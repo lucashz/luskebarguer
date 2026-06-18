@@ -1127,7 +1127,7 @@ function sanitizeAddress(data) {
     neighborhood: 'nullable_string',
     city: 'nullable_string',
     reference: 'nullable_string'
-  }, ['street']);
+  }, ['street', 'neighborhood', 'city']);
 }
 
 function sanitizeAddressWithDefault(data, requireStreet) {
@@ -1140,13 +1140,13 @@ function sanitizeAddressWithDefault(data, requireStreet) {
     city: 'nullable_string',
     reference: 'nullable_string',
     is_default: 'boolean'
-  }, requireStreet ? ['street'] : []);
+  }, requireStreet ? ['street', 'neighborhood', 'city'] : []);
 }
 
 function sanitize(data, allowed, required) {
   for (const field of required) {
     if (!(field in data) || data[field] === '') {
-      throw httpError(422, `Campo obrigatorio ausente: ${field}`);
+      throw httpError(422, `Campo obrigatorio ausente: ${fieldLabel(field)}`);
     }
   }
 
@@ -1167,6 +1167,19 @@ function sanitize(data, allowed, required) {
   }
 
   return clean;
+}
+
+function fieldLabel(field) {
+  return ({
+    name: 'nome',
+    phone: 'telefone',
+    email: 'e-mail',
+    street: 'rua',
+    number: 'numero',
+    neighborhood: 'bairro',
+    city: 'cidade',
+    payment_method: 'forma de pagamento'
+  })[field] || field;
 }
 
 function buildWhatsappMessage(store, order, items, customer, address) {

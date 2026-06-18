@@ -186,23 +186,44 @@ function orderCard(order) {
   const customer = order.customer_snapshot || {};
   const fulfillment = order.fulfillment_method === 'pickup' ? 'Retirada' : 'Entrega';
   const payment = order.payment_method ? escapeHtml(order.payment_method) : 'Pagamento nao informado';
+  const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
   card.innerHTML = `
     <div class="order-card-top">
       <div>
         <strong>#${escapeHtml(order.public_code)}</strong>
-        <p>${new Date(order.created_at).toLocaleString('pt-BR')}</p>
+        <p>${escapeHtml(customer.name || 'Cliente')}</p>
       </div>
       <span class="order-status-badge">${statusLabel(order.status)}</span>
     </div>
-    <div class="order-total">${money(order.total)}</div>
-    <p><strong>${escapeHtml(customer.name || 'Cliente')}</strong> - ${escapeHtml(customer.phone || 'Sem telefone')}</p>
-    <div class="order-meta">
-      <span>${fulfillment}</span>
-      <span>${payment}</span>
+    <p class="order-card-line">${orderItemsSummary(order)}</p>
+    <div class="order-compact-row">
+      <strong>${money(order.total)}</strong>
+      <span>${itemCount || 0} ${itemCount === 1 ? 'item' : 'itens'}</span>
     </div>
-    <div class="mini-items">${(order.items || []).map((item) => `<span>${item.quantity}x ${escapeHtml(item.item_snapshot?.name || '')}</span>`).join('')}</div>
+    <details class="order-details">
+      <summary>Ver detalhes</summary>
+      <div class="order-details-body">
+        <dl>
+          <div><dt>Horario</dt><dd>${new Date(order.created_at).toLocaleString('pt-BR')}</dd></div>
+          <div><dt>Telefone</dt><dd>${escapeHtml(customer.phone || 'Sem telefone')}</dd></div>
+          <div><dt>Tipo</dt><dd>${fulfillment}</dd></div>
+          <div><dt>Pagamento</dt><dd>${payment}</dd></div>
+        </dl>
+        ${orderAddressHtml(order)}
+        ${order.notes ? `<p class="order-note"><strong>Obs.</strong> ${escapeHtml(order.notes)}</p>` : ''}
+        <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
+        <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}">Imprimir etiqueta</button>
+      </div>
+    </details>
   `;
+  card.querySelector('.order-details')?.addEventListener('mousedown', (event) => event.stopPropagation());
+  card.querySelector('.order-details')?.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
+  card.querySelector('[data-print-order]')?.addEventListener('click', () => printOrderLabel(order));
   card.addEventListener('dragstart', (event) => {
+    if (event.target.closest('.order-details') || event.target.closest('button') || event.target.closest('select')) {
+      event.preventDefault();
+      return;
+    }
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', order.id);
     event.dataTransfer.setData('application/json', JSON.stringify({ id: order.id, status: order.status }));
@@ -225,6 +246,201 @@ function orderCard(order) {
   });
   card.append(select);
   return card;
+}
+
+function orderItemsSummary(order) {
+  const items = order.items || [];
+  if (items.length === 0) return 'Sem itens registrados';
+  const visible = items.slice(0, 2).map((item) => `${item.quantity}x ${escapeHtml(item.item_snapshot?.name || 'Item')}`);
+  const remaining = items.length - visible.length;
+  return `${visible.join(', ')}${remaining > 0 ? ` +${remaining}` : ''}`;
+}
+
+function orderItemHtml(item) {
+  const name = escapeHtml(item.item_snapshot?.name || 'Item');
+  const notes = item.notes ? `<small>Obs: ${escapeHtml(item.notes)}</small>` : '';
+  return `
+    <span>
+      <strong>${Number(item.quantity || 0)}x ${name}</strong>
+      <small>${money(item.total)}</small>
+      ${notes}
+    </span>
+  `;
+}
+
+function orderAddressHtml(order) {
+  const address = order.address_snapshot || {};
+  if (!address.street) return '';
+  const line = [
+    address.street,
+    address.number,
+    address.neighborhood,
+    address.city
+  ].map((part) => escapeHtml(part || '')).filter(Boolean).join(', ');
+  const extra = [address.complement, address.reference]
+    .map((part) => escapeHtml(part || ''))
+    .filter(Boolean)
+    .join(' - ');
+  return `
+    <p class="order-address"><strong>Endereco</strong> ${line}${extra ? `<small>${extra}</small>` : ''}</p>
+  `;
+}
+
+function printOrderLabel(order) {
+  const popup = window.open('', '_blank', 'width=420,height=640');
+  if (!popup) {
+    toast('Permita pop-ups para imprimir a etiqueta.');
+    return;
+  }
+
+  popup.document.write(orderLabelDocument(order));
+  popup.document.close();
+  popup.focus();
+  popup.setTimeout(() => {
+    popup.print();
+    popup.setTimeout(() => popup.close(), 500);
+  }, 150);
+}
+
+function orderLabelDocument(order) {
+  const customer = order.customer_snapshot || {};
+  const address = order.address_snapshot || {};
+  const storeName = state.store?.name || 'Cardapio';
+  const createdAt = new Date(order.created_at).toLocaleString('pt-BR');
+  const addressLines = orderAddressLines(address).map((line) => `<p>${escapeHtml(line)}</p>`).join('');
+  const items = (order.items || []).map((item) => {
+    const name = item.item_snapshot?.name || 'Item';
+    const notes = item.notes ? `<small>Obs: ${escapeHtml(item.notes)}</small>` : '';
+    return `
+      <li>
+        <strong>${Number(item.quantity || 0)}x ${escapeHtml(name)}</strong>
+        <span>${money(item.total)}</span>
+        ${notes}
+      </li>
+    `;
+  }).join('');
+
+  return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>Pedido #${escapeHtml(order.public_code)}</title>
+    <style>
+      @page { margin: 6mm; size: 80mm auto; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: #111827;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 12px;
+      }
+      .label {
+        width: 100%;
+        max-width: 76mm;
+        padding: 4mm;
+      }
+      h1, h2, p { margin: 0; }
+      h1 {
+        border-bottom: 2px solid #111827;
+        padding-bottom: 6px;
+        font-size: 20px;
+        letter-spacing: 0;
+      }
+      h2 {
+        margin-top: 10px;
+        font-size: 13px;
+        text-transform: uppercase;
+      }
+      .store {
+        color: #4b5563;
+        font-size: 11px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .meta, .box {
+        border-bottom: 1px dashed #9ca3af;
+        padding: 8px 0;
+      }
+      .meta p, .box p {
+        margin-top: 3px;
+        line-height: 1.35;
+      }
+      ul {
+        list-style: none;
+        margin: 6px 0 0;
+        padding: 0;
+      }
+      li {
+        display: grid;
+        gap: 2px;
+        border-top: 1px solid #e5e7eb;
+        padding: 6px 0;
+      }
+      li:first-child { border-top: 0; }
+      li span, li small { color: #4b5563; }
+      .total {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        border-top: 2px solid #111827;
+        margin-top: 8px;
+        padding-top: 8px;
+        font-size: 16px;
+        font-weight: 900;
+      }
+      .status {
+        display: inline-block;
+        border: 1px solid #111827;
+        border-radius: 999px;
+        margin-top: 6px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 900;
+      }
+      @media print {
+        .label { max-width: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="label">
+      <p class="store">${escapeHtml(storeName)}</p>
+      <h1>Pedido #${escapeHtml(order.public_code)}</h1>
+      <span class="status">${escapeHtml(statusLabel(order.status))}</span>
+      <section class="meta">
+        <p><strong>Horario:</strong> ${escapeHtml(createdAt)}</p>
+        <p><strong>Tipo:</strong> ${order.fulfillment_method === 'pickup' ? 'Retirada' : 'Entrega'}</p>
+        <p><strong>Pagamento:</strong> ${escapeHtml(order.payment_method || 'Nao informado')}</p>
+      </section>
+      <section class="box">
+        <h2>Cliente</h2>
+        <p><strong>${escapeHtml(customer.name || 'Cliente')}</strong></p>
+        <p>${escapeHtml(customer.phone || 'Sem telefone')}</p>
+      </section>
+      ${addressLines ? `<section class="box"><h2>Endereco</h2>${addressLines}</section>` : ''}
+      <section class="box">
+        <h2>Itens</h2>
+        <ul>${items}</ul>
+      </section>
+      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p>${escapeHtml(order.notes)}</p></section>` : ''}
+      <div class="total"><span>Total</span><strong>${money(order.total)}</strong></div>
+    </main>
+  </body>
+</html>`;
+}
+
+function orderAddressLines(address = {}) {
+  const main = [
+    address.street,
+    address.number
+  ].filter(Boolean).join(', ');
+  return [
+    main,
+    address.neighborhood ? `Bairro: ${address.neighborhood}` : '',
+    address.city ? `Cidade: ${address.city}` : '',
+    address.complement ? `Complemento: ${address.complement}` : '',
+    address.reference ? `Referencia: ${address.reference}` : ''
+  ].filter(Boolean);
 }
 
 function handleOrderBoardDragOver(event) {
@@ -439,9 +655,9 @@ function addressFields(address = {}) {
       <label>Apelido<input name="label" value="${escapeAttribute(address.label || 'Principal')}"></label>
       <label>Rua / Avenida<input name="street" required value="${escapeAttribute(address.street || '')}"></label>
       <label>Numero<input name="number" value="${escapeAttribute(address.number || '')}"></label>
-      <label>Bairro<input name="neighborhood" value="${escapeAttribute(address.neighborhood || '')}"></label>
+      <label>Bairro<input name="neighborhood" required value="${escapeAttribute(address.neighborhood || '')}"></label>
       <label>Complemento<input name="complement" value="${escapeAttribute(address.complement || '')}"></label>
-      <label>Cidade<input name="city" value="${escapeAttribute(address.city || '')}"></label>
+      <label>Cidade<input name="city" required value="${escapeAttribute(address.city || '')}"></label>
       <label class="editor-wide">Referencia<input name="reference" value="${escapeAttribute(address.reference || '')}"></label>
     </div>
     <label class="check"><input name="is_default" type="checkbox" ${address.is_default ? 'checked' : ''}> Endereco principal</label>

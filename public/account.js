@@ -3,6 +3,8 @@ const state = {
   orders: []
 };
 
+const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
+
 const els = {
   loading: document.querySelector('#accountLoading'),
   auth: document.querySelector('#accountAuth'),
@@ -50,12 +52,22 @@ els.logoutButton.addEventListener('click', logout);
 init();
 
 async function init() {
+  const cached = loadAccountCache();
+  if (cached?.customer) {
+    state.customer = cached.customer;
+    state.orders = Array.isArray(cached.orders) ? cached.orders : [];
+    showShell();
+    renderOrders();
+  }
+
   try {
     const data = await request('/api/customer/me');
     state.customer = data.customer;
-    await loadOrders();
     showShell();
+    await loadOrders();
+    saveAccountCache();
   } catch {
+    clearAccountCache();
     showAuth();
   }
 }
@@ -71,8 +83,9 @@ async function login(event) {
   state.customer = result.customer;
   const me = await request('/api/customer/me');
   state.customer = me.customer;
-  await loadOrders();
   showShell();
+  await loadOrders();
+  saveAccountCache();
 }
 
 async function register(event) {
@@ -90,8 +103,9 @@ async function register(event) {
   state.customer = result.customer;
   const me = await request('/api/customer/me');
   state.customer = me.customer;
-  await loadOrders();
   showShell();
+  await loadOrders();
+  saveAccountCache();
 }
 
 async function resetPassword(event) {
@@ -123,6 +137,7 @@ async function saveProfile(event) {
     body: JSON.stringify(payload)
   });
   state.customer = data.customer;
+  saveAccountCache();
   fillProfile();
   renderDashboard();
   showDashboard();
@@ -133,13 +148,20 @@ async function logout() {
   await request('/api/customer/logout', { method: 'POST' });
   state.customer = null;
   state.orders = [];
+  clearAccountCache();
   showAuth();
 }
 
 async function loadOrders() {
-  const data = await request('/api/customer/orders');
-  state.orders = data.orders || [];
-  renderOrders();
+  try {
+    const data = await request('/api/customer/orders');
+    state.orders = data.orders || [];
+    saveAccountCache();
+    renderOrders();
+  } catch (error) {
+    if (!state.orders.length) throw error;
+    renderOrders();
+  }
 }
 
 function showAuth() {
@@ -155,6 +177,29 @@ function showShell() {
   fillProfile();
   renderDashboard();
   showDashboard();
+}
+
+function loadAccountCache() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ACCOUNT_CACHE_KEY) || 'null');
+    if (!parsed || !parsed.customer) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveAccountCache() {
+  if (!state.customer?.id) return;
+  localStorage.setItem(ACCOUNT_CACHE_KEY, JSON.stringify({
+    customer: state.customer,
+    orders: state.orders,
+    saved_at: new Date().toISOString()
+  }));
+}
+
+function clearAccountCache() {
+  localStorage.removeItem(ACCOUNT_CACHE_KEY);
 }
 
 function showDashboard() {
@@ -178,6 +223,7 @@ function fillProfile() {
   setValue(els.profileForm.elements.street, address.street);
   setValue(els.profileForm.elements.number, address.number);
   setValue(els.profileForm.elements.neighborhood, address.neighborhood);
+  setValue(els.profileForm.elements.city, address.city);
   setValue(els.profileForm.elements.complement, address.complement);
   setValue(els.profileForm.elements.reference, address.reference);
 }
@@ -287,7 +333,8 @@ function formatAddress(address) {
   return [
     address.street,
     address.number,
-    address.neighborhood
+    address.neighborhood,
+    address.city
   ].filter(Boolean).join(', ');
 }
 
@@ -304,6 +351,7 @@ function addressFromForm(form) {
     street: form.get('street'),
     number: form.get('number'),
     neighborhood: form.get('neighborhood'),
+    city: form.get('city'),
     complement: form.get('complement'),
     reference: form.get('reference')
   };

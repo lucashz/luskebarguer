@@ -343,6 +343,7 @@ async function submitOrder(event) {
       street: data.get('street'),
       number: data.get('number'),
       neighborhood: data.get('neighborhood'),
+      city: data.get('city'),
       complement: data.get('complement'),
       reference: data.get('reference')
     } : null,
@@ -380,11 +381,13 @@ function renderPaymentOptions() {
 
 function updateCheckoutDeliveryFields() {
   const method = new FormData(els.checkoutForm).get('fulfillment_method');
-  ['street', 'number', 'neighborhood', 'complement', 'reference'].forEach((name) => {
+  ['street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     const field = els.checkoutForm.elements[name];
     field.disabled = method === 'pickup';
   });
-  els.checkoutForm.elements.street.required = method !== 'pickup';
+  ['street', 'neighborhood', 'city'].forEach((name) => {
+    els.checkoutForm.elements[name].required = method !== 'pickup';
+  });
 }
 
 async function loadLoggedCustomer() {
@@ -456,6 +459,7 @@ function applySavedCustomerAddress(address = selectedSavedAddress()) {
   setValue(els.checkoutForm.elements.street, address.street);
   setValue(els.checkoutForm.elements.number, address.number);
   setValue(els.checkoutForm.elements.neighborhood, address.neighborhood);
+  setValue(els.checkoutForm.elements.city, address.city);
   setValue(els.checkoutForm.elements.complement, address.complement);
   setValue(els.checkoutForm.elements.reference, address.reference);
 }
@@ -465,12 +469,13 @@ function addressLabel(address) {
     address.label && address.label !== 'Principal' ? address.label : null,
     address.street,
     address.number,
-    address.neighborhood
+    address.neighborhood,
+    address.city
   ].filter(Boolean).join(' - ');
 }
 
 function clearAddressFields() {
-  ['street', 'number', 'neighborhood', 'complement', 'reference'].forEach((name) => {
+  ['street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     setValue(els.checkoutForm.elements[name], '');
   });
 }
