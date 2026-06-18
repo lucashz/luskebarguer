@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin - Cardapio</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="admin-page">
+    <main class="admin-layout">
+      <aside class="admin-sidebar">
+        <a class="brand-mark" href="/">Cardapio</a>
+        <nav class="admin-nav" id="adminNav">
+          <button class="active" data-admin-tab="orders" type="button">Pedidos</button>
+          <button data-admin-tab="menu" type="button">Cardapio</button>
+          <button data-admin-tab="customers" type="button">Clientes</button>
+          <button data-admin-tab="store" type="button">Loja</button>
+          <button data-admin-tab="account" type="button">Conta</button>
+        </nav>
+        <button class="text-button" id="logoutButton" type="button">Sair</button>
+      </aside>
+
+      <section class="admin-main">
+        <section class="auth-screen" id="authScreen">
+          <div class="auth-card" id="setupCard">
+            <p class="eyebrow">Primeiro acesso</p>
+            <h1>Criar conta admin</h1>
+            <form id="setupForm" class="stack-form">
+              <input name="name" required placeholder="Nome">
+              <input name="email" required type="email" placeholder="E-mail">
+              <input name="password" required type="password" minlength="8" placeholder="Senha">
+              <button class="primary-button wide">Criar e entrar</button>
+            </form>
+          </div>
+
+          <div class="auth-card" id="loginCard">
+            <p class="eyebrow">Admin</p>
+            <h1>Entrar no painel</h1>
+            <form id="loginForm" class="stack-form">
+              <input name="email" required type="email" placeholder="E-mail">
+              <input name="password" required type="password" placeholder="Senha">
+              <button class="primary-button wide">Entrar</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="admin-shell" id="adminShell">
+          <header class="admin-header">
+            <div>
+              <p class="eyebrow" id="adminUser">Painel</p>
+              <h1 id="adminTitle">Pedidos</h1>
+            </div>
+          </header>
+
+          <section class="admin-section active" data-admin-section="orders">
+            <section class="admin-metrics">
+              <article><span>Pedidos hoje</span><strong id="metricOrders">0</strong></article>
+              <article><span>Em aberto</span><strong id="metricOpen">0</strong></article>
+              <article><span>Clientes</span><strong id="metricCustomers">0</strong></article>
+            </section>
+            <div class="section-actions">
+              <h2>Pedidos recentes</h2>
+              <div class="row-actions">
+                <button class="ghost-button compact" id="enableSoundButton" type="button">Ativar som</button>
+                <button class="ghost-button compact" id="refreshAdminButton" type="button">Atualizar</button>
+              </div>
+            </div>
+            <div class="order-board" id="adminOrders"></div>
+          </section>
+
+          <section class="admin-section" data-admin-section="menu">
+            <div class="menu-workspace">
+              <nav class="subnav" aria-label="Gerenciar cardapio">
+                <button class="active" data-menu-view="categories" type="button">Categorias</button>
+                <button data-menu-view="products" type="button">Produtos</button>
+              </nav>
+
+              <section class="menu-view active" data-menu-panel="categories">
+                <div class="menu-management-grid">
+                  <form id="categoryForm" class="panel stack-form">
+                    <p class="eyebrow">Cadastro rapido</p>
+                    <h2>Nova categoria</h2>
+                    <input name="name" required placeholder="Nome">
+                    <input name="description" placeholder="Descricao">
+                    <input name="sort_order" type="number" value="0" placeholder="Ordem">
+                    <label class="check"><input name="is_active" type="checkbox" checked> Visivel no cardapio</label>
+                    <button class="primary-button">Criar categoria</button>
+                  </form>
+
+                  <section class="panel menu-list-panel">
+                    <div class="section-actions">
+                      <div>
+                        <p class="eyebrow">Organizacao</p>
+                        <h2>Categorias existentes</h2>
+                      </div>
+                      <button class="ghost-button compact" id="refreshCategoriesButton" type="button">Atualizar</button>
+                    </div>
+                    <div class="admin-list" id="categoryEditorList"></div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="menu-view" data-menu-panel="products">
+                <div class="menu-management-grid">
+                  <form id="itemForm" class="panel stack-form">
+                    <p class="eyebrow">Cadastro rapido</p>
+                    <h2>Novo produto</h2>
+                    <select name="category_id" required id="itemCategory"></select>
+                    <input name="name" required placeholder="Nome">
+                    <textarea name="description" placeholder="Descricao"></textarea>
+                    <input name="price" required type="number" min="0" step="0.01" placeholder="Preco">
+                    <input name="image_url" placeholder="URL da imagem">
+                    <input name="image_file" id="itemImageFile" type="file" accept="image/*">
+                    <input name="tags" placeholder="Tags separadas por virgula">
+                    <input name="sort_order" type="number" value="0" placeholder="Ordem">
+                    <label class="check"><input name="is_featured" type="checkbox"> Destaque</label>
+                    <label class="check"><input name="is_available" type="checkbox" checked> Disponivel</label>
+                    <button class="primary-button">Criar produto</button>
+                  </form>
+
+                  <section class="panel menu-list-panel">
+                    <div class="section-actions">
+                      <div>
+                        <p class="eyebrow">Itens do cardapio</p>
+                        <h2>Produtos existentes</h2>
+                      </div>
+                      <button class="ghost-button compact" id="refreshProductsButton" type="button">Atualizar</button>
+                    </div>
+                    <div class="admin-list" id="productEditorList"></div>
+                  </section>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="admin-section" data-admin-section="customers">
+            <div class="section-actions">
+              <h2>Clientes</h2>
+            </div>
+            <div class="admin-list" id="adminCustomers"></div>
+          </section>
+
+          <section class="admin-section" data-admin-section="store">
+            <form id="storeForm" class="panel store-editor">
+              <div class="store-editor-head">
+                <div>
+                  <h2>Configurar loja</h2>
+                  <p>Dados que aparecem no cardapio e controlam como os pedidos chegam para a equipe.</p>
+                </div>
+                <button class="primary-button compact" type="submit">Salvar loja</button>
+              </div>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Identidade da loja</strong>
+                  <p>Nome, descricao e endereco exibidos para o cliente antes de pedir.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="two-cols">
+                    <label>Nome da loja<input name="name" required placeholder="Ex: Pizzaria Bella"></label>
+                    <label>Slug<input name="slug" placeholder="Ex: pizzaria-bella"></label>
+                  </div>
+                  <label>Descricao<textarea name="description" placeholder="Ex: Pizza artesanal, esfihas e bebidas geladas."></textarea></label>
+                  <label>Endereco da loja<input name="address" placeholder="Rua, numero, bairro"></label>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Atendimento e pedidos</strong>
+                  <p>Controle se a loja esta recebendo pedidos e para qual WhatsApp a mensagem sera enviada.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <section class="settings-callout">
+                    <div>
+                      <strong>WhatsApp dos pedidos</strong>
+                      <p>Use DDI + DDD + numero. Exemplo: 5511999999999.</p>
+                    </div>
+                    <input name="whatsapp_number" inputmode="tel" placeholder="Ex: 5511999999999">
+                  </section>
+                  <div class="switch-row">
+                    <label class="check"><input name="is_open" type="checkbox" checked> Loja aberta</label>
+                    <label class="check"><input name="accepts_delivery" type="checkbox" checked> Aceita entrega</label>
+                    <label class="check"><input name="accepts_pickup" type="checkbox" checked> Aceita retirada</label>
+                  </div>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Entrega</strong>
+                  <p>Valores usados no carrinho antes do cliente finalizar o pedido.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="two-cols">
+                    <label>Taxa de entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
+                    <label>Pedido minimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
+                  </div>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Formas de pagamento</strong>
+                  <p>Marque as opcoes aceitas pela loja. Se precisar, adicione outras formas no campo extra.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="payment-options">
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix"> Pix</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro"> Dinheiro</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartao de credito"> Cartao de credito</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartao de debito"> Cartao de debito</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Vale refeicao"> Vale refeicao</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pagamento online"> Pagamento online</label>
+                  </div>
+                  <label>Outras formas<input name="payment_methods_extra" placeholder="Ex: PicPay, boleto, transferencia"></label>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Aparencia</strong>
+                  <p>Imagens opcionais para deixar o cardapio mais parecido com a marca da loja.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="two-cols">
+                    <label>URL do logo<input name="logo_url" placeholder="https://..."></label>
+                    <label>URL da capa<input name="cover_url" placeholder="https://..."></label>
+                  </div>
+                </div>
+              </section>
+            </form>
+          </section>
+
+          <section class="admin-section" data-admin-section="account">
+            <div class="management-grid">
+              <form id="accountForm" class="panel stack-form">
+                <h2>Dados do admin</h2>
+                <input name="name" required placeholder="Nome">
+                <input name="email" required type="email" placeholder="E-mail">
+                <button class="primary-button">Salvar conta</button>
+              </form>
+
+              <form id="passwordForm" class="panel stack-form">
+                <h2>Trocar senha</h2>
+                <input name="current_password" required type="password" placeholder="Senha atual">
+                <input name="new_password" required type="password" minlength="8" placeholder="Nova senha">
+                <button class="primary-button">Atualizar senha</button>
+              </form>
+            </div>
+          </section>
+        </section>
+
+        <dialog class="new-order-dialog" id="newOrderDialog">
+          <div class="new-order-modal">
+            <div class="new-order-alert">Novo pedido</div>
+            <h2 id="newOrderTitle">Pedido recebido</h2>
+            <div class="new-order-details" id="newOrderDetails"></div>
+            <div class="row-actions">
+              <button class="primary-button compact" id="viewNewOrderButton" type="button">Ver pedidos</button>
+              <button class="ghost-button compact" id="newOrderCloseButton" type="button">Fechar</button>
+            </div>
+          </div>
+        </dialog>
+
+        <div class="toast" id="toast"></div>
+      </section>
+    </main>
+
+    <script src="/admin.js" type="module"></script>
+  </body>
+</html>

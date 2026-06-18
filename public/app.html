@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cardapio Digital</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="menu-page">
+    <header class="public-topbar">
+      <a class="brand-mark" href="/">Cardapio</a>
+      <div class="public-actions">
+        <a class="link-button" href="/conta">Minha conta</a>
+      </div>
+    </header>
+
+    <section class="store-header">
+      <div class="store-cover" id="storeCover"></div>
+      <div class="store-summary">
+        <div class="store-logo" id="storeLogo">C</div>
+        <div class="store-copy">
+          <p class="store-open" id="storeStatus">Carregando</p>
+          <h1 id="storeName">Cardapio digital</h1>
+          <p id="storeDescription">Escolha seus itens e envie o pedido pelo WhatsApp da loja.</p>
+          <div class="store-meta">
+            <span id="deliveryMeta">Entrega</span>
+            <span id="minimumMeta">Pedido minimo</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <main class="ifood-layout">
+      <aside class="category-rail">
+        <label class="search-box">
+          <span>Buscar no cardapio</span>
+          <input id="searchInput" type="search" placeholder="Busque por produto">
+        </label>
+        <nav id="categoryNav" class="category-list" aria-label="Categorias"></nav>
+      </aside>
+
+      <section class="menu-feed">
+        <div class="feed-toolbar">
+          <div>
+            <strong id="status">Carregando cardapio...</strong>
+            <p>Produtos disponiveis para pedido agora.</p>
+          </div>
+          <button class="icon-button" id="refreshButton" title="Atualizar" aria-label="Atualizar">R</button>
+        </div>
+        <section class="featured-strip" id="featured" aria-label="Destaques"></section>
+        <section class="menu-sections" id="menu" aria-label="Cardapio"></section>
+      </section>
+
+      <aside class="bag-panel" aria-label="Sacola">
+        <div class="bag-head">
+          <div>
+            <p class="eyebrow">Sua sacola</p>
+            <h2>Pedido</h2>
+          </div>
+          <button class="text-button" id="clearCartButton">Limpar</button>
+        </div>
+        <div class="bag-items" id="cartItems"></div>
+        <div class="bag-totals">
+          <div><span>Subtotal</span><strong id="cartSubtotal">R$ 0,00</strong></div>
+          <div><span>Entrega</span><strong id="cartDelivery">R$ 0,00</strong></div>
+          <div class="grand-total"><span>Total</span><strong id="cartTotal">R$ 0,00</strong></div>
+        </div>
+        <button class="primary-button wide" id="checkoutButton">Continuar</button>
+      </aside>
+    </main>
+
+    <button class="mobile-bag" id="mobileBagButton">
+      <span id="mobileBagCount">0 itens</span>
+      <strong id="mobileBagTotal">R$ 0,00</strong>
+    </button>
+
+    <dialog class="dialog" id="checkoutDialog">
+      <form method="dialog" class="dialog-header">
+        <div>
+          <p class="eyebrow">Finalizar pedido</p>
+          <h2>Dados para envio</h2>
+        </div>
+        <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+      </form>
+
+      <form class="checkout-form" id="checkoutForm">
+        <section class="account-prefill" id="accountPrefill" hidden>
+          <div>
+            <strong id="accountPrefillTitle">Dados da sua conta</strong>
+            <p id="accountPrefillText">Encontramos seus dados salvos.</p>
+          </div>
+          <div class="account-prefill-actions">
+            <select id="savedAddressSelect" aria-label="Endereços salvos" hidden></select>
+            <button class="text-button" id="editAddressButton" type="button">Informar outro</button>
+          </div>
+        </section>
+
+        <fieldset>
+          <legend>Cliente</legend>
+          <input name="name" required placeholder="Nome completo">
+          <input name="phone" required inputmode="tel" placeholder="Telefone com DDD">
+          <input name="email" type="email" placeholder="E-mail opcional">
+        </fieldset>
+
+        <fieldset>
+          <legend>Entrega</legend>
+          <div class="segmented">
+            <label><input type="radio" name="fulfillment_method" value="delivery" checked> Entrega</label>
+            <label><input type="radio" name="fulfillment_method" value="pickup"> Retirada</label>
+          </div>
+          <input name="street" required placeholder="Rua / Avenida">
+          <div class="two-cols">
+            <input name="number" placeholder="Numero">
+            <input name="neighborhood" placeholder="Bairro">
+          </div>
+          <input name="complement" placeholder="Complemento">
+          <input name="reference" placeholder="Referencia">
+        </fieldset>
+
+        <fieldset>
+          <legend>Pagamento</legend>
+          <select name="payment_method" id="paymentMethod" required></select>
+          <textarea name="notes" placeholder="Observacoes do pedido"></textarea>
+        </fieldset>
+
+        <fieldset class="checkout-review">
+          <legend>Conferir pedido</legend>
+          <div class="checkout-review-items" id="checkoutReviewItems"></div>
+          <div class="checkout-review-totals">
+            <div><span>Subtotal</span><strong id="checkoutReviewSubtotal">R$ 0,00</strong></div>
+            <div><span>Entrega</span><strong id="checkoutReviewDelivery">R$ 0,00</strong></div>
+            <div class="grand-total"><span>Total</span><strong id="checkoutReviewTotal">R$ 0,00</strong></div>
+          </div>
+        </fieldset>
+
+        <button class="primary-button wide">Enviar no WhatsApp</button>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

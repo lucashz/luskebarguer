@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Minha Conta - Cardapio</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="account-page">
+    <header class="public-topbar">
+      <a class="brand-mark" href="/">Cardapio</a>
+      <a class="link-button" href="/">Voltar ao cardapio</a>
+    </header>
+
+    <main class="account-layout">
+      <section class="account-loading panel" id="accountLoading">
+        <span class="loading-dot"></span>
+        <div>
+          <p class="eyebrow">Minha conta</p>
+          <h1>Carregando seus dados</h1>
+        </div>
+      </section>
+
+      <section class="auth-screen" id="accountAuth" hidden>
+        <div class="auth-card">
+          <p class="eyebrow">Cliente</p>
+          <h1>Entrar</h1>
+          <form id="loginForm" class="stack-form">
+            <input name="phone" required inputmode="tel" placeholder="Telefone com DDD">
+            <input name="password" required type="password" placeholder="Senha">
+            <button class="primary-button wide">Entrar</button>
+          </form>
+          <button class="text-button" id="showResetButton" type="button">Esqueci minha senha</button>
+          <form id="resetPasswordForm" class="stack-form reset-password-form" hidden>
+            <input name="phone" required inputmode="tel" placeholder="Telefone cadastrado">
+            <input name="order_code" required placeholder="Codigo de um pedido">
+            <input name="new_password" required type="password" minlength="8" placeholder="Nova senha">
+            <button class="ghost-button wide" type="submit">Criar nova senha</button>
+            <p class="muted">Usamos o codigo de um pedido para confirmar que a conta e sua. Sem pedido anterior, fale com a loja.</p>
+          </form>
+        </div>
+
+        <div class="auth-card">
+          <p class="eyebrow">Novo cadastro</p>
+          <h1>Criar conta</h1>
+          <form id="registerForm" class="stack-form">
+            <input name="name" required placeholder="Nome completo">
+            <input name="phone" required inputmode="tel" placeholder="Telefone com DDD">
+            <input name="email" type="email" placeholder="E-mail opcional">
+            <input name="password" required type="password" minlength="8" placeholder="Senha">
+            <input name="street" placeholder="Rua / Avenida">
+            <div class="two-cols">
+              <input name="number" placeholder="Numero">
+              <input name="neighborhood" placeholder="Bairro">
+            </div>
+            <input name="complement" placeholder="Complemento">
+            <button class="primary-button wide">Criar conta</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="account-shell" id="accountShell" hidden>
+        <header class="account-header">
+          <div>
+            <p class="eyebrow">Minha conta</p>
+            <h1 id="customerName">Cliente</h1>
+          </div>
+          <div class="row-actions">
+            <button class="ghost-button compact" id="editProfileButton" type="button">Editar dados</button>
+            <button class="text-button" id="logoutButton" type="button">Sair</button>
+          </div>
+        </header>
+
+        <section class="account-dashboard" id="accountDashboard">
+          <section class="account-hero panel">
+            <div>
+              <p class="eyebrow">Voltar a pedir</p>
+              <h2 id="lastOrderTitle">Seu ultimo pedido</h2>
+              <p id="lastOrderText">Quando voce fizer um pedido, ele aparece aqui para repetir mais rapido.</p>
+            </div>
+            <button class="primary-button" id="repeatLastOrderButton" type="button" disabled>Refazer ultimo pedido</button>
+          </section>
+
+          <section class="account-insights">
+            <article class="account-stat">
+              <span>Pedidos em andamento</span>
+              <strong id="activeOrdersCount">0</strong>
+            </article>
+            <article class="account-stat">
+              <span>Enderecos salvos</span>
+              <strong id="savedAddressesCount">0</strong>
+            </article>
+            <article class="account-stat">
+              <span>Total de pedidos</span>
+              <strong id="totalOrdersCount">0</strong>
+            </article>
+          </section>
+
+          <div class="account-grid">
+            <section class="panel account-card-list">
+              <div class="section-actions">
+                <h2>Pedidos recentes</h2>
+                <button class="ghost-button compact" id="refreshOrdersButton" type="button">Atualizar</button>
+              </div>
+              <div class="admin-list" id="ordersList"></div>
+            </section>
+
+            <section class="panel account-card-list">
+              <div class="section-actions">
+                <h2>Seus dados</h2>
+                <button class="ghost-button compact" id="editProfileInlineButton" type="button">Editar</button>
+              </div>
+              <div class="account-summary" id="accountSummary"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="account-edit panel" id="accountEdit" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Cadastro</p>
+              <h2>Editar dados da conta</h2>
+            </div>
+            <button class="ghost-button compact" id="backToDashboardButton" type="button">Voltar</button>
+          </div>
+
+          <form id="profileForm" class="stack-form">
+            <input name="name" required placeholder="Nome completo">
+            <input name="phone" required inputmode="tel" placeholder="Telefone com DDD">
+            <input name="email" type="email" placeholder="E-mail opcional">
+            <input name="password" type="password" minlength="8" placeholder="Nova senha opcional">
+            <h3>Endereco principal</h3>
+            <input name="street" placeholder="Rua / Avenida">
+            <div class="two-cols">
+              <input name="number" placeholder="Numero">
+              <input name="neighborhood" placeholder="Bairro">
+            </div>
+            <input name="complement" placeholder="Complemento">
+            <input name="reference" placeholder="Referencia">
+            <div class="row-actions">
+              <button class="primary-button">Salvar alteracoes</button>
+              <button class="ghost-button" id="cancelEditButton" type="button">Cancelar</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <div class="toast" id="toast"></div>
+    </main>
+
+    <script src="/account.js" type="module"></script>
+  </body>
+</html>
