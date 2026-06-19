@@ -107,9 +107,10 @@ els.closedStoreRefreshButton?.addEventListener('click', () => {
   loadBootstrap();
 });
 els.savedAddressSelect.addEventListener('change', () => {
-  applySavedCustomerAddress(selectedSavedAddress(), { force: true });
+  const address = selectedSavedAddress();
+  applySavedCustomerAddress(address, { force: true });
   state.savedAddressApplied = true;
-  updatePrefillNotice('Endereço selecionado. Confira os dados antes de enviar.');
+  renderAddressPrefillSummary(address, customerAddresses().length);
 });
 els.editAddressButton.addEventListener('click', () => {
   clearAddressFields();
@@ -769,20 +770,16 @@ function prefillCheckoutFromCustomer() {
   els.accountPrefill.hidden = false;
   els.editAddressButton.hidden = !hasAddress;
   els.deleteSavedAddressButton.hidden = !hasPersistedAddress;
-  els.accountPrefillTitle.textContent = `Olá, ${state.customer.name}`;
   renderSavedAddressOptions(addresses);
 
   if (hasAddress && !state.savedAddressApplied) {
-    applySavedCustomerAddress(addresses[0]);
+    applySavedCustomerAddress(addresses[0], { force: true });
     state.savedAddressApplied = true;
-    updatePrefillNotice(addresses.length > 1
-      ? 'Dados da conta carregados. Escolha qual endereço salvo deseja usar neste pedido.'
-      : 'Dados da conta e endereço salvo já foram aplicados. Clique em "Informar outro" se quiser entregar em outro local.');
+    renderAddressPrefillSummary(addresses[0], addresses.length);
   } else if (hasAddress) {
-    updatePrefillNotice(addresses.length > 1
-      ? 'Escolha um endereço salvo ou informe outro para este pedido.'
-      : 'Endereço salvo aplicado. Você pode informar outro se quiser.');
+    renderAddressPrefillSummary(selectedSavedAddress(), addresses.length);
   } else {
+    els.accountPrefillTitle.textContent = `Olá, ${state.customer.name}`;
     updatePrefillNotice('Dados da conta carregados. Cadastre um endereço neste pedido ou em Minha conta.');
   }
 }
@@ -804,6 +801,11 @@ function selectedSavedAddress() {
   const addresses = customerAddresses();
   const selectedValue = els.savedAddressSelect.value;
   return addresses.find((address) => (address.id || addressKey(address)) === selectedValue) || addresses[0] || null;
+}
+
+function renderAddressPrefillSummary(address, count = 1) {
+  els.accountPrefillTitle.textContent = count > 1 ? 'Escolha o endereço de entrega' : 'Endereço de entrega';
+  updatePrefillNotice(address ? addressLabel(address) : 'Nenhum endereço selecionado.');
 }
 
 function customerAddresses() {
