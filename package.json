@@ -7,7 +7,10 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "db:schema": "node scripts/apply-schema.mjs",
-    "admin:create": "node scripts/create-admin.mjs"
+    "db:backup": "node scripts/backup-supabase.mjs",
+    "admin:create": "node scripts/create-admin.mjs",
+    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js",
+    "test:local": "node scripts/local-audit.mjs"
   },
   "dependencies": {
     "pg": "^8.16.3"

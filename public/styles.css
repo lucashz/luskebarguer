@@ -2070,6 +2070,42 @@ legend {
   gap: 14px;
 }
 
+.modifier-wizard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.modifier-wizard article {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.modifier-wizard article.active {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.modifier-wizard span {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 950;
+}
+
+.modifier-wizard p {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .modifier-preview-card {
   display: grid;
   grid-template-columns: minmax(170px, 0.32fr) minmax(0, 1fr);
@@ -2932,6 +2968,7 @@ legend {
   }
 
   .modifier-presets,
+  .modifier-wizard,
   .modifier-preview-card,
   .modifier-create-card,
   .modifier-group-create-form,
@@ -3133,6 +3170,7 @@ legend {
 
   .modifier-admin-head,
   .modifier-presets,
+  .modifier-wizard,
   .modifier-preview-card,
   .modifier-create-card,
   .modifier-group-create-form,

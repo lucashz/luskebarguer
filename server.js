@@ -1406,6 +1406,7 @@ async function orderReportBetween(start, end, period) {
     },
     by_status: groupOrderTotals(withItems, 'status'),
     by_payment: groupOrderTotals(withItems.filter((order) => order.status !== 'cancelled'), 'payment_method'),
+    cash_closing: cashClosingTotals(withItems),
     top_products: topProductTotals(withItems.filter((order) => order.status !== 'cancelled')),
     orders: withItems
   };
@@ -1443,12 +1444,27 @@ function groupOrderTotals(orders, field) {
   const grouped = new Map();
   for (const order of orders) {
     const key = order[field] || 'Não informado';
-    const current = grouped.get(key) || { key, count: 0, total: 0 };
+    const current = grouped.get(key) || { key, count: 0, total: 0, average_ticket: 0 };
     current.count += 1;
     current.total = roundMoney(current.total + moneyNumber(order.total));
+    current.average_ticket = roundMoney(current.total / current.count);
     grouped.set(key, current);
   }
   return [...grouped.values()];
+}
+
+function cashClosingTotals(orders) {
+  const billable = orders.filter((order) => order.status !== 'cancelled');
+  const completed = orders.filter((order) => order.status === 'completed');
+  return {
+    expected_revenue: roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    completed_revenue: roundMoney(completed.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    pending_revenue: roundMoney(billable
+      .filter((order) => order.status !== 'completed')
+      .reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    delivery_fees: roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.delivery_fee), 0)),
+    order_count: billable.length
+  };
 }
 
 function topProductTotals(orders) {

@@ -447,6 +447,7 @@ function renderDailyReport(report) {
   state.currentReport = report;
   const totals = report.totals || {};
   const comparison = report.comparison || {};
+  const closing = report.cash_closing || {};
   const period = report.period || { label: report.date ? `Dia ${formatDateLabel(report.date)}` : 'Período selecionado' };
   els.reportOrdersTitle.textContent = `Pedidos - ${period.label}`;
   els.reportSummary.innerHTML = `
@@ -454,13 +455,14 @@ function renderDailyReport(report) {
     <article><span>Concluído</span><strong>${money(totals.completed_revenue || 0)}</strong><p>${totals.completed_orders || 0} pedido(s)</p></article>
     <article><span>Ticket médio</span><strong>${money(totals.average_ticket || 0)}</strong><p>${totals.billable_orders || 0} pedido(s) válidos</p></article>
     <article><span>Comparativo</span><strong>${formatDeltaMoney(comparison.revenue_delta || 0)}</strong><p>${formatDeltaNumber(comparison.orders_delta || 0)} pedido(s) vs. período anterior</p></article>
+    <article><span>Fechamento</span><strong>${money(closing.expected_revenue || 0)}</strong><p>${money(closing.pending_revenue || 0)} ainda pendente</p></article>
   `;
 
   const statusRows = (report.by_status || []).map((row) => `
     <span><strong>${statusLabel(row.key)}</strong><small>${row.count} - ${money(row.total)}</small></span>
   `).join('');
   const paymentRows = (report.by_payment || []).map((row) => `
-    <span><strong>${escapeHtml(row.key)}</strong><small>${row.count} - ${money(row.total)}</small></span>
+    <span><strong>${escapeHtml(row.key)}</strong><small>${row.count} - ${money(row.total)} - ticket ${money(row.average_ticket || 0)}</small></span>
   `).join('');
   const productRows = (report.top_products || []).map((row) => `
     <span><strong>${escapeHtml(row.name)}</strong><small>${row.quantity} un. - ${money(row.total)}</small></span>
@@ -487,12 +489,29 @@ function exportCurrentReportCsv() {
     ['Faturamento', money(report.totals?.gross_revenue || 0)],
     ['Concluído', money(report.totals?.completed_revenue || 0)],
     ['Ticket médio', money(report.totals?.average_ticket || 0)],
+    ['Fechamento esperado', money(report.cash_closing?.expected_revenue || 0)],
+    ['Fechamento concluído', money(report.cash_closing?.completed_revenue || 0)],
+    ['Faturamento pendente', money(report.cash_closing?.pending_revenue || 0)],
+    ['Taxas de entrega', money(report.cash_closing?.delivery_fees || 0)],
     ['Comparativo faturamento', formatDeltaMoney(report.comparison?.revenue_delta || 0)],
     ['Comparativo pedidos', formatDeltaNumber(report.comparison?.orders_delta || 0)],
     [],
+    ['Por forma de pagamento'],
+    ['Forma', 'Pedidos', 'Total', 'Ticket médio']
+  ];
+  for (const payment of report.by_payment || []) {
+    rows.push([
+      payment.key || '',
+      payment.count || 0,
+      money(payment.total),
+      money(payment.average_ticket || 0)
+    ]);
+  }
+  rows.push(
+    [],
     ['Produtos mais vendidos'],
     ['Produto', 'Quantidade', 'Total']
-  ];
+  );
   for (const product of report.top_products || []) {
     rows.push([
       product.name || '',
@@ -621,6 +640,7 @@ function orderCard(order) {
         <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
         <div class="row-actions order-detail-actions">
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}">${order.status === 'new' ? 'Imprimir etiqueta' : 'Reimprimir etiqueta'}</button>
+          <button class="ghost-button compact print-order-button" type="button" data-print-order-copy="${escapeAttribute(order.id)}">Imprimir 2 vias</button>
           <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar cliente</button>
         </div>
       </div>
@@ -629,6 +649,7 @@ function orderCard(order) {
   card.querySelector('.order-details')?.addEventListener('mousedown', (event) => event.stopPropagation());
   card.querySelector('.order-details')?.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
   card.querySelector('[data-print-order]')?.addEventListener('click', () => printOrderLabel(order));
+  card.querySelector('[data-print-order-copy]')?.addEventListener('click', () => printOrderLabel(order, 2));
   card.querySelector('[data-whatsapp-status]')?.addEventListener('click', () => notifyOrderStatus(order));
   card.addEventListener('dragstart', (event) => {
     if (event.target.closest('.order-details') || event.target.closest('button') || event.target.closest('select')) {
@@ -697,14 +718,14 @@ function modifierText(modifier) {
   return `${group}${modifier.name}${delta > 0 ? ` (+ ${money(delta)})` : ''}`;
 }
 
-function printOrderLabel(order) {
+function printOrderLabel(order, copies = 1) {
   const popup = window.open('', '_blank', 'width=420,height=640');
   if (!popup) {
     toast('Permita pop-ups para imprimir a etiqueta.');
     return;
   }
 
-  popup.document.write(orderLabelDocument(order));
+  popup.document.write(orderLabelDocument(order, copies));
   popup.document.close();
   popup.focus();
   popup.setTimeout(() => {
@@ -734,7 +755,7 @@ function notifyOrderStatus(order) {
   window.open(`https://wa.me/55${phone.replace(/^55/, '')}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
 }
 
-function orderLabelDocument(order) {
+function orderLabelDocument(order, copies = 1) {
   const customer = order.customer_snapshot || {};
   const address = order.address_snapshot || {};
   const storeName = state.store?.name || 'Cardápio';
@@ -753,6 +774,36 @@ function orderLabelDocument(order) {
       </li>
     `;
   }).join('');
+
+  const labels = Array.from({ length: Math.max(1, Math.min(3, Number(copies) || 1)) }, (_, index) => `
+    <main class="label">
+      <p class="store">${escapeHtml(storeName)}${copies > 1 ? ` - Via ${index + 1}` : ''}</p>
+      <h1>Pedido #${escapeHtml(order.public_code)}</h1>
+      <span class="status">${escapeHtml(statusLabel(order.status))}</span>
+      <section class="meta">
+        <p><strong>Horário:</strong> ${escapeHtml(createdAt)}</p>
+        <p><strong>Tipo:</strong> ${order.fulfillment_method === 'pickup' ? 'Retirada' : 'Entrega'}</p>
+        <p><strong>Pagamento:</strong> ${escapeHtml(order.payment_method || 'Não informado')}</p>
+      </section>
+      <section class="box">
+        <h2>Cliente</h2>
+        <p><strong>${escapeHtml(customer.name || 'Cliente')}</strong></p>
+        <p>${escapeHtml(customer.phone || 'Sem telefone')}</p>
+      </section>
+      ${addressLines ? `<section class="box"><h2>Endereço</h2>${addressLines}</section>` : ''}
+      <section class="box">
+        <h2>Itens</h2>
+        <ul>${items}</ul>
+      </section>
+      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p>${escapeHtml(order.notes)}</p></section>` : ''}
+      <section class="box totals">
+        <p><span>Subtotal</span><strong>${money(order.subtotal)}</strong></p>
+        <p><span>Entrega</span><strong>${money(order.delivery_fee)}</strong></p>
+      </section>
+      <div class="total"><span>Total</span><strong>${money(order.total)}</strong></div>
+      <p class="cut">corte aqui</p>
+    </main>
+  `).join('');
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -848,39 +899,17 @@ function orderLabelDocument(order) {
         text-align: center;
         font-size: 9px;
       }
+      .label + .label {
+        break-before: page;
+        page-break-before: always;
+      }
       @media print {
         .label { max-width: none; }
       }
     </style>
   </head>
   <body>
-    <main class="label">
-      <p class="store">${escapeHtml(storeName)}</p>
-      <h1>Pedido #${escapeHtml(order.public_code)}</h1>
-      <span class="status">${escapeHtml(statusLabel(order.status))}</span>
-      <section class="meta">
-        <p><strong>Horário:</strong> ${escapeHtml(createdAt)}</p>
-        <p><strong>Tipo:</strong> ${order.fulfillment_method === 'pickup' ? 'Retirada' : 'Entrega'}</p>
-        <p><strong>Pagamento:</strong> ${escapeHtml(order.payment_method || 'Não informado')}</p>
-      </section>
-      <section class="box">
-        <h2>Cliente</h2>
-        <p><strong>${escapeHtml(customer.name || 'Cliente')}</strong></p>
-        <p>${escapeHtml(customer.phone || 'Sem telefone')}</p>
-      </section>
-      ${addressLines ? `<section class="box"><h2>Endereço</h2>${addressLines}</section>` : ''}
-      <section class="box">
-        <h2>Itens</h2>
-        <ul>${items}</ul>
-      </section>
-      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p>${escapeHtml(order.notes)}</p></section>` : ''}
-      <section class="box totals">
-        <p><span>Subtotal</span><strong>${money(order.subtotal)}</strong></p>
-        <p><span>Entrega</span><strong>${money(order.delivery_fee)}</strong></p>
-      </section>
-      <div class="total"><span>Total</span><strong>${money(order.total)}</strong></div>
-      <p class="cut">corte aqui</p>
-    </main>
+    ${labels}
   </body>
 </html>`;
 }
