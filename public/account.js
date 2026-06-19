@@ -1,6 +1,8 @@
-const state = {
+﻿const state = {
   customer: null,
-  orders: []
+  orders: [],
+  ordersFromCache: false,
+  cacheSavedAt: null
 };
 
 const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
@@ -11,11 +13,13 @@ const els = {
   shell: document.querySelector('#accountShell'),
   dashboard: document.querySelector('#accountDashboard'),
   edit: document.querySelector('#accountEdit'),
+  addresses: document.querySelector('#accountAddresses'),
   loginForm: document.querySelector('#loginForm'),
   resetPasswordForm: document.querySelector('#resetPasswordForm'),
   showResetButton: document.querySelector('#showResetButton'),
   registerForm: document.querySelector('#registerForm'),
   profileForm: document.querySelector('#profileForm'),
+  newAddressForm: document.querySelector('#newAddressForm'),
   customerName: document.querySelector('#customerName'),
   lastOrderTitle: document.querySelector('#lastOrderTitle'),
   lastOrderText: document.querySelector('#lastOrderText'),
@@ -24,11 +28,15 @@ const els = {
   savedAddressesCount: document.querySelector('#savedAddressesCount'),
   totalOrdersCount: document.querySelector('#totalOrdersCount'),
   accountSummary: document.querySelector('#accountSummary'),
+  accountAddressList: document.querySelector('#accountAddressList'),
   editProfileButton: document.querySelector('#editProfileButton'),
   editProfileInlineButton: document.querySelector('#editProfileInlineButton'),
+  manageAddressesButton: document.querySelector('#manageAddressesButton'),
   backToDashboardButton: document.querySelector('#backToDashboardButton'),
+  backFromAddressesButton: document.querySelector('#backFromAddressesButton'),
   cancelEditButton: document.querySelector('#cancelEditButton'),
   ordersList: document.querySelector('#ordersList'),
+  ordersCacheNotice: document.querySelector('#ordersCacheNotice'),
   refreshOrdersButton: document.querySelector('#refreshOrdersButton'),
   logoutButton: document.querySelector('#logoutButton'),
   toast: document.querySelector('#toast')
@@ -41,10 +49,18 @@ els.showResetButton.addEventListener('click', () => {
 els.resetPasswordForm.addEventListener('submit', resetPassword);
 els.registerForm.addEventListener('submit', register);
 els.profileForm.addEventListener('submit', saveProfile);
+els.newAddressForm.addEventListener('submit', createSavedAddress);
+document.querySelectorAll('input[inputmode="tel"]').forEach((field) => {
+  field.addEventListener('input', () => {
+    field.value = formatPhone(field.value);
+  });
+});
 els.refreshOrdersButton.addEventListener('click', loadOrders);
 els.editProfileButton.addEventListener('click', showEdit);
 els.editProfileInlineButton.addEventListener('click', showEdit);
+els.manageAddressesButton.addEventListener('click', showAddresses);
 els.backToDashboardButton.addEventListener('click', showDashboard);
+els.backFromAddressesButton.addEventListener('click', showDashboard);
 els.cancelEditButton.addEventListener('click', showDashboard);
 els.repeatLastOrderButton.addEventListener('click', repeatLastOrder);
 els.logoutButton.addEventListener('click', logout);
@@ -53,9 +69,13 @@ init();
 
 async function init() {
   const cached = loadAccountCache();
+  let hadCachedAccount = false;
   if (cached?.customer) {
+    hadCachedAccount = true;
     state.customer = cached.customer;
     state.orders = Array.isArray(cached.orders) ? cached.orders : [];
+    state.ordersFromCache = state.orders.length > 0;
+    state.cacheSavedAt = cached.saved_at || null;
     showShell();
     renderOrders();
   }
@@ -67,6 +87,13 @@ async function init() {
     await loadOrders();
     saveAccountCache();
   } catch {
+    if (hadCachedAccount) {
+      state.ordersFromCache = state.orders.length > 0;
+      showShell();
+      renderOrders();
+      toast('Conta carregada do cache offline.');
+      return;
+    }
     clearAccountCache();
     showAuth();
   }
@@ -126,8 +153,7 @@ async function saveProfile(event) {
   event.preventDefault();
   const form = new FormData(els.profileForm);
   const payload = {
-    customer: customerFromForm(form),
-    address: addressFromForm(form)
+    customer: customerFromForm(form)
   };
   if (form.get('password')) payload.password = form.get('password');
 
@@ -139,6 +165,7 @@ async function saveProfile(event) {
   state.customer = data.customer;
   saveAccountCache();
   fillProfile();
+  renderAddressEditor();
   renderDashboard();
   showDashboard();
   toast('Conta atualizada.');
@@ -156,10 +183,22 @@ async function loadOrders() {
   try {
     const data = await request('/api/customer/orders');
     state.orders = data.orders || [];
+    state.ordersFromCache = false;
+    state.cacheSavedAt = null;
     saveAccountCache();
     renderOrders();
   } catch (error) {
+    const cached = loadAccountCache();
+    if (cached?.customer?.id === state.customer?.id && Array.isArray(cached.orders) && cached.orders.length) {
+      state.orders = cached.orders;
+      state.ordersFromCache = true;
+      state.cacheSavedAt = cached.saved_at || null;
+      renderOrders();
+      toast('Histórico carregado do cache offline.');
+      return;
+    }
     if (!state.orders.length) throw error;
+    state.ordersFromCache = true;
     renderOrders();
   }
 }
@@ -205,31 +244,34 @@ function clearAccountCache() {
 function showDashboard() {
   els.dashboard.hidden = false;
   els.edit.hidden = true;
+  els.addresses.hidden = true;
 }
 
 function showEdit() {
   fillProfile();
   els.dashboard.hidden = true;
   els.edit.hidden = false;
+  els.addresses.hidden = true;
+}
+
+function showAddresses() {
+  renderAddressEditor();
+  els.dashboard.hidden = true;
+  els.edit.hidden = true;
+  els.addresses.hidden = false;
 }
 
 function fillProfile() {
   const customer = state.customer || {};
-  const address = customer.address || {};
   els.customerName.textContent = customer.name || 'Cliente';
   setValue(els.profileForm.elements.name, customer.name);
   setValue(els.profileForm.elements.phone, customer.phone);
   setValue(els.profileForm.elements.email, customer.email);
-  setValue(els.profileForm.elements.street, address.street);
-  setValue(els.profileForm.elements.number, address.number);
-  setValue(els.profileForm.elements.neighborhood, address.neighborhood);
-  setValue(els.profileForm.elements.city, address.city);
-  setValue(els.profileForm.elements.complement, address.complement);
-  setValue(els.profileForm.elements.reference, address.reference);
 }
 
 function renderOrders() {
   renderDashboard();
+  renderOrdersCacheNotice();
   if (!state.orders.length) {
     els.ordersList.innerHTML = '<p class="muted">Nenhum pedido encontrado.</p>';
     return;
@@ -243,7 +285,10 @@ function renderOrders() {
         <span class="order-history-status">${statusLabel(order.status)}</span>
       </div>
       <p>${money(order.total)} - ${new Date(order.created_at).toLocaleString('pt-BR')}</p>
-      <div class="mini-items">${(order.items || []).map((item) => `<span>${item.quantity}x ${escapeHtml(item.item_snapshot?.name || '')}</span>`).join('')}</div>
+      <details class="account-order-details">
+        <summary>Ver itens do pedido</summary>
+        <div class="account-order-items">${(order.items || []).map(accountOrderItemHtml).join('')}</div>
+      </details>
       <div class="row-actions">
         <button class="ghost-button compact" type="button" data-repeat-order="${escapeHtml(order.id)}">Refazer pedido</button>
       </div>
@@ -251,6 +296,31 @@ function renderOrders() {
     card.querySelector('[data-repeat-order]').addEventListener('click', () => repeatOrder(order));
     return card;
   }));
+}
+
+function renderOrdersCacheNotice() {
+  if (!els.ordersCacheNotice) return;
+  els.ordersCacheNotice.hidden = !state.ordersFromCache;
+  if (!state.ordersFromCache) {
+    els.ordersCacheNotice.textContent = '';
+    return;
+  }
+  const when = state.cacheSavedAt
+    ? new Date(state.cacheSavedAt).toLocaleString('pt-BR')
+    : 'recentemente';
+  els.ordersCacheNotice.textContent = `Histórico exibido do cache local. Última atualização: ${when}.`;
+}
+
+function accountOrderItemHtml(item) {
+  const modifiers = item.item_snapshot?.modifiers || [];
+  return `
+    <div>
+      <strong>${Number(item.quantity || 0)}x ${escapeHtml(item.item_snapshot?.name || 'Item')}</strong>
+      <span>${money(item.total)}</span>
+      ${modifiers.length ? `<p>${modifiers.map(modifierText).map(escapeHtml).join(', ')}</p>` : ''}
+      ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
+    </div>
+  `;
 }
 
 function renderDashboard() {
@@ -266,8 +336,8 @@ function renderDashboard() {
     els.lastOrderTitle.textContent = `Pedido #${lastOrder.public_code}`;
     els.lastOrderText.textContent = `${money(lastOrder.total)} em ${new Date(lastOrder.created_at).toLocaleDateString('pt-BR')} - ${orderItemsText(lastOrder)}`;
   } else {
-    els.lastOrderTitle.textContent = 'Seu ultimo pedido';
-    els.lastOrderText.textContent = 'Quando voce fizer um pedido, ele aparece aqui para repetir mais rapido.';
+    els.lastOrderTitle.textContent = 'Seu último pedido';
+    els.lastOrderText.textContent = 'Quando você fizer um pedido, ele aparece aqui para repetir mais rápido.';
   }
 
   els.repeatLastOrderButton.disabled = !lastOrder;
@@ -280,18 +350,111 @@ function renderAccountSummary(addresses, activeOrders) {
   els.accountSummary.innerHTML = `
     <div>
       <strong>${escapeHtml(customer.name || 'Cliente')}</strong>
-      <p>${escapeHtml(customer.phone || 'Telefone nao informado')}</p>
-      <p>${escapeHtml(customer.email || 'E-mail nao informado')}</p>
+      <p>${escapeHtml(customer.phone || 'Telefone não informado')}</p>
+      <p>${escapeHtml(customer.email || 'E-mail não informado')}</p>
     </div>
     <div>
-      <strong>Endereco principal</strong>
-      <p>${defaultAddress ? escapeHtml(formatAddress(defaultAddress)) : 'Nenhum endereco salvo.'}</p>
+      <strong>Endereço principal</strong>
+      <p>${defaultAddress ? escapeHtml(formatAddress(defaultAddress)) : 'Nenhum endereço salvo.'}</p>
     </div>
     <div>
       <strong>Status</strong>
       <p>${activeOrders.length ? `${activeOrders.length} pedido${activeOrders.length === 1 ? '' : 's'} em andamento.` : 'Nenhum pedido em andamento.'}</p>
     </div>
   `;
+}
+
+function renderAddressEditor() {
+  const addresses = state.customer?.addresses || [];
+  if (!els.accountAddressList) return;
+  if (!addresses.length) {
+    els.accountAddressList.innerHTML = '<p class="account-empty-note">Nenhum endereço salvo ainda. Abra "Novo endereço" para cadastrar o primeiro local de entrega.</p>';
+    return;
+  }
+
+  els.accountAddressList.replaceChildren(...addresses.map(accountAddressForm));
+}
+
+function accountAddressForm(address) {
+  const details = document.createElement('details');
+  details.className = `account-address-row${address.is_default ? ' is-default' : ''}`;
+  details.innerHTML = `
+    <summary>
+      <span>
+        <strong>${escapeHtml(address.label || 'Endereço salvo')}</strong>
+        <small>${escapeHtml(formatAddress(address) || 'Complete os dados deste endereço.')}</small>
+      </span>
+      <em>${address.is_default ? 'Principal' : 'Editar'}</em>
+    </summary>
+    <form class="account-address-form">
+      <div class="compact-address-grid">
+        <input name="label" list="addressLabelSuggestions" placeholder="Apelido: Casa, Trabalho" value="${escapeAttribute(address.label || '')}">
+        <input name="street" required placeholder="Rua / Avenida" value="${escapeAttribute(address.street || '')}">
+        <input name="number" required placeholder="Número" value="${escapeAttribute(address.number || '')}">
+        <input name="neighborhood" required placeholder="Bairro" value="${escapeAttribute(address.neighborhood || '')}">
+        <input name="city" required placeholder="Cidade" value="${escapeAttribute(address.city || '')}">
+        <input name="complement" placeholder="Complemento" value="${escapeAttribute(address.complement || '')}">
+        <input name="reference" placeholder="Referência" value="${escapeAttribute(address.reference || '')}">
+      </div>
+      <div class="row-actions">
+        <label class="inline-check">
+          <input type="checkbox" name="is_default" ${address.is_default ? 'checked' : ''}>
+          Usar como principal
+        </label>
+        <button class="danger-button compact" type="button" data-delete-address>Excluir</button>
+        <button class="primary-button compact" type="submit">Salvar</button>
+      </div>
+    </form>
+  `;
+
+  const form = details.querySelector('form');
+  form.addEventListener('submit', (event) => saveSavedAddress(event, address.id));
+  details.querySelector('[data-delete-address]').addEventListener('click', () => removeSavedAddress(address.id));
+  return details;
+}
+
+async function saveSavedAddress(event, addressId) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const data = await request(`/api/customer/addresses/${addressId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(addressPayloadFromForm(form))
+  });
+  state.customer = data.customer;
+  saveAccountCache();
+  fillProfile();
+  renderDashboard();
+  renderAddressEditor();
+  toast('Endereço atualizado.');
+}
+
+async function createSavedAddress(event) {
+  event.preventDefault();
+  const data = await request('/api/customer/addresses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(addressPayloadFromForm(new FormData(els.newAddressForm)))
+  });
+  state.customer = data.customer;
+  els.newAddressForm.reset();
+  els.newAddressForm.closest('details').open = false;
+  saveAccountCache();
+  fillProfile();
+  renderDashboard();
+  renderAddressEditor();
+  toast('Endereço adicionado.');
+}
+
+async function removeSavedAddress(addressId) {
+  if (!confirm('Excluir este endereço salvo?')) return;
+  const data = await request(`/api/customer/addresses/${addressId}`, { method: 'DELETE' });
+  state.customer = data.customer;
+  saveAccountCache();
+  fillProfile();
+  renderDashboard();
+  renderAddressEditor();
+  toast('Endereço excluído.');
 }
 
 function repeatLastOrder() {
@@ -307,11 +470,19 @@ function repeatOrder(order) {
       id: item.menu_item_id,
       name: item.item_snapshot.name,
       price: Number(item.unit_price || item.item_snapshot.price || 0),
-      quantity: Number(item.quantity || 1)
+      quantity: Number(item.quantity || 1),
+      modifier_ids: (item.item_snapshot.modifiers || []).map((modifier) => modifier.id).filter(Boolean),
+      modifiers: item.item_snapshot.modifiers || [],
+      notes: item.notes || '',
+      key: [
+        item.menu_item_id,
+        (item.item_snapshot.modifiers || []).map((modifier) => modifier.id).sort().join(','),
+        item.notes || ''
+      ].join('|')
     }));
 
   if (!cart.length) {
-    toast('Nao foi possivel refazer este pedido.');
+    toast('Não foi possível refazer este pedido.');
     return;
   }
 
@@ -327,6 +498,10 @@ function orderItemsText(order) {
     .slice(0, 3)
     .map((item) => `${item.quantity}x ${item.item_snapshot?.name || 'Item'}`)
     .join(', ');
+}
+
+function modifierText(modifier) {
+  return `${modifier.group_name ? `${modifier.group_name}: ` : ''}${modifier.name}`;
 }
 
 function formatAddress(address) {
@@ -357,6 +532,19 @@ function addressFromForm(form) {
   };
 }
 
+function addressPayloadFromForm(form) {
+  return {
+    label: form.get('label') || 'Principal',
+    street: form.get('street'),
+    number: form.get('number'),
+    neighborhood: form.get('neighborhood'),
+    city: form.get('city'),
+    complement: form.get('complement'),
+    reference: form.get('reference'),
+    is_default: form.get('is_default') === 'on'
+  };
+}
+
 async function request(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -371,6 +559,16 @@ function setValue(field, value) {
   if (field) field.value = value ?? '';
 }
 
+function formatPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
 function statusLabel(status) {
   return ({
     new: 'Novo',
@@ -378,7 +576,7 @@ function statusLabel(status) {
     preparing: 'Preparando',
     ready: 'Pronto',
     out_for_delivery: 'Saiu para entrega',
-    completed: 'Concluido',
+    completed: 'Concluído',
     cancelled: 'Cancelado'
   })[status] || status;
 }
@@ -402,3 +600,12 @@ function escapeHtml(value) {
     "'": '&#039;'
   })[char]);
 }
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, '&#096;');
+}
+
+
+
+
+

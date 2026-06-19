@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   store: null,
   customer: null,
   categories: [],
@@ -6,10 +6,13 @@ const state = {
   query: '',
   activeCategory: 'all',
   customerChecked: false,
-  savedAddressApplied: false
+  savedAddressApplied: false,
+  customizingItem: null,
+  closedStoreNoticeKey: null
 };
 
 const BOOTSTRAP_CACHE_KEY = 'cardapio_bootstrap_cache_v1';
+const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
 
 const els = {
   storeCover: document.querySelector('#storeCover'),
@@ -24,6 +27,7 @@ const els = {
   featured: document.querySelector('#featured'),
   categoryNav: document.querySelector('#categoryNav'),
   searchInput: document.querySelector('#searchInput'),
+  customerLogoutButton: document.querySelector('#customerLogoutButton'),
   refreshButton: document.querySelector('#refreshButton'),
   checkoutButton: document.querySelector('#checkoutButton'),
   mobileBagButton: document.querySelector('#mobileBagButton'),
@@ -45,7 +49,22 @@ const els = {
   accountPrefillTitle: document.querySelector('#accountPrefillTitle'),
   accountPrefillText: document.querySelector('#accountPrefillText'),
   savedAddressSelect: document.querySelector('#savedAddressSelect'),
-  editAddressButton: document.querySelector('#editAddressButton')
+  editAddressButton: document.querySelector('#editAddressButton'),
+  deleteSavedAddressButton: document.querySelector('#deleteSavedAddressButton'),
+  productDialog: document.querySelector('#productDialog'),
+  productForm: document.querySelector('#productForm'),
+  productDialogTitle: document.querySelector('#productDialogTitle'),
+  productDialogMedia: document.querySelector('#productDialogMedia'),
+  productDialogDescription: document.querySelector('#productDialogDescription'),
+  productModifierGroups: document.querySelector('#productModifierGroups'),
+  productDialogTotal: document.querySelector('#productDialogTotal'),
+  productQuantity: document.querySelector('#productQuantity'),
+  productQuantityMinus: document.querySelector('#productQuantityMinus'),
+  productQuantityPlus: document.querySelector('#productQuantityPlus'),
+  closedStoreDialog: document.querySelector('#closedStoreDialog'),
+  closedStoreTitle: document.querySelector('#closedStoreTitle'),
+  closedStoreText: document.querySelector('#closedStoreText'),
+  closedStoreRefreshButton: document.querySelector('#closedStoreRefreshButton')
 };
 
 els.searchInput.addEventListener('input', () => {
@@ -53,9 +72,11 @@ els.searchInput.addEventListener('input', () => {
   renderMenu();
 });
 
-els.refreshButton.addEventListener('click', loadBootstrap);
+els.refreshButton?.addEventListener('click', loadBootstrap);
+els.customerLogoutButton.addEventListener('click', logoutCustomer);
 els.checkoutButton.addEventListener('click', openCheckout);
 els.mobileBagButton.addEventListener('click', openCheckout);
+els.featured.addEventListener('wheel', scrollFeaturedWithWheel, { passive: false });
 els.clearCartButton.addEventListener('click', () => {
   state.cart = [];
   persistCart();
@@ -69,8 +90,20 @@ els.checkoutForm.addEventListener('change', (event) => {
     renderCheckoutReview();
   }
 });
+els.checkoutForm.elements.phone.addEventListener('input', (event) => {
+  event.target.value = formatPhone(event.target.value);
+});
 
 els.checkoutForm.addEventListener('submit', submitOrder);
+els.productForm.addEventListener('change', renderProductDialogTotal);
+els.productForm.addEventListener('input', renderProductDialogTotal);
+els.productForm.addEventListener('submit', submitProductCustomization);
+els.productQuantityMinus.addEventListener('click', () => changeProductDialogQuantity(-1));
+els.productQuantityPlus.addEventListener('click', () => changeProductDialogQuantity(1));
+els.closedStoreRefreshButton?.addEventListener('click', () => {
+  els.closedStoreDialog.close();
+  loadBootstrap();
+});
 els.savedAddressSelect.addEventListener('change', () => {
   applySavedCustomerAddress(selectedSavedAddress());
   state.savedAddressApplied = true;
@@ -80,23 +113,27 @@ els.editAddressButton.addEventListener('click', () => {
   clearAddressFields();
   state.savedAddressApplied = false;
   els.savedAddressSelect.hidden = true;
+  els.deleteSavedAddressButton.hidden = true;
   updatePrefillNotice('Informe outro endereço. Depois de enviar o pedido, ele ficará salvo na sua conta.');
   els.checkoutForm.elements.street.focus();
 });
+els.deleteSavedAddressButton.addEventListener('click', deleteSelectedSavedAddress);
 
+renderCachedCustomer();
 renderCachedBootstrap();
+loadLoggedCustomer().catch(() => {});
 loadBootstrap();
 renderCart();
 
 async function loadBootstrap() {
-  setStatus(state.categories.length ? 'Atualizando cardapio...' : 'Carregando cardapio...');
+  setStatus(state.categories.length ? 'Atualizando cardápio...' : 'Carregando cardápio...');
   try {
     const data = await request('/api/bootstrap');
     state.store = data.store || null;
     state.categories = data.categories || [];
     saveCachedBootstrap(data);
     render();
-    setStatus(`${countItems(state.categories)} produtos disponiveis`);
+    setStatus(isStoreClosed() ? 'Loja fechada no momento. Pedidos pausados.' : `${countItems(state.categories)} produtos disponiveis`);
     loadLoggedCustomer().catch(() => {});
   } catch (error) {
     setStatus(state.categories.length ? `${countItems(state.categories)} produtos disponiveis` : error.message);
@@ -110,11 +147,20 @@ function renderCachedBootstrap() {
   state.store = cached.store || null;
   state.categories = cached.categories || [];
   render();
-  setStatus(`${countItems(state.categories)} produtos disponiveis`);
+  setStatus(isStoreClosed() ? 'Loja fechada no momento. Pedidos pausados.' : `${countItems(state.categories)} produtos disponiveis`);
+}
+
+function renderCachedCustomer() {
+  const cached = loadAccountCache();
+  if (!cached?.customer) return;
+  state.customer = cached.customer;
+  state.customerChecked = true;
+  renderCustomerActions();
 }
 
 function render() {
   renderStore();
+  renderCustomerActions();
   renderNav();
   renderFeatured();
   renderMenu();
@@ -124,13 +170,15 @@ function render() {
 
 function renderStore() {
   const store = state.store || {};
-  const name = store.name || 'Cardapio digital';
+  const name = store.name || 'Cardápio digital';
   els.storeName.textContent = name;
-  els.storeLogo.textContent = name.slice(0, 1).toUpperCase();
+  els.storeLogo.textContent = '';
+  els.storeLogo.style.backgroundImage = '';
   els.storeDescription.textContent = store.description || 'Escolha seus itens e envie o pedido pelo WhatsApp da loja.';
   els.storeStatus.textContent = store.is_open === false ? 'Fechado agora' : 'Aberto agora';
+  els.storeStatus.classList.toggle('closed', store.is_open === false);
   els.deliveryMeta.textContent = store.accepts_delivery === false ? 'Somente retirada' : `Entrega ${money(store.delivery_fee || 0)}`;
-  els.minimumMeta.textContent = `Minimo ${money(store.minimum_order || 0)}`;
+  els.minimumMeta.textContent = `Mínimo ${money(store.minimum_order || 0)}`;
 
   if (store.cover_url) {
     els.storeCover.style.backgroundImage = `url("${store.cover_url}")`;
@@ -138,8 +186,9 @@ function renderStore() {
 
   if (store.logo_url) {
     els.storeLogo.style.backgroundImage = `url("${store.logo_url}")`;
-    els.storeLogo.textContent = '';
   }
+
+  handleStoreClosedState();
 }
 
 function renderNav() {
@@ -169,9 +218,11 @@ function renderFeatured() {
     .filter((item) => item.is_featured)
     .slice(0, 8);
 
+  els.featured.hidden = items.length === 0;
   els.featured.replaceChildren(...items.map((item) => {
     const card = document.createElement('article');
     card.className = 'featured-product';
+    if (isStoreClosed()) card.classList.add('disabled');
     card.innerHTML = `
       ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="">` : '<div class="image-fallback"></div>'}
       <div>
@@ -179,9 +230,42 @@ function renderFeatured() {
         <span>${money(item.price)}</span>
       </div>
     `;
-    card.addEventListener('click', () => addToCart(item));
+    card.addEventListener('click', () => startAddToCart(item));
     return card;
   }));
+}
+
+function scrollFeaturedWithWheel(event) {
+  if (els.featured.hidden || els.featured.scrollWidth <= els.featured.clientWidth) return;
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (!delta) return;
+  event.preventDefault();
+  els.featured.scrollLeft += delta;
+}
+
+function isStoreClosed() {
+  return state.store?.is_open === false;
+}
+
+function handleStoreClosedState() {
+  document.body.classList.toggle('store-closed', isStoreClosed());
+  if (isStoreClosed()) {
+    showClosedStoreDialog();
+    return;
+  }
+  state.closedStoreNoticeKey = null;
+  if (els.closedStoreDialog?.open) els.closedStoreDialog.close();
+}
+
+function showClosedStoreDialog(force = false) {
+  if (!els.closedStoreDialog) return;
+  const store = state.store || {};
+  const noticeKey = store.updated_at || store.id || 'closed';
+  if (!force && state.closedStoreNoticeKey === noticeKey) return;
+  state.closedStoreNoticeKey = noticeKey;
+  els.closedStoreTitle.textContent = `${store.name || 'A loja'} está fechada agora.`;
+  els.closedStoreText.textContent = 'Você pode consultar o cardápio, mas novos pedidos estão pausados até a loja iniciar a operação.';
+  if (!els.closedStoreDialog.open) els.closedStoreDialog.showModal();
 }
 
 function renderMenu() {
@@ -209,6 +293,7 @@ function renderMenu() {
 function productRow(item) {
   const row = document.createElement('article');
   row.className = 'product-row';
+  const storeClosed = isStoreClosed();
   row.innerHTML = `
     <div class="product-info">
       <h3>${escapeHtml(item.name)}</h3>
@@ -216,18 +301,18 @@ function productRow(item) {
       <strong>${money(item.price)}</strong>
       <div class="tags">${(item.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
     </div>
-    <button class="add-product" type="button" aria-label="Adicionar ${escapeHtml(item.name)}">
+    <button class="add-product" type="button" aria-label="Adicionar ${escapeHtml(item.name)}" ${storeClosed ? 'disabled' : ''}>
       ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="">` : '<span>+</span>'}
-      <b>+</b>
+      <b>${storeClosed ? 'Fechado' : '+'}</b>
     </button>
   `;
-  row.querySelector('button').addEventListener('click', () => addToCart(item));
+  row.querySelector('button').addEventListener('click', () => startAddToCart(item));
   return row;
 }
 
 function renderCart() {
   if (state.cart.length === 0) {
-    els.cartItems.innerHTML = '<p class="muted">Sua sacola esta vazia.</p>';
+    els.cartItems.innerHTML = '<p class="muted">Sua sacola está vazia.</p>';
   } else {
     els.cartItems.replaceChildren(...state.cart.map(cartRow));
   }
@@ -240,6 +325,8 @@ function renderCart() {
   els.mobileBagCount.textContent = `${quantity} ${quantity === 1 ? 'item' : 'itens'}`;
   els.mobileBagTotal.textContent = money(totals.total);
   els.mobileBagButton.classList.toggle('visible', quantity > 0);
+  els.checkoutButton.disabled = quantity === 0 || isStoreClosed();
+  els.mobileBagButton.disabled = isStoreClosed();
   renderCheckoutReview();
 }
 
@@ -249,7 +336,8 @@ function cartRow(item) {
   row.innerHTML = `
     <div>
       <strong>${escapeHtml(item.name)}</strong>
-      <p>${money(item.price)} cada</p>
+      <p>${money(item.price)} cada${item.modifiers?.length ? ` - ${item.modifiers.map(modifierText).map(escapeHtml).join(', ')}` : ''}</p>
+      ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
     </div>
     <div class="qty">
       <button type="button" aria-label="Diminuir">-</button>
@@ -258,29 +346,43 @@ function cartRow(item) {
     </div>
   `;
   const [minus, plus] = row.querySelectorAll('button');
-  minus.addEventListener('click', () => changeCartQuantity(item.id, -1));
-  plus.addEventListener('click', () => changeCartQuantity(item.id, 1));
+  minus.addEventListener('click', () => changeCartQuantity(item.key, -1));
+  plus.addEventListener('click', () => changeCartQuantity(item.key, 1));
   return row;
 }
 
+function startAddToCart(item) {
+  if (isStoreClosed()) {
+    showClosedStoreDialog(true);
+    return;
+  }
+  openProductDialog(item);
+}
+
 function addToCart(item) {
-  const existing = state.cart.find((entry) => entry.id === item.id);
+  const key = item.key || cartItemKey(item.id, item.modifier_ids || [], item.notes || '');
+  const existing = state.cart.find((entry) => entry.key === key);
   if (existing) {
-    existing.quantity += 1;
+    existing.quantity += Number(item.quantity || 1);
   } else {
     state.cart.push({
+      ...item,
+      key,
       id: item.id,
       name: item.name,
       price: Number(item.price || 0),
-      quantity: 1
+      quantity: item.quantity || 1,
+      modifier_ids: item.modifier_ids || [],
+      modifiers: item.modifiers || [],
+      notes: item.notes || ''
     });
   }
   persistCart();
   renderCart();
 }
 
-function changeCartQuantity(id, delta) {
-  const item = state.cart.find((entry) => entry.id === id);
+function changeCartQuantity(key, delta) {
+  const item = state.cart.find((entry) => entry.key === key);
   if (!item) return;
   item.quantity += delta;
   state.cart = state.cart.filter((entry) => entry.quantity > 0);
@@ -288,7 +390,160 @@ function changeCartQuantity(id, delta) {
   renderCart();
 }
 
+function openProductDialog(item) {
+  state.customizingItem = item;
+  els.productForm.reset();
+  els.productQuantity.value = '1';
+  els.productDialogTitle.textContent = item.name;
+  els.productDialogDescription.textContent = item.description || 'Confira o item antes de adicionar a sacola.';
+  renderProductDialogMedia(item);
+  els.productModifierGroups.replaceChildren(...(item.modifier_groups || []).map(modifierGroupFieldset));
+  renderProductDialogTotal();
+  els.productDialog.showModal();
+}
+
+function renderProductDialogMedia(item) {
+  if (item.image_url) {
+    els.productDialogMedia.innerHTML = `<img src="${escapeAttribute(item.image_url)}" alt="${escapeAttribute(item.name)}">`;
+    return;
+  }
+  els.productDialogMedia.innerHTML = `<div class="product-dialog-fallback">${escapeHtml((item.name || 'P').slice(0, 1).toUpperCase())}</div>`;
+}
+
+function changeProductDialogQuantity(delta) {
+  const current = Number.parseInt(els.productQuantity.value, 10) || 1;
+  els.productQuantity.value = String(Math.min(99, Math.max(1, current + delta)));
+  renderProductDialogTotal();
+}
+
+function modifierGroupFieldset(group) {
+  const fieldset = document.createElement('fieldset');
+  const type = Number(group.max_choices || 1) === 1 ? 'radio' : 'checkbox';
+  const required = group.is_required || Number(group.min_choices || 0) > 0;
+  fieldset.className = 'modifier-group';
+  fieldset.dataset.groupId = group.id;
+  fieldset.dataset.minChoices = group.min_choices || 0;
+  fieldset.dataset.maxChoices = group.max_choices || 1;
+  fieldset.innerHTML = `
+    <legend>${escapeHtml(group.name)}${required ? ' *' : ''}</legend>
+    <div class="modifier-group-meta">
+      <p>${required ? `Escolha ${group.min_choices || 1}` : 'Opcional'}${Number(group.max_choices || 0) > 1 ? `, até ${group.max_choices}` : ''}</p>
+      ${!required && type === 'radio' ? '<button class="modifier-clear-button" type="button" data-clear-modifier-group>Remover escolha</button>' : ''}
+    </div>
+    <div class="modifier-options">
+      ${(group.modifiers || []).map((modifier) => `
+        <label>
+          <input type="${type}" name="modifier_${escapeAttribute(group.id)}" value="${escapeAttribute(modifier.id)}" ${required && type === 'radio' ? 'required' : ''}>
+          <span>${escapeHtml(modifier.name)}</span>
+          <strong>${Number(modifier.price_delta || 0) > 0 ? `+ ${money(modifier.price_delta)}` : ''}</strong>
+        </label>
+      `).join('')}
+    </div>
+  `;
+
+  fieldset.querySelector('[data-clear-modifier-group]')?.addEventListener('click', () => {
+    fieldset.querySelectorAll('input[name^="modifier_"]').forEach((input) => {
+      input.checked = false;
+    });
+    renderProductDialogTotal();
+  });
+
+  if (!required && type === 'radio') {
+    fieldset.querySelectorAll('input[type="radio"]').forEach((input) => {
+      input.addEventListener('pointerdown', () => {
+        input.dataset.wasChecked = String(input.checked);
+      });
+      input.addEventListener('click', () => {
+        if (input.dataset.wasChecked === 'true') {
+          input.checked = false;
+          renderProductDialogTotal();
+        }
+        delete input.dataset.wasChecked;
+      });
+    });
+  }
+
+  return fieldset;
+}
+
+function submitProductCustomization(event) {
+  event.preventDefault();
+  const item = state.customizingItem;
+  if (!item) return;
+
+  const selected = selectedProductModifiers();
+  if (!selected) return;
+  const notes = String(new FormData(els.productForm).get('notes') || '').trim();
+  const quantity = Math.min(99, Math.max(1, Number.parseInt(new FormData(els.productForm).get('quantity'), 10) || 1));
+  const price = Number(item.price || 0) + selected.reduce((sum, modifier) => sum + Number(modifier.price_delta || 0), 0);
+  addToCart({
+    id: item.id,
+    name: item.name,
+    price,
+    quantity,
+    modifier_ids: selected.map((modifier) => modifier.id),
+    modifiers: selected,
+    notes
+  });
+  els.productDialog.close();
+}
+
+function selectedProductModifiers() {
+  const item = state.customizingItem;
+  const selectedIds = new Set([...els.productForm.querySelectorAll('input[name^="modifier_"]:checked')].map((input) => input.value));
+  const selected = [];
+
+  for (const group of item.modifier_groups || []) {
+    const groupSelected = (group.modifiers || []).filter((modifier) => selectedIds.has(modifier.id));
+    const min = Number(group.min_choices || 0);
+    const max = Number(group.max_choices || 0);
+    if ((group.is_required || min > 0) && groupSelected.length < Math.max(1, min)) {
+      setStatus(`Escolha ${group.name}.`);
+      return null;
+    }
+    if (max > 0 && groupSelected.length > max) {
+      setStatus(`Escolha no máximo ${max} opção(ões) em ${group.name}.`);
+      return null;
+    }
+    selected.push(...groupSelected.map((modifier) => ({
+      id: modifier.id,
+      group_id: group.id,
+      group_name: group.name,
+      name: modifier.name,
+      price_delta: Number(modifier.price_delta || 0)
+    })));
+  }
+
+  return selected;
+}
+
+function renderProductDialogTotal() {
+  if (!state.customizingItem) return;
+  const selected = [...els.productForm.querySelectorAll('input[name^="modifier_"]:checked')]
+    .map((input) => findModifier(input.value))
+    .filter(Boolean);
+  const quantity = Math.min(99, Math.max(1, Number.parseInt(els.productQuantity.value, 10) || 1));
+  if (String(quantity) !== els.productQuantity.value) els.productQuantity.value = String(quantity);
+  const unitTotal = Number(state.customizingItem.price || 0) + selected.reduce((sum, modifier) => sum + Number(modifier.price_delta || 0), 0);
+  const total = unitTotal * quantity;
+  els.productDialogTotal.textContent = money(total);
+}
+
+function findModifier(modifierId) {
+  return (state.customizingItem?.modifier_groups || [])
+    .flatMap((group) => group.modifiers || [])
+    .find((modifier) => modifier.id === modifierId);
+}
+
+function cartItemKey(id, modifierIds, notes) {
+  return [id, [...modifierIds].sort().join(','), notes.trim()].join('|');
+}
+
 async function openCheckout() {
+  if (isStoreClosed()) {
+    showClosedStoreDialog(true);
+    return;
+  }
   if (state.cart.length === 0) {
     setStatus('Adicione algum produto antes de continuar.');
     return;
@@ -305,7 +560,7 @@ async function openCheckout() {
 function renderCheckoutReview() {
   if (!els.checkoutReviewItems) return;
   if (state.cart.length === 0) {
-    els.checkoutReviewItems.innerHTML = '<p class="muted">Sua sacola esta vazia.</p>';
+    els.checkoutReviewItems.innerHTML = '<p class="muted">Sua sacola está vazia.</p>';
   } else {
     els.checkoutReviewItems.replaceChildren(...state.cart.map((item) => {
       const row = document.createElement('div');
@@ -314,7 +569,8 @@ function renderCheckoutReview() {
       row.innerHTML = `
         <div>
           <strong>${item.quantity}x ${escapeHtml(item.name)}</strong>
-          <p>${money(item.price)} cada</p>
+          <p>${money(item.price)} cada${item.modifiers?.length ? ` - ${item.modifiers.map(modifierText).map(escapeHtml).join(', ')}` : ''}</p>
+          ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
         </div>
         <span>${money(total)}</span>
       `;
@@ -330,8 +586,13 @@ function renderCheckoutReview() {
 
 async function submitOrder(event) {
   event.preventDefault();
+  if (isStoreClosed()) {
+    showClosedStoreDialog(true);
+    return;
+  }
   const data = new FormData(els.checkoutForm);
   const method = data.get('fulfillment_method');
+  if (!validateCheckoutData(data, method)) return;
   const payload = {
     customer: {
       name: data.get('name'),
@@ -340,6 +601,7 @@ async function submitOrder(event) {
     },
     fulfillment_method: method,
     address: method === 'delivery' ? {
+      label: data.get('label') || 'Casa',
       street: data.get('street'),
       number: data.get('number'),
       neighborhood: data.get('neighborhood'),
@@ -349,28 +611,37 @@ async function submitOrder(event) {
     } : null,
     payment_method: data.get('payment_method'),
     notes: data.get('notes'),
-    items: state.cart.map((item) => ({ id: item.id, quantity: item.quantity }))
+    items: state.cart.map((item) => ({
+      id: item.id,
+      quantity: item.quantity,
+      modifier_ids: item.modifier_ids || [],
+      notes: item.notes || ''
+    }))
   };
 
-  const result = await request('/api/orders', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const result = await request('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
 
-  state.cart = [];
-  persistCart();
-  renderCart();
-  els.checkoutDialog.close();
-  setStatus(`Pedido ${result.order.public_code} criado.`);
+    state.cart = [];
+    persistCart();
+    renderCart();
+    els.checkoutDialog.close();
+    setStatus(`Pedido ${result.order.public_code} criado.`);
 
-  if (result.whatsapp_url) {
-    window.open(result.whatsapp_url, '_blank', 'noopener');
+    if (result.whatsapp_url) {
+      window.open(result.whatsapp_url, '_blank', 'noopener');
+    }
+  } catch (error) {
+    setStatus(error.message || 'Não foi possível enviar o pedido agora.');
   }
 }
 
 function renderPaymentOptions() {
-  const methods = state.store?.payment_methods?.length ? state.store.payment_methods : ['Pix', 'Cartao na entrega', 'Dinheiro'];
+  const methods = state.store?.payment_methods?.length ? state.store.payment_methods : ['Pix', 'Cartão na entrega', 'Dinheiro'];
   els.paymentMethod.replaceChildren(...methods.map((method) => {
     const option = document.createElement('option');
     option.value = method;
@@ -381,13 +652,45 @@ function renderPaymentOptions() {
 
 function updateCheckoutDeliveryFields() {
   const method = new FormData(els.checkoutForm).get('fulfillment_method');
-  ['street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
+  ['label', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     const field = els.checkoutForm.elements[name];
     field.disabled = method === 'pickup';
   });
-  ['street', 'neighborhood', 'city'].forEach((name) => {
+  ['street', 'number', 'neighborhood', 'city'].forEach((name) => {
     els.checkoutForm.elements[name].required = method !== 'pickup';
   });
+}
+
+function validateCheckoutData(data, method) {
+  const phone = onlyDigits(data.get('phone'));
+  if (!isValidBrazilianPhone(phone)) {
+    return focusCheckoutField('phone', 'Informe um telefone válido com DDD. Exemplo: (11) 99999-9999.');
+  }
+
+  if (method === 'delivery') {
+    const labels = {
+      street: 'rua ou avenida',
+      number: 'número',
+      neighborhood: 'bairro',
+      city: 'cidade'
+    };
+    const missing = Object.keys(labels).find((name) => !String(data.get(name) || '').trim());
+    if (missing) {
+      return focusCheckoutField(missing, `Informe ${labels[missing]} para entrega.`);
+    }
+  }
+
+  return true;
+}
+
+function focusCheckoutField(name, message) {
+  const field = els.checkoutForm.elements[name];
+  field?.focus();
+  field?.setCustomValidity(message);
+  field?.reportValidity();
+  setTimeout(() => field?.setCustomValidity(''), 700);
+  setStatus(message);
+  return false;
 }
 
 async function loadLoggedCustomer() {
@@ -395,9 +698,52 @@ async function loadLoggedCustomer() {
   try {
     const data = await request('/api/customer/me');
     state.customer = data.customer || null;
+    saveAccountCache();
   } catch {
     state.customer = null;
+    clearAccountCache();
   }
+  renderCustomerActions();
+}
+
+async function logoutCustomer() {
+  await request('/api/customer/logout', { method: 'POST' });
+  state.customer = null;
+  state.customerChecked = true;
+  state.savedAddressApplied = false;
+  clearAccountCache();
+  els.accountPrefill.hidden = true;
+  els.deleteSavedAddressButton.hidden = true;
+  renderCustomerActions();
+  setStatus('Você saiu da conta.');
+}
+
+function saveAccountCache() {
+  try {
+    localStorage.setItem(ACCOUNT_CACHE_KEY, JSON.stringify({
+      customer: state.customer,
+      saved_at: new Date().toISOString()
+    }));
+  } catch {
+    // Cache visual do cliente.
+  }
+}
+
+function loadAccountCache() {
+  try {
+    return JSON.parse(localStorage.getItem(ACCOUNT_CACHE_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function clearAccountCache() {
+  localStorage.removeItem(ACCOUNT_CACHE_KEY);
+}
+
+function renderCustomerActions() {
+  if (!els.customerLogoutButton) return;
+  els.customerLogoutButton.hidden = !state.customer;
 }
 
 function prefillCheckoutFromCustomer() {
@@ -412,8 +758,10 @@ function prefillCheckoutFromCustomer() {
 
   const addresses = customerAddresses();
   const hasAddress = addresses.length > 0;
+  const hasPersistedAddress = addresses.some((address) => address.id);
   els.accountPrefill.hidden = false;
   els.editAddressButton.hidden = !hasAddress;
+  els.deleteSavedAddressButton.hidden = !hasPersistedAddress;
   els.accountPrefillTitle.textContent = `Olá, ${state.customer.name}`;
   renderSavedAddressOptions(addresses);
 
@@ -422,7 +770,7 @@ function prefillCheckoutFromCustomer() {
     state.savedAddressApplied = true;
     updatePrefillNotice(addresses.length > 1
       ? 'Dados da conta carregados. Escolha qual endereço salvo deseja usar neste pedido.'
-      : 'Dados da conta e endereço salvo já foram aplicados. Clique em “Informar outro” se quiser entregar em outro local.');
+      : 'Dados da conta e endereço salvo já foram aplicados. Clique em "Informar outro" se quiser entregar em outro local.');
   } else if (hasAddress) {
     updatePrefillNotice(addresses.length > 1
       ? 'Escolha um endereço salvo ou informe outro para este pedido.'
@@ -434,6 +782,7 @@ function prefillCheckoutFromCustomer() {
 
 function renderSavedAddressOptions(addresses) {
   els.savedAddressSelect.hidden = addresses.length <= 1;
+  els.deleteSavedAddressButton.hidden = !addresses.some((address) => address.id);
   els.savedAddressSelect.replaceChildren(...addresses.map((address) => {
     const option = document.createElement('option');
     option.value = address.id;
@@ -454,8 +803,38 @@ function customerAddresses() {
   return state.customer?.address ? [state.customer.address] : [];
 }
 
+async function deleteSelectedSavedAddress() {
+  const address = selectedSavedAddress();
+  if (!address?.id) return;
+  if (!confirm('Excluir este endereço salvo?')) return;
+
+  const data = await request(`/api/customer/addresses/${address.id}`, { method: 'DELETE' });
+  state.customer = data.customer || null;
+  saveAccountCache();
+  state.savedAddressApplied = false;
+
+  const addresses = customerAddresses();
+  renderSavedAddressOptions(addresses);
+
+  if (addresses.length) {
+    applySavedCustomerAddress(addresses[0]);
+    state.savedAddressApplied = true;
+    updatePrefillNotice(addresses.length > 1
+      ? 'Endereço excluído. Escolha outro endereço salvo para este pedido.'
+      : 'Endereço excluído. O endereço restante foi aplicado ao pedido.');
+  } else {
+    clearAddressFields();
+    els.editAddressButton.hidden = true;
+    els.deleteSavedAddressButton.hidden = true;
+    updatePrefillNotice('Endereço excluído. Informe abaixo um novo endereço para entrega.');
+  }
+
+  renderCustomerActions();
+}
+
 function applySavedCustomerAddress(address = selectedSavedAddress()) {
   if (!address) return;
+  setValue(els.checkoutForm.elements.label, address.label || 'Casa');
   setValue(els.checkoutForm.elements.street, address.street);
   setValue(els.checkoutForm.elements.number, address.number);
   setValue(els.checkoutForm.elements.neighborhood, address.neighborhood);
@@ -474,8 +853,12 @@ function addressLabel(address) {
   ].filter(Boolean).join(' - ');
 }
 
+function modifierText(modifier) {
+  return `${modifier.group_name ? `${modifier.group_name}: ` : ''}${modifier.name}`;
+}
+
 function clearAddressFields() {
-  ['street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
+  ['label', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     setValue(els.checkoutForm.elements[name], '');
   });
 }
@@ -490,6 +873,29 @@ function setIfEmpty(field, value) {
 
 function setValue(field, value) {
   if (field) field.value = value ?? '';
+}
+
+function formatPhone(value) {
+  const digits = onlyDigits(value).slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function isValidBrazilianPhone(digits) {
+  if (!/^\d{10,11}$/.test(digits)) return false;
+  const ddd = Number(digits.slice(0, 2));
+  if (ddd < 11 || ddd > 99) return false;
+  if (/^(\d)\1+$/.test(digits)) return false;
+  if (digits.length === 11 && digits[2] !== '9') return false;
+  return true;
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
 }
 
 async function request(url, options = {}) {
@@ -544,7 +950,13 @@ function cartTotals() {
 
 function loadCart() {
   try {
-    return JSON.parse(localStorage.getItem('cart') || '[]');
+    return JSON.parse(localStorage.getItem('cart') || '[]').map((item) => ({
+      ...item,
+      key: item.key || cartItemKey(item.id, item.modifier_ids || [], item.notes || ''),
+      modifier_ids: item.modifier_ids || [],
+      modifiers: item.modifiers || [],
+      notes: item.notes || ''
+    }));
   } catch {
     return [];
   }
@@ -580,3 +992,10 @@ function escapeHtml(value) {
     "'": '&#039;'
   })[char]);
 }
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, '&#096;');
+}
+
+
+

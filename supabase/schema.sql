@@ -110,9 +110,13 @@ create table if not exists public.orders (
   total numeric(10, 2) not null default 0,
   notes text,
   whatsapp_message text,
+  archived_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.orders
+  add column if not exists archived_at timestamptz;
 
 create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
@@ -169,11 +173,35 @@ create index if not exists menu_categories_active_sort_idx
 create index if not exists menu_items_category_available_sort_idx
   on public.menu_items (category_id, is_available, sort_order, name);
 
+create index if not exists menu_modifier_groups_item_sort_idx
+  on public.menu_modifier_groups (menu_item_id, sort_order, name);
+
+create index if not exists menu_modifiers_group_available_sort_idx
+  on public.menu_modifiers (group_id, is_available, sort_order, name);
+
 create index if not exists orders_customer_created_idx
   on public.orders (customer_id, created_at desc);
 
 create index if not exists orders_status_created_idx
   on public.orders (status, created_at desc);
+
+create index if not exists orders_archived_created_idx
+  on public.orders (archived_at, created_at desc);
+
+create index if not exists orders_created_idx
+  on public.orders (created_at desc);
+
+create index if not exists orders_status_archived_created_idx
+  on public.orders (status, archived_at, created_at desc);
+
+create index if not exists order_items_order_idx
+  on public.order_items (order_id);
+
+create index if not exists order_items_menu_item_idx
+  on public.order_items (menu_item_id);
+
+create index if not exists customer_addresses_customer_default_idx
+  on public.customer_addresses (customer_id, is_default desc, updated_at desc);
 
 create index if not exists app_sessions_owner_idx
   on public.app_sessions (type, owner_id);
@@ -313,6 +341,10 @@ select 'Pratos', 'Receitas principais da casa.', 20
 where not exists (select 1 from public.menu_categories where name = 'Pratos');
 
 insert into public.menu_categories (name, description, sort_order)
+select 'Hamburgueres', 'Burgers artesanais com pao macio, queijo e molhos da casa.', 25
+where not exists (select 1 from public.menu_categories where name = 'Hamburgueres');
+
+insert into public.menu_categories (name, description, sort_order)
 select 'Bebidas', 'Geladas, quentes e especiais.', 30
 where not exists (select 1 from public.menu_categories where name = 'Bebidas');
 
@@ -343,6 +375,62 @@ select
 from public.menu_categories
 where name = 'Pratos'
 and not exists (select 1 from public.menu_items where name = 'Risoto de Cogumelos');
+
+insert into public.menu_items (category_id, name, description, price, image_url, tags, is_featured, sort_order)
+select
+  id,
+  'Luske Smash',
+  'Dois smash burgers, cheddar cremoso, cebola caramelizada e molho da casa.',
+  34.90,
+  'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+  array['smash', 'cheddar'],
+  true,
+  10
+from public.menu_categories
+where name = 'Hamburgueres'
+and not exists (select 1 from public.menu_items where name = 'Luske Smash');
+
+insert into public.menu_items (category_id, name, description, price, image_url, tags, is_featured, sort_order)
+select
+  id,
+  'Bacon Supreme',
+  'Burger artesanal, bacon crocante, queijo prato, alface, tomate e maionese temperada.',
+  39.90,
+  'https://images.unsplash.com/photo-1553979459-d2229ba7433b?auto=format&fit=crop&w=900&q=80',
+  array['bacon', 'artesanal'],
+  true,
+  20
+from public.menu_categories
+where name = 'Hamburgueres'
+and not exists (select 1 from public.menu_items where name = 'Bacon Supreme');
+
+insert into public.menu_items (category_id, name, description, price, image_url, tags, is_featured, sort_order)
+select
+  id,
+  'Classic Salada',
+  'Hamburguer, queijo, alface, tomate, picles e molho especial no pao brioche.',
+  31.90,
+  'https://images.unsplash.com/photo-1594212699903-ec8a3eca50f5?auto=format&fit=crop&w=900&q=80',
+  array['classico', 'brioche'],
+  false,
+  30
+from public.menu_categories
+where name = 'Hamburgueres'
+and not exists (select 1 from public.menu_items where name = 'Classic Salada');
+
+insert into public.menu_items (category_id, name, description, price, image_url, tags, is_featured, sort_order)
+select
+  id,
+  'Chicken Crispy',
+  'Frango crocante, queijo, alface americana e molho ranch no pao brioche.',
+  32.90,
+  'https://images.unsplash.com/photo-1615297928064-24977384d0da?auto=format&fit=crop&w=900&q=80',
+  array['frango', 'crocante'],
+  false,
+  40
+from public.menu_categories
+where name = 'Hamburgueres'
+and not exists (select 1 from public.menu_items where name = 'Chicken Crispy');
 
 insert into public.menu_items (category_id, name, description, price, image_url, tags, is_featured, sort_order)
 select

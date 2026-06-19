@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+﻿import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,10 +19,17 @@ const SUPABASE_IMAGE_BUCKET = process.env.SUPABASE_IMAGE_BUCKET || 'menu-images'
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
-const SESSION_MAX_AGE = 60 * 60 * 24 * 180;
+const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 180), 1, 365);
+const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
+const COOKIE_SECURE = parseBoolean(process.env.COOKIE_SECURE, false);
+const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH || 8), 8, 72);
+const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
+const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false);
 const PUBLIC_BOOTSTRAP_CACHE_MS = 1000 * 20;
 let publicBootstrapCache = null;
+const rateLimitBuckets = new Map();
+const allowedUploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const orderStatuses = new Set([
   'new',
@@ -59,7 +66,7 @@ const server = createServer(async (req, res) => {
   } catch (error) {
     json(res, error.status || 500, {
       error: error.message || 'Erro interno do servidor.',
-      detail: error.detail || undefined
+      detail: EXPOSE_ERROR_DETAIL ? error.detail || undefined : undefined
     });
   }
 });
@@ -67,6 +74,9 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Servidor Node iniciado em http://${HOST}:${PORT}`);
 });
+
+setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
+setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
 
 async function handleApi(req, res, url) {
   const method = req.method || 'GET';
@@ -78,11 +88,13 @@ async function handleApi(req, res, url) {
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     json(res, 500, {
-      error: 'Supabase nao configurado.',
+      error: 'Supabase não configurado.',
       detail: 'Preencha SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no arquivo .env.'
     });
     return;
   }
+
+  enforceRateLimit(req, method, url.pathname);
 
   if (method === 'GET' && url.pathname === '/api/bootstrap') {
     json(res, 200, await getPublicBootstrap(), {
@@ -152,12 +164,35 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/customer/addresses') {
+    const customer = await requireCustomer(req, res);
+    if (!customer) return;
+    json(res, 201, { customer: await createCustomerAddressByOwner(customer.id, await readJson(req)) });
+    return;
+  }
+
+  const customerAddressMatch = url.pathname.match(/^\/api\/customer\/addresses\/([a-f0-9-]+)$/i);
+  if (customerAddressMatch) {
+    const customer = await requireCustomer(req, res);
+    if (!customer) return;
+    if (method === 'PUT' || method === 'PATCH') {
+      json(res, 200, { customer: await updateCustomerAddressByOwner(customer.id, customerAddressMatch[1], await readJson(req)) });
+      return;
+    }
+    if (method === 'DELETE') {
+      json(res, 200, { customer: await deleteCustomerAddressByOwner(customer.id, customerAddressMatch[1]) });
+      return;
+    }
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/setup-status') {
-    json(res, 200, { has_admin: await hasAdminUser() });
+    const hasAdmin = await hasAdminUser();
+    json(res, 200, { has_admin: hasAdmin || !ADMIN_SETUP_ENABLED, setup_enabled: ADMIN_SETUP_ENABLED });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/setup') {
+    if (!ADMIN_SETUP_ENABLED) throw httpError(403, 'Criação pública de admin desativada neste ambiente.');
     const result = await setupFirstAdmin(await readJson(req));
     json(res, 201, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
     return;
@@ -217,6 +252,23 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/admin/operation/start') {
+    if (!(await requireAdmin(req, res))) return;
+    const queue = await clearOrderQueue({ mode: 'close_open' });
+    const store = await setStoreOpen(true);
+    clearPublicBootstrapCache();
+    json(res, 200, { store, queue });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/operation/stop') {
+    if (!(await requireAdmin(req, res))) return;
+    const store = await setStoreOpen(false);
+    clearPublicBootstrapCache();
+    json(res, 200, { store });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/orders') {
     if (!(await requireAdmin(req, res))) return;
     json(res, 200, { orders: await listOrders() });
@@ -228,11 +280,37 @@ async function handleApi(req, res, url) {
     if (!(await requireAdmin(req, res))) return;
     const body = await readJson(req);
     if (!orderStatuses.has(body.status)) {
-      throw httpError(422, 'Status de pedido invalido.');
+      throw httpError(422, 'Status de pedido inválido.');
     }
     json(res, 200, await supabase('PATCH', 'orders', { id: `eq.${orderStatusMatch[1]}` }, {
       status: body.status
     }, ['Prefer: return=representation']));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/orders/clear-queue') {
+    if (!(await requireAdmin(req, res))) return;
+    const result = await clearOrderQueue(await readJson(req));
+    json(res, 200, result);
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/reports/daily') {
+    if (!(await requireAdmin(req, res))) return;
+    const date = cleanText(url.searchParams.get('date') || '');
+    json(res, 200, { report: await dailyOrderReport(date) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/reports/range') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 200, {
+      report: await rangeOrderReport({
+        days: url.searchParams.get('days'),
+        start: url.searchParams.get('start'),
+        end: url.searchParams.get('end')
+      })
+    });
     return;
   }
 
@@ -332,7 +410,69 @@ async function handleApi(req, res, url) {
     }
   }
 
-  json(res, 404, { error: 'Rota nao encontrada.' });
+  const modifierGroupMatch = url.pathname.match(/^\/api\/items\/([a-f0-9-]+)\/modifier-groups$/i);
+  if (modifierGroupMatch && method === 'POST') {
+    if (!(await requireAdmin(req, res))) return;
+    const payload = sanitizeModifierGroup(await readJson(req), true);
+    await ensureUniqueModifierGroupName(modifierGroupMatch[1], payload.name);
+    const result = await supabase('POST', 'menu_modifier_groups', {}, {
+      ...payload,
+      menu_item_id: modifierGroupMatch[1]
+    }, ['Prefer: return=representation']);
+    clearPublicBootstrapCache();
+    json(res, 201, result);
+    return;
+  }
+
+  const modifierGroupIdMatch = url.pathname.match(/^\/api\/modifier-groups\/([a-f0-9-]+)$/i);
+  if (modifierGroupIdMatch) {
+    if (!(await requireAdmin(req, res))) return;
+    if (method === 'PUT' || method === 'PATCH') {
+      const result = await supabase('PATCH', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, sanitizeModifierGroup(await readJson(req), false), ['Prefer: return=representation']);
+      clearPublicBootstrapCache();
+      json(res, 200, result);
+      return;
+    }
+    if (method === 'DELETE') {
+      const result = await supabase('DELETE', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, undefined, ['Prefer: return=representation']);
+      clearPublicBootstrapCache();
+      json(res, 200, result);
+      return;
+    }
+  }
+
+  const modifierCreateMatch = url.pathname.match(/^\/api\/modifier-groups\/([a-f0-9-]+)\/modifiers$/i);
+  if (modifierCreateMatch && method === 'POST') {
+    if (!(await requireAdmin(req, res))) return;
+    const payload = sanitizeModifier(await readJson(req), true);
+    await ensureUniqueModifierName(modifierCreateMatch[1], payload.name);
+    const result = await supabase('POST', 'menu_modifiers', {}, {
+      ...payload,
+      group_id: modifierCreateMatch[1]
+    }, ['Prefer: return=representation']);
+    clearPublicBootstrapCache();
+    json(res, 201, result);
+    return;
+  }
+
+  const modifierMatch = url.pathname.match(/^\/api\/modifiers\/([a-f0-9-]+)$/i);
+  if (modifierMatch) {
+    if (!(await requireAdmin(req, res))) return;
+    if (method === 'PUT' || method === 'PATCH') {
+      const result = await supabase('PATCH', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, sanitizeModifier(await readJson(req), false), ['Prefer: return=representation']);
+      clearPublicBootstrapCache();
+      json(res, 200, result);
+      return;
+    }
+    if (method === 'DELETE') {
+      const result = await supabase('DELETE', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, undefined, ['Prefer: return=representation']);
+      clearPublicBootstrapCache();
+      json(res, 200, result);
+      return;
+    }
+  }
+
+  json(res, 404, { error: 'Rota não encontrada.' });
 }
 
 async function hasAdminUser() {
@@ -345,7 +485,7 @@ async function hasAdminUser() {
 
 async function setupFirstAdmin(data) {
   if (await hasAdminUser()) {
-    throw httpError(409, 'A primeira conta admin ja foi criada.');
+    throw httpError(409, 'A primeira conta admin já foi criada.');
   }
 
   const admin = sanitizeAdminUser(data);
@@ -374,7 +514,7 @@ async function loginAdmin(data) {
 
   const admin = rows[0];
   if (!admin || admin.is_active === false || !verifyPassword(password, admin.password_hash)) {
-    throw httpError(401, 'E-mail ou senha invalidos.');
+    throw httpError(401, 'E-mail ou senha inválidos.');
   }
 
   await supabase('PATCH', 'admin_users', { id: `eq.${admin.id}` }, {
@@ -391,7 +531,7 @@ async function getAdminById(adminId) {
     limit: '1'
   });
 
-  if (!rows[0]) throw httpError(404, 'Admin nao encontrado.');
+  if (!rows[0]) throw httpError(404, 'Admin não encontrado.');
   return rows[0];
 }
 
@@ -458,7 +598,7 @@ async function registerCustomer(data) {
   let row;
   if (existing[0]) {
     if (existing[0].password_hash) {
-      throw httpError(409, 'Este telefone ja possui cadastro. Entre com sua senha.');
+      throw httpError(409, 'Este telefone já possui cadastro. Entre com sua senha.');
     }
     [row] = await supabase('PATCH', 'customers', { id: `eq.${existing[0].id}` }, {
       ...customer,
@@ -489,7 +629,7 @@ async function loginCustomer(data) {
 
   const customer = rows[0];
   if (!customer || !customer.password_hash || !verifyPassword(password, customer.password_hash)) {
-    throw httpError(401, 'Telefone ou senha invalidos.');
+    throw httpError(401, 'Telefone ou senha inválidos.');
   }
 
   await supabase('PATCH', 'customers', { id: `eq.${customer.id}` }, {
@@ -502,8 +642,11 @@ async function loginCustomer(data) {
 async function resetCustomerPassword(data) {
   const phone = onlyDigits(data.phone);
   const orderCode = cleanText(data.order_code || '').replace(/^#/, '').toUpperCase();
+  const orderTotal = parseMoneyInput(data.order_total);
   const newPassword = validatePassword(data.new_password);
-  if (!phone || !orderCode) throw httpError(422, 'Informe telefone e codigo de um pedido.');
+  if (!phone || !orderCode || orderTotal === null) {
+    throw httpError(422, 'Informe telefone, código e total de um pedido.');
+  }
 
   const customers = await supabase('GET', 'customers', {
     select: 'id,phone',
@@ -511,15 +654,17 @@ async function resetCustomerPassword(data) {
     limit: '1'
   });
   const customer = customers[0];
-  if (!customer) throw httpError(401, 'Nao foi possivel validar os dados informados.');
+  if (!customer) throw httpError(401, 'Não foi possível validar os dados informados.');
 
   const orders = await supabase('GET', 'orders', {
-    select: 'id,customer_id,public_code',
+    select: 'id,customer_id,public_code,total',
     customer_id: `eq.${customer.id}`,
     public_code: `eq.${orderCode}`,
     limit: '1'
   });
-  if (!orders[0]) throw httpError(401, 'Nao foi possivel validar os dados informados.');
+  if (!orders[0] || Math.abs(moneyNumber(orders[0].total) - orderTotal) > 0.01) {
+    throw httpError(401, 'Não foi possível validar os dados informados.');
+  }
 
   await supabase('PATCH', 'customers', { id: `eq.${customer.id}` }, {
     password_hash: hashPassword(newPassword)
@@ -550,7 +695,7 @@ async function getCustomerProfile(customerId) {
     id: `eq.${customerId}`,
     limit: '1'
   });
-  if (!rows[0]) throw httpError(404, 'Cliente nao encontrado.');
+  if (!rows[0]) throw httpError(404, 'Cliente não encontrado.');
   const addresses = await listCustomerAddresses(customerId);
   return { ...rows[0], address: addresses[0] || null, addresses };
 }
@@ -567,12 +712,24 @@ async function updateCustomerProfile(customerId, data) {
   return getCustomerProfile(updated.id);
 }
 
+async function updateCustomerAddressByOwner(customerId, addressId, data) {
+  return updateCustomerAddressByAdmin(customerId, addressId, data);
+}
+
+async function createCustomerAddressByOwner(customerId, data) {
+  return createCustomerAddressByAdmin(customerId, data);
+}
+
+async function deleteCustomerAddressByOwner(customerId, addressId) {
+  return deleteCustomerAddressByAdmin(customerId, addressId);
+}
+
 async function updateCustomerByAdmin(customerId, data) {
   const customer = sanitizeCustomer(data.customer || data);
   const payload = { ...customer };
   if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
   const [updated] = await supabase('PATCH', 'customers', { id: `eq.${customerId}` }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Cliente nao encontrado.');
+  if (!updated) throw httpError(404, 'Cliente não encontrado.');
   return getCustomerProfile(customerId);
 }
 
@@ -602,7 +759,7 @@ async function updateCustomerAddressByAdmin(customerId, addressId, data) {
     id: `eq.${addressId}`,
     customer_id: `eq.${customerId}`
   }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Endereco nao encontrado.');
+  if (!updated) throw httpError(404, 'Endereço não encontrado.');
   return getCustomerProfile(customerId);
 }
 
@@ -642,14 +799,14 @@ async function getStoreSettings() {
 
   return rows[0] || {
     name: 'Menu da Casa',
-    description: 'Pedido rapido pelo cardapio digital.',
+    description: 'Pedido rápido pelo cardápio digital.',
     whatsapp_number: STORE_WHATSAPP_NUMBER,
     is_open: true,
     accepts_delivery: true,
     accepts_pickup: true,
     delivery_fee: 0,
     minimum_order: 0,
-    payment_methods: ['Pix', 'Cartao', 'Dinheiro']
+    payment_methods: ['Pix', 'Cartão', 'Dinheiro']
   };
 }
 
@@ -686,8 +843,32 @@ async function updateStoreSettings(data) {
   return supabase('POST', 'store_settings', {}, payload, ['Prefer: return=representation']);
 }
 
+async function setStoreOpen(isOpen) {
+  const current = await getStoreSettings();
+  const payload = { is_open: Boolean(isOpen) };
+
+  if (current.id) {
+    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    return updated;
+  }
+
+  const [created] = await supabase('POST', 'store_settings', {}, {
+    name: current.name || 'Menu da Casa',
+    slug: current.slug || 'menu-da-casa',
+    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
+    accepts_delivery: current.accepts_delivery !== false,
+    accepts_pickup: current.accepts_pickup !== false,
+    delivery_fee: current.delivery_fee || 0,
+    minimum_order: current.minimum_order || 0,
+    payment_methods: current.payment_methods || ['Pix', 'Cartão', 'Dinheiro'],
+    ...payload
+  }, ['Prefer: return=representation']);
+  return created;
+}
+
 async function getMenu(admin) {
-  const [categories, items] = await Promise.all([
+  const [categories, items, groups, modifiers] = await Promise.all([
     supabase('GET', 'menu_categories', {
       select: admin ? '*' : 'id,name,description,sort_order',
       ...(admin ? {} : { is_active: 'eq.true' }),
@@ -697,12 +878,38 @@ async function getMenu(admin) {
       select: admin ? '*' : 'id,category_id,name,description,price,image_url,tags,is_featured,is_available,sort_order',
       ...(admin ? {} : { is_available: 'eq.true' }),
       order: 'sort_order.asc,name.asc'
+    }),
+    supabase('GET', 'menu_modifier_groups', {
+      select: '*',
+      order: 'sort_order.asc,name.asc'
+    }),
+    supabase('GET', 'menu_modifiers', {
+      select: '*',
+      ...(admin ? {} : { is_available: 'eq.true' }),
+      order: 'sort_order.asc,name.asc'
     })
   ]);
 
+  const modifiersByGroup = new Map(groups.map((group) => [group.id, []]));
+  for (const modifier of modifiers) {
+    modifiersByGroup.get(modifier.group_id)?.push(modifier);
+  }
+
+  const groupsByItem = new Map();
+  for (const group of groups) {
+    if (!groupsByItem.has(group.menu_item_id)) groupsByItem.set(group.menu_item_id, []);
+    groupsByItem.get(group.menu_item_id).push({
+      ...group,
+      modifiers: modifiersByGroup.get(group.id) || []
+    });
+  }
+
   const byCategory = new Map(categories.map((category) => [category.id, { ...category, items: [] }]));
   for (const item of items) {
-    byCategory.get(item.category_id)?.items.push(item);
+    byCategory.get(item.category_id)?.items.push({
+      ...item,
+      modifier_groups: groupsByItem.get(item.id) || []
+    });
   }
 
   return [...byCategory.values()];
@@ -721,7 +928,7 @@ async function createOrder(req, data) {
   if (requestedItems.length === 0) throw httpError(422, 'Inclua ao menos um item no pedido.');
 
   const itemIds = [...new Set(requestedItems.map((item) => cleanText(item.id)).filter(Boolean))];
-  if (itemIds.length === 0) throw httpError(422, 'Itens do pedido invalidos.');
+  if (itemIds.length === 0) throw httpError(422, 'Itens do pedido inválidos.');
 
   const menuItems = await supabase('GET', 'menu_items', {
     select: '*',
@@ -730,19 +937,30 @@ async function createOrder(req, data) {
   });
 
   const menuById = new Map(menuItems.map((item) => [item.id, item]));
+  const modifierCatalog = await loadModifierCatalog(itemIds);
   const orderItems = requestedItems.map((requested) => {
     const menuItem = menuById.get(cleanText(requested.id));
-    if (!menuItem) throw httpError(422, 'Um item escolhido nao esta mais disponivel.');
+    if (!menuItem) throw httpError(422, 'Um item escolhido não está mais disponível.');
 
     const quantity = clampInteger(requested.quantity, 1, 99);
-    const unitPrice = moneyNumber(menuItem.price);
+    const selectedModifiers = validateSelectedModifiers(menuItem.id, requested.modifier_ids, modifierCatalog);
+    const basePrice = moneyNumber(menuItem.price);
+    const modifiersTotal = selectedModifiers.reduce((sum, modifier) => sum + moneyNumber(modifier.price_delta), 0);
+    const unitPrice = roundMoney(basePrice + modifiersTotal);
     return {
       menu_item_id: menuItem.id,
       item_snapshot: {
         id: menuItem.id,
         name: menuItem.name,
         description: menuItem.description,
-        price: unitPrice,
+        price: basePrice,
+        modifiers: selectedModifiers.map((modifier) => ({
+          id: modifier.id,
+          group_id: modifier.group_id,
+          group_name: modifier.group_name,
+          name: modifier.name,
+          price_delta: moneyNumber(modifier.price_delta)
+        })),
         image_url: menuItem.image_url,
         tags: menuItem.tags || []
       },
@@ -754,6 +972,9 @@ async function createOrder(req, data) {
   });
 
   const store = await getStoreSettings();
+  if (store.is_open === false) {
+    throw httpError(423, 'A loja está fechada no momento e não está aceitando pedidos.');
+  }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
   const deliveryFee = fulfillmentMethod === 'delivery' ? moneyNumber(store.delivery_fee) : 0;
   const total = roundMoney(subtotal + deliveryFee);
@@ -797,6 +1018,105 @@ async function createOrder(req, data) {
     whatsapp_url: whatsappUrl,
     whatsapp_message: whatsappMessage
   };
+}
+
+async function loadModifierCatalog(itemIds) {
+  const groups = await supabase('GET', 'menu_modifier_groups', {
+    select: '*',
+    menu_item_id: `in.(${itemIds.join(',')})`,
+    order: 'sort_order.asc,name.asc'
+  });
+
+  if (groups.length === 0) {
+    return { groupsByItem: new Map(), modifiersById: new Map() };
+  }
+
+  const groupIds = groups.map((group) => group.id);
+  const modifiers = await supabase('GET', 'menu_modifiers', {
+    select: '*',
+    group_id: `in.(${groupIds.join(',')})`,
+    is_available: 'eq.true',
+    order: 'sort_order.asc,name.asc'
+  });
+
+  const groupsByItem = new Map();
+  const groupsById = new Map();
+  for (const group of groups) {
+    groupsById.set(group.id, group);
+    if (!groupsByItem.has(group.menu_item_id)) groupsByItem.set(group.menu_item_id, []);
+    groupsByItem.get(group.menu_item_id).push(group);
+  }
+
+  const modifiersById = new Map();
+  for (const modifier of modifiers) {
+    const group = groupsById.get(modifier.group_id);
+    if (!group) continue;
+    modifiersById.set(modifier.id, {
+      ...modifier,
+      menu_item_id: group.menu_item_id,
+      group_name: group.name,
+      min_choices: group.min_choices,
+      max_choices: group.max_choices,
+      is_required: group.is_required
+    });
+  }
+
+  return { groupsByItem, modifiersById };
+}
+
+function validateSelectedModifiers(menuItemId, selectedIds, catalog) {
+  const ids = Array.isArray(selectedIds) ? [...new Set(selectedIds.map(cleanText).filter(Boolean))] : [];
+  const selected = ids.map((id) => {
+    const modifier = catalog.modifiersById.get(id);
+    if (!modifier || modifier.menu_item_id !== menuItemId) {
+      throw httpError(422, 'Adicional inválido para um item escolhido.');
+    }
+    return modifier;
+  });
+
+  const selectedByGroup = new Map();
+  for (const modifier of selected) {
+    if (!selectedByGroup.has(modifier.group_id)) selectedByGroup.set(modifier.group_id, []);
+    selectedByGroup.get(modifier.group_id).push(modifier);
+  }
+
+  const groups = catalog.groupsByItem.get(menuItemId) || [];
+  for (const group of groups) {
+    const count = selectedByGroup.get(group.id)?.length || 0;
+    if (group.is_required && count < Number(group.min_choices || 1)) {
+      throw httpError(422, `Escolha ${group.name}.`);
+    }
+    if (count < Number(group.min_choices || 0)) {
+      throw httpError(422, `Escolha ao menos ${group.min_choices} opção(ões) em ${group.name}.`);
+    }
+    if (Number(group.max_choices || 0) > 0 && count > Number(group.max_choices)) {
+      throw httpError(422, `Escolha no máximo ${group.max_choices} opção(ões) em ${group.name}.`);
+    }
+  }
+
+  return selected;
+}
+
+async function ensureUniqueModifierGroupName(menuItemId, name) {
+  const existing = await supabase('GET', 'menu_modifier_groups', {
+    select: 'id,name',
+    menu_item_id: `eq.${menuItemId}`
+  });
+  const normalized = normalizeName(name);
+  if (existing.some((group) => normalizeName(group.name) === normalized)) {
+    throw httpError(409, 'Já existe um grupo com esse nome neste produto.');
+  }
+}
+
+async function ensureUniqueModifierName(groupId, name) {
+  const existing = await supabase('GET', 'menu_modifiers', {
+    select: 'id,name',
+    group_id: `eq.${groupId}`
+  });
+  const normalized = normalizeName(name);
+  if (existing.some((modifier) => normalizeName(modifier.name) === normalized)) {
+    throw httpError(409, 'Já existe uma opção com esse nome neste grupo.');
+  }
 }
 
 async function upsertCustomer(customer) {
@@ -900,6 +1220,65 @@ async function deleteSession(token) {
   await supabase('DELETE', 'app_sessions', { token: `eq.${token}` }, undefined, ['Prefer: return=minimal']);
 }
 
+async function cleanExpiredSessions() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    await supabase('DELETE', 'app_sessions', {
+      expires_at: `lte.${new Date().toISOString()}`
+    }, undefined, ['Prefer: return=minimal']);
+  } catch (error) {
+    console.warn('Não foi possível limpar sessões expiradas:', error.message);
+  }
+}
+
+function enforceRateLimit(req, method, pathname) {
+  const rule = rateLimitRule(method, pathname);
+  if (!rule) return;
+
+  const now = Date.now();
+  const client = clientKey(req);
+  const key = `${rule.name}:${client}`;
+  const bucket = rateLimitBuckets.get(key) || { count: 0, resetAt: now + rule.windowMs };
+
+  if (bucket.resetAt <= now) {
+    bucket.count = 0;
+    bucket.resetAt = now + rule.windowMs;
+  }
+
+  bucket.count += 1;
+  rateLimitBuckets.set(key, bucket);
+
+  if (bucket.count > rule.max) {
+    const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    throw httpError(429, `Muitas tentativas. Tente novamente em ${retryAfter} segundos.`);
+  }
+
+  if (rateLimitBuckets.size > 1000) {
+    for (const [entryKey, entry] of rateLimitBuckets.entries()) {
+      if (entry.resetAt <= now) rateLimitBuckets.delete(entryKey);
+    }
+  }
+}
+
+function rateLimitRule(method, pathname) {
+  if (method === 'POST' && pathname === '/api/admin/login') return limitRule('admin-login', 8, 15 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/customer/login') return limitRule('customer-login', 10, 15 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/customer/reset-password') return limitRule('customer-reset', 5, 30 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/orders') return limitRule('order-create', 20, 10 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 60 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/admin/uploads') return limitRule('admin-upload', 30, 10 * 60 * 1000);
+  return null;
+}
+
+function limitRule(name, max, windowMs) {
+  return { name, max, windowMs };
+}
+
+function clientKey(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || req.socket.remoteAddress || 'local';
+}
+
 async function listCustomerOrders(customerId) {
   const orders = await supabase('GET', 'orders', {
     select: '*',
@@ -914,11 +1293,183 @@ async function listCustomerOrders(customerId) {
 async function listOrders() {
   const orders = await supabase('GET', 'orders', {
     select: '*',
+    archived_at: 'is.null',
     order: 'created_at.desc',
     limit: '100'
   });
 
   return attachOrderItems(orders);
+}
+
+async function clearOrderQueue(data = {}) {
+  const mode = ['close_open', 'archive_closed'].includes(data.mode) ? data.mode : 'close_open';
+  const openStatuses = ['new', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
+  const archivedAt = new Date().toISOString();
+  let openArchived = [];
+  if (mode === 'close_open') {
+    openArchived = await supabase('PATCH', 'orders', {
+      status: `in.(${openStatuses.join(',')})`,
+      archived_at: 'is.null'
+    }, {
+      status: 'completed',
+      archived_at: archivedAt
+    }, ['Prefer: return=representation']);
+  }
+  const closedArchived = await supabase('PATCH', 'orders', {
+    status: 'in.(completed,cancelled)',
+    archived_at: 'is.null'
+  }, {
+    archived_at: archivedAt
+  }, ['Prefer: return=representation']);
+  return {
+    archived: openArchived.length + closedArchived.length,
+    closed: openArchived.length,
+    hidden: closedArchived.length,
+    mode
+  };
+}
+
+async function dailyOrderReport(dateValue) {
+  const day = validReportDate(dateValue);
+  const start = reportDateStart(day);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return orderReportBetween(start, end, {
+    date: day,
+    label: `Dia ${formatReportDate(day)}`,
+    start: day,
+    end: day
+  });
+}
+
+async function rangeOrderReport({ days, start, end } = {}) {
+  const today = validReportDate(new Date().toISOString().slice(0, 10));
+  const parsedDays = Number.parseInt(days, 10);
+
+  if ([7, 15, 30].includes(parsedDays)) {
+    const endDay = today;
+    const startDate = reportDateStart(endDay);
+    startDate.setDate(startDate.getDate() - parsedDays + 1);
+    const startDay = localReportDate(startDate);
+    const endExclusive = reportDateStart(endDay);
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    return orderReportBetween(reportDateStart(startDay), endExclusive, {
+      label: `Últimos ${parsedDays} dias`,
+      start: startDay,
+      end: endDay,
+      days: parsedDays
+    });
+  }
+
+  const startDay = validReportDate(start || today);
+  const endDay = validReportDate(end || today);
+  const startDate = reportDateStart(startDay);
+  const endExclusive = reportDateStart(endDay);
+  endExclusive.setDate(endExclusive.getDate() + 1);
+  const label = startDay === endDay
+    ? `Dia ${formatReportDate(startDay)}`
+    : `${formatReportDate(startDay)} a ${formatReportDate(endDay)}`;
+  return orderReportBetween(startDate, endExclusive, {
+    label,
+    start: startDay,
+    end: endDay
+  });
+}
+
+async function orderReportBetween(start, end, period) {
+  const spanMs = end.getTime() - start.getTime();
+  const previousStart = new Date(start.getTime() - spanMs);
+  const orders = await supabase('GET', 'orders', {
+    select: '*',
+    created_at: `gte.${previousStart.toISOString()}`,
+    order: 'created_at.desc',
+    limit: '5000'
+  });
+  const periodOrders = orders.filter((order) => new Date(order.created_at) < end);
+  const currentOrders = periodOrders.filter((order) => new Date(order.created_at) >= start);
+  const previousOrders = periodOrders.filter((order) => {
+    const createdAt = new Date(order.created_at);
+    return createdAt >= previousStart && createdAt < start;
+  });
+  const withItems = await attachOrderItems(currentOrders);
+  const totals = reportTotals(withItems);
+  const previousTotals = reportTotals(previousOrders);
+
+  return {
+    date: period.start,
+    period,
+    totals,
+    comparison: {
+      label: 'Período anterior',
+      totals: previousTotals,
+      revenue_delta: roundMoney(totals.gross_revenue - previousTotals.gross_revenue),
+      orders_delta: totals.orders - previousTotals.orders
+    },
+    by_status: groupOrderTotals(withItems, 'status'),
+    by_payment: groupOrderTotals(withItems.filter((order) => order.status !== 'cancelled'), 'payment_method'),
+    top_products: topProductTotals(withItems.filter((order) => order.status !== 'cancelled')),
+    orders: withItems
+  };
+}
+
+function reportTotals(orders) {
+  const billable = orders.filter((order) => order.status !== 'cancelled');
+  const completed = orders.filter((order) => order.status === 'completed');
+  const grossRevenue = roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.total), 0));
+  return {
+    orders: orders.length,
+    billable_orders: billable.length,
+    completed_orders: completed.length,
+    cancelled_orders: orders.filter((order) => order.status === 'cancelled').length,
+    gross_revenue: grossRevenue,
+    completed_revenue: roundMoney(completed.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    average_ticket: billable.length ? roundMoney(grossRevenue / billable.length) : 0
+  };
+}
+
+function reportDateStart(value) {
+  return new Date(`${validReportDate(value)}T00:00:00.000-03:00`);
+}
+
+function localReportDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatReportDate(value) {
+  const [year, month, day] = validReportDate(value).split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function groupOrderTotals(orders, field) {
+  const grouped = new Map();
+  for (const order of orders) {
+    const key = order[field] || 'Não informado';
+    const current = grouped.get(key) || { key, count: 0, total: 0 };
+    current.count += 1;
+    current.total = roundMoney(current.total + moneyNumber(order.total));
+    grouped.set(key, current);
+  }
+  return [...grouped.values()];
+}
+
+function topProductTotals(orders) {
+  const grouped = new Map();
+  for (const order of orders) {
+    for (const item of order.items || []) {
+      const name = item.item_snapshot?.name || 'Item removido';
+      const current = grouped.get(name) || { name, quantity: 0, total: 0 };
+      current.quantity += Number(item.quantity || 0);
+      current.total = roundMoney(current.total + moneyNumber(item.total));
+      grouped.set(name, current);
+    }
+  }
+  return [...grouped.values()]
+    .sort((a, b) => b.quantity - a.quantity || b.total - a.total)
+    .slice(0, 8);
+}
+
+function validReportDate(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return new Date().toISOString().slice(0, 10);
 }
 
 async function attachOrderItems(orders) {
@@ -953,14 +1504,19 @@ async function listCustomers() {
 
 async function uploadImage(data) {
   const fileName = cleanFileName(data.fileName || 'produto.jpg');
-  const contentType = cleanText(data.contentType || 'image/jpeg');
+  const contentType = cleanText(data.contentType || 'image/jpeg').split(';')[0].toLowerCase();
   const base64 = String(data.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
 
   if (!base64) throw httpError(422, 'Arquivo de imagem ausente.');
-  if (!contentType.startsWith('image/')) throw httpError(422, 'Envie apenas imagens.');
+  if (!allowedUploadTypes.has(contentType)) {
+    throw httpError(422, 'Envie apenas imagens JPG, PNG ou WebP.');
+  }
 
   const buffer = Buffer.from(base64, 'base64');
   if (buffer.length > 5 * 1024 * 1024) throw httpError(422, 'Imagem muito grande. Limite de 5 MB.');
+  if (detectImageContentType(buffer) !== contentType) {
+    throw httpError(422, 'O conteúdo do arquivo não corresponde ao tipo de imagem informado.');
+  }
 
   const objectPath = `products/${Date.now()}-${fileName}`;
   const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_IMAGE_BUCKET}/${objectPath}`, {
@@ -1053,7 +1609,7 @@ async function readJson(req) {
   try {
     return JSON.parse(body);
   } catch {
-    throw httpError(400, 'JSON invalido.');
+    throw httpError(400, 'JSON inválido.');
   }
 }
 
@@ -1106,6 +1662,34 @@ function sanitizeItem(data, creating) {
   }, creating ? ['category_id', 'name', 'price'] : []);
 }
 
+function sanitizeModifierGroup(data, creating) {
+  const clean = sanitize(data, {
+    name: 'string',
+    min_choices: 'integer',
+    max_choices: 'integer',
+    is_required: 'boolean',
+    sort_order: 'integer'
+  }, creating ? ['name'] : []);
+  if ('min_choices' in clean) clean.min_choices = Math.max(0, clean.min_choices);
+  if ('max_choices' in clean) clean.max_choices = Math.max(1, clean.max_choices);
+  if (clean.is_required && (!('min_choices' in clean) || clean.min_choices < 1)) {
+    clean.min_choices = 1;
+  }
+  if ('min_choices' in clean && 'max_choices' in clean && clean.max_choices < clean.min_choices) {
+    clean.max_choices = clean.min_choices || 1;
+  }
+  return clean;
+}
+
+function sanitizeModifier(data, creating) {
+  return sanitize(data, {
+    name: 'string',
+    price_delta: 'float',
+    is_available: 'boolean',
+    sort_order: 'integer'
+  }, creating ? ['name'] : []);
+}
+
 function sanitizeCustomer(data) {
   const customer = sanitize(data, {
     name: 'string',
@@ -1114,7 +1698,7 @@ function sanitizeCustomer(data) {
     notes: 'nullable_string'
   }, ['name', 'phone']);
 
-  if (customer.phone.length < 10) throw httpError(422, 'Informe um telefone valido.');
+  if (customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido.');
   return customer;
 }
 
@@ -1122,25 +1706,25 @@ function sanitizeAddress(data) {
   return sanitize(data, {
     label: 'string',
     street: 'string',
-    number: 'nullable_string',
+    number: 'string',
     complement: 'nullable_string',
     neighborhood: 'nullable_string',
     city: 'nullable_string',
     reference: 'nullable_string'
-  }, ['street', 'neighborhood', 'city']);
+  }, ['street', 'number', 'neighborhood', 'city']);
 }
 
 function sanitizeAddressWithDefault(data, requireStreet) {
   return sanitize(data, {
     label: 'string',
     street: 'string',
-    number: 'nullable_string',
+    number: requireStreet ? 'string' : 'nullable_string',
     complement: 'nullable_string',
     neighborhood: 'nullable_string',
     city: 'nullable_string',
     reference: 'nullable_string',
     is_default: 'boolean'
-  }, requireStreet ? ['street', 'neighborhood', 'city'] : []);
+  }, requireStreet ? ['street', 'number', 'neighborhood', 'city'] : []);
 }
 
 function sanitize(data, allowed, required) {
@@ -1175,7 +1759,7 @@ function fieldLabel(field) {
     phone: 'telefone',
     email: 'e-mail',
     street: 'rua',
-    number: 'numero',
+    number: 'número',
     neighborhood: 'bairro',
     city: 'cidade',
     payment_method: 'forma de pagamento'
@@ -1194,17 +1778,21 @@ function buildWhatsappMessage(store, order, items, customer, address) {
   ];
 
   if (address) {
-    lines.push('Endereco:');
+    lines.push('Endereço:');
     lines.push(`${address.street}${address.number ? `, ${address.number}` : ''}`);
     if (address.neighborhood) lines.push(`Bairro: ${address.neighborhood}`);
+    if (address.city) lines.push(`Cidade: ${address.city}`);
     if (address.complement) lines.push(`Complemento: ${address.complement}`);
-    if (address.reference) lines.push(`Referencia: ${address.reference}`);
+    if (address.reference) lines.push(`Referência: ${address.reference}`);
     lines.push('');
   }
 
   lines.push('Itens:');
   for (const item of items) {
     lines.push(`${item.quantity}x ${item.item_snapshot.name} - ${formatMoney(item.total)}`);
+    for (const modifier of item.item_snapshot.modifiers || []) {
+      lines.push(`  - ${modifierWhatsappLine(modifier)}`);
+    }
     if (item.notes) lines.push(`Obs: ${item.notes}`);
   }
 
@@ -1212,10 +1800,16 @@ function buildWhatsappMessage(store, order, items, customer, address) {
   lines.push(`Subtotal: ${formatMoney(order.subtotal)}`);
   if (Number(order.delivery_fee) > 0) lines.push(`Entrega: ${formatMoney(order.delivery_fee)}`);
   lines.push(`Total: ${formatMoney(order.total)}`);
-  if (order.notes) lines.push(`Observacoes: ${order.notes}`);
+  if (order.notes) lines.push(`Observações: ${order.notes}`);
   if (store.name) lines.push('', store.name);
 
   return lines.join('\n');
+}
+
+function modifierWhatsappLine(modifier) {
+  const delta = moneyNumber(modifier.price_delta);
+  const group = modifier.group_name ? `${modifier.group_name}: ` : '';
+  return `${group}${modifier.name}${delta > 0 ? ` (+ ${formatMoney(delta)})` : ''}`;
 }
 
 function hashPassword(password) {
@@ -1236,7 +1830,9 @@ function verifyPassword(password, stored) {
 
 function validatePassword(value) {
   const password = String(value || '');
-  if (password.length < 8) throw httpError(422, 'A senha deve ter pelo menos 8 caracteres.');
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    throw httpError(422, `A senha deve ter pelo menos ${PASSWORD_MIN_LENGTH} caracteres.`);
+  }
   return password;
 }
 
@@ -1252,11 +1848,13 @@ function parseCookies(req) {
 }
 
 function sessionCookie(name, value) {
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`;
+  const secure = COOKIE_SECURE ? '; Secure' : '';
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}${secure}`;
 }
 
 function clearCookie(name) {
-  return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  const secure = COOKIE_SECURE ? '; Secure' : '';
+  return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 function publicAdmin(admin) {
@@ -1307,6 +1905,14 @@ function cleanText(value) {
   return String(value ?? '').trim().slice(0, 500);
 }
 
+function normalizeName(value) {
+  return cleanText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
 function addressKey(address) {
   return [
     address.street,
@@ -1319,12 +1925,22 @@ function addressKey(address) {
 
 function cleanEmail(value) {
   const email = cleanText(value).toLowerCase();
-  if (!email || !email.includes('@')) throw httpError(422, 'Informe um e-mail valido.');
+  if (!email || !email.includes('@')) throw httpError(422, 'Informe um e-mail válido.');
   return email;
 }
 
 function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
+}
+
+function parseBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'sim', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
 }
 
 function clampInteger(value, min, max) {
@@ -1335,6 +1951,16 @@ function clampInteger(value, min, max) {
 
 function moneyNumber(value) {
   return roundMoney(Number(value || 0));
+}
+
+function parseMoneyInput(value) {
+  const normalized = String(value ?? '')
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+  if (!normalized) return null;
+  const number = Number.parseFloat(normalized);
+  return Number.isFinite(number) ? roundMoney(number) : null;
 }
 
 function roundMoney(value) {
@@ -1353,6 +1979,33 @@ function cleanFileName(value) {
     .slice(0, 90) || 'imagem.jpg';
 }
 
+function detectImageContentType(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    buffer.length >= 8
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (
+    buffer.length >= 12
+    && buffer.toString('ascii', 0, 4) === 'RIFF'
+    && buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -1368,3 +2021,6 @@ function loadEnv(filePath) {
     if (!process.env[key.trim()]) process.env[key.trim()] = value;
   }
 }
+
+
+

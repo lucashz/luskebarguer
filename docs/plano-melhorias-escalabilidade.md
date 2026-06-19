@@ -208,11 +208,6 @@ Funcionalidades:
   - via navegador;
   - layout de cozinha;
   - layout de entrega.
-- Mensagens automaticas ao cliente:
-  - pedido recebido;
-  - em preparo;
-  - saiu para entrega;
-  - pronto para retirada.
 - Cancelamento com motivo.
 - Historico completo de alteracao de status.
 
@@ -221,7 +216,6 @@ Banco sugerido:
 - `order_status_events`
 - `production_sectors`
 - `category_sector_rules`
-- `order_notifications`
 
 Prioridade: alta.
 
@@ -541,8 +535,7 @@ Prioridade: media-baixa enquanto for uma unica loja, alta se virar produto SaaS.
 2. Taxa por bairro.
 3. Pedido por QR Code de mesa.
 4. KDS simples.
-5. Mensagens automaticas por status.
-6. Fidelidade basica.
+5. Fidelidade basica.
 
 ### Fazer quando virar SaaS
 

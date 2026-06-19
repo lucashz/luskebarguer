@@ -1,30 +1,31 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cardapio Digital</title>
+    <title>Cardápio Digital</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="menu-page">
     <header class="public-topbar">
-      <a class="brand-mark" href="/">Cardapio</a>
+      <a class="brand-mark" href="/">Cardápio</a>
       <div class="public-actions">
         <a class="link-button" href="/conta">Minha conta</a>
+        <button class="text-button" id="customerLogoutButton" type="button" hidden>Sair</button>
       </div>
     </header>
 
     <section class="store-header">
       <div class="store-cover" id="storeCover"></div>
       <div class="store-summary">
-        <div class="store-logo" id="storeLogo">C</div>
+        <div class="store-logo" id="storeLogo"></div>
         <div class="store-copy">
           <p class="store-open" id="storeStatus">Carregando</p>
-          <h1 id="storeName">Cardapio digital</h1>
+          <h1 id="storeName">Cardápio digital</h1>
           <p id="storeDescription">Escolha seus itens e envie o pedido pelo WhatsApp da loja.</p>
           <div class="store-meta">
             <span id="deliveryMeta">Entrega</span>
-            <span id="minimumMeta">Pedido minimo</span>
+            <span id="minimumMeta">Pedido mínimo</span>
           </div>
         </div>
       </div>
@@ -33,7 +34,7 @@
     <main class="ifood-layout">
       <aside class="category-rail">
         <label class="search-box">
-          <span>Buscar no cardapio</span>
+          <span>Buscar no cardápio</span>
           <input id="searchInput" type="search" placeholder="Busque por produto">
         </label>
         <nav id="categoryNav" class="category-list" aria-label="Categorias"></nav>
@@ -42,13 +43,12 @@
       <section class="menu-feed">
         <div class="feed-toolbar">
           <div>
-            <strong id="status">Carregando cardapio...</strong>
+            <strong id="status">Carregando cardápio...</strong>
             <p>Produtos disponiveis para pedido agora.</p>
           </div>
-          <button class="icon-button" id="refreshButton" title="Atualizar" aria-label="Atualizar">R</button>
         </div>
         <section class="featured-strip" id="featured" aria-label="Destaques"></section>
-        <section class="menu-sections" id="menu" aria-label="Cardapio"></section>
+        <section class="menu-sections" id="menu" aria-label="Cardápio"></section>
       </section>
 
       <aside class="bag-panel" aria-label="Sacola">
@@ -74,6 +74,21 @@
       <strong id="mobileBagTotal">R$ 0,00</strong>
     </button>
 
+    <dialog class="dialog closed-store-dialog" id="closedStoreDialog">
+      <form method="dialog" class="dialog-header">
+        <div>
+          <p class="eyebrow">Loja fechada</p>
+          <h2>Pedidos pausados no momento</h2>
+        </div>
+        <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+      </form>
+      <section class="closed-store-body">
+        <strong id="closedStoreTitle">A loja está fechada agora.</strong>
+        <p id="closedStoreText">Você pode ver o cardápio, mas novos pedidos estão bloqueados até a loja iniciar a operação.</p>
+        <button class="primary-button wide" id="closedStoreRefreshButton" type="button">Atualizar status</button>
+      </section>
+    </dialog>
+
     <dialog class="dialog" id="checkoutDialog">
       <form method="dialog" class="dialog-header">
         <div>
@@ -92,13 +107,14 @@
           <div class="account-prefill-actions">
             <select id="savedAddressSelect" aria-label="Endereços salvos" hidden></select>
             <button class="text-button" id="editAddressButton" type="button">Informar outro</button>
+            <button class="text-button" id="deleteSavedAddressButton" type="button" hidden>Excluir endereço</button>
           </div>
         </section>
 
         <fieldset>
           <legend>Cliente</legend>
           <input name="name" required placeholder="Nome completo">
-          <input name="phone" required inputmode="tel" placeholder="Telefone com DDD">
+          <input name="phone" required inputmode="tel" autocomplete="tel" maxlength="15" placeholder="Telefone com DDD">
           <input name="email" type="email" placeholder="E-mail opcional">
         </fieldset>
 
@@ -108,20 +124,26 @@
             <label><input type="radio" name="fulfillment_method" value="delivery" checked> Entrega</label>
             <label><input type="radio" name="fulfillment_method" value="pickup"> Retirada</label>
           </div>
-          <input name="street" required placeholder="Rua / Avenida">
+          <input name="label" list="checkoutAddressLabelSuggestions" placeholder="Apelido do endereço: Casa, Trabalho">
+          <input name="street" required autocomplete="address-line1" placeholder="Rua / Avenida">
           <div class="two-cols">
-            <input name="number" placeholder="Numero">
+            <input name="number" required autocomplete="address-line2" placeholder="Número">
             <input name="neighborhood" required placeholder="Bairro">
           </div>
-          <input name="city" required placeholder="Cidade">
+          <input name="city" required autocomplete="address-level2" placeholder="Cidade">
           <input name="complement" placeholder="Complemento">
-          <input name="reference" placeholder="Referencia">
+          <input name="reference" placeholder="Referência">
+          <datalist id="checkoutAddressLabelSuggestions">
+            <option value="Casa"></option>
+            <option value="Trabalho"></option>
+            <option value="Família"></option>
+          </datalist>
         </fieldset>
 
         <fieldset>
           <legend>Pagamento</legend>
           <select name="payment_method" id="paymentMethod" required></select>
-          <textarea name="notes" placeholder="Observacoes do pedido"></textarea>
+          <textarea name="notes" placeholder="Observações do pedido"></textarea>
         </fieldset>
 
         <fieldset class="checkout-review">
@@ -138,6 +160,40 @@
       </form>
     </dialog>
 
+    <dialog class="dialog" id="productDialog">
+      <form method="dialog" class="dialog-header">
+        <div>
+          <p class="eyebrow">Montar item</p>
+          <h2 id="productDialogTitle">Produto</h2>
+        </div>
+        <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+      </form>
+
+      <form class="checkout-form product-customize-form" id="productForm">
+        <div class="product-dialog-media" id="productDialogMedia"></div>
+        <p class="muted" id="productDialogDescription"></p>
+        <section class="product-quantity-box">
+          <div>
+            <strong>Quantidade</strong>
+            <p>Escolha quantos itens deseja adicionar.</p>
+          </div>
+          <div class="qty product-dialog-qty">
+            <button type="button" id="productQuantityMinus" aria-label="Diminuir quantidade">-</button>
+            <input id="productQuantity" name="quantity" type="text" value="1" inputmode="numeric" pattern="[0-9]*" readonly>
+            <button type="button" id="productQuantityPlus" aria-label="Aumentar quantidade">+</button>
+          </div>
+        </section>
+        <div id="productModifierGroups"></div>
+        <label>Observação do item<textarea name="notes" placeholder="Ex: sem cebola, ponto da carne, embalagem separada"></textarea></label>
+        <div class="checkout-review-totals">
+          <div class="grand-total"><span>Total do item</span><strong id="productDialogTotal">R$ 0,00</strong></div>
+        </div>
+        <button class="primary-button wide">Adicionar a sacola</button>
+      </form>
+    </dialog>
+
     <script src="/app.js" type="module"></script>
   </body>
 </html>
+
+

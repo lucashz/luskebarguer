@@ -1,18 +1,20 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Admin - Cardapio</title>
+    <title>Admin - Cardápio</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body class="admin-page">
-    <main class="admin-layout">
-      <aside class="admin-sidebar">
-        <a class="brand-mark" href="/">Cardapio</a>
+    <main class="admin-layout auth-only" id="adminLayout">
+      <aside class="admin-sidebar" id="adminSidebar" hidden>
+        <a class="brand-mark" href="/">Cardápio</a>
         <nav class="admin-nav" id="adminNav">
-          <button class="active" data-admin-tab="orders" type="button">Pedidos</button>
-          <button data-admin-tab="menu" type="button">Cardapio</button>
+          <button class="active" data-admin-tab="operation" type="button">Operação</button>
+          <button data-admin-tab="orders" type="button">Pedidos</button>
+          <button data-admin-tab="menu" type="button">Cardápio</button>
+          <button data-admin-tab="reports" type="button">Relatórios</button>
           <button data-admin-tab="customers" type="button">Clientes</button>
           <button data-admin-tab="store" type="button">Loja</button>
           <button data-admin-tab="account" type="button">Conta</button>
@@ -22,7 +24,15 @@
 
       <section class="admin-main">
         <section class="auth-screen" id="authScreen">
-          <div class="auth-card" id="setupCard">
+          <section class="account-loading auth-card" id="adminAuthLoading">
+            <span class="loading-dot"></span>
+            <div>
+              <p class="eyebrow">Admin</p>
+              <h1>Carregando painel</h1>
+            </div>
+          </section>
+
+          <div class="auth-card" id="setupCard" hidden>
             <p class="eyebrow">Primeiro acesso</p>
             <h1>Criar conta admin</h1>
             <form id="setupForm" class="stack-form">
@@ -33,7 +43,7 @@
             </form>
           </div>
 
-          <div class="auth-card" id="loginCard">
+          <div class="auth-card" id="loginCard" hidden>
             <p class="eyebrow">Admin</p>
             <h1>Entrar no painel</h1>
             <form id="loginForm" class="stack-form">
@@ -44,15 +54,50 @@
           </div>
         </section>
 
-        <section class="admin-shell" id="adminShell">
+        <section class="admin-shell" id="adminShell" hidden>
           <header class="admin-header">
             <div>
               <p class="eyebrow" id="adminUser">Painel</p>
-              <h1 id="adminTitle">Pedidos</h1>
+              <h1 id="adminTitle">Operação</h1>
             </div>
+            <button class="ghost-button compact" id="adminHeaderLogoutButton" type="button">Sair</button>
           </header>
 
-          <section class="admin-section active" data-admin-section="orders">
+          <section class="admin-section active" data-admin-section="operation">
+            <section class="operation-hero panel">
+              <div>
+                <p class="eyebrow">Controle da loja</p>
+                <h2 id="operationTitle">Carregando operação</h2>
+                <p id="operationText">Confira se a loja está pronta para receber pedidos.</p>
+              </div>
+              <span class="operation-badge" id="operationBadge">Carregando</span>
+            </section>
+
+            <section class="operation-grid">
+              <article class="operation-card">
+                <div>
+                  <strong>Iniciar operação</strong>
+                  <p>Zera a fila atual, arquiva os pedidos anteriores e deixa a loja online para novos pedidos.</p>
+                </div>
+                <button class="primary-button wide" id="startOperationButton" type="button">Iniciar operação</button>
+              </article>
+              <article class="operation-card danger-zone">
+                <div>
+                  <strong>Parar operação</strong>
+                  <p>Deixa a loja offline, bloqueia novos pedidos e mostra aviso de loja fechada para o cliente.</p>
+                </div>
+                <button class="danger-button wide" id="stopOperationButton" type="button">Parar operação</button>
+              </article>
+            </section>
+
+            <section class="admin-metrics operation-metrics">
+              <article><span>Pedidos hoje</span><strong id="operationMetricOrders">0</strong></article>
+              <article><span>Em aberto</span><strong id="operationMetricOpen">0</strong></article>
+              <article><span>Status</span><strong id="operationMetricStatus">-</strong></article>
+            </section>
+          </section>
+
+          <section class="admin-section" data-admin-section="orders">
             <section class="admin-metrics">
               <article><span>Pedidos hoje</span><strong id="metricOrders">0</strong></article>
               <article><span>Em aberto</span><strong id="metricOpen">0</strong></article>
@@ -62,74 +107,135 @@
               <h2>Pedidos recentes</h2>
               <div class="row-actions">
                 <button class="ghost-button compact" id="enableSoundButton" type="button">Ativar som</button>
+                <button class="ghost-button compact" id="kitchenModeButton" type="button">Modo cozinha</button>
+                <button class="ghost-button compact" id="autoPrintButton" type="button">Auto imprimir</button>
+                <button class="ghost-button compact" id="archiveClosedOrdersButton" type="button">Limpar finalizados</button>
+                <button class="danger-button compact" id="clearQueueButton" type="button">Fechar operação</button>
                 <button class="ghost-button compact" id="refreshAdminButton" type="button">Atualizar</button>
               </div>
             </div>
             <div class="order-board" id="adminOrders"></div>
           </section>
 
+          <section class="admin-section" data-admin-section="reports">
+            <div class="section-actions">
+              <div>
+                <p class="eyebrow">Fechamento</p>
+                <h2>Relatórios</h2>
+              </div>
+              <div class="row-actions">
+                <input class="compact-date" id="reportDate" type="date">
+                <button class="ghost-button compact" id="loadReportButton" type="button">Buscar</button>
+                <button class="ghost-button compact" id="exportReportCsvButton" type="button">CSV</button>
+                <button class="ghost-button compact" id="printReportButton" type="button">PDF</button>
+              </div>
+            </div>
+            <div class="report-quick-actions" aria-label="Filtros rápidos de relatório">
+              <button class="active" type="button" data-report-preset="today">Hoje</button>
+              <button type="button" data-report-preset="yesterday">Ontem</button>
+              <button type="button" data-report-preset="7">7 dias</button>
+              <button type="button" data-report-preset="15">15 dias</button>
+              <button type="button" data-report-preset="30">30 dias</button>
+              <button type="button" data-report-preset="month">Mês atual</button>
+            </div>
+            <section class="report-summary" id="reportSummary"></section>
+            <section class="panel report-panel">
+              <div class="section-actions">
+                <h2 id="reportOrdersTitle">Pedidos do período</h2>
+              </div>
+              <div class="admin-list" id="reportOrders"></div>
+            </section>
+          </section>
+
           <section class="admin-section" data-admin-section="menu">
             <div class="menu-workspace">
-              <nav class="subnav" aria-label="Gerenciar cardapio">
+              <nav class="subnav" aria-label="Gerenciar cardápio">
                 <button class="active" data-menu-view="categories" type="button">Categorias</button>
                 <button data-menu-view="products" type="button">Produtos</button>
+                <button data-menu-view="modifiers" type="button">Adicionais</button>
               </nav>
 
               <section class="menu-view active" data-menu-panel="categories">
-                <div class="menu-management-grid">
-                  <form id="categoryForm" class="panel stack-form">
-                    <p class="eyebrow">Cadastro rapido</p>
-                    <h2>Nova categoria</h2>
-                    <input name="name" required placeholder="Nome">
-                    <input name="description" placeholder="Descricao">
-                    <input name="sort_order" type="number" value="0" placeholder="Ordem">
-                    <label class="check"><input name="is_active" type="checkbox" checked> Visivel no cardapio</label>
-                    <button class="primary-button">Criar categoria</button>
-                  </form>
-
-                  <section class="panel menu-list-panel">
-                    <div class="section-actions">
-                      <div>
-                        <p class="eyebrow">Organizacao</p>
-                        <h2>Categorias existentes</h2>
-                      </div>
+                <section class="panel menu-list-panel">
+                  <div class="section-actions">
+                    <div>
+                      <p class="eyebrow">Organizacao</p>
+                      <h2>Categorias</h2>
+                    </div>
+                    <div class="row-actions">
+                      <button class="primary-button compact" id="newCategoryButton" type="button">Nova categoria</button>
                       <button class="ghost-button compact" id="refreshCategoriesButton" type="button">Atualizar</button>
                     </div>
-                    <div class="admin-list" id="categoryEditorList"></div>
-                  </section>
-                </div>
+                  </div>
+                  <div class="admin-list" id="categoryEditorList"></div>
+                </section>
               </section>
 
               <section class="menu-view" data-menu-panel="products">
-                <div class="menu-management-grid">
-                  <form id="itemForm" class="panel stack-form">
-                    <p class="eyebrow">Cadastro rapido</p>
-                    <h2>Novo produto</h2>
-                    <select name="category_id" required id="itemCategory"></select>
-                    <input name="name" required placeholder="Nome">
-                    <textarea name="description" placeholder="Descricao"></textarea>
-                    <input name="price" required type="number" min="0" step="0.01" placeholder="Preco">
-                    <input name="image_url" placeholder="URL da imagem">
-                    <input name="image_file" id="itemImageFile" type="file" accept="image/*">
-                    <input name="tags" placeholder="Tags separadas por virgula">
-                    <input name="sort_order" type="number" value="0" placeholder="Ordem">
-                    <label class="check"><input name="is_featured" type="checkbox"> Destaque</label>
-                    <label class="check"><input name="is_available" type="checkbox" checked> Disponivel</label>
-                    <button class="primary-button">Criar produto</button>
-                  </form>
-
-                  <section class="panel menu-list-panel">
-                    <div class="section-actions">
-                      <div>
-                        <p class="eyebrow">Itens do cardapio</p>
-                        <h2>Produtos existentes</h2>
-                      </div>
+                <section class="panel menu-list-panel">
+                  <div class="section-actions">
+                    <div>
+                      <p class="eyebrow">Itens do cardápio</p>
+                      <h2>Produtos</h2>
+                    </div>
+                    <div class="row-actions">
+                      <button class="primary-button compact" id="newProductButton" type="button">Novo produto</button>
                       <button class="ghost-button compact" id="refreshProductsButton" type="button">Atualizar</button>
                     </div>
-                    <div class="admin-list" id="productEditorList"></div>
-                  </section>
-                </div>
+                  </div>
+                  <div class="admin-list" id="productEditorList"></div>
+                </section>
               </section>
+
+              <section class="menu-view" data-menu-panel="modifiers">
+                <section class="panel menu-list-panel modifier-admin">
+                  <div class="modifier-admin-head">
+                    <div>
+                      <p class="eyebrow">Adicionais</p>
+                      <h2>Adicionais por produto</h2>
+                      <p>Escolha um produto e configure perguntas, respostas e valores extras.</p>
+                    </div>
+                    <button class="ghost-button compact" id="refreshModifiersButton" type="button">Atualizar</button>
+                  </div>
+
+                  <label class="modifier-product-picker">
+                    Produto
+                    <select id="modifierProductSelect"></select>
+                  </label>
+
+                  <section class="modifier-options-workspace" id="productOptionsPanel" hidden>
+                    <div class="modifier-admin-head">
+                      <div>
+                        <strong id="productOptionsTitle">Adicionais</strong>
+                        <p>Monte as perguntas que aparecem quando o cliente adiciona esse produto ao pedido.</p>
+                      </div>
+                      <span class="pill" id="productOptionsCount">0 pergunta(s)</span>
+                    </div>
+                    <div class="modifier-presets" aria-label="Modelos de perguntas">
+                      <button type="button" data-modifier-preset="additional">Adicional pago</button>
+                      <button type="button" data-modifier-preset="size">Tamanho</button>
+                      <button type="button" data-modifier-preset="meat">Ponto da carne</button>
+                      <button type="button" data-modifier-preset="edge">Borda</button>
+                      <button type="button" data-modifier-preset="remove">Remover ingrediente</button>
+                    </div>
+                    <section class="modifier-create-card">
+                      <div>
+                        <strong>Nova pergunta</strong>
+                        <p>Escolha um modelo acima ou escreva uma pergunta. Depois cadastre as respostas.</p>
+                      </div>
+                      <form class="modifier-group-create modifier-group-create-form" id="modifierGroupForm">
+                        <label>Pergunta ao cliente<input name="name" required placeholder="Ex: Quer adicionar algo?"></label>
+                        <label>Mínimo<input name="min_choices" type="number" min="0" value="0"></label>
+                        <label>Máximo<input name="max_choices" type="number" min="1" value="1"></label>
+                        <label class="check inline-check"><input name="is_required" type="checkbox"> Obrigatória</label>
+                        <button class="ghost-button compact">Adicionar pergunta</button>
+                      </form>
+                    </section>
+                    <div class="modifier-group-list" id="productModifierList"></div>
+                  </section>
+                </section>
+              </section>
+
             </div>
           </section>
 
@@ -145,7 +251,7 @@
               <div class="store-editor-head">
                 <div>
                   <h2>Configurar loja</h2>
-                  <p>Dados que aparecem no cardapio e controlam como os pedidos chegam para a equipe.</p>
+                  <p>Dados que aparecem no cardápio e controlam como os pedidos chegam para a equipe.</p>
                 </div>
                 <button class="primary-button compact" type="submit">Salvar loja</button>
               </div>
@@ -153,28 +259,28 @@
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Identidade da loja</strong>
-                  <p>Nome, descricao e endereco exibidos para o cliente antes de pedir.</p>
+                  <p>Nome, descrição e endereço exibidos para o cliente antes de pedir.</p>
                 </div>
                 <div class="store-settings-fields">
                   <div class="two-cols">
                     <label>Nome da loja<input name="name" required placeholder="Ex: Pizzaria Bella"></label>
                     <label>Slug<input name="slug" placeholder="Ex: pizzaria-bella"></label>
                   </div>
-                  <label>Descricao<textarea name="description" placeholder="Ex: Pizza artesanal, esfihas e bebidas geladas."></textarea></label>
-                  <label>Endereco da loja<input name="address" placeholder="Rua, numero, bairro"></label>
+                  <label>Descrição<textarea name="description" placeholder="Ex: Pizza artesanal, esfihas e bebidas geladas."></textarea></label>
+                  <label>Endereço da loja<input name="address" placeholder="Rua, número, bairro"></label>
                 </div>
               </section>
 
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Atendimento e pedidos</strong>
-                  <p>Controle se a loja esta recebendo pedidos e para qual WhatsApp a mensagem sera enviada.</p>
+                  <p>Controle se a loja está recebendo pedidos e para qual WhatsApp a mensagem será enviada.</p>
                 </div>
                 <div class="store-settings-fields">
                   <section class="settings-callout">
                     <div>
                       <strong>WhatsApp dos pedidos</strong>
-                      <p>Use DDI + DDD + numero. Exemplo: 5511999999999.</p>
+                      <p>Use DDI + DDD + número. Exemplo: 5511999999999.</p>
                     </div>
                     <input name="whatsapp_number" inputmode="tel" placeholder="Ex: 5511999999999">
                   </section>
@@ -194,7 +300,7 @@
                 <div class="store-settings-fields">
                   <div class="two-cols">
                     <label>Taxa de entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
-                    <label>Pedido minimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
+                    <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
                   </div>
                 </div>
               </section>
@@ -202,14 +308,14 @@
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Formas de pagamento</strong>
-                  <p>Marque as opcoes aceitas pela loja. Se precisar, adicione outras formas no campo extra.</p>
+                  <p>Marque as opções aceitas pela loja. Se precisar, adicione outras formas no campo extra.</p>
                 </div>
                 <div class="store-settings-fields">
                   <div class="payment-options">
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix"> Pix</label>
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro"> Dinheiro</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartao de credito"> Cartao de credito</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartao de debito"> Cartao de debito</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> Cartão de crédito</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de débito"> Cartão de débito</label>
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Vale refeicao"> Vale refeicao</label>
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pagamento online"> Pagamento online</label>
                   </div>
@@ -220,7 +326,7 @@
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Aparencia</strong>
-                  <p>Imagens opcionais para deixar o cardapio mais parecido com a marca da loja.</p>
+                  <p>Imagens opcionais para deixar o cardápio mais parecido com a marca da loja.</p>
                 </div>
                 <div class="store-settings-fields">
                   <div class="two-cols">
@@ -263,6 +369,91 @@
           </div>
         </dialog>
 
+        <dialog class="dialog category-admin-dialog" id="categoryDialog">
+          <form method="dialog" class="dialog-header">
+            <div>
+              <p class="eyebrow" id="categoryDialogEyebrow">Categoria</p>
+              <h2 id="categoryDialogTitle">Nova categoria</h2>
+            </div>
+            <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+          </form>
+
+          <form id="categoryForm" class="checkout-form category-admin-form">
+            <div class="editor-grid">
+              <label>Nome<input name="name" required placeholder="Ex: Lanches"></label>
+              <label class="editor-wide">Descrição<input name="description" placeholder="Descrição curta da categoria"></label>
+            </div>
+            <div class="switch-row">
+              <label class="check"><input name="is_active" type="checkbox" checked> Visível no cardápio</label>
+            </div>
+            <div class="row-actions">
+              <button class="primary-button compact" id="saveCategoryButton">Salvar categoria</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="dialog product-admin-dialog" id="productDialog">
+          <form method="dialog" class="dialog-header product-dialog-header">
+            <div>
+              <p class="eyebrow" id="productDialogEyebrow">Produto</p>
+              <h2 id="productDialogTitle">Novo produto</h2>
+            </div>
+            <button class="icon-button product-dialog-close" title="Fechar" aria-label="Fechar">X</button>
+          </form>
+
+          <div class="product-dialog-body">
+            <section class="product-dialog-panel active" data-product-editor-panel="details">
+              <form id="itemForm" class="checkout-form product-admin-form">
+                <section class="product-form-section">
+                  <div>
+                    <span>1</span>
+                    <strong id="productFormMainTitle">Cadastro do produto</strong>
+                    <p id="productFormMainText">Preencha o mínimo necessário para o item aparecer corretamente no cardápio.</p>
+                  </div>
+                  <div class="editor-grid product-main-grid">
+                    <label>Categoria<select name="category_id" required id="itemCategory"></select></label>
+                    <label>Nome do produto<input name="name" required placeholder="Ex: X-Burger"></label>
+                    <label>Preço de venda<input name="price" required type="number" min="0" step="0.01" placeholder="0,00"></label>
+                    <label class="editor-wide">Descrição para o cliente<textarea name="description" placeholder="Ex: Pão brioche, burger artesanal, queijo e molho da casa."></textarea></label>
+                  </div>
+                </section>
+
+                <section class="product-form-section">
+                  <div>
+                    <span>2</span>
+                    <strong>Foto e busca</strong>
+                    <p>A foto vende o produto. Tags ajudam na busca interna do cardápio.</p>
+                  </div>
+                  <div class="editor-grid">
+                    <label class="editor-wide">URL da imagem<input name="image_url" placeholder="https://..."></label>
+                    <label class="editor-wide">Enviar imagem<input name="image_file" id="itemImageFile" type="file" accept="image/*"></label>
+                    <label class="editor-wide">Palavras de busca<input name="tags" placeholder="Ex: artesanal, promocao, bacon"></label>
+                  </div>
+                </section>
+
+                <section class="product-form-section product-form-section-inline">
+                  <div>
+                    <span>3</span>
+                    <strong>Disponibilidade</strong>
+                    <p>Use destaque para itens que a loja quer vender mais.</p>
+                  </div>
+                  <div class="switch-row">
+                    <label class="check"><input name="is_featured" type="checkbox"> Marcar como destaque</label>
+                    <label class="check"><input name="is_available" type="checkbox" checked> Disponível para venda</label>
+                  </div>
+                </section>
+              </form>
+            </section>
+          </div>
+
+          <div class="product-dialog-footer">
+            <form method="dialog">
+              <button class="ghost-button compact" type="submit">Fechar</button>
+            </form>
+            <button class="primary-button compact" id="saveProductButton" type="submit" form="itemForm">Salvar produto</button>
+          </div>
+        </dialog>
+
         <div class="toast" id="toast"></div>
       </section>
     </main>
@@ -270,3 +461,6 @@
     <script src="/admin.js" type="module"></script>
   </body>
 </html>
+
+
+
