@@ -44,6 +44,7 @@ const els = {
   checkoutReviewSubtotal: document.querySelector('#checkoutReviewSubtotal'),
   checkoutReviewDelivery: document.querySelector('#checkoutReviewDelivery'),
   checkoutReviewTotal: document.querySelector('#checkoutReviewTotal'),
+  cancelCheckoutButton: document.querySelector('#cancelCheckoutButton'),
   paymentMethod: document.querySelector('#paymentMethod'),
   accountPrefill: document.querySelector('#accountPrefill'),
   accountPrefillTitle: document.querySelector('#accountPrefillTitle'),
@@ -95,6 +96,7 @@ els.checkoutForm.elements.phone.addEventListener('input', (event) => {
 });
 
 els.checkoutForm.addEventListener('submit', submitOrder);
+els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog.close());
 els.productForm.addEventListener('change', renderProductDialogTotal);
 els.productForm.addEventListener('input', renderProductDialogTotal);
 els.productForm.addEventListener('submit', submitProductCustomization);

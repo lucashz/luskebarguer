@@ -784,6 +784,40 @@ textarea {
   font-weight: 900;
 }
 
+#checkoutDialog {
+  max-height: calc(100vh - 28px);
+  overflow: hidden;
+}
+
+#checkoutDialog[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#checkoutDialog .checkout-form {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 0;
+}
+
+.checkout-dialog-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  margin: 4px -18px -18px;
+  padding: 12px 18px;
+  box-shadow: 0 -14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.checkout-dialog-footer button {
+  min-height: 44px;
+}
+
 .product-customize-form {
   gap: 10px;
   padding: 14px;
@@ -3099,6 +3133,10 @@ legend {
   }
 
   .account-prefill-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .checkout-dialog-footer {
     grid-template-columns: 1fr;
   }
 
