@@ -105,7 +105,7 @@ els.closedStoreRefreshButton?.addEventListener('click', () => {
   loadBootstrap();
 });
 els.savedAddressSelect.addEventListener('change', () => {
-  applySavedCustomerAddress(selectedSavedAddress());
+  applySavedCustomerAddress(selectedSavedAddress(), { force: true });
   state.savedAddressApplied = true;
   updatePrefillNotice('Endereço selecionado. Confira os dados antes de enviar.');
 });
@@ -592,25 +592,30 @@ async function submitOrder(event) {
   }
   const data = new FormData(els.checkoutForm);
   const method = data.get('fulfillment_method');
-  if (!validateCheckoutData(data, method)) return;
+  const selectedAddress = method === 'delivery' && state.savedAddressApplied ? selectedSavedAddress() : null;
+  if (selectedAddress) {
+    applySavedCustomerAddress(selectedAddress, { force: true });
+  }
+  const normalizedData = new FormData(els.checkoutForm);
+  if (!validateCheckoutData(normalizedData, method)) return;
   const payload = {
     customer: {
-      name: data.get('name'),
-      phone: data.get('phone'),
-      email: data.get('email')
+      name: normalizedData.get('name'),
+      phone: normalizedData.get('phone'),
+      email: normalizedData.get('email')
     },
     fulfillment_method: method,
     address: method === 'delivery' ? {
-      label: data.get('label') || 'Casa',
-      street: data.get('street'),
-      number: data.get('number'),
-      neighborhood: data.get('neighborhood'),
-      city: data.get('city'),
-      complement: data.get('complement'),
-      reference: data.get('reference')
+      label: normalizedData.get('label') || selectedAddress?.label || 'Casa',
+      street: normalizedData.get('street') || selectedAddress?.street,
+      number: normalizedData.get('number') || selectedAddress?.number,
+      neighborhood: normalizedData.get('neighborhood') || selectedAddress?.neighborhood,
+      city: normalizedData.get('city') || selectedAddress?.city,
+      complement: normalizedData.get('complement') || selectedAddress?.complement,
+      reference: normalizedData.get('reference') || selectedAddress?.reference
     } : null,
-    payment_method: data.get('payment_method'),
-    notes: data.get('notes'),
+    payment_method: normalizedData.get('payment_method'),
+    notes: normalizedData.get('notes'),
     items: state.cart.map((item) => ({
       id: item.id,
       quantity: item.quantity,
@@ -785,15 +790,18 @@ function renderSavedAddressOptions(addresses) {
   els.deleteSavedAddressButton.hidden = !addresses.some((address) => address.id);
   els.savedAddressSelect.replaceChildren(...addresses.map((address) => {
     const option = document.createElement('option');
-    option.value = address.id;
+    option.value = address.id || addressKey(address);
     option.textContent = addressLabel(address);
     return option;
   }));
+  const current = customerAddresses().find((address) => addressKey(address) === addressKeyFromForm());
+  if (current) els.savedAddressSelect.value = current.id || addressKey(current);
 }
 
 function selectedSavedAddress() {
   const addresses = customerAddresses();
-  return addresses.find((address) => address.id === els.savedAddressSelect.value) || addresses[0] || null;
+  const selectedValue = els.savedAddressSelect.value;
+  return addresses.find((address) => (address.id || addressKey(address)) === selectedValue) || addresses[0] || null;
 }
 
 function customerAddresses() {
@@ -817,7 +825,7 @@ async function deleteSelectedSavedAddress() {
   renderSavedAddressOptions(addresses);
 
   if (addresses.length) {
-    applySavedCustomerAddress(addresses[0]);
+    applySavedCustomerAddress(addresses[0], { force: true });
     state.savedAddressApplied = true;
     updatePrefillNotice(addresses.length > 1
       ? 'Endereço excluído. Escolha outro endereço salvo para este pedido.'
@@ -832,15 +840,18 @@ async function deleteSelectedSavedAddress() {
   renderCustomerActions();
 }
 
-function applySavedCustomerAddress(address = selectedSavedAddress()) {
+function applySavedCustomerAddress(address = selectedSavedAddress(), options = {}) {
   if (!address) return;
-  setValue(els.checkoutForm.elements.label, address.label || 'Casa');
-  setValue(els.checkoutForm.elements.street, address.street);
-  setValue(els.checkoutForm.elements.number, address.number);
-  setValue(els.checkoutForm.elements.neighborhood, address.neighborhood);
-  setValue(els.checkoutForm.elements.city, address.city);
-  setValue(els.checkoutForm.elements.complement, address.complement);
-  setValue(els.checkoutForm.elements.reference, address.reference);
+  const force = options.force === true;
+  setAddressField('label', address.label || 'Casa', force);
+  setAddressField('street', address.street, force);
+  setAddressField('number', address.number, force);
+  setAddressField('neighborhood', address.neighborhood, force);
+  setAddressField('city', address.city, force);
+  setAddressField('complement', address.complement, force);
+  setAddressField('reference', address.reference, force);
+  els.savedAddressSelect.value = address.id || addressKey(address);
+  clearCheckoutValidity();
 }
 
 function addressLabel(address) {
@@ -860,6 +871,41 @@ function modifierText(modifier) {
 function clearAddressFields() {
   ['label', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     setValue(els.checkoutForm.elements[name], '');
+  });
+  clearCheckoutValidity();
+}
+
+function setAddressField(name, value, force) {
+  const field = els.checkoutForm.elements[name];
+  if (!field) return;
+  if (force || !field.value) field.value = value ?? '';
+}
+
+function clearCheckoutValidity() {
+  [...els.checkoutForm.elements].forEach((field) => {
+    if (typeof field.setCustomValidity === 'function') field.setCustomValidity('');
+  });
+}
+
+function addressKey(address = {}) {
+  return [
+    address.street,
+    address.number,
+    address.neighborhood,
+    address.city,
+    address.complement,
+    address.reference
+  ].map((value) => String(value || '').trim().toLowerCase()).join('|');
+}
+
+function addressKeyFromForm() {
+  return addressKey({
+    street: els.checkoutForm.elements.street.value,
+    number: els.checkoutForm.elements.number.value,
+    neighborhood: els.checkoutForm.elements.neighborhood.value,
+    city: els.checkoutForm.elements.city.value,
+    complement: els.checkoutForm.elements.complement.value,
+    reference: els.checkoutForm.elements.reference.value
   });
 }
 
