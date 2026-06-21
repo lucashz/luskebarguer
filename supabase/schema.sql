@@ -15,9 +15,13 @@ create table if not exists public.store_settings (
   delivery_fee numeric(10, 2) not null default 0,
   minimum_order numeric(10, 2) not null default 0,
   payment_methods text[] not null default array['Pix', 'Cartao', 'Dinheiro'],
+  business_hours jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.store_settings
+  add column if not exists business_hours jsonb not null default '{}'::jsonb;
 
 create table if not exists public.menu_categories (
   id uuid primary key default gen_random_uuid(),
@@ -109,6 +113,7 @@ create table if not exists public.orders (
   discount numeric(10, 2) not null default 0,
   total numeric(10, 2) not null default 0,
   notes text,
+  promotion_code text,
   whatsapp_message text,
   archived_at timestamptz,
   created_at timestamptz not null default now(),
@@ -116,7 +121,8 @@ create table if not exists public.orders (
 );
 
 alter table public.orders
-  add column if not exists archived_at timestamptz;
+  add column if not exists archived_at timestamptz,
+  add column if not exists promotion_code text;
 
 create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
@@ -153,6 +159,23 @@ create table if not exists public.menu_modifiers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.promotions (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  code text not null,
+  description text,
+  discount_type text not null default 'fixed' check (discount_type in ('fixed', 'percent', 'free_delivery')),
+  discount_value numeric(10, 2) not null default 0,
+  minimum_order numeric(10, 2) not null default 0,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  max_uses integer,
+  used_count integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.app_sessions (
   token text primary key,
   type text not null check (type in ('admin', 'customer')),
@@ -178,6 +201,12 @@ create index if not exists menu_modifier_groups_item_sort_idx
 
 create index if not exists menu_modifiers_group_available_sort_idx
   on public.menu_modifiers (group_id, is_available, sort_order, name);
+
+create unique index if not exists promotions_code_unique_idx
+  on public.promotions (code);
+
+create index if not exists promotions_active_dates_idx
+  on public.promotions (is_active, starts_at, ends_at);
 
 create index if not exists orders_customer_created_idx
   on public.orders (customer_id, created_at desc);
@@ -264,6 +293,11 @@ create trigger menu_modifiers_updated_at
 before update on public.menu_modifiers
 for each row execute function public.set_updated_at();
 
+drop trigger if exists promotions_updated_at on public.promotions;
+create trigger promotions_updated_at
+before update on public.promotions
+for each row execute function public.set_updated_at();
+
 drop trigger if exists app_sessions_updated_at on public.app_sessions;
 create trigger app_sessions_updated_at
 before update on public.app_sessions
@@ -279,6 +313,7 @@ alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.menu_modifier_groups enable row level security;
 alter table public.menu_modifiers enable row level security;
+alter table public.promotions enable row level security;
 alter table public.app_sessions enable row level security;
 
 drop policy if exists "Public can read store settings" on public.store_settings;

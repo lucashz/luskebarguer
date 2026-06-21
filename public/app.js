@@ -8,11 +8,16 @@
   customerChecked: false,
   savedAddressApplied: false,
   customizingItem: null,
-  closedStoreNoticeKey: null
+  editingCartKey: null,
+  closedStoreNoticeKey: null,
+  orderSubmitting: false,
+  favorites: loadFavorites(),
+  coupon: null
 };
 
 const BOOTSTRAP_CACHE_KEY = 'cardapio_bootstrap_cache_v1';
 const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
+const FAVORITES_KEY = 'customer_favorites_v1';
 
 const els = {
   storeCover: document.querySelector('#storeCover'),
@@ -25,8 +30,10 @@ const els = {
   status: document.querySelector('#status'),
   menu: document.querySelector('#menu'),
   featured: document.querySelector('#featured'),
+  favoritesStrip: document.querySelector('#favoritesStrip'),
   categoryNav: document.querySelector('#categoryNav'),
   searchInput: document.querySelector('#searchInput'),
+  searchSuggestions: document.querySelector('#searchSuggestions'),
   customerLogoutButton: document.querySelector('#customerLogoutButton'),
   refreshButton: document.querySelector('#refreshButton'),
   checkoutButton: document.querySelector('#checkoutButton'),
@@ -43,9 +50,20 @@ const els = {
   checkoutReviewItems: document.querySelector('#checkoutReviewItems'),
   checkoutReviewSubtotal: document.querySelector('#checkoutReviewSubtotal'),
   checkoutReviewDelivery: document.querySelector('#checkoutReviewDelivery'),
+  checkoutDiscountRow: document.querySelector('#checkoutDiscountRow'),
+  checkoutReviewDiscount: document.querySelector('#checkoutReviewDiscount'),
   checkoutReviewTotal: document.querySelector('#checkoutReviewTotal'),
+  checkoutConfirmSnapshot: document.querySelector('#checkoutConfirmSnapshot'),
   cancelCheckoutButton: document.querySelector('#cancelCheckoutButton'),
+  confirmOrderButton: document.querySelector('#confirmOrderButton'),
+  checkoutCustomerFieldset: document.querySelector('#checkoutCustomerFieldset'),
+  checkoutCustomerSummary: document.querySelector('#checkoutCustomerSummary'),
+  checkoutCustomerName: document.querySelector('#checkoutCustomerName'),
+  checkoutCustomerPhone: document.querySelector('#checkoutCustomerPhone'),
   paymentMethod: document.querySelector('#paymentMethod'),
+  couponCode: document.querySelector('#couponCode'),
+  applyCouponButton: document.querySelector('#applyCouponButton'),
+  couponFeedback: document.querySelector('#couponFeedback'),
   accountPrefill: document.querySelector('#accountPrefill'),
   accountPrefillTitle: document.querySelector('#accountPrefillTitle'),
   accountPrefillText: document.querySelector('#accountPrefillText'),
@@ -80,18 +98,30 @@ els.mobileBagButton.addEventListener('click', openCheckout);
 els.featured.addEventListener('wheel', scrollFeaturedWithWheel, { passive: false });
 els.clearCartButton.addEventListener('click', () => {
   state.cart = [];
+  state.coupon = null;
   persistCart();
   renderCart();
 });
+els.applyCouponButton?.addEventListener('click', applyCoupon);
 
 els.checkoutForm.addEventListener('change', (event) => {
   if (event.target.name === 'fulfillment_method') {
+    state.coupon = null;
+    clearCouponFeedback();
     updateCheckoutDeliveryFields();
     renderCart();
     renderCheckoutReview();
   }
+  if (['payment_method', 'street', 'number', 'neighborhood', 'city', 'coupon_code'].includes(event.target.name)) {
+    renderCheckoutReview();
+  }
 });
-els.checkoutForm.elements.phone.addEventListener('input', (event) => {
+els.checkoutForm.addEventListener('input', (event) => {
+  if (['street', 'number', 'neighborhood', 'city'].includes(event.target.name)) {
+    renderCheckoutReview();
+  }
+});
+els.checkoutForm.elements.phone?.addEventListener('input', (event) => {
   event.target.value = formatPhone(event.target.value);
 });
 
@@ -123,6 +153,7 @@ els.editAddressButton.addEventListener('click', () => {
 els.deleteSavedAddressButton.addEventListener('click', deleteSelectedSavedAddress);
 
 renderCachedCustomer();
+renderCheckoutCustomerSection();
 renderCachedBootstrap();
 loadLoggedCustomer().catch(() => {});
 loadBootstrap();
@@ -159,12 +190,15 @@ function renderCachedCustomer() {
   state.customer = cached.customer;
   state.customerChecked = true;
   renderCustomerActions();
+  renderCheckoutCustomerSection();
 }
 
 function render() {
   renderStore();
   renderCustomerActions();
   renderNav();
+  renderSearchSuggestions();
+  renderFavoritesStrip();
   renderFeatured();
   renderMenu();
   renderPaymentOptions();
@@ -197,6 +231,7 @@ function renderStore() {
 function renderNav() {
   const buttons = [
     navButton('all', 'Todos'),
+    navButton('favorites', `Favoritos ${state.favorites.size ? `(${state.favorites.size})` : ''}`),
     ...state.categories.map((category) => navButton(category.id, category.name))
   ];
   els.categoryNav.replaceChildren(...buttons);
@@ -238,6 +273,32 @@ function renderFeatured() {
   }));
 }
 
+function renderFavoritesStrip() {
+  const items = allProducts().filter((item) => state.favorites.has(item.id)).slice(0, 10);
+  if (!els.favoritesStrip) return;
+  els.favoritesStrip.hidden = items.length === 0;
+  els.favoritesStrip.replaceChildren(...items.map((item) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'favorite-chip';
+    button.innerHTML = `<span>♥</span><strong>${escapeHtml(item.name)}</strong><small>${money(item.price)}</small>`;
+    button.addEventListener('click', () => startAddToCart(item));
+    return button;
+  }));
+}
+
+function renderSearchSuggestions() {
+  if (!els.searchSuggestions) return;
+  const suggestions = [
+    ...new Set(allProducts().flatMap((item) => [item.name, ...(item.tags || [])]).filter(Boolean))
+  ].slice(0, 30);
+  els.searchSuggestions.replaceChildren(...suggestions.map((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    return option;
+  }));
+}
+
 function scrollFeaturedWithWheel(event) {
   if (els.featured.hidden || els.featured.scrollWidth <= els.featured.clientWidth) return;
   const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
@@ -267,8 +328,25 @@ function showClosedStoreDialog(force = false) {
   if (!force && state.closedStoreNoticeKey === noticeKey) return;
   state.closedStoreNoticeKey = noticeKey;
   els.closedStoreTitle.textContent = `${store.name || 'A loja'} está fechada agora.`;
-  els.closedStoreText.textContent = 'Você pode consultar o cardápio, mas novos pedidos estão pausados até a loja iniciar a operação.';
+  const nextOpen = nextOpenText(store.business_hours);
+  els.closedStoreText.textContent = nextOpen
+    ? `Você pode montar sua sacola para conferir depois. Próxima abertura: ${nextOpen}.`
+    : 'Você pode montar sua sacola para conferir depois, mas novos pedidos estão pausados até a loja iniciar a operação.';
   if (!els.closedStoreDialog.open) els.closedStoreDialog.showModal();
+}
+
+function nextOpenText(hours = {}) {
+  const keys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const labels = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  const now = new Date();
+  for (let offset = 0; offset < 7; offset += 1) {
+    const index = (now.getDay() + offset) % 7;
+    const day = hours?.[keys[index]];
+    if (!day || day.closed || !day.open) continue;
+    const prefix = offset === 0 ? 'hoje' : offset === 1 ? 'amanhã' : labels[index];
+    return `${prefix} às ${day.open}`;
+  }
+  return '';
 }
 
 function renderMenu() {
@@ -304,13 +382,32 @@ function productRow(item) {
       <strong>${money(item.price)}</strong>
       <div class="tags">${(item.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
     </div>
+    <button class="favorite-button ${state.favorites.has(item.id) ? 'active' : ''}" type="button" aria-label="Favoritar ${escapeHtml(item.name)}">${state.favorites.has(item.id) ? '♥' : '♡'}</button>
     <button class="add-product" type="button" aria-label="Adicionar ${escapeHtml(item.name)}" ${storeClosed ? 'disabled' : ''}>
       ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="">` : '<span>+</span>'}
       <b>${storeClosed ? 'Fechado' : '+'}</b>
     </button>
   `;
-  row.querySelector('button').addEventListener('click', () => startAddToCart(item));
+  row.querySelector('.favorite-button').addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleFavorite(item.id);
+  });
+  row.querySelector('.add-product').addEventListener('click', () => startAddToCart(item));
   return row;
+}
+
+function toggleFavorite(itemId) {
+  if (state.favorites.has(itemId)) {
+    state.favorites.delete(itemId);
+    setStatus('Produto removido dos favoritos.');
+  } else {
+    state.favorites.add(itemId);
+    setStatus('Produto salvo nos favoritos.');
+  }
+  persistFavorites();
+  renderNav();
+  renderFavoritesStrip();
+  renderMenu();
 }
 
 function renderCart() {
@@ -363,6 +460,8 @@ function startAddToCart(item) {
 }
 
 function addToCart(item) {
+  state.coupon = null;
+  clearCouponFeedback();
   const key = item.key || cartItemKey(item.id, item.modifier_ids || [], item.notes || '');
   const existing = state.cart.find((entry) => entry.key === key);
   if (existing) {
@@ -385,6 +484,8 @@ function addToCart(item) {
 }
 
 function changeCartQuantity(key, delta) {
+  state.coupon = null;
+  clearCouponFeedback();
   const item = state.cart.find((entry) => entry.key === key);
   if (!item) return;
   item.quantity += delta;
@@ -393,16 +494,67 @@ function changeCartQuantity(key, delta) {
   renderCart();
 }
 
-function openProductDialog(item) {
+function replaceCartItem(oldKey, item) {
+  state.coupon = null;
+  clearCouponFeedback();
+  const nextItem = {
+    ...item,
+    key: cartItemKey(item.id, item.modifier_ids || [], item.notes || ''),
+    price: Number(item.price || 0),
+    quantity: item.quantity || 1,
+    modifier_ids: item.modifier_ids || [],
+    modifiers: item.modifiers || [],
+    notes: item.notes || ''
+  };
+  state.cart = state.cart.filter((entry) => entry.key !== oldKey);
+  const existing = state.cart.find((entry) => entry.key === nextItem.key);
+  if (existing) {
+    existing.quantity += nextItem.quantity;
+  } else {
+    state.cart.push(nextItem);
+  }
+  persistCart();
+  renderCart();
+  renderCheckoutReview();
+}
+
+function openProductDialog(item, options = {}) {
   state.customizingItem = item;
+  state.editingCartKey = options.cartKey || null;
   els.productForm.reset();
-  els.productQuantity.value = '1';
+  els.productQuantity.value = String(options.quantity || 1);
   els.productDialogTitle.textContent = item.name;
   els.productDialogDescription.textContent = item.description || 'Confira o item antes de adicionar a sacola.';
   renderProductDialogMedia(item);
   els.productModifierGroups.replaceChildren(...(item.modifier_groups || []).map(modifierGroupFieldset));
+  if (options.modifierIds?.length) {
+    const selectedIds = new Set(options.modifierIds);
+    els.productForm.querySelectorAll('input[name^="modifier_"]').forEach((input) => {
+      input.checked = selectedIds.has(input.value);
+    });
+  }
+  if (options.notes) {
+    els.productForm.elements.notes.value = options.notes;
+  }
+  els.productForm.querySelector('button.primary-button.wide').textContent = state.editingCartKey ? 'Salvar item' : 'Adicionar a sacola';
   renderProductDialogTotal();
   els.productDialog.showModal();
+}
+
+function editCartItem(key) {
+  const cartItem = state.cart.find((entry) => entry.key === key);
+  if (!cartItem) return;
+  const product = findProductById(cartItem.id);
+  if (!product) {
+    setStatus('Não foi possível editar este item agora.');
+    return;
+  }
+  openProductDialog(product, {
+    cartKey: key,
+    quantity: cartItem.quantity,
+    modifierIds: cartItem.modifier_ids || [],
+    notes: cartItem.notes || ''
+  });
 }
 
 function renderProductDialogMedia(item) {
@@ -423,14 +575,14 @@ function modifierGroupFieldset(group) {
   const fieldset = document.createElement('fieldset');
   const type = Number(group.max_choices || 1) === 1 ? 'radio' : 'checkbox';
   const required = group.is_required || Number(group.min_choices || 0) > 0;
-  fieldset.className = 'modifier-group';
+  fieldset.className = `modifier-group ${required ? 'is-required' : ''}`;
   fieldset.dataset.groupId = group.id;
   fieldset.dataset.minChoices = group.min_choices || 0;
   fieldset.dataset.maxChoices = group.max_choices || 1;
   fieldset.innerHTML = `
-    <legend>${escapeHtml(group.name)}${required ? ' *' : ''}</legend>
+    <legend><span>${required ? 'Obrigatório' : 'Opcional'}</span>${escapeHtml(group.name)}</legend>
     <div class="modifier-group-meta">
-      <p>${required ? `Escolha ${group.min_choices || 1}` : 'Opcional'}${Number(group.max_choices || 0) > 1 ? `, até ${group.max_choices}` : ''}</p>
+      <p>${required ? `Escolha pelo menos ${group.min_choices || 1}` : 'Escolha se quiser'}${Number(group.max_choices || 0) > 1 ? `, até ${group.max_choices}` : ''}</p>
       ${!required && type === 'radio' ? '<button class="modifier-clear-button" type="button" data-clear-modifier-group>Remover escolha</button>' : ''}
     </div>
     <div class="modifier-options">
@@ -479,7 +631,7 @@ function submitProductCustomization(event) {
   const notes = String(new FormData(els.productForm).get('notes') || '').trim();
   const quantity = Math.min(99, Math.max(1, Number.parseInt(new FormData(els.productForm).get('quantity'), 10) || 1));
   const price = Number(item.price || 0) + selected.reduce((sum, modifier) => sum + Number(modifier.price_delta || 0), 0);
-  addToCart({
+  const cartItem = {
     id: item.id,
     name: item.name,
     price,
@@ -487,7 +639,13 @@ function submitProductCustomization(event) {
     modifier_ids: selected.map((modifier) => modifier.id),
     modifiers: selected,
     notes
-  });
+  };
+  if (state.editingCartKey) {
+    replaceCartItem(state.editingCartKey, cartItem);
+  } else {
+    addToCart(cartItem);
+  }
+  state.editingCartKey = null;
   els.productDialog.close();
 }
 
@@ -571,12 +729,16 @@ function renderCheckoutReview() {
       const total = Number(item.price || 0) * Number(item.quantity || 0);
       row.innerHTML = `
         <div>
-          <strong>${item.quantity}x ${escapeHtml(item.name)}</strong>
+          <div class="checkout-review-title">
+            <strong>${item.quantity}x ${escapeHtml(item.name)}</strong>
+            <button class="text-button mini-edit-button" type="button" data-edit-cart-item="${escapeAttribute(item.key)}">Editar</button>
+          </div>
           <p>${money(item.price)} cada${item.modifiers?.length ? ` - ${item.modifiers.map(modifierText).map(escapeHtml).join(', ')}` : ''}</p>
           ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
         </div>
         <span>${money(total)}</span>
       `;
+      row.querySelector('[data-edit-cart-item]').addEventListener('click', () => editCartItem(item.key));
       return row;
     }));
   }
@@ -584,15 +746,20 @@ function renderCheckoutReview() {
   const totals = cartTotals();
   els.checkoutReviewSubtotal.textContent = money(totals.subtotal);
   els.checkoutReviewDelivery.textContent = money(totals.deliveryFee);
+  els.checkoutDiscountRow.hidden = !totals.discount;
+  els.checkoutReviewDiscount.textContent = `- ${money(totals.discount)}`;
   els.checkoutReviewTotal.textContent = money(totals.total);
+  renderCheckoutSnapshot(totals);
 }
 
 async function submitOrder(event) {
   event.preventDefault();
+  if (state.orderSubmitting) return;
   if (isStoreClosed()) {
     showClosedStoreDialog(true);
     return;
   }
+  syncLoggedCustomerFields();
   const data = new FormData(els.checkoutForm);
   const method = data.get('fulfillment_method');
   const selectedAddress = method === 'delivery' && state.savedAddressApplied ? selectedSavedAddress() : null;
@@ -600,13 +767,10 @@ async function submitOrder(event) {
     applySavedCustomerAddress(selectedAddress, { force: true });
   }
   const normalizedData = new FormData(els.checkoutForm);
-  if (!validateCheckoutData(normalizedData, method)) return;
+  const customer = checkoutCustomerFromState(normalizedData);
+  if (!validateCheckoutData(normalizedData, method, customer)) return;
   const payload = {
-    customer: {
-      name: normalizedData.get('name'),
-      phone: normalizedData.get('phone'),
-      email: normalizedData.get('email')
-    },
+    customer,
     fulfillment_method: method,
     address: method === 'delivery' ? {
       label: normalizedData.get('label') || selectedAddress?.label || 'Casa',
@@ -618,6 +782,7 @@ async function submitOrder(event) {
       reference: normalizedData.get('reference') || selectedAddress?.reference
     } : null,
     payment_method: normalizedData.get('payment_method'),
+    coupon_code: state.coupon?.code || normalizedData.get('coupon_code') || '',
     notes: normalizedData.get('notes'),
     items: state.cart.map((item) => ({
       id: item.id,
@@ -628,6 +793,7 @@ async function submitOrder(event) {
   };
 
   try {
+    setOrderSubmitting(true);
     const result = await request('/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -635,6 +801,8 @@ async function submitOrder(event) {
     });
 
     state.cart = [];
+    state.coupon = null;
+    clearCouponFeedback();
     persistCart();
     renderCart();
     els.checkoutDialog.close();
@@ -645,7 +813,65 @@ async function submitOrder(event) {
     }
   } catch (error) {
     setStatus(error.message || 'Não foi possível enviar o pedido agora.');
+  } finally {
+    setOrderSubmitting(false);
   }
+}
+
+async function applyCoupon() {
+  const code = els.couponCode.value.trim();
+  if (!code) {
+    state.coupon = null;
+    clearCouponFeedback();
+    renderCart();
+    return;
+  }
+  const totals = cartTotals({ ignoreCoupon: true });
+  try {
+    const data = await request('/api/coupons/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        subtotal: totals.subtotal,
+        delivery_fee: totals.deliveryFee
+      })
+    });
+    state.coupon = data.coupon;
+    els.couponFeedback.hidden = false;
+    els.couponFeedback.textContent = `${data.coupon.code} aplicado: - ${money(data.coupon.discount)}.`;
+    els.couponFeedback.classList.remove('error');
+    renderCart();
+  } catch (error) {
+    state.coupon = null;
+    els.couponFeedback.hidden = false;
+    els.couponFeedback.textContent = error.message || 'Cupom inválido.';
+    els.couponFeedback.classList.add('error');
+    renderCart();
+  }
+}
+
+function clearCouponFeedback() {
+  if (els.couponCode) els.couponCode.value = '';
+  if (els.couponFeedback) {
+    els.couponFeedback.hidden = true;
+    els.couponFeedback.textContent = '';
+    els.couponFeedback.classList.remove('error');
+  }
+}
+
+function renderCheckoutSnapshot(totals) {
+  if (!els.checkoutConfirmSnapshot) return;
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  const address = method === 'delivery'
+    ? [els.checkoutForm.elements.street.value, els.checkoutForm.elements.number.value, els.checkoutForm.elements.neighborhood.value, els.checkoutForm.elements.city.value].filter(Boolean).join(', ')
+    : 'Retirada no balcão';
+  const payment = els.paymentMethod.value || 'Pagamento não selecionado';
+  els.checkoutConfirmSnapshot.innerHTML = `
+    <div><strong>Entrega</strong><span>${escapeHtml(address || 'Endereço será conferido acima.')}</span></div>
+    <div><strong>Pagamento</strong><span>${escapeHtml(payment)}</span></div>
+    <div><strong>Total final</strong><span>${money(totals.total)}</span></div>
+  `;
 }
 
 function renderPaymentOptions() {
@@ -669,8 +895,8 @@ function updateCheckoutDeliveryFields() {
   });
 }
 
-function validateCheckoutData(data, method) {
-  const phone = onlyDigits(data.get('phone'));
+function validateCheckoutData(data, method, customer = checkoutCustomerFromState(data)) {
+  const phone = onlyDigits(customer.phone);
   if (!isValidBrazilianPhone(phone)) {
     return focusCheckoutField('phone', 'Informe um telefone válido com DDD. Exemplo: (11) 99999-9999.');
   }
@@ -693,10 +919,12 @@ function validateCheckoutData(data, method) {
 
 function focusCheckoutField(name, message) {
   const field = els.checkoutForm.elements[name];
-  field?.focus();
-  field?.setCustomValidity(message);
-  field?.reportValidity();
-  setTimeout(() => field?.setCustomValidity(''), 700);
+  if (field && !field.disabled) {
+    field.focus();
+    field.setCustomValidity(message);
+    field.reportValidity();
+    setTimeout(() => field.setCustomValidity(''), 700);
+  }
   setStatus(message);
   return false;
 }
@@ -712,6 +940,7 @@ async function loadLoggedCustomer() {
     clearAccountCache();
   }
   renderCustomerActions();
+  renderCheckoutCustomerSection();
 }
 
 async function logoutCustomer() {
@@ -722,6 +951,7 @@ async function logoutCustomer() {
   clearAccountCache();
   els.accountPrefill.hidden = true;
   els.deleteSavedAddressButton.hidden = true;
+  renderCheckoutCustomerSection();
   renderCustomerActions();
   setStatus('Você saiu da conta.');
 }
@@ -757,12 +987,12 @@ function renderCustomerActions() {
 function prefillCheckoutFromCustomer() {
   if (!state.customer) {
     els.accountPrefill.hidden = true;
+    renderCheckoutCustomerSection();
     return;
   }
 
-  setIfEmpty(els.checkoutForm.elements.name, state.customer.name);
-  setIfEmpty(els.checkoutForm.elements.phone, state.customer.phone);
-  setIfEmpty(els.checkoutForm.elements.email, state.customer.email);
+  syncLoggedCustomerFields();
+  renderCheckoutCustomerSection();
 
   const addresses = customerAddresses();
   const hasAddress = addresses.length > 0;
@@ -782,6 +1012,55 @@ function prefillCheckoutFromCustomer() {
     els.accountPrefillTitle.textContent = `Olá, ${state.customer.name}`;
     updatePrefillNotice('Dados da conta carregados. Cadastre um endereço neste pedido ou em Minha conta.');
   }
+}
+
+function syncLoggedCustomerFields() {
+  if (!state.customer) return;
+  setValue(els.checkoutForm.elements.name, state.customer.name || '');
+  setValue(els.checkoutForm.elements.phone, formatPhone(state.customer.phone || ''));
+}
+
+function renderCheckoutCustomerSection() {
+  const isLogged = Boolean(state.customer);
+  els.checkoutCustomerSummary.hidden = !isLogged;
+  els.checkoutCustomerName.textContent = state.customer?.name || 'Cliente';
+  els.checkoutCustomerPhone.textContent = state.customer?.phone ? formatPhone(state.customer.phone) : 'Telefone não informado';
+
+  ['name', 'phone'].forEach((name) => {
+    const field = els.checkoutForm.elements[name];
+    if (!field) return;
+    field.hidden = isLogged;
+    field.disabled = isLogged;
+    field.required = !isLogged;
+    field.classList.toggle('readonly-field', isLogged);
+  });
+}
+
+function checkoutCustomerFromState(data) {
+  if (state.customer) {
+    return {
+      name: state.customer.name || data.get('name'),
+      phone: state.customer.phone || data.get('phone'),
+      email: state.customer.email || null
+    };
+  }
+
+  return {
+    name: data.get('name'),
+    phone: data.get('phone'),
+    email: null
+  };
+}
+
+function setOrderSubmitting(isSubmitting) {
+  state.orderSubmitting = isSubmitting;
+  if (els.confirmOrderButton) {
+    els.confirmOrderButton.disabled = isSubmitting;
+    els.confirmOrderButton.textContent = isSubmitting ? 'Enviando pedido...' : 'Confirmar pedido';
+  }
+  if (els.cancelCheckoutButton) els.cancelCheckoutButton.disabled = isSubmitting;
+  if (els.checkoutButton) els.checkoutButton.disabled = isSubmitting || state.cart.length === 0 || isStoreClosed();
+  if (els.mobileBagButton) els.mobileBagButton.disabled = isSubmitting || state.cart.length === 0 || isStoreClosed();
 }
 
 function renderSavedAddressOptions(addresses) {
@@ -981,9 +1260,25 @@ function saveCachedBootstrap(data) {
 }
 
 function visibleCategories() {
+  if (state.activeCategory === 'favorites') {
+    return state.categories
+      .map((category) => ({
+        ...category,
+        items: (category.items || []).filter((item) => state.favorites.has(item.id))
+      }))
+      .filter((category) => category.items.length > 0);
+  }
   return state.categories
     .filter((category) => state.activeCategory === 'all' || category.id === state.activeCategory)
     .map((category) => ({ ...category, items: category.items || [] }));
+}
+
+function allProducts() {
+  return state.categories.flatMap((category) => category.items || []);
+}
+
+function findProductById(id) {
+  return allProducts().find((item) => item.id === id);
 }
 
 function matchesQuery(item) {
@@ -991,11 +1286,12 @@ function matchesQuery(item) {
   return [item.name, item.description, ...(item.tags || [])].join(' ').toLowerCase().includes(state.query);
 }
 
-function cartTotals() {
+function cartTotals(options = {}) {
   const subtotal = state.cart.reduce((sum, item) => sum + Number(item.price || 0) * item.quantity, 0);
   const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
   const deliveryFee = method === 'pickup' ? 0 : Number(state.store?.delivery_fee || 0);
-  return { subtotal, deliveryFee, total: subtotal + deliveryFee };
+  const discount = options.ignoreCoupon ? 0 : Math.min(subtotal + deliveryFee, Number(state.coupon?.discount || 0));
+  return { subtotal, deliveryFee, discount, total: subtotal + deliveryFee - discount };
 }
 
 function loadCart() {
@@ -1014,6 +1310,18 @@ function loadCart() {
 
 function persistCart() {
   localStorage.setItem('cart', JSON.stringify(state.cart));
+}
+
+function loadFavorites() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistFavorites() {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...state.favorites]));
 }
 
 function renderEmptyState() {

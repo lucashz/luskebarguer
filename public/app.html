@@ -10,6 +10,7 @@
     <header class="public-topbar">
       <a class="brand-mark" href="/">Cardápio</a>
       <div class="public-actions">
+        <a class="link-button" href="/pedidos">Meus pedidos</a>
         <a class="link-button" href="/conta">Minha conta</a>
         <button class="text-button" id="customerLogoutButton" type="button" hidden>Sair</button>
       </div>
@@ -35,7 +36,8 @@
       <aside class="category-rail">
         <label class="search-box">
           <span>Buscar no cardápio</span>
-          <input id="searchInput" type="search" placeholder="Busque por produto">
+          <input id="searchInput" type="search" list="searchSuggestions" placeholder="Busque por produto">
+          <datalist id="searchSuggestions"></datalist>
         </label>
         <nav id="categoryNav" class="category-list" aria-label="Categorias"></nav>
       </aside>
@@ -47,6 +49,7 @@
             <p>Produtos disponiveis para pedido agora.</p>
           </div>
         </div>
+        <section class="favorites-strip" id="favoritesStrip" hidden></section>
         <section class="featured-strip" id="featured" aria-label="Destaques"></section>
         <section class="menu-sections" id="menu" aria-label="Cardápio"></section>
       </section>
@@ -111,11 +114,15 @@
           </div>
         </section>
 
-        <fieldset>
+        <fieldset id="checkoutCustomerFieldset">
           <legend>Cliente</legend>
-          <input name="name" required placeholder="Nome completo">
+          <div class="checkout-customer-summary" id="checkoutCustomerSummary" hidden>
+            <strong id="checkoutCustomerName">Cliente</strong>
+            <span id="checkoutCustomerPhone">Telefone</span>
+            <small>Dados carregados da sua conta.</small>
+          </div>
+          <input name="name" required autocomplete="name" placeholder="Nome completo">
           <input name="phone" required inputmode="tel" autocomplete="tel" maxlength="15" placeholder="Telefone com DDD">
-          <input name="email" type="email" placeholder="E-mail opcional">
         </fieldset>
 
         <fieldset>
@@ -137,12 +144,19 @@
             <option value="Casa"></option>
             <option value="Trabalho"></option>
             <option value="Família"></option>
+            <option value="Namorada"></option>
+            <option value="Faculdade"></option>
           </datalist>
         </fieldset>
 
         <fieldset>
           <legend>Pagamento</legend>
           <select name="payment_method" id="paymentMethod" required></select>
+          <div class="coupon-row">
+            <input name="coupon_code" id="couponCode" placeholder="Cupom de desconto">
+            <button class="ghost-button compact" id="applyCouponButton" type="button">Aplicar</button>
+          </div>
+          <p class="coupon-feedback" id="couponFeedback" hidden></p>
           <textarea name="notes" placeholder="Observações do pedido"></textarea>
         </fieldset>
 
@@ -152,13 +166,15 @@
           <div class="checkout-review-totals">
             <div><span>Subtotal</span><strong id="checkoutReviewSubtotal">R$ 0,00</strong></div>
             <div><span>Entrega</span><strong id="checkoutReviewDelivery">R$ 0,00</strong></div>
+            <div id="checkoutDiscountRow" hidden><span>Desconto</span><strong id="checkoutReviewDiscount">- R$ 0,00</strong></div>
             <div class="grand-total"><span>Total</span><strong id="checkoutReviewTotal">R$ 0,00</strong></div>
           </div>
+          <div class="checkout-confirm-snapshot" id="checkoutConfirmSnapshot"></div>
         </fieldset>
 
         <div class="checkout-dialog-footer">
           <button class="ghost-button" type="button" id="cancelCheckoutButton">Cancelar</button>
-          <button class="primary-button" type="submit">Confirmar pedido</button>
+          <button class="primary-button" id="confirmOrderButton" type="submit">Confirmar pedido</button>
         </div>
       </form>
     </dialog>

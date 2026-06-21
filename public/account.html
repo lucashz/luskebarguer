@@ -16,7 +16,7 @@
       <section class="account-loading panel" id="accountLoading">
         <span class="loading-dot"></span>
         <div>
-          <p class="eyebrow">Minha conta</p>
+          <p class="eyebrow" id="accountLoadingEyebrow">Minha conta</p>
           <h1>Carregando seus dados</h1>
         </div>
       </section>
@@ -64,10 +64,12 @@
       <section class="account-shell" id="accountShell" hidden>
         <header class="account-header">
           <div>
-            <p class="eyebrow">Minha conta</p>
+            <p class="eyebrow" id="accountPageEyebrow">Minha conta</p>
             <h1 id="customerName">Cliente</h1>
           </div>
           <div class="row-actions">
+            <a class="ghost-button compact" id="accountOrdersLink" href="/pedidos">Meus pedidos</a>
+            <a class="ghost-button compact" id="accountDashboardLink" href="/conta" hidden>Minha conta</a>
             <button class="ghost-button compact" id="editProfileButton" type="button">Editar dados</button>
             <button class="text-button" id="logoutButton" type="button">Sair</button>
           </div>
@@ -180,7 +182,9 @@
           <datalist id="addressLabelSuggestions">
             <option value="Casa"></option>
             <option value="Trabalho"></option>
-            <option value="Familia"></option>
+            <option value="Família"></option>
+            <option value="Namorada"></option>
+            <option value="Faculdade"></option>
             <option value="Retirada"></option>
           </datalist>
           <div class="account-address-list" id="accountAddressList"></div>

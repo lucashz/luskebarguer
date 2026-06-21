@@ -15,6 +15,7 @@
           <button data-admin-tab="orders" type="button">Pedidos</button>
           <button data-admin-tab="menu" type="button">Cardápio</button>
           <button data-admin-tab="reports" type="button">Relatórios</button>
+          <button data-admin-tab="promotions" type="button">Promoções</button>
           <button data-admin-tab="customers" type="button">Clientes</button>
           <button data-admin-tab="store" type="button">Loja</button>
           <button data-admin-tab="account" type="button">Conta</button>
@@ -256,6 +257,55 @@
             </div>
           </section>
 
+          <section class="admin-section" data-admin-section="promotions">
+            <div class="section-actions">
+              <div>
+                <p class="eyebrow">Cupons e campanhas</p>
+                <h2>Promoções</h2>
+              </div>
+            </div>
+            <section class="promo-layout">
+              <form id="promotionForm" class="panel stack-form promo-form">
+                <div>
+                  <h3>Criar promoção</h3>
+                  <p class="muted">Crie cupons sem alterar preços dos produtos. Depois você pode divulgar o código para o cliente.</p>
+                </div>
+                <input name="name" required placeholder="Nome da promoção">
+                <input name="code" required placeholder="Código: PRIMEIRA10">
+                <textarea name="description" placeholder="Descrição interna ou regra simples"></textarea>
+                <div class="two-cols">
+                  <label>Tipo
+                    <select name="discount_type">
+                      <option value="fixed">Valor fixo</option>
+                      <option value="percent">Percentual</option>
+                      <option value="free_delivery">Frete grátis</option>
+                    </select>
+                  </label>
+                  <label>Desconto<input name="discount_value" type="number" min="0" step="0.01" value="0"></label>
+                </div>
+                <div class="two-cols">
+                  <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" value="0"></label>
+                  <label>Limite de usos<input name="max_uses" type="number" min="1" placeholder="Sem limite"></label>
+                </div>
+                <div class="two-cols">
+                  <label>Início<input name="starts_at" type="datetime-local"></label>
+                  <label>Fim<input name="ends_at" type="datetime-local"></label>
+                </div>
+                <label class="check"><input name="is_active" type="checkbox" checked> Promoção ativa</label>
+                <button class="primary-button wide">Salvar promoção</button>
+              </form>
+              <section class="panel menu-list-panel">
+                <div class="section-actions">
+                  <div>
+                    <h3>Cupons cadastrados</h3>
+                    <p class="muted">Ative, pause ou exclua campanhas rapidamente.</p>
+                  </div>
+                </div>
+                <div class="admin-list" id="promotionList"></div>
+              </section>
+            </section>
+          </section>
+
           <section class="admin-section" data-admin-section="customers">
             <div class="section-actions">
               <h2>Clientes</h2>
@@ -318,6 +368,24 @@
                   <div class="two-cols">
                     <label>Taxa de entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
                     <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
+                  </div>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Horários de funcionamento</strong>
+                  <p>Esses horários aparecem quando a loja está fechada, ajudando o cliente a saber quando voltar.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="business-hours-grid" id="businessHoursGrid">
+                    <label data-day="monday"><span>Segunda</span><input name="monday_open" type="time"><input name="monday_close" type="time"><small><input name="monday_closed" type="checkbox"> Fechado</small></label>
+                    <label data-day="tuesday"><span>Terça</span><input name="tuesday_open" type="time"><input name="tuesday_close" type="time"><small><input name="tuesday_closed" type="checkbox"> Fechado</small></label>
+                    <label data-day="wednesday"><span>Quarta</span><input name="wednesday_open" type="time"><input name="wednesday_close" type="time"><small><input name="wednesday_closed" type="checkbox"> Fechado</small></label>
+                    <label data-day="thursday"><span>Quinta</span><input name="thursday_open" type="time"><input name="thursday_close" type="time"><small><input name="thursday_closed" type="checkbox"> Fechado</small></label>
+                    <label data-day="friday"><span>Sexta</span><input name="friday_open" type="time"><input name="friday_close" type="time"><small><input name="friday_closed" type="checkbox"> Fechado</small></label>
+                    <label data-day="saturday"><span>Sábado</span><input name="saturday_open" type="time"><input name="saturday_close" type="time"><small><input name="saturday_closed" type="checkbox"> Fechado</small></label>
+                    <label data-day="sunday"><span>Domingo</span><input name="sunday_open" type="time"><input name="sunday_close" type="time"><small><input name="sunday_closed" type="checkbox"> Fechado</small></label>
                   </div>
                 </div>
               </section>

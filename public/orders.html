@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Meus Pedidos - Cardápio</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="account-page orders-page">
+    <header class="public-topbar">
+      <a class="brand-mark" href="/">Cardápio</a>
+      <div class="public-actions">
+        <a class="link-button" href="/">Cardápio</a>
+        <a class="link-button" href="/conta">Minha conta</a>
+      </div>
+    </header>
+
+    <main class="orders-layout">
+      <section class="orders-hero panel">
+        <div>
+          <p class="eyebrow">Meus pedidos</p>
+          <h1>Acompanhe seu histórico</h1>
+          <p>Veja o status atual, confira os itens e refaça pedidos anteriores quando quiser.</p>
+        </div>
+        <button class="ghost-button compact" id="refreshOrdersButton" type="button">Atualizar</button>
+      </section>
+
+      <section class="orders-login panel" id="ordersLogin" hidden>
+        <p class="eyebrow">Acesso do cliente</p>
+        <h2>Entre para ver seus pedidos</h2>
+        <p class="muted">Se você já tem conta, entre para acompanhar pedidos atuais e anteriores.</p>
+        <a class="primary-button wide" href="/conta">Entrar ou criar conta</a>
+      </section>
+
+      <p class="cache-notice" id="ordersCacheNotice" hidden></p>
+      <section class="orders-list" id="ordersList">
+        <article class="panel account-loading">
+          <span class="loading-dot"></span>
+          <div>
+            <p class="eyebrow">Carregando</p>
+            <h2>Buscando seus pedidos</h2>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="/orders.js" type="module"></script>
+  </body>
+</html>

@@ -4,6 +4,7 @@
   categories: [],
   orders: [],
   customers: [],
+  promotions: [],
   knownOrderIds: new Set(),
   initialOrdersLoaded: false,
   orderPollTimer: null,
@@ -19,10 +20,21 @@
   openModifierGroupIds: new Set(),
   openCustomerIds: new Set(),
   modifierCreateDrafts: new Map(),
-  currentReport: null
+  currentReport: null,
+  draggedOrderId: null,
+  updatingOrderIds: new Set()
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v1';
+const businessDayLabels = [
+  ['monday', '18:00', '23:00'],
+  ['tuesday', '18:00', '23:00'],
+  ['wednesday', '18:00', '23:00'],
+  ['thursday', '18:00', '23:00'],
+  ['friday', '18:00', '23:30'],
+  ['saturday', '18:00', '23:30'],
+  ['sunday', '18:00', '23:00']
+];
 
 const els = {
   authScreen: document.querySelector('#authScreen'),
@@ -102,6 +114,8 @@ const els = {
   storeForm: document.querySelector('#storeForm'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
+  promotionForm: document.querySelector('#promotionForm'),
+  promotionList: document.querySelector('#promotionList'),
   toast: document.querySelector('#toast')
 };
 
@@ -168,6 +182,7 @@ els.storeForm.addEventListener('change', () => {
 });
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
+els.promotionForm?.addEventListener('submit', submitPromotion);
 
 renderKitchenModeButton();
 renderAutoPrintButton();
@@ -252,6 +267,7 @@ async function loadSummary(options = {}) {
   state.categories = data.categories || [];
   state.orders = data.orders || [];
   state.customers = data.customers || [];
+  state.promotions = data.promotions || [];
   saveAdminCache();
   detectNewOrders(previousIds, state.orders, options);
   state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
@@ -265,6 +281,7 @@ function render() {
   renderOrderMetrics();
   renderOrders();
   renderCustomers();
+  renderPromotions();
   renderMenu();
   renderCategoryOptions();
   fillStoreForm();
@@ -656,12 +673,14 @@ function orderCard(order) {
       event.preventDefault();
       return;
     }
+    state.draggedOrderId = order.id;
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', order.id);
     event.dataTransfer.setData('application/json', JSON.stringify({ id: order.id, status: order.status }));
     card.classList.add('dragging');
   });
   card.addEventListener('dragend', () => {
+    state.draggedOrderId = null;
     card.classList.remove('dragging');
     document.querySelectorAll('.order-column.drag-over').forEach((column) => column.classList.remove('drag-over'));
   });
@@ -944,24 +963,42 @@ async function handleOrderBoardDrop(event) {
   const column = closestOrderColumnFromPoint(event.clientX, event.clientY);
   clearDragColumns();
   if (!column) return;
-  const orderId = event.dataTransfer.getData('text/plain');
+  const orderId = event.dataTransfer.getData('text/plain') || state.draggedOrderId;
   const status = column.dataset.orderStatus;
   const order = state.orders.find((item) => String(item.id) === String(orderId));
   if (!order || !status || order.status === status) return;
-  await updateOrderStatus(order.id, status);
+  updateOrderStatus(order.id, status);
   toast(`Pedido #${order.public_code} movido para ${statusLabel(status)}.`);
 }
 
 function closestOrderColumnFromPoint(x, y) {
   const columns = [...els.adminOrders.querySelectorAll('.order-column')];
-  return columns.find((column) => {
+  const elementAtPoint = document.elementFromPoint(x, y);
+  const directColumn = elementAtPoint?.closest?.('.order-column');
+  if (directColumn && els.adminOrders.contains(directColumn)) return directColumn;
+
+  const boardRect = els.adminOrders.getBoundingClientRect();
+  const outsideBoard =
+    x < boardRect.left - 24 ||
+    x > boardRect.right + 24 ||
+    y < boardRect.top - 24 ||
+    y > boardRect.bottom + 24;
+  if (outsideBoard) return null;
+
+  const containingColumn = columns.find((column) => {
     const rect = column.getBoundingClientRect();
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-  }) || columns
+  });
+  if (containingColumn) return containingColumn;
+
+  return columns
     .map((column) => {
       const rect = column.getBoundingClientRect();
-      const center = rect.left + rect.width / 2;
-      return { column, distance: Math.abs(x - center) };
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const horizontalDistance = Math.abs(x - centerX);
+      const verticalDistance = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      return { column, distance: horizontalDistance + verticalDistance * 1.5 };
     })
     .sort((a, b) => a.distance - b.distance)[0]?.column || null;
 }
@@ -977,13 +1014,15 @@ function clearDragColumns() {
 }
 
 async function updateOrderStatus(orderId, status) {
+  if (state.updatingOrderIds.has(orderId)) return;
   const order = state.orders.find((item) => String(item.id) === String(orderId));
   const previousStatus = order?.status;
 
+  if (previousStatus === status) return;
+  state.updatingOrderIds.add(orderId);
+
   if (order && previousStatus !== status) {
-    order.status = status;
-    renderOrderMetrics();
-    renderOrders();
+    applyOrderStatusLocally(order, status);
   }
 
   try {
@@ -995,15 +1034,43 @@ async function updateOrderStatus(orderId, status) {
     if (state.autoPrintAccepted && status === 'accepted' && previousStatus !== 'accepted' && order) {
       printOrderLabel({ ...order, status });
     }
-    await loadSummary({ skipNotifications: true });
+    loadSummary({ skipNotifications: true, silent: true }).catch(() => {});
   } catch (error) {
     if (order && previousStatus) {
-      order.status = previousStatus;
-      renderOrderMetrics();
-      renderOrders();
+      applyOrderStatusLocally(order, previousStatus);
     }
     toast(error.message || 'Não foi possível atualizar o pedido.');
+  } finally {
+    state.updatingOrderIds.delete(orderId);
   }
+}
+
+function applyOrderStatusLocally(order, status) {
+  order.status = status;
+  renderOrderMetrics();
+
+  const currentCard = [...els.adminOrders.querySelectorAll('.order-card')]
+    .find((card) => String(card.dataset.orderId) === String(order.id));
+  const targetColumn = [...els.adminOrders.querySelectorAll('.order-column')]
+    .find((column) => column.dataset.orderStatus === status);
+
+  if (!currentCard || !targetColumn) {
+    renderOrders();
+    return;
+  }
+
+  const freshCard = orderCard(order);
+  targetColumn.append(freshCard);
+  currentCard.remove();
+  updateOrderColumnCounts();
+}
+
+function updateOrderColumnCounts() {
+  els.adminOrders.querySelectorAll('.order-column').forEach((column) => {
+    const count = state.orders.filter((order) => order.status === column.dataset.orderStatus).length;
+    const badge = column.querySelector('h3 strong');
+    if (badge) badge.textContent = count;
+  });
 }
 
 function renderCustomers() {
@@ -1013,6 +1080,85 @@ function renderCustomers() {
     return;
   }
   els.adminCustomers.replaceChildren(...state.customers.map(customerEditor));
+}
+
+function renderPromotions() {
+  if (!els.promotionList) return;
+  if (!state.promotions.length) {
+    els.promotionList.innerHTML = '<p class="muted">Nenhuma promoção cadastrada.</p>';
+    return;
+  }
+  els.promotionList.replaceChildren(...state.promotions.map(promotionCard));
+}
+
+function promotionCard(promotion) {
+  const card = document.createElement('article');
+  card.className = `list-card promo-card ${promotion.is_active ? '' : 'muted-card'}`;
+  const discount = promotion.discount_type === 'free_delivery'
+    ? 'Frete grátis'
+    : promotion.discount_type === 'percent'
+      ? `${Number(promotion.discount_value || 0)}%`
+      : money(promotion.discount_value || 0);
+  const period = [
+    promotion.starts_at ? `Início ${new Date(promotion.starts_at).toLocaleDateString('pt-BR')}` : null,
+    promotion.ends_at ? `Fim ${new Date(promotion.ends_at).toLocaleDateString('pt-BR')}` : null
+  ].filter(Boolean).join(' - ') || 'Sem período definido';
+  const usage = promotion.max_uses
+    ? `${promotion.used_count || 0}/${promotion.max_uses} uso(s)`
+    : `${promotion.used_count || 0} uso(s)`;
+  card.innerHTML = `
+    <div>
+      <strong>${escapeHtml(promotion.name)}</strong>
+      <p><code>${escapeHtml(promotion.code)}</code> - ${discount} - mínimo ${money(promotion.minimum_order || 0)}</p>
+      <small>${escapeHtml(promotion.description || period)} - ${usage}</small>
+    </div>
+    <div class="row-actions">
+      <button class="ghost-button compact" type="button" data-action="toggle">${promotion.is_active ? 'Pausar' : 'Ativar'}</button>
+      <button class="danger-button compact" type="button" data-action="delete">Excluir</button>
+    </div>
+  `;
+  card.querySelector('[data-action="toggle"]').addEventListener('click', async () => {
+    await updatePromotion(promotion.id, { is_active: !promotion.is_active });
+    toast(promotion.is_active ? 'Promoção pausada.' : 'Promoção ativada.');
+  });
+  card.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+    if (!confirm(`Excluir a promoção "${promotion.name}"?`)) return;
+    await deletePromotion(promotion.id);
+    toast('Promoção excluída.');
+  });
+  return card;
+}
+
+async function submitPromotion(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(els.promotionForm));
+  data.is_active = els.promotionForm.elements.is_active.checked;
+  const result = await request('/api/admin/promotions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  state.promotions.unshift(result.promotion);
+  els.promotionForm.reset();
+  els.promotionForm.elements.is_active.checked = true;
+  renderPromotions();
+  toast('Promoção criada.');
+}
+
+async function updatePromotion(id, payload) {
+  const result = await request(`/api/admin/promotions/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  state.promotions = state.promotions.map((promotion) => promotion.id === id ? result.promotion : promotion);
+  renderPromotions();
+}
+
+async function deletePromotion(id) {
+  await request(`/api/admin/promotions/${id}`, { method: 'DELETE' });
+  state.promotions = state.promotions.filter((promotion) => promotion.id !== id);
+  renderPromotions();
 }
 
 function rememberOpenCustomers() {
@@ -1036,6 +1182,10 @@ function customerEditor(customer) {
   const addresses = customer.addresses || [];
   const defaultAddress = addresses.find((address) => address.is_default) || addresses[0];
   const customerOrders = state.orders.filter((order) => order.customer_id === customer.id);
+  const completedOrders = customerOrders.filter((order) => order.status === 'completed').length;
+  const customerRevenue = customerOrders
+    .filter((order) => order.status !== 'cancelled')
+    .reduce((total, order) => total + Number(order.total || 0), 0);
   const lastSeen = customer.last_login_at
     ? `Último acesso ${new Date(customer.last_login_at).toLocaleDateString('pt-BR')}`
     : `Cadastrado em ${new Date(customer.created_at).toLocaleDateString('pt-BR')}`;
@@ -1050,7 +1200,8 @@ function customerEditor(customer) {
       </button>
       <div class="customer-summary-pills">
         <span class="pill">${addresses.length} endereço${addresses.length === 1 ? '' : 's'}</span>
-        <span class="pill">${customerOrders.length} pedido${customerOrders.length === 1 ? '' : 's'} na fila</span>
+        <span class="pill">${customerOrders.length} pedido${customerOrders.length === 1 ? '' : 's'}</span>
+        <span class="pill">${money(customerRevenue)}</span>
       </div>
       <div class="row-actions">
         <button class="ghost-button compact" type="button" data-action="edit">Editar</button>
@@ -1061,7 +1212,7 @@ function customerEditor(customer) {
       <form class="customer-main-form">
         <div class="section-actions">
           <h3>Cadastro do cliente</h3>
-          <span class="pill">${customerOrders.length} pedido(s) na fila atual</span>
+          <span class="pill">${completedOrders} concluído(s)</span>
         </div>
       <div class="editor-grid">
         <label>Nome<input name="name" required value="${escapeAttribute(customer.name)}"></label>
@@ -1093,6 +1244,18 @@ function customerEditor(customer) {
           </form>
         </div>
       </details>
+      <details class="customer-addresses customer-orders-history" ${customerOrders.length ? '' : 'open'}>
+        <summary>
+          <span>
+            <strong>Histórico de pedidos</strong>
+            <small>${customerOrders.length ? `${customerOrders.length} pedido${customerOrders.length === 1 ? '' : 's'} carregado${customerOrders.length === 1 ? '' : 's'}` : 'Nenhum pedido recente'}</small>
+          </span>
+          <em>Ver pedidos</em>
+        </summary>
+        <div class="customer-order-list">
+          ${customerOrders.slice(0, 8).map(customerOrderHistoryRow).join('') || '<p class="muted">Sem pedidos recentes para este cliente.</p>'}
+        </div>
+      </details>
     </div>
   `;
 
@@ -1119,6 +1282,12 @@ function customerEditor(customer) {
     await removeAdminCustomer(customer.id);
     toast('Cliente excluído.');
   });
+  card.querySelectorAll('[data-whatsapp-status]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const order = state.orders.find((item) => item.id === button.dataset.whatsappStatus);
+      if (order) notifyOrderStatus(order);
+    });
+  });
 
   const mainForm = card.querySelector('.customer-main-form');
   mainForm.addEventListener('submit', async (event) => {
@@ -1142,6 +1311,19 @@ function customerEditor(customer) {
   });
 
   return card;
+}
+
+function customerOrderHistoryRow(order) {
+  const createdAt = new Date(order.created_at).toLocaleString('pt-BR');
+  return `
+    <article class="customer-order-row status-${order.status}">
+      <div>
+        <strong>#${escapeHtml(order.public_code)} - ${money(order.total)}</strong>
+        <small>${createdAt} - ${statusLabel(order.status)}</small>
+      </div>
+      <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar</button>
+    </article>
+  `;
 }
 
 function customerAddressForm(customerId, address) {
@@ -2086,14 +2268,24 @@ async function submitStore(event) {
     els.storeForm.elements.whatsapp_number.focus();
     return;
   }
-  await request('/api/admin/store', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+  await withSaving(els.storeForm, async () => {
+    const result = await request('/api/admin/store', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const updatedStore = Array.isArray(result) ? result[0] : result?.[0] || result?.store || result;
+    if (updatedStore?.id) {
+      state.store = updatedStore;
+    } else {
+      state.store = { ...(state.store || {}), ...payload };
+    }
+    state.storeFormDirty = false;
+    saveAdminCache();
+    renderOperation();
+    fillStoreForm();
+    toast(`Loja atualizada. WhatsApp salvo: ${payload.whatsapp_number}`);
   });
-  state.storeFormDirty = false;
-  await loadSummary();
-  toast(`Loja atualizada. WhatsApp salvo: ${payload.whatsapp_number}`);
 }
 
 async function updateCategory(id, payload, options = {}) {
@@ -2283,6 +2475,7 @@ function activateAdminTab(tab) {
     orders: 'Pedidos',
     menu: 'Cardápio',
     reports: 'Relatórios',
+    promotions: 'Promoções',
     customers: 'Clientes',
     store: 'Loja',
     account: 'Conta'
@@ -2343,6 +2536,7 @@ function fillStoreForm() {
   els.storeForm.elements.is_open.checked = store.is_open !== false;
   els.storeForm.elements.accepts_delivery.checked = store.accepts_delivery !== false;
   els.storeForm.elements.accepts_pickup.checked = store.accepts_pickup !== false;
+  fillBusinessHours(store.business_hours || {});
 }
 
 function fillAccountForm() {
@@ -2542,10 +2736,30 @@ function formToStore(form) {
     delivery_fee: data.get('delivery_fee'),
     minimum_order: data.get('minimum_order'),
     payment_methods: [...new Set(paymentMethods)],
+    business_hours: businessHoursFromForm(data),
     is_open: data.get('is_open') === 'on',
     accepts_delivery: data.get('accepts_delivery') === 'on',
     accepts_pickup: data.get('accepts_pickup') === 'on'
   };
+}
+
+function fillBusinessHours(hours = {}) {
+  for (const [day, defaultOpen, defaultClose] of businessDayLabels) {
+    const entry = hours[day] || {};
+    setValue(els.storeForm.elements[`${day}_open`], entry.open || defaultOpen);
+    setValue(els.storeForm.elements[`${day}_close`], entry.close || defaultClose);
+    if (els.storeForm.elements[`${day}_closed`]) {
+      els.storeForm.elements[`${day}_closed`].checked = Boolean(entry.closed);
+    }
+  }
+}
+
+function businessHoursFromForm(data) {
+  return Object.fromEntries(businessDayLabels.map(([day, defaultOpen, defaultClose]) => [day, {
+    open: data.get(`${day}_open`) || defaultOpen,
+    close: data.get(`${day}_close`) || defaultClose,
+    closed: data.get(`${day}_closed`) === 'on'
+  }]));
 }
 
 function customerPayloadFromForm(form) {

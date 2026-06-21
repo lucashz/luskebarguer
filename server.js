@@ -103,6 +103,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/coupons/preview') {
+    json(res, 200, { coupon: await previewCoupon(await readJson(req)) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/menu') {
     json(res, 200, { categories: await getMenu(false) });
     return;
@@ -239,7 +244,8 @@ async function handleApi(req, res, url) {
       store: await getStoreSettings(),
       categories: await getMenu(true),
       orders: await listOrders(),
-      customers: await listCustomers()
+      customers: await listCustomers(),
+      promotions: await listPromotions()
     });
     return;
   }
@@ -350,6 +356,34 @@ async function handleApi(req, res, url) {
     }
     if (method === 'DELETE') {
       json(res, 200, { customer: await deleteCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2]) });
+      return;
+    }
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/promotions') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 200, { promotions: await listPromotions() });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/promotions') {
+    if (!(await requireAdmin(req, res))) return;
+    const [promotion] = await supabase('POST', 'promotions', {}, sanitizePromotion(await readJson(req), true), ['Prefer: return=representation']);
+    json(res, 201, { promotion });
+    return;
+  }
+
+  const promotionMatch = url.pathname.match(/^\/api\/admin\/promotions\/([a-f0-9-]+)$/i);
+  if (promotionMatch) {
+    if (!(await requireAdmin(req, res))) return;
+    if (method === 'PUT' || method === 'PATCH') {
+      const [promotion] = await supabase('PATCH', 'promotions', { id: `eq.${promotionMatch[1]}` }, sanitizePromotion(await readJson(req), false), ['Prefer: return=representation']);
+      json(res, 200, { promotion });
+      return;
+    }
+    if (method === 'DELETE') {
+      await supabase('DELETE', 'promotions', { id: `eq.${promotionMatch[1]}` }, undefined, ['Prefer: return=minimal']);
+      json(res, 200, { ok: true });
       return;
     }
   }
@@ -806,7 +840,8 @@ async function getStoreSettings() {
     accepts_pickup: true,
     delivery_fee: 0,
     minimum_order: 0,
-    payment_methods: ['Pix', 'Cartão', 'Dinheiro']
+    payment_methods: ['Pix', 'Cartão', 'Dinheiro'],
+    business_hours: defaultBusinessHours()
   };
 }
 
@@ -862,6 +897,7 @@ async function setStoreOpen(isOpen) {
     delivery_fee: current.delivery_fee || 0,
     minimum_order: current.minimum_order || 0,
     payment_methods: current.payment_methods || ['Pix', 'Cartão', 'Dinheiro'],
+    business_hours: current.business_hours || defaultBusinessHours(),
     ...payload
   }, ['Prefer: return=representation']);
   return created;
@@ -922,6 +958,7 @@ async function createOrder(req, data) {
   const address = fulfillmentMethod === 'delivery' ? sanitizeAddress(data.address || {}) : null;
   const paymentMethod = cleanText(data.payment_method || '');
   const notes = cleanText(data.notes || '');
+  const couponCode = cleanText(data.coupon_code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '');
   const requestedItems = Array.isArray(data.items) ? data.items : [];
 
   if (!paymentMethod) throw httpError(422, 'Informe a forma de pagamento.');
@@ -977,7 +1014,9 @@ async function createOrder(req, data) {
   }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
   const deliveryFee = fulfillmentMethod === 'delivery' ? moneyNumber(store.delivery_fee) : 0;
-  const total = roundMoney(subtotal + deliveryFee);
+  const coupon = couponCode ? await findActivePromotion(couponCode, subtotal, deliveryFee) : null;
+  const discount = coupon ? couponDiscountAmount(coupon, subtotal, deliveryFee) : 0;
+  const total = roundMoney(Math.max(0, subtotal + deliveryFee - discount));
   const customerRow = session ? await getCustomerProfile(session.data.id) : await upsertCustomer(customer);
 
   if (fulfillmentMethod === 'delivery') {
@@ -994,14 +1033,20 @@ async function createOrder(req, data) {
     address_snapshot: address,
     subtotal,
     delivery_fee: deliveryFee,
-    discount: 0,
+    discount,
     total,
-    notes
+    notes,
+    promotion_code: coupon?.code || null
   };
 
   const [order] = await supabase('POST', 'orders', {}, orderPayload, ['Prefer: return=representation']);
   const itemsWithOrder = orderItems.map((item) => ({ ...item, order_id: order.id }));
   await supabase('POST', 'order_items', {}, itemsWithOrder, ['Prefer: return=representation']);
+  if (coupon) {
+    await supabase('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
+      used_count: Number(coupon.used_count || 0) + 1
+    }, ['Prefer: return=minimal']);
+  }
 
   const whatsappMessage = buildWhatsappMessage(store, order, itemsWithOrder, customer, address);
   const [updatedOrder] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
@@ -1518,6 +1563,76 @@ async function listCustomers() {
   })));
 }
 
+async function listPromotions() {
+  try {
+    return await supabase('GET', 'promotions', {
+      select: '*',
+      order: 'created_at.desc'
+    });
+  } catch (error) {
+    const detail = JSON.stringify(error.detail || '');
+    if (error.status === 404 || detail.includes('promotions')) return [];
+    throw error;
+  }
+}
+
+async function previewCoupon(data) {
+  const code = cleanText(data.code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  const subtotal = roundMoney(Number.parseFloat(data.subtotal) || 0);
+  const deliveryFee = roundMoney(Number.parseFloat(data.delivery_fee) || 0);
+  if (!code) throw httpError(422, 'Informe o cupom.');
+  const coupon = await findActivePromotion(code, subtotal, deliveryFee);
+  const discount = couponDiscountAmount(coupon, subtotal, deliveryFee);
+  return {
+    code: coupon.code,
+    name: coupon.name,
+    description: coupon.description || null,
+    discount,
+    discount_type: coupon.discount_type
+  };
+}
+
+async function findActivePromotion(code, subtotal, deliveryFee) {
+  const rows = await supabase('GET', 'promotions', {
+    select: '*',
+    code: `eq.${code}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  const coupon = rows[0];
+  if (!coupon) throw httpError(404, 'Cupom não encontrado ou inativo.');
+  const now = Date.now();
+  if (coupon.starts_at && new Date(coupon.starts_at).getTime() > now) throw httpError(422, 'Cupom ainda não começou.');
+  if (coupon.ends_at && new Date(coupon.ends_at).getTime() < now) throw httpError(422, 'Cupom expirado.');
+  if (coupon.max_uses && Number(coupon.used_count || 0) >= Number(coupon.max_uses)) throw httpError(422, 'Cupom esgotado.');
+  if (subtotal < moneyNumber(coupon.minimum_order)) {
+    throw httpError(422, `Pedido mínimo para este cupom: ${formatMoney(coupon.minimum_order)}.`);
+  }
+  if (coupon.discount_type === 'free_delivery' && deliveryFee <= 0) {
+    throw httpError(422, 'Este cupom é para pedidos com entrega.');
+  }
+  return coupon;
+}
+
+function couponDiscountAmount(coupon, subtotal, deliveryFee) {
+  if (!coupon) return 0;
+  if (coupon.discount_type === 'free_delivery') return roundMoney(deliveryFee);
+  if (coupon.discount_type === 'percent') return roundMoney(subtotal * Math.min(100, moneyNumber(coupon.discount_value)) / 100);
+  return roundMoney(Math.min(subtotal, moneyNumber(coupon.discount_value)));
+}
+
+function defaultBusinessHours() {
+  return {
+    monday: { open: '18:00', close: '23:00', closed: false },
+    tuesday: { open: '18:00', close: '23:00', closed: false },
+    wednesday: { open: '18:00', close: '23:00', closed: false },
+    thursday: { open: '18:00', close: '23:00', closed: false },
+    friday: { open: '18:00', close: '23:30', closed: false },
+    saturday: { open: '18:00', close: '23:30', closed: false },
+    sunday: { open: '18:00', close: '23:00', closed: false }
+  };
+}
+
 async function uploadImage(data) {
   const fileName = cleanFileName(data.fileName || 'produto.jpg');
   const contentType = cleanText(data.contentType || 'image/jpeg').split(';')[0].toLowerCase();
@@ -1604,6 +1719,7 @@ function routePath(requestPath) {
   if (requestPath === '/') return '/app.html';
   if (requestPath === '/admin') return '/admin.html';
   if (requestPath === '/conta' || requestPath === '/cliente') return '/account.html';
+  if (requestPath === '/pedidos') return '/orders.html';
   return decodeURIComponent(requestPath);
 }
 
@@ -1651,7 +1767,8 @@ function sanitizeStore(data) {
     accepts_pickup: 'boolean',
     delivery_fee: 'float',
     minimum_order: 'float',
-    payment_methods: 'array'
+    payment_methods: 'array',
+    business_hours: 'object'
   }, ['name']);
 }
 
@@ -1706,6 +1823,36 @@ function sanitizeModifier(data, creating) {
   }, creating ? ['name'] : []);
 }
 
+function sanitizePromotion(data, creating) {
+  const promotion = sanitize(data, {
+    name: 'string',
+    code: 'string',
+    description: 'nullable_string',
+    discount_type: 'string',
+    discount_value: 'float',
+    minimum_order: 'float',
+    starts_at: 'nullable_string',
+    ends_at: 'nullable_string',
+    max_uses: 'nullable_integer',
+    is_active: 'boolean'
+  }, creating ? ['name', 'code'] : []);
+
+  if ('code' in promotion) {
+    promotion.code = promotion.code.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!promotion.code) throw httpError(422, 'Informe um código de cupom válido.');
+  }
+  if ('discount_type' in promotion && !['fixed', 'percent', 'free_delivery'].includes(promotion.discount_type)) {
+    throw httpError(422, 'Tipo de desconto inválido.');
+  }
+  if (promotion.discount_type === 'percent' && promotion.discount_value > 100) promotion.discount_value = 100;
+  if ('discount_value' in promotion) promotion.discount_value = Math.max(0, promotion.discount_value);
+  if ('minimum_order' in promotion) promotion.minimum_order = Math.max(0, promotion.minimum_order);
+  if ('max_uses' in promotion && promotion.max_uses !== null) promotion.max_uses = Math.max(1, promotion.max_uses);
+  if ('starts_at' in promotion) promotion.starts_at = cleanOptionalDate(promotion.starts_at);
+  if ('ends_at' in promotion) promotion.ends_at = cleanOptionalDate(promotion.ends_at);
+  return promotion;
+}
+
 function sanitizeCustomer(data) {
   const customer = sanitize(data, {
     name: 'string',
@@ -1758,15 +1905,24 @@ function sanitize(data, allowed, required) {
     if (type === 'string') clean[field] = cleanText(value);
     if (type === 'nullable_string') clean[field] = value === null || value === '' ? null : cleanText(value);
     if (type === 'integer') clean[field] = Number.parseInt(value, 10) || 0;
+    if (type === 'nullable_integer') clean[field] = value === null || value === '' ? null : Number.parseInt(value, 10) || null;
     if (type === 'float') clean[field] = roundMoney(Number.parseFloat(value) || 0);
     if (type === 'boolean') clean[field] = value === true || value === 'true' || value === 'on' || value === '1';
     if (type === 'array') clean[field] = Array.isArray(value) ? value.map(cleanText).filter(Boolean) : [];
+    if (type === 'object') clean[field] = isPlainObject(value) ? value : {};
     if (type === 'phone') clean[field] = onlyDigits(value);
     if (type === 'email') clean[field] = cleanEmail(value);
     if (type === 'nullable_email') clean[field] = value ? cleanEmail(value) : null;
   }
 
   return clean;
+}
+
+function cleanOptionalDate(value) {
+  if (value === null || value === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw httpError(422, 'Data inválida.');
+  return date.toISOString();
 }
 
 function fieldLabel(field) {
@@ -1815,6 +1971,9 @@ function buildWhatsappMessage(store, order, items, customer, address) {
   lines.push('');
   lines.push(`Subtotal: ${formatMoney(order.subtotal)}`);
   if (Number(order.delivery_fee) > 0) lines.push(`Entrega: ${formatMoney(order.delivery_fee)}`);
+  if (Number(order.discount) > 0) {
+    lines.push(`Desconto${order.promotion_code ? ` (${order.promotion_code})` : ''}: -${formatMoney(order.discount)}`);
+  }
   lines.push(`Total: ${formatMoney(order.total)}`);
   if (order.notes) lines.push(`Observações: ${order.notes}`);
   if (store.name) lines.push('', store.name);

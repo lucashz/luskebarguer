@@ -1,14 +1,17 @@
-﻿const state = {
+const state = {
   customer: null,
   orders: [],
   ordersFromCache: false,
-  cacheSavedAt: null
+  cacheSavedAt: null,
+  view: window.location.pathname === '/pedidos' ? 'orders' : 'dashboard'
 };
 
 const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
+const RECENT_ORDERS_LIMIT = 2;
 
 const els = {
   loading: document.querySelector('#accountLoading'),
+  loadingEyebrow: document.querySelector('#accountLoadingEyebrow'),
   auth: document.querySelector('#accountAuth'),
   shell: document.querySelector('#accountShell'),
   dashboard: document.querySelector('#accountDashboard'),
@@ -20,6 +23,7 @@ const els = {
   registerForm: document.querySelector('#registerForm'),
   profileForm: document.querySelector('#profileForm'),
   newAddressForm: document.querySelector('#newAddressForm'),
+  pageEyebrow: document.querySelector('#accountPageEyebrow'),
   customerName: document.querySelector('#customerName'),
   lastOrderTitle: document.querySelector('#lastOrderTitle'),
   lastOrderText: document.querySelector('#lastOrderText'),
@@ -29,6 +33,8 @@ const els = {
   totalOrdersCount: document.querySelector('#totalOrdersCount'),
   accountSummary: document.querySelector('#accountSummary'),
   accountAddressList: document.querySelector('#accountAddressList'),
+  accountOrdersLink: document.querySelector('#accountOrdersLink'),
+  accountDashboardLink: document.querySelector('#accountDashboardLink'),
   editProfileButton: document.querySelector('#editProfileButton'),
   editProfileInlineButton: document.querySelector('#editProfileInlineButton'),
   manageAddressesButton: document.querySelector('#manageAddressesButton'),
@@ -68,6 +74,7 @@ els.logoutButton.addEventListener('click', logout);
 init();
 
 async function init() {
+  applyPageMode();
   const cached = loadAccountCache();
   let hadCachedAccount = false;
   if (cached?.customer) {
@@ -84,7 +91,9 @@ async function init() {
     const data = await request('/api/customer/me');
     state.customer = data.customer;
     showShell();
-    await loadOrders();
+    loadOrders().catch((error) => {
+      if (!state.orders.length) toast(error.message || 'Não foi possível carregar seus pedidos.');
+    });
     saveAccountCache();
   } catch {
     if (hadCachedAccount) {
@@ -215,7 +224,11 @@ function showShell() {
   els.shell.hidden = false;
   fillProfile();
   renderDashboard();
-  showDashboard();
+  if (state.view === 'orders') {
+    showOrders();
+  } else {
+    showDashboard();
+  }
 }
 
 function loadAccountCache() {
@@ -242,9 +255,19 @@ function clearAccountCache() {
 }
 
 function showDashboard() {
+  state.view = 'dashboard';
   els.dashboard.hidden = false;
   els.edit.hidden = true;
   els.addresses.hidden = true;
+  applyPageMode();
+}
+
+function showOrders() {
+  state.view = 'orders';
+  els.dashboard.hidden = false;
+  els.edit.hidden = true;
+  els.addresses.hidden = true;
+  applyPageMode();
 }
 
 function showEdit() {
@@ -252,6 +275,7 @@ function showEdit() {
   els.dashboard.hidden = true;
   els.edit.hidden = false;
   els.addresses.hidden = true;
+  applyPageMode();
 }
 
 function showAddresses() {
@@ -259,11 +283,23 @@ function showAddresses() {
   els.dashboard.hidden = true;
   els.edit.hidden = true;
   els.addresses.hidden = false;
+  applyPageMode();
+}
+
+function applyPageMode() {
+  const isOrders = state.view === 'orders';
+  document.title = isOrders ? 'Meus Pedidos - Cardápio' : 'Minha Conta - Cardápio';
+  if (els.loadingEyebrow) els.loadingEyebrow.textContent = isOrders ? 'Meus pedidos' : 'Minha conta';
+  if (els.pageEyebrow) els.pageEyebrow.textContent = isOrders ? 'Meus pedidos' : 'Minha conta';
+  if (els.accountOrdersLink) els.accountOrdersLink.hidden = isOrders;
+  if (els.accountDashboardLink) els.accountDashboardLink.hidden = !isOrders;
+  if (els.editProfileButton) els.editProfileButton.hidden = isOrders;
+  els.dashboard?.classList.toggle('orders-view', isOrders);
 }
 
 function fillProfile() {
   const customer = state.customer || {};
-  els.customerName.textContent = customer.name || 'Cliente';
+  els.customerName.textContent = state.view === 'orders' ? 'Meus pedidos' : (customer.name || 'Cliente');
   setValue(els.profileForm.elements.name, customer.name);
   setValue(els.profileForm.elements.phone, customer.phone);
   setValue(els.profileForm.elements.email, customer.email);
@@ -276,7 +312,9 @@ function renderOrders() {
     els.ordersList.innerHTML = '<p class="muted">Nenhum pedido encontrado.</p>';
     return;
   }
-  els.ordersList.replaceChildren(...state.orders.map((order) => {
+  const isOrdersPage = state.view === 'orders';
+  const visibleOrders = isOrdersPage ? state.orders : state.orders.slice(0, RECENT_ORDERS_LIMIT);
+  const orderCards = visibleOrders.map((order) => {
     const card = document.createElement('article');
     card.className = `list-card account-order-card status-${order.status}`;
     card.innerHTML = `
@@ -290,12 +328,28 @@ function renderOrders() {
         <div class="account-order-items">${(order.items || []).map(accountOrderItemHtml).join('')}</div>
       </details>
       <div class="row-actions">
-        <button class="ghost-button compact" type="button" data-repeat-order="${escapeHtml(order.id)}">Refazer pedido</button>
+        <button class="ghost-button compact" type="button" data-repeat-order="${escapeHtml(order.id)}">Refazer tudo</button>
       </div>
     `;
     card.querySelector('[data-repeat-order]').addEventListener('click', () => repeatOrder(order));
+    card.querySelectorAll('[data-repeat-item]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const item = (order.items || []).find((entry) => entry.id === button.dataset.repeatItem);
+        if (item) repeatOrder({ ...order, items: [item] });
+      });
+    });
     return card;
-  }));
+  });
+
+  if (!isOrdersPage && state.orders.length > RECENT_ORDERS_LIMIT) {
+    const more = document.createElement('a');
+    more.className = 'ghost-button wide account-show-more-orders';
+    more.href = '/pedidos';
+    more.textContent = `Exibir mais ${state.orders.length - RECENT_ORDERS_LIMIT} pedido${state.orders.length - RECENT_ORDERS_LIMIT === 1 ? '' : 's'}`;
+    orderCards.push(more);
+  }
+
+  els.ordersList.replaceChildren(...orderCards);
 }
 
 function renderOrdersCacheNotice() {
@@ -319,6 +373,20 @@ function accountOrderItemHtml(item) {
       <span>${money(item.total)}</span>
       ${modifiers.length ? `<p>${modifiers.map(modifierText).map(escapeHtml).join(', ')}</p>` : ''}
       ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
+      <button class="text-button compact" type="button" data-repeat-item="${escapeAttribute(item.id)}">Pedir só este item</button>
+    </div>
+  `;
+}
+
+function orderStatusTimeline(status) {
+  const steps = ['new', 'accepted', 'preparing', 'out_for_delivery', 'completed'];
+  const labels = ['Recebido', 'Aceito', 'Preparando', 'Saiu', 'Concluído'];
+  const statusIndex = status === 'ready' ? 2 : steps.indexOf(status);
+  const activeIndex = status === 'cancelled' ? -1 : Math.max(0, statusIndex);
+  return `
+    <div class="order-timeline ${status === 'cancelled' ? 'is-cancelled' : ''}">
+      ${steps.map((step, index) => `<span class="${index <= activeIndex ? 'active' : ''}">${labels[index]}</span>`).join('')}
+      ${status === 'cancelled' ? '<strong>Cancelado</strong>' : ''}
     </div>
   `;
 }
@@ -331,6 +399,7 @@ function renderDashboard() {
   els.activeOrdersCount.textContent = activeOrders.length;
   els.savedAddressesCount.textContent = addresses.length;
   els.totalOrdersCount.textContent = state.orders.length;
+  renderLoyaltyHint(state.orders.length);
 
   if (lastOrder) {
     els.lastOrderTitle.textContent = `Pedido #${lastOrder.public_code}`;
@@ -342,6 +411,18 @@ function renderDashboard() {
 
   els.repeatLastOrderButton.disabled = !lastOrder;
   renderAccountSummary(addresses, activeOrders);
+}
+
+function renderLoyaltyHint(totalOrders) {
+  els.lastOrderText.dataset.loyalty = loyaltyText(totalOrders);
+}
+
+function loyaltyText(totalOrders) {
+  const target = 5;
+  if (!totalOrders) return `A cada ${target} pedidos, acompanhe sua recompensa por aqui.`;
+  const remaining = target - (totalOrders % target);
+  if (remaining === target) return `Você completou ${totalOrders} pedido(s). Pergunte à loja sobre sua recompensa.`;
+  return `Faltam ${remaining} pedido(s) para completar ${target} pedidos.`;
 }
 
 function renderAccountSummary(addresses, activeOrders) {
@@ -360,6 +441,10 @@ function renderAccountSummary(addresses, activeOrders) {
     <div>
       <strong>Status</strong>
       <p>${activeOrders.length ? `${activeOrders.length} pedido${activeOrders.length === 1 ? '' : 's'} em andamento.` : 'Nenhum pedido em andamento.'}</p>
+    </div>
+    <div>
+      <strong>Fidelidade</strong>
+      <p>${escapeHtml(loyaltyText(state.orders.length))}</p>
     </div>
   `;
 }
