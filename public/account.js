@@ -31,6 +31,7 @@ const els = {
   activeOrdersCount: document.querySelector('#activeOrdersCount'),
   savedAddressesCount: document.querySelector('#savedAddressesCount'),
   totalOrdersCount: document.querySelector('#totalOrdersCount'),
+  loyaltyProgressCard: document.querySelector('#loyaltyProgressCard'),
   accountSummary: document.querySelector('#accountSummary'),
   accountAddressList: document.querySelector('#accountAddressList'),
   accountOrdersLink: document.querySelector('#accountOrdersLink'),
@@ -399,7 +400,7 @@ function renderDashboard() {
   els.activeOrdersCount.textContent = activeOrders.length;
   els.savedAddressesCount.textContent = addresses.length;
   els.totalOrdersCount.textContent = state.orders.length;
-  renderLoyaltyHint(state.orders.length);
+  renderLoyaltyProgress();
 
   if (lastOrder) {
     els.lastOrderTitle.textContent = `Pedido #${lastOrder.public_code}`;
@@ -425,6 +426,49 @@ function loyaltyText(totalOrders) {
   return `Faltam ${remaining} pedido(s) para completar ${target} pedidos.`;
 }
 
+function renderLoyaltyProgress() {
+  if (!els.loyaltyProgressCard) return;
+  const loyalty = state.customer?.loyalty || {};
+  if (!loyalty.is_active) {
+    els.loyaltyProgressCard.hidden = true;
+    return;
+  }
+
+  const isPoints = loyalty.mode === 'points';
+  const target = Number(loyalty.target || 0);
+  const current = isPoints
+    ? Number(loyalty.points || 0)
+    : Math.max(0, target - Number(loyalty.remaining || 0));
+  const progress = Math.max(0, Math.min(100, Number(loyalty.progress || 0)));
+  const mainText = Number(loyalty.remaining || 0) === 0
+    ? `Meta completa. Recompensa: ${loyalty.reward}.`
+    : isPoints
+      ? `Faltam ${loyalty.remaining} ponto(s) para ganhar ${loyalty.reward}.`
+      : `Faltam ${loyalty.remaining} pedido(s) para ganhar ${loyalty.reward}.`;
+
+  els.loyaltyProgressCard.hidden = false;
+  els.loyaltyProgressCard.innerHTML = `
+    <div class="section-actions">
+      <div>
+        <p class="eyebrow">Fidelidade</p>
+        <h2>${escapeHtml(loyalty.reward || 'Recompensa')}</h2>
+      </div>
+      <span class="pill">${isPoints ? 'Pontos' : 'Pedidos'}</span>
+    </div>
+    <p>${escapeHtml(mainText)}</p>
+    <div class="loyalty-progress-bar"><span style="width: ${progress}%"></span></div>
+    <small>${current} de ${target} ${isPoints ? 'ponto(s)' : 'pedido(s) concluído(s)'}</small>
+  `;
+}
+
+function loyaltyProgressText() {
+  const loyalty = state.customer?.loyalty || {};
+  if (!loyalty.is_active) return 'Acompanhe seus pedidos e recompensas por aqui.';
+  if (Number(loyalty.remaining || 0) === 0) return `Meta completa: ${loyalty.reward}.`;
+  if (loyalty.mode === 'points') return `Faltam ${loyalty.remaining} ponto(s) para ${loyalty.reward}.`;
+  return `Faltam ${loyalty.remaining} pedido(s) para ${loyalty.reward}.`;
+}
+
 function renderAccountSummary(addresses, activeOrders) {
   const customer = state.customer || {};
   const defaultAddress = addresses[0] || customer.address || null;
@@ -444,7 +488,7 @@ function renderAccountSummary(addresses, activeOrders) {
     </div>
     <div>
       <strong>Fidelidade</strong>
-      <p>${escapeHtml(loyaltyText(state.orders.length))}</p>
+      <p>${escapeHtml(loyaltyProgressText())}</p>
     </div>
   `;
 }

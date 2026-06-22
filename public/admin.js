@@ -15,6 +15,7 @@
   storeFormDirty: false,
   editingCategoryId: null,
   editingProductId: null,
+  editingPromotionId: null,
   selectedOptionsProductId: null,
   pendingModifierPresetOptions: [],
   openModifierGroupIds: new Set(),
@@ -22,10 +23,13 @@
   modifierCreateDrafts: new Map(),
   currentReport: null,
   draggedOrderId: null,
-  updatingOrderIds: new Set()
+  updatingOrderIds: new Set(),
+  onboardingStep: 0,
+  onboardingCategoryId: null
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v1';
+const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
 const businessDayLabels = [
   ['monday', '18:00', '23:00'],
   ['tuesday', '18:00', '23:00'],
@@ -50,6 +54,12 @@ const els = {
   loginForm: document.querySelector('#loginForm'),
   logoutButton: document.querySelector('#logoutButton'),
   adminHeaderLogoutButton: document.querySelector('#adminHeaderLogoutButton'),
+  onboardingPanel: document.querySelector('#onboardingPanel'),
+  onboardingStepText: document.querySelector('#onboardingStepText'),
+  onboardingProgressBar: document.querySelector('#onboardingProgressBar'),
+  onboardingBackButton: document.querySelector('#onboardingBackButton'),
+  onboardingNextButton: document.querySelector('#onboardingNextButton'),
+  onboardingProductCategory: document.querySelector('#onboardingProductCategory'),
   operationTitle: document.querySelector('#operationTitle'),
   operationText: document.querySelector('#operationText'),
   operationBadge: document.querySelector('#operationBadge'),
@@ -116,6 +126,15 @@ const els = {
   passwordForm: document.querySelector('#passwordForm'),
   promotionForm: document.querySelector('#promotionForm'),
   promotionList: document.querySelector('#promotionList'),
+  promotionFormTitle: document.querySelector('#promotionFormTitle'),
+  savePromotionButton: document.querySelector('#savePromotionButton'),
+  cancelPromotionEditButton: document.querySelector('#cancelPromotionEditButton'),
+  openPromotionFormButton: document.querySelector('#openPromotionFormButton'),
+  openLoyaltyFormButton: document.querySelector('#openLoyaltyFormButton'),
+  closeLoyaltyFormButton: document.querySelector('#closeLoyaltyFormButton'),
+  promotionCategories: document.querySelector('#promotionCategories'),
+  promotionComboItems: document.querySelector('#promotionComboItems'),
+  loyaltyForm: document.querySelector('#loyaltyForm'),
   toast: document.querySelector('#toast')
 };
 
@@ -137,8 +156,10 @@ document.querySelectorAll('[data-modifier-preset]').forEach((button) => {
 
 els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
-els.logoutButton.addEventListener('click', logout);
+els.logoutButton?.addEventListener('click', logout);
 els.adminHeaderLogoutButton.addEventListener('click', logout);
+els.onboardingBackButton?.addEventListener('click', previousOnboardingStep);
+els.onboardingNextButton?.addEventListener('click', nextOnboardingStep);
 els.startOperationButton?.addEventListener('click', startOperation);
 els.stopOperationButton?.addEventListener('click', stopOperation);
 els.refreshAdminButton.addEventListener('click', () => loadSummary());
@@ -183,6 +204,14 @@ els.storeForm.addEventListener('change', () => {
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
 els.promotionForm?.addEventListener('submit', submitPromotion);
+els.cancelPromotionEditButton?.addEventListener('click', resetPromotionForm);
+els.openPromotionFormButton?.addEventListener('click', () => {
+  resetPromotionForm({ keepOpen: true });
+  showPromotionForm();
+});
+els.openLoyaltyFormButton?.addEventListener('click', showLoyaltyForm);
+els.closeLoyaltyFormButton?.addEventListener('click', hideLoyaltyForm);
+els.loyaltyForm?.addEventListener('submit', submitLoyalty);
 
 renderKitchenModeButton();
 renderAutoPrintButton();
@@ -282,10 +311,13 @@ function render() {
   renderOrders();
   renderCustomers();
   renderPromotions();
+  renderPromotionOptions();
   renderMenu();
   renderCategoryOptions();
   fillStoreForm();
+  fillLoyaltyForm();
   fillAccountForm();
+  renderOnboarding();
   renderSoundButton();
 }
 
@@ -323,6 +355,181 @@ function renderOperation() {
   els.operationMetricStatus.textContent = isOpen ? 'Online' : 'Offline';
   els.startOperationButton.disabled = isOpen;
   els.stopOperationButton.disabled = !isOpen;
+}
+
+function renderOnboarding() {
+  if (!els.onboardingPanel || !state.store) return;
+  const completed = state.store.onboarding_completed === true || localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true';
+  if (state.store.onboarding_completed === true) {
+    localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
+  }
+  els.onboardingPanel.hidden = completed;
+  if (completed) return;
+  fillOnboardingDefaults();
+  updateOnboardingProductCategories();
+  showOnboardingStep(state.onboardingStep);
+}
+
+function fillOnboardingDefaults() {
+  const store = state.store || {};
+  const whatsappInput = document.querySelector('[data-onboarding-step="0"] input[name="whatsapp_number"]');
+  if (whatsappInput && !whatsappInput.value) whatsappInput.value = store.whatsapp_number || '';
+
+  const hoursForm = document.querySelector('[data-onboarding-step="1"]');
+  const monday = store.business_hours?.monday || {};
+  if (hoursForm && !hoursForm.elements.open.value) hoursForm.elements.open.value = monday.open || '18:00';
+  if (hoursForm && !hoursForm.elements.close.value) hoursForm.elements.close.value = monday.close || '23:00';
+
+  document.querySelectorAll('[data-onboarding-step="2"] input[name="payment_methods"]').forEach((input) => {
+    input.checked = (store.payment_methods || ['Pix', 'Dinheiro']).includes(input.value);
+  });
+
+  const deliveryForm = document.querySelector('[data-onboarding-step="3"]');
+  if (deliveryForm && !deliveryForm.elements.delivery_fee.value) deliveryForm.elements.delivery_fee.value = store.delivery_fee || 0;
+  if (deliveryForm && !deliveryForm.elements.minimum_order.value) deliveryForm.elements.minimum_order.value = store.minimum_order || 0;
+  if (deliveryForm && !deliveryForm.elements.delivery_neighborhood_fees.value) {
+    deliveryForm.elements.delivery_neighborhood_fees.value = neighborhoodFeesToText(store.delivery_neighborhood_fees);
+  }
+}
+
+function showOnboardingStep(step) {
+  const steps = [...document.querySelectorAll('[data-onboarding-step]')];
+  const max = steps.length - 1;
+  state.onboardingStep = Math.max(0, Math.min(max, step));
+  steps.forEach((form, index) => {
+    form.classList.toggle('active', index === state.onboardingStep);
+  });
+  const current = state.onboardingStep + 1;
+  const total = steps.length;
+  if (els.onboardingStepText) els.onboardingStepText.textContent = `Passo ${current} de ${total}`;
+  if (els.onboardingProgressBar) els.onboardingProgressBar.style.width = `${Math.round((current / total) * 100)}%`;
+  if (els.onboardingBackButton) els.onboardingBackButton.disabled = state.onboardingStep === 0;
+  if (els.onboardingNextButton) els.onboardingNextButton.textContent = state.onboardingStep === max ? 'Finalizar configuração' : 'Salvar e continuar';
+}
+
+function previousOnboardingStep() {
+  showOnboardingStep(state.onboardingStep - 1);
+}
+
+async function nextOnboardingStep() {
+  const form = document.querySelector(`[data-onboarding-step="${state.onboardingStep}"]`);
+  if (!form?.reportValidity()) return;
+  els.onboardingNextButton.disabled = true;
+  try {
+    await saveOnboardingStep(state.onboardingStep, new FormData(form));
+    const total = document.querySelectorAll('[data-onboarding-step]').length;
+    if (state.onboardingStep >= total - 1) {
+      await completeOnboarding();
+      return;
+    }
+    showOnboardingStep(state.onboardingStep + 1);
+    toast('Etapa salva.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar esta etapa.');
+  } finally {
+    els.onboardingNextButton.disabled = false;
+  }
+}
+
+async function saveOnboardingStep(step, data) {
+  if (step === 0) {
+    const whatsapp = digits(data.get('whatsapp_number'));
+    if (!whatsapp || whatsapp.length < 12) throw new Error('Informe o WhatsApp com DDI e DDD.');
+    await updateOnboardingStore({ whatsapp_number: whatsapp });
+  }
+  if (step === 1) {
+    await updateOnboardingStore({ business_hours: businessHoursEveryDay(data.get('open') || '18:00', data.get('close') || '23:00') });
+  }
+  if (step === 2) {
+    const paymentMethods = data.getAll('payment_methods');
+    if (!paymentMethods.length) throw new Error('Escolha ao menos uma forma de pagamento.');
+    await updateOnboardingStore({ payment_methods: paymentMethods });
+  }
+  if (step === 3) {
+    await updateOnboardingStore({
+      delivery_fee: data.get('delivery_fee'),
+      minimum_order: data.get('minimum_order'),
+      delivery_neighborhood_fees: parseNeighborhoodFees(data.get('delivery_neighborhood_fees'))
+    });
+  }
+  if (step === 4) {
+    const category = await createOnboardingCategory({
+      name: data.get('name'),
+      description: data.get('description'),
+      sort_order: nextCategorySortOrder(),
+      is_active: true
+    });
+    state.onboardingCategoryId = category?.id || state.onboardingCategoryId;
+    await loadSummary();
+    updateOnboardingProductCategories();
+  }
+  if (step === 5) {
+    const categoryId = data.get('category_id') || state.onboardingCategoryId || state.categories[0]?.id;
+    if (!categoryId) throw new Error('Crie uma categoria antes do produto.');
+    await request('/api/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category_id: categoryId,
+        name: data.get('name'),
+        description: data.get('description'),
+        price: data.get('price'),
+        is_featured: true,
+        is_available: true,
+        sort_order: 0,
+        tags: []
+      })
+    });
+    await loadSummary();
+  }
+}
+
+async function updateOnboardingStore(partial) {
+  const payload = { ...(state.store || {}), ...partial };
+  const result = await request('/api/admin/store', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  state.store = Array.isArray(result) ? result[0] : result?.[0] || result?.store || result;
+  saveAdminCache();
+}
+
+async function createOnboardingCategory(payload) {
+  const result = await request('/api/categories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return Array.isArray(result) ? result[0] : result?.[0] || result?.category || result;
+}
+
+async function completeOnboarding() {
+  localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
+  if (els.onboardingPanel) els.onboardingPanel.hidden = true;
+  await updateOnboardingStore({ onboarding_completed: true });
+  await loadSummary();
+  toast('Sistema pronto para receber pedidos.');
+}
+
+function businessHoursEveryDay(open, close) {
+  return Object.fromEntries(businessDayLabels.map(([day]) => [day, {
+    open,
+    close,
+    closed: false
+  }]));
+}
+
+function updateOnboardingProductCategories() {
+  if (!els.onboardingProductCategory) return;
+  const selected = state.onboardingCategoryId || els.onboardingProductCategory.value || state.categories[0]?.id || '';
+  els.onboardingProductCategory.replaceChildren(...state.categories.map((category) => {
+    const option = document.createElement('option');
+    option.value = category.id;
+    option.textContent = category.name;
+    option.selected = category.id === selected;
+    return option;
+  }));
 }
 
 async function startOperation() {
@@ -649,6 +856,7 @@ function orderCard(order) {
           <div><dt>Telefone</dt><dd>${escapeHtml(customer.phone || 'Sem telefone')}</dd></div>
           <div><dt>Tipo</dt><dd>${fulfillment}</dd></div>
           <div><dt>Pagamento</dt><dd>${payment}</dd></div>
+          ${order.payment_details?.change_for ? `<div><dt>Troco</dt><dd>Para ${money(order.payment_details.change_for)}</dd></div>` : ''}
           <div><dt>Subtotal</dt><dd>${money(order.subtotal)}</dd></div>
           <div><dt>Entrega</dt><dd>${money(order.delivery_fee)}</dd></div>
         </dl>
@@ -1088,7 +1296,77 @@ function renderPromotions() {
     els.promotionList.innerHTML = '<p class="muted">Nenhuma promoção cadastrada.</p>';
     return;
   }
-  els.promotionList.replaceChildren(...state.promotions.map(promotionCard));
+  const salesPromotions = state.promotions.filter((promotion) => !isLoyaltyPromotion(promotion));
+  const loyaltyPromotions = state.promotions.filter(isLoyaltyPromotion);
+  els.promotionList.replaceChildren(
+    promotionGroupSection('Cupons e promoções', 'Descontos, frete grátis, valor fixo, percentual e combos.', salesPromotions),
+    promotionGroupSection('Fidelidade e relacionamento', 'Primeira compra, aniversário e benefícios para clientes recorrentes.', loyaltyPromotions)
+  );
+}
+
+function promotionGroupSection(title, description, promotions) {
+  const section = document.createElement('section');
+  section.className = 'promotion-group-panel';
+  section.innerHTML = `
+    <div class="promotion-group-head">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(description)}</p>
+      </div>
+      <span class="pill">${promotions.length}</span>
+    </div>
+    <div class="promotion-card-grid"></div>
+  `;
+  const grid = section.querySelector('.promotion-card-grid');
+  if (promotions.length) {
+    grid.replaceChildren(...promotions.map(promotionCard));
+  } else {
+    grid.innerHTML = '<p class="muted">Nenhuma campanha deste tipo ainda.</p>';
+  }
+  return section;
+}
+
+function isLoyaltyPromotion(promotion) {
+  return ['first_order', 'birthday', 'recurring'].includes(promotion.promotion_type || 'general');
+}
+
+function renderPromotionOptions() {
+  if (els.promotionCategories) {
+    els.promotionCategories.replaceChildren(...state.categories.map((category) => {
+      const option = document.createElement('option');
+      option.value = category.id;
+      option.textContent = category.name;
+      return option;
+    }));
+  }
+  if (els.promotionComboItems) {
+    const items = promotionMenuItems();
+    els.promotionComboItems.replaceChildren(...items.map((item) => {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = `${item.name} - ${item.categoryName}`;
+      return option;
+    }));
+  }
+}
+
+function promotionMenuItems() {
+  return state.categories.flatMap((category) => (
+    (category.items || []).map((item) => ({ ...item, categoryName: category.name }))
+  ));
+}
+
+function promotionTypeLabel(type) {
+  return ({
+    general: 'Geral',
+    first_order: 'Primeira compra',
+    free_delivery: 'Frete grátis',
+    fixed: 'Valor fixo',
+    percent: 'Percentual',
+    combo: 'Combo',
+    birthday: 'Aniversário',
+    recurring: 'Cliente recorrente'
+  })[type || 'general'] || 'Geral';
 }
 
 function promotionCard(promotion) {
@@ -1106,17 +1384,40 @@ function promotionCard(promotion) {
   const usage = promotion.max_uses
     ? `${promotion.used_count || 0}/${promotion.max_uses} uso(s)`
     : `${promotion.used_count || 0} uso(s)`;
+  const perCustomerUsage = `${promotion.max_uses_per_customer || 1} por cliente`;
+  const categoryNames = cleanPromotionIds(promotion.allowed_category_ids)
+    .map((id) => findCategory(id)?.name)
+    .filter(Boolean)
+    .join(', ');
+  const comboNames = cleanPromotionIds(promotion.combo_item_ids)
+    .map((id) => findProduct(id)?.name)
+    .filter(Boolean)
+    .join(' + ');
+  const rules = [
+    promotionTypeLabel(promotion.promotion_type),
+    categoryNames ? `Categorias: ${categoryNames}` : null,
+    comboNames ? `Combo: ${comboNames}` : null,
+    promotion.promotion_type === 'recurring' ? `${promotion.recurring_min_orders || 2}+ pedidos` : null,
+    promotion.promotion_type === 'birthday' ? `${promotion.birthday_window_days || 7} dia(s) do aniversário` : null
+  ].filter(Boolean).join(' | ');
   card.innerHTML = `
     <div>
-      <strong>${escapeHtml(promotion.name)}</strong>
-      <p><code>${escapeHtml(promotion.code)}</code> - ${discount} - mínimo ${money(promotion.minimum_order || 0)}</p>
-      <small>${escapeHtml(promotion.description || period)} - ${usage}</small>
+      <div class="promo-card-top">
+        <strong>${escapeHtml(promotion.name)}</strong>
+        <span class="pill">${promotion.is_active ? 'Ativa' : 'Pausada'}</span>
+      </div>
+      <p><code>${escapeHtml(promotion.code)}</code> <b>${discount}</b></p>
+      <small>${escapeHtml(rules)}</small>
+      <small>Mínimo ${money(promotion.minimum_order || 0)} - ${usage} - ${perCustomerUsage}</small>
+      <small>${escapeHtml(promotion.description || period)}</small>
     </div>
     <div class="row-actions">
+      <button class="ghost-button compact" type="button" data-action="edit">Editar</button>
       <button class="ghost-button compact" type="button" data-action="toggle">${promotion.is_active ? 'Pausar' : 'Ativar'}</button>
       <button class="danger-button compact" type="button" data-action="delete">Excluir</button>
     </div>
   `;
+  card.querySelector('[data-action="edit"]').addEventListener('click', () => editPromotion(promotion));
   card.querySelector('[data-action="toggle"]').addEventListener('click', async () => {
     await updatePromotion(promotion.id, { is_active: !promotion.is_active });
     toast(promotion.is_active ? 'Promoção pausada.' : 'Promoção ativada.');
@@ -1131,18 +1432,105 @@ function promotionCard(promotion) {
 
 async function submitPromotion(event) {
   event.preventDefault();
-  const data = Object.fromEntries(new FormData(els.promotionForm));
+  const data = promotionPayloadFromForm(els.promotionForm);
   data.is_active = els.promotionForm.elements.is_active.checked;
-  const result = await request('/api/admin/promotions', {
-    method: 'POST',
+  const editingId = state.editingPromotionId;
+  const result = await request(editingId ? `/api/admin/promotions/${editingId}` : '/api/admin/promotions', {
+    method: editingId ? 'PATCH' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  state.promotions.unshift(result.promotion);
-  els.promotionForm.reset();
-  els.promotionForm.elements.is_active.checked = true;
+  if (editingId) {
+    state.promotions = state.promotions.map((promotion) => promotion.id === editingId ? result.promotion : promotion);
+  } else {
+    state.promotions.unshift(result.promotion);
+  }
+  resetPromotionForm();
   renderPromotions();
-  toast('Promoção criada.');
+  toast(editingId ? 'Promoção atualizada.' : 'Promoção criada.');
+}
+
+function promotionPayloadFromForm(form) {
+  const data = Object.fromEntries(new FormData(form));
+  data.allowed_category_ids = [...form.elements.allowed_category_ids.selectedOptions].map((option) => option.value);
+  data.combo_item_ids = [...form.elements.combo_item_ids.selectedOptions].map((option) => option.value);
+  return data;
+}
+
+function editPromotion(promotion) {
+  showPromotionForm();
+  state.editingPromotionId = promotion.id;
+  els.promotionFormTitle.textContent = 'Editar promoção';
+  els.savePromotionButton.textContent = 'Salvar alterações';
+  els.cancelPromotionEditButton.hidden = false;
+  setValue(els.promotionForm.elements.name, promotion.name);
+  setValue(els.promotionForm.elements.code, promotion.code);
+  setValue(els.promotionForm.elements.description, promotion.description || '');
+  setValue(els.promotionForm.elements.promotion_type, promotion.promotion_type || 'general');
+  setValue(els.promotionForm.elements.discount_type, promotion.discount_type || 'fixed');
+  setValue(els.promotionForm.elements.discount_value, promotion.discount_value || 0);
+  setValue(els.promotionForm.elements.minimum_order, promotion.minimum_order || 0);
+  setValue(els.promotionForm.elements.max_uses, promotion.max_uses || '');
+  setValue(els.promotionForm.elements.max_uses_per_customer, promotion.max_uses_per_customer || 1);
+  setValue(els.promotionForm.elements.starts_at, dateTimeLocalValue(promotion.starts_at));
+  setValue(els.promotionForm.elements.ends_at, dateTimeLocalValue(promotion.ends_at));
+  setValue(els.promotionForm.elements.recurring_min_orders, promotion.recurring_min_orders || 2);
+  setValue(els.promotionForm.elements.birthday_window_days, promotion.birthday_window_days || 7);
+  els.promotionForm.elements.is_active.checked = promotion.is_active !== false;
+  setMultiSelectValues(els.promotionForm.elements.allowed_category_ids, cleanPromotionIds(promotion.allowed_category_ids));
+  setMultiSelectValues(els.promotionForm.elements.combo_item_ids, cleanPromotionIds(promotion.combo_item_ids));
+  els.promotionForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showPromotionForm() {
+  if (els.promotionForm) els.promotionForm.hidden = false;
+  hideLoyaltyForm();
+}
+
+function hidePromotionForm() {
+  if (els.promotionForm) els.promotionForm.hidden = true;
+}
+
+function showLoyaltyForm() {
+  if (els.loyaltyForm) els.loyaltyForm.hidden = false;
+  hidePromotionForm();
+  els.loyaltyForm?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function hideLoyaltyForm() {
+  if (els.loyaltyForm) els.loyaltyForm.hidden = true;
+}
+
+function resetPromotionForm(options = {}) {
+  state.editingPromotionId = null;
+  els.promotionForm.reset();
+  els.promotionFormTitle.textContent = 'Criar promoção';
+  els.savePromotionButton.textContent = 'Salvar promoção';
+  els.promotionForm.elements.is_active.checked = true;
+  els.promotionForm.elements.max_uses_per_customer.value = 1;
+  els.promotionForm.elements.recurring_min_orders.value = 2;
+  els.promotionForm.elements.birthday_window_days.value = 7;
+  setMultiSelectValues(els.promotionForm.elements.allowed_category_ids, []);
+  setMultiSelectValues(els.promotionForm.elements.combo_item_ids, []);
+  if (!options.keepOpen) hidePromotionForm();
+}
+
+function setMultiSelectValues(select, values) {
+  const selected = new Set(values);
+  [...select.options].forEach((option) => {
+    option.selected = selected.has(option.value);
+  });
+}
+
+function dateTimeLocalValue(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function cleanPromotionIds(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
 async function updatePromotion(id, payload) {
@@ -1159,6 +1547,40 @@ async function deletePromotion(id) {
   await request(`/api/admin/promotions/${id}`, { method: 'DELETE' });
   state.promotions = state.promotions.filter((promotion) => promotion.id !== id);
   renderPromotions();
+}
+
+function fillLoyaltyForm() {
+  if (!els.loyaltyForm || !state.store) return;
+  const program = state.store.loyalty_program || {};
+  els.loyaltyForm.elements.is_active.checked = program.is_active === true;
+  setValue(els.loyaltyForm.elements.mode, program.mode || 'orders_reward');
+  setValue(els.loyaltyForm.elements.reward, program.reward || 'Item grátis');
+  setValue(els.loyaltyForm.elements.orders_required, program.orders_required || 5);
+  setValue(els.loyaltyForm.elements.points_target, program.points_target || 500);
+  setValue(els.loyaltyForm.elements.points_per_currency, program.points_per_currency || 1);
+}
+
+async function submitLoyalty(event) {
+  event.preventDefault();
+  const form = new FormData(els.loyaltyForm);
+  const payload = {
+    is_active: els.loyaltyForm.elements.is_active.checked,
+    mode: form.get('mode'),
+    reward: form.get('reward'),
+    orders_required: form.get('orders_required'),
+    points_target: form.get('points_target'),
+    points_per_currency: form.get('points_per_currency')
+  };
+  const result = await request('/api/admin/loyalty', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  state.store = result.store;
+  saveAdminCache();
+  fillLoyaltyForm();
+  hideLoyaltyForm();
+  toast('Fidelidade atualizada.');
 }
 
 function rememberOpenCustomers() {
@@ -1189,6 +1611,7 @@ function customerEditor(customer) {
   const lastSeen = customer.last_login_at
     ? `Último acesso ${new Date(customer.last_login_at).toLocaleDateString('pt-BR')}`
     : `Cadastrado em ${new Date(customer.created_at).toLocaleDateString('pt-BR')}`;
+  const customerFormId = `customerForm-${customer.id}`;
   card.innerHTML = `
     <div class="customer-row-summary">
       <button class="customer-toggle" type="button" aria-expanded="false">
@@ -1209,7 +1632,7 @@ function customerEditor(customer) {
       </div>
     </div>
     <div class="customer-dropdown" ${state.openCustomerIds.has(customer.id) ? '' : 'hidden'}>
-      <form class="customer-main-form">
+      <form class="customer-main-form" id="${escapeAttribute(customerFormId)}">
         <div class="section-actions">
           <h3>Cadastro do cliente</h3>
           <span class="pill">${completedOrders} concluído(s)</span>
@@ -1218,11 +1641,9 @@ function customerEditor(customer) {
         <label>Nome<input name="name" required value="${escapeAttribute(customer.name)}"></label>
         <label>Telefone<input name="phone" required inputmode="tel" value="${escapeAttribute(customer.phone)}"></label>
         <label>E-mail<input name="email" type="email" value="${escapeAttribute(customer.email || '')}"></label>
+        <label>Nascimento<input name="birth_date" type="date" value="${escapeAttribute(customer.birth_date || '')}"></label>
         <label>Nova senha<input name="password" type="password" minlength="8" placeholder="Opcional"></label>
         <label class="editor-wide">Observações<textarea name="notes">${escapeHtml(customer.notes || '')}</textarea></label>
-      </div>
-      <div class="row-actions">
-        <button class="primary-button compact">Salvar cliente</button>
       </div>
       </form>
       <details class="customer-addresses" ${addresses.length ? '' : 'open'}>
@@ -1256,6 +1677,9 @@ function customerEditor(customer) {
           ${customerOrders.slice(0, 8).map(customerOrderHistoryRow).join('') || '<p class="muted">Sem pedidos recentes para este cliente.</p>'}
         </div>
       </details>
+      <div class="row-actions customer-dropdown-footer">
+        <button class="primary-button compact" form="${escapeAttribute(customerFormId)}">Salvar cliente</button>
+      </div>
     </div>
   `;
 
@@ -1868,6 +2292,7 @@ function applyModifierPreset(preset) {
   const presets = {
     additional: {
       name: 'Quer adicionar algo?',
+      description: 'Escolha os extras que combinam com seu pedido.',
       min: 0,
       max: 5,
       required: false,
@@ -1879,6 +2304,7 @@ function applyModifierPreset(preset) {
     },
     size: {
       name: 'Escolha o tamanho',
+      description: 'Selecione uma opção para definir o tamanho do produto.',
       min: 1,
       max: 1,
       required: true,
@@ -1890,6 +2316,7 @@ function applyModifierPreset(preset) {
     },
     meat: {
       name: 'Escolha o ponto da carne',
+      description: 'Informe como a carne deve ser preparada.',
       min: 1,
       max: 1,
       required: true,
@@ -1901,6 +2328,7 @@ function applyModifierPreset(preset) {
     },
     edge: {
       name: 'Escolha a borda',
+      description: 'Adicione uma borda recheada se quiser.',
       min: 0,
       max: 1,
       required: false,
@@ -1912,6 +2340,7 @@ function applyModifierPreset(preset) {
     },
     remove: {
       name: 'Deseja remover algum ingrediente?',
+      description: 'Marque os ingredientes que não devem ir no pedido.',
       min: 0,
       max: 6,
       required: false,
@@ -1927,6 +2356,7 @@ function applyModifierPreset(preset) {
   if (!selected) return;
   state.pendingModifierPresetOptions = selected.options || [];
   els.modifierGroupForm.elements.name.value = selected.name;
+  els.modifierGroupForm.elements.description.value = selected.description || '';
   els.modifierGroupForm.elements.min_choices.value = String(selected.min);
   els.modifierGroupForm.elements.max_choices.value = String(selected.max);
   els.modifierGroupForm.elements.is_required.checked = selected.required;
@@ -2058,6 +2488,7 @@ async function submitModifierGroupFromDialog(event) {
     els.modifierGroupForm.reset();
     els.modifierGroupForm.elements.min_choices.value = '0';
     els.modifierGroupForm.elements.max_choices.value = '1';
+    els.modifierGroupForm.elements.description.value = '';
     state.pendingModifierPresetOptions = [];
     await refreshProductOptions(item.id);
     toast(group?.id ? 'Pergunta criada com respostas iniciais.' : 'Pergunta criada. Agora adicione as respostas dela.');
@@ -2109,7 +2540,7 @@ function modifierGroupEditor(group) {
       <summary class="modifier-group-summary">
         <span>
           <strong>${escapeHtml(group.name)}</strong>
-          <small>${choicesText}</small>
+          <small>${escapeHtml(group.description || choicesText)}</small>
         </span>
         <em>${modifiers.length} resposta${modifiers.length === 1 ? '' : 's'}</em>
       </summary>
@@ -2117,6 +2548,7 @@ function modifierGroupEditor(group) {
         <form class="modifier-rule-form" data-modifier-group-form="${escapeAttribute(group.id)}">
           <input name="sort_order" type="hidden" value="${Number(group.sort_order || 0)}">
           <label>Pergunta<input name="name" required value="${escapeAttribute(group.name)}"></label>
+          <label>Descrição<input name="description" value="${escapeAttribute(group.description || '')}" placeholder="Ex: Escolha até 3 adicionais."></label>
           <label>Mínimo<input name="min_choices" type="number" min="0" value="${Number(group.min_choices || 0)}"></label>
           <label>Máximo<input name="max_choices" type="number" min="1" value="${Number(group.max_choices || 1)}"></label>
           <label class="check inline-check"><input name="is_required" type="checkbox" ${group.is_required ? 'checked' : ''}> Obrigatória</label>
@@ -2152,6 +2584,7 @@ function modifierPreviewHtml(item) {
       <article>
         <strong>${escapeHtml(group.name)}${required ? ' *' : ''}</strong>
         <small>${modifierRuleText(group)}</small>
+        ${group.description ? `<p>${escapeHtml(group.description)}</p>` : ''}
         <div>
           ${options.slice(0, 5).map((modifier) => `
             <span>${escapeHtml(modifier.name)}${Number(modifier.price_delta || 0) > 0 ? ` + ${money(modifier.price_delta)}` : ''}</span>
@@ -2529,6 +2962,7 @@ function fillStoreForm() {
   setValue(els.storeForm.elements.cover_url, store.cover_url);
   setValue(els.storeForm.elements.delivery_fee, store.delivery_fee);
   setValue(els.storeForm.elements.minimum_order, store.minimum_order);
+  setValue(els.storeForm.elements.delivery_neighborhood_fees, neighborhoodFeesToText(store.delivery_neighborhood_fees));
   els.storeForm.querySelectorAll('input[name="payment_methods"]').forEach((input) => {
     input.checked = paymentMethods.includes(input.value);
   });
@@ -2662,6 +3096,7 @@ function formToModifierGroup(form) {
   const data = new FormData(form);
   return {
     name: data.get('name'),
+    description: data.get('description'),
     min_choices: data.get('min_choices'),
     max_choices: data.get('max_choices'),
     sort_order: data.get('sort_order') || 0,
@@ -2734,6 +3169,7 @@ function formToStore(form) {
     logo_url: data.get('logo_url'),
     cover_url: data.get('cover_url'),
     delivery_fee: data.get('delivery_fee'),
+    delivery_neighborhood_fees: parseNeighborhoodFees(data.get('delivery_neighborhood_fees')),
     minimum_order: data.get('minimum_order'),
     payment_methods: [...new Set(paymentMethods)],
     business_hours: businessHoursFromForm(data),
@@ -2741,6 +3177,26 @@ function formToStore(form) {
     accepts_delivery: data.get('accepts_delivery') === 'on',
     accepts_pickup: data.get('accepts_pickup') === 'on'
   };
+}
+
+function neighborhoodFeesToText(value) {
+  if (!value || typeof value !== 'object') return '';
+  return Object.entries(value)
+    .map(([name, price]) => `${name}=${String(price).replace('.', ',')}`)
+    .join('\n');
+}
+
+function parseNeighborhoodFees(value) {
+  const fees = {};
+  String(value || '').split(/\r?\n/).forEach((line) => {
+    const [name, ...priceParts] = line.split('=');
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return;
+    const price = Number.parseFloat(priceParts.join('=').trim().replace(',', '.'));
+    if (Number.isNaN(price) || price < 0) return;
+    fees[cleanName] = price;
+  });
+  return fees;
 }
 
 function fillBusinessHours(hours = {}) {
@@ -2769,6 +3225,7 @@ function customerPayloadFromForm(form) {
       name: data.get('name'),
       phone: data.get('phone'),
       email: data.get('email'),
+      birth_date: data.get('birth_date'),
       notes: data.get('notes')
     }
   };

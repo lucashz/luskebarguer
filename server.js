@@ -104,7 +104,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/coupons/preview') {
-    json(res, 200, { coupon: await previewCoupon(await readJson(req)) });
+    json(res, 200, { coupon: await previewCoupon(req, await readJson(req)) });
     return;
   }
 
@@ -255,6 +255,14 @@ async function handleApi(req, res, url) {
     const result = await updateStoreSettings(await readJson(req));
     clearPublicBootstrapCache();
     json(res, 200, result);
+    return;
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/admin/loyalty') {
+    if (!(await requireAdmin(req, res))) return;
+    const store = await updateLoyaltyProgram(await readJson(req));
+    clearPublicBootstrapCache();
+    json(res, 200, { store });
     return;
   }
 
@@ -725,13 +733,68 @@ async function requireCustomer(req, res) {
 
 async function getCustomerProfile(customerId) {
   const rows = await supabase('GET', 'customers', {
-    select: 'id,name,phone,email,notes,created_at,updated_at',
+    select: 'id,name,phone,email,birth_date,notes,created_at,updated_at',
     id: `eq.${customerId}`,
     limit: '1'
   });
   if (!rows[0]) throw httpError(404, 'Cliente não encontrado.');
   const addresses = await listCustomerAddresses(customerId);
-  return { ...rows[0], address: addresses[0] || null, addresses };
+  const loyalty = await customerLoyaltyProgress(customerId);
+  return { ...rows[0], address: addresses[0] || null, addresses, loyalty };
+}
+
+async function customerLoyaltyProgress(customerId) {
+  const store = await getStoreSettings();
+  const program = sanitizeLoyaltyProgram(store.loyalty_program || {});
+  const orders = await supabase('GET', 'orders', {
+    select: 'id,total,status,created_at',
+    customer_id: `eq.${customerId}`,
+    status: 'eq.completed'
+  });
+  const completedOrders = orders.length;
+  const completedRevenue = roundMoney(orders.reduce((sum, order) => sum + moneyNumber(order.total), 0));
+
+  if (!program.is_active) {
+    return {
+      is_active: false,
+      mode: program.mode,
+      reward: program.reward,
+      completed_orders: completedOrders,
+      points: 0,
+      target: program.mode === 'points' ? program.points_target : program.orders_required,
+      progress: 0,
+      remaining: program.mode === 'points' ? program.points_target : program.orders_required
+    };
+  }
+
+  if (program.mode === 'points') {
+    const points = Math.floor(completedRevenue * program.points_per_currency);
+    const target = Math.max(1, program.points_target);
+    return {
+      is_active: true,
+      mode: 'points',
+      reward: program.reward,
+      completed_orders: completedOrders,
+      points,
+      target,
+      progress: Math.min(100, Math.round((points / target) * 100)),
+      remaining: Math.max(0, target - points)
+    };
+  }
+
+  const target = Math.max(1, program.orders_required);
+  const currentCycle = completedOrders % target;
+  const cycleProgress = currentCycle === 0 && completedOrders > 0 ? target : currentCycle;
+  return {
+    is_active: true,
+    mode: 'orders_reward',
+    reward: program.reward,
+    completed_orders: completedOrders,
+    points: 0,
+    target,
+    progress: Math.min(100, Math.round((cycleProgress / target) * 100)),
+    remaining: cycleProgress >= target ? 0 : target - cycleProgress
+  };
 }
 
 async function updateCustomerProfile(customerId, data) {
@@ -831,7 +894,7 @@ async function getStoreSettings() {
     limit: '1'
   });
 
-  return rows[0] || {
+  const store = rows[0] || {
     name: 'Menu da Casa',
     description: 'Pedido rápido pelo cardápio digital.',
     whatsapp_number: STORE_WHATSAPP_NUMBER,
@@ -839,9 +902,18 @@ async function getStoreSettings() {
     accepts_delivery: true,
     accepts_pickup: true,
     delivery_fee: 0,
+    delivery_neighborhood_fees: defaultNeighborhoodFees(),
     minimum_order: 0,
     payment_methods: ['Pix', 'Cartão', 'Dinheiro'],
-    business_hours: defaultBusinessHours()
+    business_hours: defaultBusinessHours(),
+    loyalty_program: defaultLoyaltyProgram(),
+    onboarding_completed: false
+  };
+  return {
+    ...store,
+    delivery_neighborhood_fees: isPlainObject(store.delivery_neighborhood_fees) ? store.delivery_neighborhood_fees : defaultNeighborhoodFees(),
+    business_hours: isPlainObject(store.business_hours) ? store.business_hours : defaultBusinessHours(),
+    loyalty_program: sanitizeLoyaltyProgram(store.loyalty_program || {})
   };
 }
 
@@ -878,6 +950,33 @@ async function updateStoreSettings(data) {
   return supabase('POST', 'store_settings', {}, payload, ['Prefer: return=representation']);
 }
 
+async function updateLoyaltyProgram(data) {
+  const current = await getStoreSettings();
+  const payload = {
+    loyalty_program: sanitizeLoyaltyProgram(data.loyalty_program || data)
+  };
+
+  if (current.id) {
+    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    return {
+      ...updated,
+      loyalty_program: sanitizeLoyaltyProgram(updated.loyalty_program || {})
+    };
+  }
+
+  const [created] = await supabase('POST', 'store_settings', {}, {
+    name: current.name || 'Menu da Casa',
+    slug: current.slug || 'menu-da-casa',
+    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
+    loyalty_program: payload.loyalty_program
+  }, ['Prefer: return=representation']);
+  return {
+    ...created,
+    loyalty_program: sanitizeLoyaltyProgram(created.loyalty_program || {})
+  };
+}
+
 async function setStoreOpen(isOpen) {
   const current = await getStoreSettings();
   const payload = { is_open: Boolean(isOpen) };
@@ -895,6 +994,7 @@ async function setStoreOpen(isOpen) {
     accepts_delivery: current.accepts_delivery !== false,
     accepts_pickup: current.accepts_pickup !== false,
     delivery_fee: current.delivery_fee || 0,
+    delivery_neighborhood_fees: current.delivery_neighborhood_fees || defaultNeighborhoodFees(),
     minimum_order: current.minimum_order || 0,
     payment_methods: current.payment_methods || ['Pix', 'Cartão', 'Dinheiro'],
     business_hours: current.business_hours || defaultBusinessHours(),
@@ -957,6 +1057,7 @@ async function createOrder(req, data) {
   const fulfillmentMethod = data.fulfillment_method === 'pickup' ? 'pickup' : 'delivery';
   const address = fulfillmentMethod === 'delivery' ? sanitizeAddress(data.address || {}) : null;
   const paymentMethod = cleanText(data.payment_method || '');
+  const paymentDetails = sanitizePaymentDetails(data.payment_details || {}, paymentMethod);
   const notes = cleanText(data.notes || '');
   const couponCode = cleanText(data.coupon_code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '');
   const requestedItems = Array.isArray(data.items) ? data.items : [];
@@ -991,6 +1092,7 @@ async function createOrder(req, data) {
         name: menuItem.name,
         description: menuItem.description,
         price: basePrice,
+        category_id: menuItem.category_id,
         modifiers: selectedModifiers.map((modifier) => ({
           id: modifier.id,
           group_id: modifier.group_id,
@@ -1013,11 +1115,17 @@ async function createOrder(req, data) {
     throw httpError(423, 'A loja está fechada no momento e não está aceitando pedidos.');
   }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
-  const deliveryFee = fulfillmentMethod === 'delivery' ? moneyNumber(store.delivery_fee) : 0;
-  const coupon = couponCode ? await findActivePromotion(couponCode, subtotal, deliveryFee) : null;
+  const deliveryFee = fulfillmentMethod === 'delivery' ? deliveryFeeForAddress(store, address) : 0;
+  const customerRow = session ? await getCustomerProfile(session.data.id) : await upsertCustomer(customer);
+  const coupon = couponCode ? await findActivePromotion(couponCode, {
+    subtotal,
+    deliveryFee,
+    customer: customerRow,
+    items: orderItems
+  }) : null;
   const discount = coupon ? couponDiscountAmount(coupon, subtotal, deliveryFee) : 0;
   const total = roundMoney(Math.max(0, subtotal + deliveryFee - discount));
-  const customerRow = session ? await getCustomerProfile(session.data.id) : await upsertCustomer(customer);
+  validatePaymentDetails(paymentDetails, paymentMethod, total);
 
   if (fulfillmentMethod === 'delivery') {
     await upsertAddress(customerRow.id, address);
@@ -1036,6 +1144,7 @@ async function createOrder(req, data) {
     discount,
     total,
     notes,
+    payment_details: paymentDetails,
     promotion_code: coupon?.code || null
   };
 
@@ -1553,7 +1662,7 @@ async function attachOrderItems(orders) {
 
 async function listCustomers() {
   const customers = await supabase('GET', 'customers', {
-    select: 'id,name,phone,email,notes,created_at,updated_at,last_login_at',
+    select: 'id,name,phone,email,birth_date,notes,created_at,updated_at,last_login_at',
     order: 'created_at.desc',
     limit: '100'
   });
@@ -1576,23 +1685,70 @@ async function listPromotions() {
   }
 }
 
-async function previewCoupon(data) {
+async function previewCoupon(req, data) {
   const code = cleanText(data.code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '');
   const subtotal = roundMoney(Number.parseFloat(data.subtotal) || 0);
   const deliveryFee = roundMoney(Number.parseFloat(data.delivery_fee) || 0);
   if (!code) throw httpError(422, 'Informe o cupom.');
-  const coupon = await findActivePromotion(code, subtotal, deliveryFee);
+  const coupon = await findActivePromotion(code, {
+    subtotal,
+    deliveryFee,
+    customer: await promotionCustomerContext(req, data),
+    items: await promotionItemsContext(data.items || [])
+  });
   const discount = couponDiscountAmount(coupon, subtotal, deliveryFee);
   return {
     code: coupon.code,
     name: coupon.name,
     description: coupon.description || null,
     discount,
-    discount_type: coupon.discount_type
+    discount_type: coupon.discount_type,
+    promotion_type: coupon.promotion_type || 'general'
   };
 }
 
-async function findActivePromotion(code, subtotal, deliveryFee) {
+async function promotionCustomerContext(req, data) {
+  const session = await readPersistentSession(parseCookies(req)[CUSTOMER_COOKIE], 'customer');
+  if (session?.data?.id) return getCustomerProfile(session.data.id);
+
+  const phone = onlyDigits(data.phone || data.customer?.phone || '');
+  if (!phone) return null;
+  const rows = await supabase('GET', 'customers', {
+    select: 'id,name,phone,email,birth_date,notes,created_at,updated_at',
+    phone: `eq.${phone}`,
+    limit: '1'
+  });
+  return rows[0] || null;
+}
+
+async function promotionItemsContext(rawItems) {
+  const requestedItems = Array.isArray(rawItems) ? rawItems : [];
+  const itemIds = [...new Set(requestedItems.map((item) => cleanText(item.id)).filter(Boolean))];
+  if (itemIds.length === 0) return [];
+  const items = await supabase('GET', 'menu_items', {
+    select: 'id,name,category_id,price',
+    id: `in.(${itemIds.join(',')})`
+  });
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return requestedItems.map((requested) => {
+    const item = byId.get(cleanText(requested.id));
+    if (!item) return null;
+    return {
+      menu_item_id: item.id,
+      quantity: clampInteger(requested.quantity, 1, 99),
+      item_snapshot: {
+        id: item.id,
+        name: item.name,
+        category_id: item.category_id,
+        price: moneyNumber(item.price)
+      }
+    };
+  }).filter(Boolean);
+}
+
+async function findActivePromotion(code, context) {
+  const subtotal = roundMoney(Number(context.subtotal || 0));
+  const deliveryFee = roundMoney(Number(context.deliveryFee || 0));
   const rows = await supabase('GET', 'promotions', {
     select: '*',
     code: `eq.${code}`,
@@ -1608,15 +1764,100 @@ async function findActivePromotion(code, subtotal, deliveryFee) {
   if (subtotal < moneyNumber(coupon.minimum_order)) {
     throw httpError(422, `Pedido mínimo para este cupom: ${formatMoney(coupon.minimum_order)}.`);
   }
-  if (coupon.discount_type === 'free_delivery' && deliveryFee <= 0) {
+  if ((coupon.discount_type === 'free_delivery' || coupon.promotion_type === 'free_delivery') && deliveryFee <= 0) {
     throw httpError(422, 'Este cupom é para pedidos com entrega.');
   }
+  await assertPromotionAudience(coupon, { ...context, subtotal, deliveryFee });
   return coupon;
+}
+
+async function assertPromotionAudience(coupon, context) {
+  const promotionType = coupon.promotion_type || 'general';
+  const items = Array.isArray(context.items) ? context.items : [];
+  const itemIds = new Set(items.map((item) => item.menu_item_id || item.item_snapshot?.id).filter(Boolean));
+  const categoryIds = new Set(items.map((item) => item.item_snapshot?.category_id).filter(Boolean));
+  const allowedCategoryIds = cleanIdArray(coupon.allowed_category_ids);
+  const comboItemIds = cleanIdArray(coupon.combo_item_ids);
+
+  if (allowedCategoryIds.length && !allowedCategoryIds.some((categoryId) => categoryIds.has(categoryId))) {
+    throw httpError(422, 'Este cupom não vale para as categorias escolhidas.');
+  }
+
+  if (promotionType === 'combo' && comboItemIds.length && !comboItemIds.every((itemId) => itemIds.has(itemId))) {
+    throw httpError(422, 'Este combo precisa dos produtos configurados na promoção.');
+  }
+
+  const customer = context.customer || null;
+  await assertPromotionUseLimitPerCustomer(coupon, customer);
+
+  if (!['first_order', 'recurring', 'birthday'].includes(promotionType)) return;
+
+  const orderCount = customer?.id ? await customerOrderCount(customer.id) : 0;
+
+  if (promotionType === 'first_order' && orderCount > 0) {
+    throw httpError(422, 'Este cupom é válido apenas para a primeira compra.');
+  }
+
+  if (promotionType === 'recurring') {
+    const minOrders = Math.max(1, Number(coupon.recurring_min_orders || 2));
+    if (!customer?.id || orderCount < minOrders) {
+      throw httpError(422, `Este cupom é para clientes com pelo menos ${minOrders} pedido(s).`);
+    }
+  }
+
+  if (promotionType === 'birthday') {
+    if (!customer?.birth_date) throw httpError(422, 'Informe a data de aniversário no cadastro para usar este cupom.');
+    const windowDays = Math.max(0, Number(coupon.birthday_window_days || 7));
+    if (!isBirthdayWithinWindow(customer.birth_date, windowDays)) {
+      throw httpError(422, 'Este cupom só vale perto da data de aniversário.');
+    }
+  }
+}
+
+async function assertPromotionUseLimitPerCustomer(coupon, customer) {
+  const limit = Math.max(1, Number(coupon.max_uses_per_customer || 1));
+  if (!customer?.id) return;
+  const uses = await supabase('GET', 'orders', {
+    select: 'id',
+    customer_id: `eq.${customer.id}`,
+    promotion_code: `eq.${coupon.code}`
+  });
+  if (uses.length >= limit) {
+    throw httpError(422, `Este cupom já atingiu o limite de ${limit} uso(s) para sua conta.`);
+  }
+}
+
+async function customerOrderCount(customerId) {
+  const orders = await supabase('GET', 'orders', {
+    select: 'id',
+    customer_id: `eq.${customerId}`
+  });
+  return orders.length;
+}
+
+function isBirthdayWithinWindow(birthDate, windowDays) {
+  const birthday = new Date(`${String(birthDate).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(birthday.getTime())) return false;
+  const now = new Date();
+  const thisYear = new Date(now.getFullYear(), birthday.getMonth(), birthday.getDate(), 12, 0, 0);
+  const nextYear = new Date(now.getFullYear() + 1, birthday.getMonth(), birthday.getDate(), 12, 0, 0);
+  const previousYear = new Date(now.getFullYear() - 1, birthday.getMonth(), birthday.getDate(), 12, 0, 0);
+  const diffDays = Math.min(
+    Math.abs(thisYear.getTime() - now.getTime()),
+    Math.abs(nextYear.getTime() - now.getTime()),
+    Math.abs(previousYear.getTime() - now.getTime())
+  ) / 86400000;
+  return diffDays <= windowDays;
+}
+
+function cleanIdArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(cleanText).filter(Boolean);
 }
 
 function couponDiscountAmount(coupon, subtotal, deliveryFee) {
   if (!coupon) return 0;
-  if (coupon.discount_type === 'free_delivery') return roundMoney(deliveryFee);
+  if (coupon.discount_type === 'free_delivery' || coupon.promotion_type === 'free_delivery') return roundMoney(deliveryFee);
   if (coupon.discount_type === 'percent') return roundMoney(subtotal * Math.min(100, moneyNumber(coupon.discount_value)) / 100);
   return roundMoney(Math.min(subtotal, moneyNumber(coupon.discount_value)));
 }
@@ -1631,6 +1872,50 @@ function defaultBusinessHours() {
     saturday: { open: '18:00', close: '23:30', closed: false },
     sunday: { open: '18:00', close: '23:00', closed: false }
   };
+}
+
+function defaultNeighborhoodFees() {
+  return {
+    Centro: 5,
+    'Bela Vista': 8,
+    Interior: 12
+  };
+}
+
+function defaultLoyaltyProgram() {
+  return {
+    is_active: false,
+    mode: 'orders_reward',
+    reward: 'Item grátis',
+    orders_required: 5,
+    points_per_currency: 1,
+    points_target: 500
+  };
+}
+
+function sanitizeLoyaltyProgram(value) {
+  const defaults = defaultLoyaltyProgram();
+  const data = isPlainObject(value) ? value : {};
+  const mode = data.mode === 'points' ? 'points' : 'orders_reward';
+  return {
+    is_active: data.is_active === true || data.is_active === 'true' || data.is_active === 'on' || data.is_active === '1',
+    mode,
+    reward: cleanText(data.reward || defaults.reward) || defaults.reward,
+    orders_required: clampInteger(data.orders_required, 1, 999),
+    points_per_currency: Math.max(0.01, roundMoney(Number.parseFloat(data.points_per_currency) || defaults.points_per_currency)),
+    points_target: clampInteger(data.points_target, 1, 999999)
+  };
+}
+
+function deliveryFeeForAddress(store, address) {
+  const fallback = moneyNumber(store.delivery_fee);
+  const rules = isPlainObject(store.delivery_neighborhood_fees) ? store.delivery_neighborhood_fees : {};
+  const neighborhood = normalizeName(address?.neighborhood || '');
+  if (!neighborhood) return fallback;
+  for (const [name, value] of Object.entries(rules)) {
+    if (normalizeName(name) === neighborhood) return moneyNumber(value);
+  }
+  return fallback;
 }
 
 async function uploadImage(data) {
@@ -1718,6 +2003,7 @@ async function serveStatic(res, requestPath) {
 function routePath(requestPath) {
   if (requestPath === '/') return '/app.html';
   if (requestPath === '/admin') return '/admin.html';
+  if (requestPath === '/cozinha') return '/kitchen.html';
   if (requestPath === '/conta' || requestPath === '/cliente') return '/account.html';
   if (requestPath === '/pedidos') return '/orders.html';
   return decodeURIComponent(requestPath);
@@ -1754,7 +2040,7 @@ function sanitizeAdminUser(data) {
 }
 
 function sanitizeStore(data) {
-  return sanitize(data, {
+  const store = sanitize(data, {
     name: 'string',
     slug: 'string',
     description: 'nullable_string',
@@ -1766,10 +2052,27 @@ function sanitizeStore(data) {
     accepts_delivery: 'boolean',
     accepts_pickup: 'boolean',
     delivery_fee: 'float',
+    delivery_neighborhood_fees: 'object',
     minimum_order: 'float',
     payment_methods: 'array',
-    business_hours: 'object'
+    business_hours: 'object',
+    loyalty_program: 'object',
+    onboarding_completed: 'boolean'
   }, ['name']);
+  if ('delivery_neighborhood_fees' in store) {
+    store.delivery_neighborhood_fees = sanitizeNeighborhoodFees(store.delivery_neighborhood_fees);
+  }
+  if ('loyalty_program' in store) {
+    store.loyalty_program = sanitizeLoyaltyProgram(store.loyalty_program);
+  }
+  return store;
+}
+
+function sanitizeNeighborhoodFees(value) {
+  if (!isPlainObject(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([name, price]) => [cleanText(name), roundMoney(Number.parseFloat(price) || 0)])
+    .filter(([name, price]) => name && price >= 0));
 }
 
 function sanitizeCategory(data, creating) {
@@ -1798,6 +2101,7 @@ function sanitizeItem(data, creating) {
 function sanitizeModifierGroup(data, creating) {
   const clean = sanitize(data, {
     name: 'string',
+    description: 'nullable_string',
     min_choices: 'integer',
     max_choices: 'integer',
     is_required: 'boolean',
@@ -1828,12 +2132,18 @@ function sanitizePromotion(data, creating) {
     name: 'string',
     code: 'string',
     description: 'nullable_string',
+    promotion_type: 'string',
     discount_type: 'string',
     discount_value: 'float',
     minimum_order: 'float',
     starts_at: 'nullable_string',
     ends_at: 'nullable_string',
     max_uses: 'nullable_integer',
+    max_uses_per_customer: 'integer',
+    allowed_category_ids: 'array',
+    combo_item_ids: 'array',
+    recurring_min_orders: 'integer',
+    birthday_window_days: 'integer',
     is_active: 'boolean'
   }, creating ? ['name', 'code'] : []);
 
@@ -1844,10 +2154,21 @@ function sanitizePromotion(data, creating) {
   if ('discount_type' in promotion && !['fixed', 'percent', 'free_delivery'].includes(promotion.discount_type)) {
     throw httpError(422, 'Tipo de desconto inválido.');
   }
+  if ('promotion_type' in promotion && !['general', 'first_order', 'free_delivery', 'fixed', 'percent', 'combo', 'birthday', 'recurring'].includes(promotion.promotion_type)) {
+    throw httpError(422, 'Tipo de promoção inválido.');
+  }
+  if (promotion.promotion_type === 'free_delivery') promotion.discount_type = 'free_delivery';
+  if (promotion.promotion_type === 'fixed') promotion.discount_type = 'fixed';
+  if (promotion.promotion_type === 'percent') promotion.discount_type = 'percent';
   if (promotion.discount_type === 'percent' && promotion.discount_value > 100) promotion.discount_value = 100;
   if ('discount_value' in promotion) promotion.discount_value = Math.max(0, promotion.discount_value);
   if ('minimum_order' in promotion) promotion.minimum_order = Math.max(0, promotion.minimum_order);
   if ('max_uses' in promotion && promotion.max_uses !== null) promotion.max_uses = Math.max(1, promotion.max_uses);
+  if ('max_uses_per_customer' in promotion) promotion.max_uses_per_customer = Math.max(1, promotion.max_uses_per_customer);
+  if ('allowed_category_ids' in promotion) promotion.allowed_category_ids = cleanIdArray(promotion.allowed_category_ids);
+  if ('combo_item_ids' in promotion) promotion.combo_item_ids = cleanIdArray(promotion.combo_item_ids);
+  if ('recurring_min_orders' in promotion) promotion.recurring_min_orders = Math.max(1, promotion.recurring_min_orders);
+  if ('birthday_window_days' in promotion) promotion.birthday_window_days = Math.max(0, promotion.birthday_window_days);
   if ('starts_at' in promotion) promotion.starts_at = cleanOptionalDate(promotion.starts_at);
   if ('ends_at' in promotion) promotion.ends_at = cleanOptionalDate(promotion.ends_at);
   return promotion;
@@ -1858,6 +2179,7 @@ function sanitizeCustomer(data) {
     name: 'string',
     phone: 'phone',
     email: 'nullable_email',
+    birth_date: 'nullable_date',
     notes: 'nullable_string'
   }, ['name', 'phone']);
 
@@ -1868,6 +2190,7 @@ function sanitizeCustomer(data) {
 function sanitizeAddress(data) {
   return sanitize(data, {
     label: 'string',
+    postal_code: 'nullable_string',
     street: 'string',
     number: 'string',
     complement: 'nullable_string',
@@ -1880,6 +2203,7 @@ function sanitizeAddress(data) {
 function sanitizeAddressWithDefault(data, requireStreet) {
   return sanitize(data, {
     label: 'string',
+    postal_code: 'nullable_string',
     street: 'string',
     number: requireStreet ? 'string' : 'nullable_string',
     complement: 'nullable_string',
@@ -1888,6 +2212,25 @@ function sanitizeAddressWithDefault(data, requireStreet) {
     reference: 'nullable_string',
     is_default: 'boolean'
   }, requireStreet ? ['street', 'number', 'neighborhood', 'city'] : []);
+}
+
+function sanitizePaymentDetails(data, paymentMethod) {
+  const details = {};
+  if (isCashPayment(paymentMethod) && 'change_for' in data) {
+    details.change_for = roundMoney(Number.parseFloat(String(data.change_for).replace(',', '.')) || 0);
+  }
+  return details;
+}
+
+function validatePaymentDetails(details, paymentMethod, total) {
+  if (!isCashPayment(paymentMethod) || !details.change_for) return;
+  if (moneyNumber(details.change_for) < moneyNumber(total)) {
+    throw httpError(422, 'O valor para troco precisa ser maior ou igual ao total do pedido.');
+  }
+}
+
+function isCashPayment(paymentMethod) {
+  return normalizeName(paymentMethod).includes('dinheiro');
 }
 
 function sanitize(data, allowed, required) {
@@ -1913,6 +2256,7 @@ function sanitize(data, allowed, required) {
     if (type === 'phone') clean[field] = onlyDigits(value);
     if (type === 'email') clean[field] = cleanEmail(value);
     if (type === 'nullable_email') clean[field] = value ? cleanEmail(value) : null;
+    if (type === 'nullable_date') clean[field] = value ? cleanOptionalDate(value).slice(0, 10) : null;
   }
 
   return clean;
@@ -1930,6 +2274,7 @@ function fieldLabel(field) {
     name: 'nome',
     phone: 'telefone',
     email: 'e-mail',
+    postal_code: 'CEP',
     street: 'rua',
     number: 'número',
     neighborhood: 'bairro',
@@ -1951,6 +2296,7 @@ function buildWhatsappMessage(store, order, items, customer, address) {
 
   if (address) {
     lines.push('Endereço:');
+    if (address.postal_code) lines.push(`CEP: ${address.postal_code}`);
     lines.push(`${address.street}${address.number ? `, ${address.number}` : ''}`);
     if (address.neighborhood) lines.push(`Bairro: ${address.neighborhood}`);
     if (address.city) lines.push(`Cidade: ${address.city}`);
@@ -1975,6 +2321,9 @@ function buildWhatsappMessage(store, order, items, customer, address) {
     lines.push(`Desconto${order.promotion_code ? ` (${order.promotion_code})` : ''}: -${formatMoney(order.discount)}`);
   }
   lines.push(`Total: ${formatMoney(order.total)}`);
+  if (isCashPayment(order.payment_method) && order.payment_details?.change_for) {
+    lines.push(`Troco para: ${formatMoney(order.payment_details.change_for)}`);
+  }
   if (order.notes) lines.push(`Observações: ${order.notes}`);
   if (store.name) lines.push('', store.name);
 

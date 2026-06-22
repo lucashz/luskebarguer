@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Modo Cozinha - Cardápio</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="kitchen-page">
+    <main class="kitchen-shell">
+      <header class="kitchen-header">
+        <div>
+          <p class="eyebrow">Modo cozinha</p>
+          <h1>Pedidos em produção</h1>
+        </div>
+        <div class="kitchen-actions">
+          <button class="ghost-button compact" id="kitchenSoundButton" type="button">Ativar som</button>
+          <button class="ghost-button compact" id="kitchenFullscreenButton" type="button">Tela cheia</button>
+          <button class="ghost-button compact" id="kitchenRefreshButton" type="button">Atualizar</button>
+          <a class="ghost-button compact" href="/admin">Voltar ao admin</a>
+        </div>
+      </header>
+
+      <section class="kitchen-filters" id="kitchenFilters">
+        <button class="active" data-kitchen-filter="all" type="button">Todos</button>
+        <button data-kitchen-filter="new" type="button">Novo</button>
+        <button data-kitchen-filter="preparing" type="button">Preparando</button>
+        <button data-kitchen-filter="ready" type="button">Pronto</button>
+        <button data-kitchen-filter="completed" type="button">Entregue</button>
+      </section>
+
+      <section class="kitchen-status" id="kitchenStatus">Carregando pedidos...</section>
+      <section class="kitchen-board" id="kitchenBoard"></section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="/kitchen.js" type="module"></script>
+  </body>
+</html>

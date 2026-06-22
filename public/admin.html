@@ -20,7 +20,6 @@
           <button data-admin-tab="store" type="button">Loja</button>
           <button data-admin-tab="account" type="button">Conta</button>
         </nav>
-        <button class="text-button" id="logoutButton" type="button">Sair</button>
       </aside>
 
       <section class="admin-main">
@@ -63,6 +62,74 @@
             </div>
             <button class="ghost-button compact" id="adminHeaderLogoutButton" type="button">Sair</button>
           </header>
+
+          <section class="onboarding-panel panel" id="onboardingPanel" hidden>
+            <div class="onboarding-head">
+              <div>
+                <p class="eyebrow">Primeira configuração</p>
+                <h2>Vamos configurar sua loja</h2>
+                <p id="onboardingStepText">Passo 1 de 6</p>
+              </div>
+              <div class="onboarding-progress"><span id="onboardingProgressBar"></span></div>
+            </div>
+
+            <form class="onboarding-step active" data-onboarding-step="0">
+              <h3>WhatsApp dos pedidos</h3>
+              <p class="muted">Informe o número que receberá os pedidos enviados pelo cliente.</p>
+              <label>WhatsApp<input name="whatsapp_number" required inputmode="tel" placeholder="Ex: 5511999999999"></label>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="1">
+              <h3>Horário de funcionamento</h3>
+              <p class="muted">Para começar, use um horário único para todos os dias. Depois você pode ajustar por dia.</p>
+              <div class="two-cols">
+                <label>Abre<input name="open" type="time" value="18:00"></label>
+                <label>Fecha<input name="close" type="time" value="23:00"></label>
+              </div>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="2">
+              <h3>Formas de pagamento</h3>
+              <p class="muted">Marque as opções que a loja aceita hoje.</p>
+              <div class="payment-options">
+                <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix" checked> Pix</label>
+                <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro" checked> Dinheiro</label>
+                <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> Cartão de crédito</label>
+                <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de débito"> Cartão de débito</label>
+              </div>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="3">
+              <h3>Taxas de entrega</h3>
+              <p class="muted">Configure uma taxa padrão e, se quiser, valores por bairro.</p>
+              <div class="two-cols">
+                <label>Taxa padrão<input name="delivery_fee" type="number" min="0" step="0.01" value="5"></label>
+                <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" value="20"></label>
+              </div>
+              <label>Taxa por bairro<textarea name="delivery_neighborhood_fees" placeholder="Centro=5&#10;Bela Vista=8&#10;Interior=12"></textarea></label>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="4">
+              <h3>Primeira categoria</h3>
+              <p class="muted">Crie a primeira seção do cardápio.</p>
+              <label>Nome da categoria<input name="name" required placeholder="Ex: Hambúrgueres"></label>
+              <label>Descrição<input name="description" placeholder="Ex: Artesanais, smash e especiais"></label>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="5">
+              <h3>Primeiro produto</h3>
+              <p class="muted">Cadastre um item inicial para o cardápio já nascer com cara de loja aberta.</p>
+              <label>Categoria<select name="category_id" id="onboardingProductCategory"></select></label>
+              <label>Nome do produto<input name="name" required placeholder="Ex: Burger da Casa"></label>
+              <label>Descrição<textarea name="description" placeholder="Ex: Pão brioche, burger artesanal, queijo e molho da casa"></textarea></label>
+              <label>Preço<input name="price" required type="number" min="0" step="0.01" value="29.90"></label>
+            </form>
+
+            <div class="onboarding-actions">
+              <button class="ghost-button compact" id="onboardingBackButton" type="button">Voltar</button>
+              <button class="primary-button compact" id="onboardingNextButton" type="button">Salvar e continuar</button>
+            </div>
+          </section>
 
           <section class="admin-section active" data-admin-section="operation">
             <section class="operation-hero panel">
@@ -109,6 +176,7 @@
               <div class="row-actions">
                 <button class="ghost-button compact" id="enableSoundButton" type="button">Ativar som</button>
                 <button class="ghost-button compact" id="kitchenModeButton" type="button">Modo cozinha</button>
+                <a class="ghost-button compact" href="/cozinha" target="_blank" rel="noopener">Tela cozinha</a>
                 <button class="ghost-button compact" id="autoPrintButton" type="button">Auto imprimir</button>
                 <button class="ghost-button compact" id="archiveClosedOrdersButton" type="button">Limpar finalizados</button>
                 <button class="danger-button compact" id="clearQueueButton" type="button">Fechar operação</button>
@@ -243,6 +311,7 @@
                       </div>
                       <form class="modifier-group-create modifier-group-create-form" id="modifierGroupForm">
                         <label>Pergunta ao cliente<input name="name" required placeholder="Ex: Quer adicionar algo?"></label>
+                        <label>Descrição<input name="description" placeholder="Ex: Escolha até 3 adicionais."></label>
                         <label>Mínimo<input name="min_choices" type="number" min="0" value="0"></label>
                         <label>Máximo<input name="max_choices" type="number" min="1" value="1"></label>
                         <label class="check inline-check"><input name="is_required" type="checkbox"> Obrigatória</label>
@@ -261,47 +330,113 @@
             <div class="section-actions">
               <div>
                 <p class="eyebrow">Cupons e campanhas</p>
-                <h2>Promoções</h2>
+                <h2>Promoções e fidelidade</h2>
+                <p class="muted">Crie cupons de venda rápida, combos e campanhas para clientes recorrentes sem mexer no cardápio.</p>
+              </div>
+              <div class="row-actions">
+                <button class="primary-button compact" id="openPromotionFormButton" type="button">Criar promoção</button>
+                <button class="ghost-button compact" id="openLoyaltyFormButton" type="button">Criar campanha</button>
               </div>
             </div>
             <section class="promo-layout">
-              <form id="promotionForm" class="panel stack-form promo-form">
-                <div>
-                  <h3>Criar promoção</h3>
-                  <p class="muted">Crie cupons sem alterar preços dos produtos. Depois você pode divulgar o código para o cliente.</p>
+              <div class="promotion-form-slot panel">
+                <div class="promotion-empty-state" id="promotionFormPlaceholder">
+                  <p class="eyebrow">Box 1</p>
+                  <h3>Escolha o que deseja criar</h3>
+                  <p>Use os botões acima para cadastrar uma promoção ou uma campanha de fidelidade.</p>
                 </div>
-                <input name="name" required placeholder="Nome da promoção">
-                <input name="code" required placeholder="Código: PRIMEIRA10">
-                <textarea name="description" placeholder="Descrição interna ou regra simples"></textarea>
-                <div class="two-cols">
-                  <label>Tipo
-                    <select name="discount_type">
-                      <option value="fixed">Valor fixo</option>
-                      <option value="percent">Percentual</option>
-                      <option value="free_delivery">Frete grátis</option>
+                <form id="promotionForm" class="stack-form promo-form" hidden>
+                  <div>
+                    <h3 id="promotionFormTitle">Criar promoção</h3>
+                    <p class="muted">Crie cupons sem alterar preços dos produtos. Depois você pode divulgar o código para o cliente.</p>
+                  </div>
+                  <input name="name" required placeholder="Nome da promoção">
+                  <input name="code" required placeholder="Código: PRIMEIRA10">
+                  <textarea name="description" placeholder="Descrição interna ou regra simples"></textarea>
+                  <div class="two-cols">
+                    <label>Tipo de campanha
+                      <select name="promotion_type">
+                        <option value="general">Geral</option>
+                        <option value="first_order">Primeira compra</option>
+                        <option value="free_delivery">Frete grátis</option>
+                        <option value="fixed">Valor fixo</option>
+                        <option value="percent">Percentual</option>
+                        <option value="combo">Combo</option>
+                        <option value="birthday">Aniversário</option>
+                        <option value="recurring">Cliente recorrente</option>
+                      </select>
+                    </label>
+                    <label>Tipo de desconto
+                      <select name="discount_type">
+                        <option value="fixed">Valor fixo</option>
+                        <option value="percent">Percentual</option>
+                        <option value="free_delivery">Frete grátis</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label>Desconto<input name="discount_value" type="number" min="0" step="0.01" value="0"></label>
+                  <div class="two-cols">
+                    <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" value="0"></label>
+                    <label>Limite total de usos<input name="max_uses" type="number" min="1" placeholder="Sem limite"></label>
+                  </div>
+                  <div class="two-cols">
+                    <label>Limite por cliente<input name="max_uses_per_customer" type="number" min="1" value="1"></label>
+                    <span class="muted">Ex: 1 uso por conta. Se colocar 2, o mesmo cliente poderá usar duas vezes.</span>
+                  </div>
+                  <div class="two-cols">
+                    <label>Início<input name="starts_at" type="datetime-local"></label>
+                    <label>Fim<input name="ends_at" type="datetime-local"></label>
+                  </div>
+                  <div class="two-cols">
+                    <label>Pedidos mínimos do cliente<input name="recurring_min_orders" type="number" min="1" value="2"></label>
+                    <label>Dias perto do aniversário<input name="birthday_window_days" type="number" min="0" value="7"></label>
+                  </div>
+                  <label>Categorias permitidas
+                    <select name="allowed_category_ids" id="promotionCategories" multiple size="5"></select>
+                  </label>
+                  <label>Produtos do combo
+                    <select name="combo_item_ids" id="promotionComboItems" multiple size="6"></select>
+                  </label>
+                  <label class="check"><input name="is_active" type="checkbox" checked> Promoção ativa</label>
+                  <div class="row-actions">
+                    <button class="primary-button compact" id="savePromotionButton">Salvar promoção</button>
+                    <button class="ghost-button compact" id="cancelPromotionEditButton" type="button">Fechar</button>
+                  </div>
+                </form>
+                <form id="loyaltyForm" class="panel stack-form loyalty-form" hidden>
+                  <div>
+                    <h3>Programa de fidelidade</h3>
+                    <p class="muted">Configure uma recompensa simples para o cliente acompanhar na conta.</p>
+                  </div>
+                  <label class="check"><input name="is_active" type="checkbox"> Fidelidade ativa</label>
+                  <label>Modo
+                    <select name="mode">
+                      <option value="orders_reward">A cada X pedidos</option>
+                      <option value="points">Pontos por valor gasto</option>
                     </select>
                   </label>
-                  <label>Desconto<input name="discount_value" type="number" min="0" step="0.01" value="0"></label>
-                </div>
-                <div class="two-cols">
-                  <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" value="0"></label>
-                  <label>Limite de usos<input name="max_uses" type="number" min="1" placeholder="Sem limite"></label>
-                </div>
-                <div class="two-cols">
-                  <label>Início<input name="starts_at" type="datetime-local"></label>
-                  <label>Fim<input name="ends_at" type="datetime-local"></label>
-                </div>
-                <label class="check"><input name="is_active" type="checkbox" checked> Promoção ativa</label>
-                <button class="primary-button wide">Salvar promoção</button>
-              </form>
-              <section class="panel menu-list-panel">
+                  <label>Recompensa<input name="reward" placeholder="Ex: Item grátis, combo, sobremesa"></label>
+                  <div class="two-cols">
+                    <label>Pedidos necessários<input name="orders_required" type="number" min="1" value="5"></label>
+                    <label>Pontos necessários<input name="points_target" type="number" min="1" value="500"></label>
+                  </div>
+                  <label>Pontos por R$ 1,00<input name="points_per_currency" type="number" min="0.01" step="0.01" value="1"></label>
+                  <div class="row-actions">
+                    <button class="primary-button compact">Salvar campanha</button>
+                    <button class="ghost-button compact" id="closeLoyaltyFormButton" type="button">Fechar</button>
+                  </div>
+                </form>
+              </div>
+
+              <section class="panel menu-list-panel promotion-list-panel">
                 <div class="section-actions">
                   <div>
-                    <h3>Cupons cadastrados</h3>
-                    <p class="muted">Ative, pause ou exclua campanhas rapidamente.</p>
+                    <p class="eyebrow">Box 2</p>
+                    <h3>Campanhas cadastradas</h3>
+                    <p class="muted">Cupons e campanhas criadas aparecem aqui para editar, pausar ou excluir.</p>
                   </div>
                 </div>
-                <div class="admin-list" id="promotionList"></div>
+                <div class="promotion-board" id="promotionList"></div>
               </section>
             </section>
           </section>
@@ -369,6 +504,8 @@
                     <label>Taxa de entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
                     <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
                   </div>
+                  <label>Taxa por bairro<textarea name="delivery_neighborhood_fees" placeholder="Centro=5&#10;Bela Vista=8&#10;Interior=12"></textarea></label>
+                  <p class="muted">Use uma linha por bairro. Se o bairro não estiver na lista, vale a taxa padrão acima.</p>
                 </div>
               </section>
 

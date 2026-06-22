@@ -13,15 +13,21 @@ create table if not exists public.store_settings (
   accepts_delivery boolean not null default true,
   accepts_pickup boolean not null default true,
   delivery_fee numeric(10, 2) not null default 0,
+  delivery_neighborhood_fees jsonb not null default '{}'::jsonb,
   minimum_order numeric(10, 2) not null default 0,
   payment_methods text[] not null default array['Pix', 'Cartao', 'Dinheiro'],
   business_hours jsonb not null default '{}'::jsonb,
+  loyalty_program jsonb not null default '{}'::jsonb,
+  onboarding_completed boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.store_settings
-  add column if not exists business_hours jsonb not null default '{}'::jsonb;
+  add column if not exists business_hours jsonb not null default '{}'::jsonb,
+  add column if not exists delivery_neighborhood_fees jsonb not null default '{}'::jsonb,
+  add column if not exists loyalty_program jsonb not null default '{}'::jsonb,
+  add column if not exists onboarding_completed boolean not null default false;
 
 create table if not exists public.menu_categories (
   id uuid primary key default gen_random_uuid(),
@@ -65,6 +71,7 @@ create table if not exists public.customers (
   name text not null,
   phone text not null,
   email text,
+  birth_date date,
   password_hash text,
   notes text,
   last_login_at timestamptz,
@@ -74,13 +81,15 @@ create table if not exists public.customers (
 
 alter table public.customers
   add column if not exists password_hash text,
-  add column if not exists last_login_at timestamptz;
+  add column if not exists last_login_at timestamptz,
+  add column if not exists birth_date date;
 
 create table if not exists public.customer_addresses (
   id uuid primary key default gen_random_uuid(),
   customer_id uuid not null references public.customers(id) on delete cascade,
   label text not null default 'Principal',
   street text not null,
+  postal_code text,
   number text,
   complement text,
   neighborhood text,
@@ -90,6 +99,9 @@ create table if not exists public.customer_addresses (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.customer_addresses
+  add column if not exists postal_code text;
 
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
@@ -113,6 +125,7 @@ create table if not exists public.orders (
   discount numeric(10, 2) not null default 0,
   total numeric(10, 2) not null default 0,
   notes text,
+  payment_details jsonb not null default '{}'::jsonb,
   promotion_code text,
   whatsapp_message text,
   archived_at timestamptz,
@@ -122,7 +135,8 @@ create table if not exists public.orders (
 
 alter table public.orders
   add column if not exists archived_at timestamptz,
-  add column if not exists promotion_code text;
+  add column if not exists promotion_code text,
+  add column if not exists payment_details jsonb not null default '{}'::jsonb;
 
 create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
@@ -140,6 +154,7 @@ create table if not exists public.menu_modifier_groups (
   id uuid primary key default gen_random_uuid(),
   menu_item_id uuid not null references public.menu_items(id) on delete cascade,
   name text not null,
+  description text,
   min_choices integer not null default 0,
   max_choices integer not null default 1,
   is_required boolean not null default false,
@@ -147,6 +162,9 @@ create table if not exists public.menu_modifier_groups (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.menu_modifier_groups
+  add column if not exists description text;
 
 create table if not exists public.menu_modifiers (
   id uuid primary key default gen_random_uuid(),
@@ -164,17 +182,31 @@ create table if not exists public.promotions (
   name text not null,
   code text not null,
   description text,
+  promotion_type text not null default 'general',
   discount_type text not null default 'fixed' check (discount_type in ('fixed', 'percent', 'free_delivery')),
   discount_value numeric(10, 2) not null default 0,
   minimum_order numeric(10, 2) not null default 0,
   starts_at timestamptz,
   ends_at timestamptz,
   max_uses integer,
+  max_uses_per_customer integer not null default 1,
+  allowed_category_ids uuid[] not null default '{}',
+  combo_item_ids uuid[] not null default '{}',
+  recurring_min_orders integer not null default 2,
+  birthday_window_days integer not null default 7,
   used_count integer not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.promotions
+  add column if not exists promotion_type text not null default 'general',
+  add column if not exists max_uses_per_customer integer not null default 1,
+  add column if not exists allowed_category_ids uuid[] not null default '{}',
+  add column if not exists combo_item_ids uuid[] not null default '{}',
+  add column if not exists recurring_min_orders integer not null default 2,
+  add column if not exists birthday_window_days integer not null default 7;
 
 create table if not exists public.app_sessions (
   token text primary key,
@@ -207,6 +239,9 @@ create unique index if not exists promotions_code_unique_idx
 
 create index if not exists promotions_active_dates_idx
   on public.promotions (is_active, starts_at, ends_at);
+
+create index if not exists promotions_type_active_idx
+  on public.promotions (promotion_type, is_active);
 
 create index if not exists orders_customer_created_idx
   on public.orders (customer_id, created_at desc);

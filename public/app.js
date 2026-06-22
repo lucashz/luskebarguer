@@ -60,7 +60,9 @@ const els = {
   checkoutCustomerSummary: document.querySelector('#checkoutCustomerSummary'),
   checkoutCustomerName: document.querySelector('#checkoutCustomerName'),
   checkoutCustomerPhone: document.querySelector('#checkoutCustomerPhone'),
+  deliveryFeeHint: document.querySelector('#deliveryFeeHint'),
   paymentMethod: document.querySelector('#paymentMethod'),
+  cashChangeField: document.querySelector('#cashChangeField'),
   couponCode: document.querySelector('#couponCode'),
   applyCouponButton: document.querySelector('#applyCouponButton'),
   couponFeedback: document.querySelector('#couponFeedback'),
@@ -76,6 +78,7 @@ const els = {
   productDialogMedia: document.querySelector('#productDialogMedia'),
   productDialogDescription: document.querySelector('#productDialogDescription'),
   productModifierGroups: document.querySelector('#productModifierGroups'),
+  productChoiceSummary: document.querySelector('#productChoiceSummary'),
   productDialogTotal: document.querySelector('#productDialogTotal'),
   productQuantity: document.querySelector('#productQuantity'),
   productQuantityMinus: document.querySelector('#productQuantityMinus'),
@@ -112,12 +115,16 @@ els.checkoutForm.addEventListener('change', (event) => {
     renderCart();
     renderCheckoutReview();
   }
-  if (['payment_method', 'street', 'number', 'neighborhood', 'city', 'coupon_code'].includes(event.target.name)) {
+  if (['payment_method', 'street', 'number', 'neighborhood', 'city', 'postal_code', 'coupon_code', 'change_for'].includes(event.target.name)) {
+    updatePaymentDetailsVisibility();
     renderCheckoutReview();
   }
 });
 els.checkoutForm.addEventListener('input', (event) => {
-  if (['street', 'number', 'neighborhood', 'city'].includes(event.target.name)) {
+  if (event.target.name === 'postal_code') {
+    event.target.value = formatCep(event.target.value);
+  }
+  if (['street', 'number', 'neighborhood', 'city', 'postal_code', 'change_for'].includes(event.target.name)) {
     renderCheckoutReview();
   }
 });
@@ -575,18 +582,26 @@ function modifierGroupFieldset(group) {
   const fieldset = document.createElement('fieldset');
   const type = Number(group.max_choices || 1) === 1 ? 'radio' : 'checkbox';
   const required = group.is_required || Number(group.min_choices || 0) > 0;
+  const options = (group.modifiers || []).filter((modifier) => modifier.is_available !== false);
+  const min = Math.max(0, Number(group.min_choices || 0));
+  const max = Math.max(1, Number(group.max_choices || 1));
   fieldset.className = `modifier-group ${required ? 'is-required' : ''}`;
   fieldset.dataset.groupId = group.id;
-  fieldset.dataset.minChoices = group.min_choices || 0;
-  fieldset.dataset.maxChoices = group.max_choices || 1;
+  fieldset.dataset.minChoices = min;
+  fieldset.dataset.maxChoices = max;
   fieldset.innerHTML = `
-    <legend><span>${required ? 'Obrigatório' : 'Opcional'}</span>${escapeHtml(group.name)}</legend>
+    <legend>
+      <span>${required ? 'Obrigatório' : 'Opcional'}</span>
+      ${escapeHtml(group.name)}
+    </legend>
     <div class="modifier-group-meta">
-      <p>${required ? `Escolha pelo menos ${group.min_choices || 1}` : 'Escolha se quiser'}${Number(group.max_choices || 0) > 1 ? `, até ${group.max_choices}` : ''}</p>
+      <p>${escapeHtml(group.description || modifierInstructionText(group))}</p>
+      <strong data-modifier-counter>${required ? `0/${Math.max(1, min)}` : `0/${max}`}</strong>
       ${!required && type === 'radio' ? '<button class="modifier-clear-button" type="button" data-clear-modifier-group>Remover escolha</button>' : ''}
     </div>
+    <p class="modifier-validation" data-modifier-validation hidden></p>
     <div class="modifier-options">
-      ${(group.modifiers || []).map((modifier) => `
+      ${options.map((modifier) => `
         <label>
           <input type="${type}" name="modifier_${escapeAttribute(group.id)}" value="${escapeAttribute(modifier.id)}" ${required && type === 'radio' ? 'required' : ''}>
           <span>${escapeHtml(modifier.name)}</span>
@@ -600,7 +615,16 @@ function modifierGroupFieldset(group) {
     fieldset.querySelectorAll('input[name^="modifier_"]').forEach((input) => {
       input.checked = false;
     });
+    updateModifierGroupState(fieldset, group);
     renderProductDialogTotal();
+  });
+
+  fieldset.querySelectorAll('input[name^="modifier_"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      enforceModifierLimit(fieldset);
+      updateModifierGroupState(fieldset, group);
+      renderProductDialogTotal();
+    });
   });
 
   if (!required && type === 'radio') {
@@ -611,6 +635,7 @@ function modifierGroupFieldset(group) {
       input.addEventListener('click', () => {
         if (input.dataset.wasChecked === 'true') {
           input.checked = false;
+          updateModifierGroupState(fieldset, group);
           renderProductDialogTotal();
         }
         delete input.dataset.wasChecked;
@@ -618,7 +643,42 @@ function modifierGroupFieldset(group) {
     });
   }
 
+  updateModifierGroupState(fieldset, group);
   return fieldset;
+}
+
+function modifierInstructionText(group) {
+  const min = Number(group.min_choices || 0);
+  const max = Number(group.max_choices || 1);
+  if (group.is_required || min > 0) {
+    return max === 1 ? 'Escolha uma opção para continuar.' : `Escolha de ${Math.max(1, min)} a ${max} opções.`;
+  }
+  return max === 1 ? 'Escolha uma opção se quiser.' : `Escolha até ${max} opções.`;
+}
+
+function enforceModifierLimit(fieldset) {
+  const max = Number(fieldset.dataset.maxChoices || 1);
+  const checked = [...fieldset.querySelectorAll('input[name^="modifier_"]:checked')];
+  if (max > 0 && checked.length > max) {
+    checked.at(-1).checked = false;
+    setStatus(`Escolha no máximo ${max} opção(ões).`);
+  }
+}
+
+function updateModifierGroupState(fieldset, group) {
+  const checked = [...fieldset.querySelectorAll('input[name^="modifier_"]:checked')];
+  const min = Number(fieldset.dataset.minChoices || 0);
+  const max = Number(fieldset.dataset.maxChoices || 1);
+  const required = group.is_required || min > 0;
+  const counter = fieldset.querySelector('[data-modifier-counter]');
+  const validation = fieldset.querySelector('[data-modifier-validation]');
+  if (counter) counter.textContent = required ? `${checked.length}/${Math.max(1, min)}` : `${checked.length}/${max}`;
+  const invalid = required && checked.length < Math.max(1, min);
+  fieldset.classList.toggle('is-invalid', invalid);
+  if (validation) {
+    validation.hidden = !invalid;
+    validation.textContent = invalid ? `Escolha ${Math.max(1, min)} opção(ões) em "${group.name}".` : '';
+  }
 }
 
 function submitProductCustomization(event) {
@@ -660,6 +720,9 @@ function selectedProductModifiers() {
     const max = Number(group.max_choices || 0);
     if ((group.is_required || min > 0) && groupSelected.length < Math.max(1, min)) {
       setStatus(`Escolha ${group.name}.`);
+      const fieldset = els.productForm.querySelector(`[data-group-id="${escapeAttribute(group.id)}"]`);
+      fieldset?.classList.add('is-invalid');
+      fieldset?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return null;
     }
     if (max > 0 && groupSelected.length > max) {
@@ -688,6 +751,34 @@ function renderProductDialogTotal() {
   const unitTotal = Number(state.customizingItem.price || 0) + selected.reduce((sum, modifier) => sum + Number(modifier.price_delta || 0), 0);
   const total = unitTotal * quantity;
   els.productDialogTotal.textContent = money(total);
+  renderProductChoiceSummary(selected, quantity, unitTotal, total);
+}
+
+function renderProductChoiceSummary(selected, quantity, unitTotal, total) {
+  if (!els.productChoiceSummary || !state.customizingItem) return;
+  const grouped = new Map();
+  for (const modifier of selected) {
+    const groupName = modifier.group_name || 'Adicionais';
+    if (!grouped.has(groupName)) grouped.set(groupName, []);
+    grouped.get(groupName).push(modifier);
+  }
+  els.productChoiceSummary.hidden = false;
+  els.productChoiceSummary.innerHTML = `
+    <div>
+      <p class="eyebrow">Resumo do item</p>
+      <h3>${escapeHtml(state.customizingItem.name)}</h3>
+      <small>${quantity}x ${money(unitTotal)} cada</small>
+    </div>
+    <div class="product-choice-list">
+      ${grouped.size ? [...grouped.entries()].map(([groupName, modifiers]) => `
+        <article>
+          <strong>${escapeHtml(groupName)}</strong>
+          ${modifiers.map((modifier) => `<span>✓ ${escapeHtml(modifier.name)}${Number(modifier.price_delta || 0) > 0 ? ` + ${money(modifier.price_delta)}` : ''}</span>`).join('')}
+        </article>
+      `).join('') : '<p>Nenhuma opção selecionada ainda.</p>'}
+    </div>
+    <strong class="product-choice-total">${money(total)}</strong>
+  `;
 }
 
 function findModifier(modifierId) {
@@ -714,6 +805,7 @@ async function openCheckout() {
   }
   prefillCheckoutFromCustomer();
   updateCheckoutDeliveryFields();
+  updatePaymentDetailsVisibility();
   renderCheckoutReview();
   els.checkoutDialog.showModal();
 }
@@ -774,6 +866,7 @@ async function submitOrder(event) {
     fulfillment_method: method,
     address: method === 'delivery' ? {
       label: normalizedData.get('label') || selectedAddress?.label || 'Casa',
+      postal_code: normalizedData.get('postal_code') || selectedAddress?.postal_code,
       street: normalizedData.get('street') || selectedAddress?.street,
       number: normalizedData.get('number') || selectedAddress?.number,
       neighborhood: normalizedData.get('neighborhood') || selectedAddress?.neighborhood,
@@ -782,6 +875,7 @@ async function submitOrder(event) {
       reference: normalizedData.get('reference') || selectedAddress?.reference
     } : null,
     payment_method: normalizedData.get('payment_method'),
+    payment_details: paymentDetailsFromForm(normalizedData),
     coupon_code: state.coupon?.code || normalizedData.get('coupon_code') || '',
     notes: normalizedData.get('notes'),
     items: state.cart.map((item) => ({
@@ -827,6 +921,8 @@ async function applyCoupon() {
     return;
   }
   const totals = cartTotals({ ignoreCoupon: true });
+  const form = els.checkoutForm ? new FormData(els.checkoutForm) : new FormData();
+  const customer = checkoutCustomerFromState(form);
   try {
     const data = await request('/api/coupons/preview', {
       method: 'POST',
@@ -834,7 +930,12 @@ async function applyCoupon() {
       body: JSON.stringify({
         code,
         subtotal: totals.subtotal,
-        delivery_fee: totals.deliveryFee
+        delivery_fee: totals.deliveryFee,
+        phone: customer.phone,
+        items: state.cart.map((item) => ({
+          id: item.id,
+          quantity: item.quantity
+        }))
       })
     });
     state.coupon = data.coupon;
@@ -867,32 +968,39 @@ function renderCheckoutSnapshot(totals) {
     ? [els.checkoutForm.elements.street.value, els.checkoutForm.elements.number.value, els.checkoutForm.elements.neighborhood.value, els.checkoutForm.elements.city.value].filter(Boolean).join(', ')
     : 'Retirada no balcão';
   const payment = els.paymentMethod.value || 'Pagamento não selecionado';
+  const changeFor = new FormData(els.checkoutForm).get('change_for');
   els.checkoutConfirmSnapshot.innerHTML = `
     <div><strong>Entrega</strong><span>${escapeHtml(address || 'Endereço será conferido acima.')}</span></div>
     <div><strong>Pagamento</strong><span>${escapeHtml(payment)}</span></div>
+    ${isCashPayment(payment) && changeFor ? `<div><strong>Troco</strong><span>Para ${money(parseMoneyInput(changeFor))}</span></div>` : ''}
+    <div><strong>Subtotal</strong><span>${money(totals.subtotal)}</span></div>
+    <div><strong>Entrega</strong><span>${money(totals.deliveryFee)}</span></div>
+    ${totals.discount ? `<div><strong>Desconto</strong><span>- ${money(totals.discount)}</span></div>` : ''}
     <div><strong>Total final</strong><span>${money(totals.total)}</span></div>
   `;
 }
 
 function renderPaymentOptions() {
-  const methods = state.store?.payment_methods?.length ? state.store.payment_methods : ['Pix', 'Cartão na entrega', 'Dinheiro'];
+  const methods = state.store?.payment_methods?.length ? state.store.payment_methods : ['Pix', 'Cartão', 'Dinheiro'];
   els.paymentMethod.replaceChildren(...methods.map((method) => {
     const option = document.createElement('option');
     option.value = method;
     option.textContent = method;
     return option;
   }));
+  updatePaymentDetailsVisibility();
 }
 
 function updateCheckoutDeliveryFields() {
   const method = new FormData(els.checkoutForm).get('fulfillment_method');
-  ['label', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
+  ['label', 'postal_code', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     const field = els.checkoutForm.elements[name];
     field.disabled = method === 'pickup';
   });
   ['street', 'number', 'neighborhood', 'city'].forEach((name) => {
     els.checkoutForm.elements[name].required = method !== 'pickup';
   });
+  updateDeliveryFeeHint();
 }
 
 function validateCheckoutData(data, method, customer = checkoutCustomerFromState(data)) {
@@ -911,6 +1019,15 @@ function validateCheckoutData(data, method, customer = checkoutCustomerFromState
     const missing = Object.keys(labels).find((name) => !String(data.get(name) || '').trim());
     if (missing) {
       return focusCheckoutField(missing, `Informe ${labels[missing]} para entrega.`);
+    }
+  }
+
+  const payment = data.get('payment_method');
+  if (isCashPayment(payment)) {
+    const changeFor = parseMoneyInput(data.get('change_for'));
+    const total = cartTotals().total;
+    if (changeFor > 0 && changeFor < total) {
+      return focusCheckoutField('change_for', 'O valor do troco precisa ser maior ou igual ao total do pedido.');
     }
   }
 
@@ -1127,6 +1244,7 @@ function applySavedCustomerAddress(address = selectedSavedAddress(), options = {
   if (!address) return;
   const force = options.force === true;
   setAddressField('label', address.label || 'Casa', force);
+  setAddressField('postal_code', address.postal_code, force);
   setAddressField('street', address.street, force);
   setAddressField('number', address.number, force);
   setAddressField('neighborhood', address.neighborhood, force);
@@ -1135,6 +1253,7 @@ function applySavedCustomerAddress(address = selectedSavedAddress(), options = {
   setAddressField('reference', address.reference, force);
   els.savedAddressSelect.value = address.id || addressKey(address);
   clearCheckoutValidity();
+  renderCheckoutReview();
 }
 
 function addressLabel(address) {
@@ -1152,7 +1271,7 @@ function modifierText(modifier) {
 }
 
 function clearAddressFields() {
-  ['label', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
+  ['label', 'postal_code', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     setValue(els.checkoutForm.elements[name], '');
   });
   clearCheckoutValidity();
@@ -1173,6 +1292,7 @@ function clearCheckoutValidity() {
 function addressKey(address = {}) {
   return [
     address.street,
+    address.postal_code,
     address.number,
     address.neighborhood,
     address.city,
@@ -1184,6 +1304,7 @@ function addressKey(address = {}) {
 function addressKeyFromForm() {
   return addressKey({
     street: els.checkoutForm.elements.street.value,
+    postal_code: els.checkoutForm.elements.postal_code.value,
     number: els.checkoutForm.elements.number.value,
     neighborhood: els.checkoutForm.elements.neighborhood.value,
     city: els.checkoutForm.elements.city.value,
@@ -1212,6 +1333,12 @@ function formatPhone(value) {
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   }
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function formatCep(value) {
+  const digits = onlyDigits(value).slice(0, 8);
+  if (digits.length <= 5) return digits;
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 }
 
 function isValidBrazilianPhone(digits) {
@@ -1289,9 +1416,67 @@ function matchesQuery(item) {
 function cartTotals(options = {}) {
   const subtotal = state.cart.reduce((sum, item) => sum + Number(item.price || 0) * item.quantity, 0);
   const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
-  const deliveryFee = method === 'pickup' ? 0 : Number(state.store?.delivery_fee || 0);
+  const deliveryFee = method === 'pickup' ? 0 : deliveryFeeForNeighborhood(els.checkoutForm.elements.neighborhood?.value);
   const discount = options.ignoreCoupon ? 0 : Math.min(subtotal + deliveryFee, Number(state.coupon?.discount || 0));
+  updateDeliveryFeeHint(deliveryFee);
   return { subtotal, deliveryFee, discount, total: subtotal + deliveryFee - discount };
+}
+
+function deliveryFeeForNeighborhood(neighborhood) {
+  const fallback = Number(state.store?.delivery_fee || 0);
+  const rules = state.store?.delivery_neighborhood_fees && typeof state.store.delivery_neighborhood_fees === 'object'
+    ? state.store.delivery_neighborhood_fees
+    : {};
+  const normalized = normalizeText(neighborhood);
+  if (!normalized) return fallback;
+  const match = Object.entries(rules).find(([name]) => normalizeText(name) === normalized);
+  return match ? Number(match[1] || 0) : fallback;
+}
+
+function updateDeliveryFeeHint(currentFee = deliveryFeeForNeighborhood(els.checkoutForm.elements.neighborhood?.value)) {
+  if (!els.deliveryFeeHint) return;
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  if (method === 'pickup') {
+    els.deliveryFeeHint.textContent = 'Retirada no balcão não tem taxa de entrega.';
+    return;
+  }
+  const neighborhood = els.checkoutForm.elements.neighborhood?.value?.trim();
+  els.deliveryFeeHint.textContent = neighborhood
+    ? `Entrega para ${neighborhood}: ${money(currentFee)}.`
+    : 'A taxa de entrega será calculada pelo bairro.';
+}
+
+function updatePaymentDetailsVisibility() {
+  if (!els.cashChangeField) return;
+  const payment = els.paymentMethod?.value || '';
+  els.cashChangeField.hidden = !isCashPayment(payment);
+  els.checkoutForm.elements.change_for.required = false;
+  if (!isCashPayment(payment)) setValue(els.checkoutForm.elements.change_for, '');
+}
+
+function paymentDetailsFromForm(data) {
+  const payment = data.get('payment_method');
+  if (!isCashPayment(payment)) return {};
+  return {
+    change_for: parseMoneyInput(data.get('change_for'))
+  };
+}
+
+function isCashPayment(value) {
+  return normalizeText(value).includes('dinheiro');
+}
+
+function parseMoneyInput(value) {
+  const normalized = String(value || '').replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
+  return Number.parseFloat(normalized) || 0;
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 function loadCart() {

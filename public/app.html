@@ -132,14 +132,16 @@
             <label><input type="radio" name="fulfillment_method" value="pickup"> Retirada</label>
           </div>
           <input name="label" list="checkoutAddressLabelSuggestions" placeholder="Apelido do endereço: Casa, Trabalho">
+          <input name="postal_code" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="CEP">
           <input name="street" required autocomplete="address-line1" placeholder="Rua / Avenida">
           <div class="two-cols">
             <input name="number" required autocomplete="address-line2" placeholder="Número">
-            <input name="neighborhood" required placeholder="Bairro">
+            <input name="complement" placeholder="Complemento">
           </div>
+          <input name="neighborhood" required placeholder="Bairro">
           <input name="city" required autocomplete="address-level2" placeholder="Cidade">
-          <input name="complement" placeholder="Complemento">
           <input name="reference" placeholder="Referência">
+          <p class="delivery-fee-hint" id="deliveryFeeHint">A taxa de entrega será calculada pelo bairro.</p>
           <datalist id="checkoutAddressLabelSuggestions">
             <option value="Casa"></option>
             <option value="Trabalho"></option>
@@ -152,6 +154,9 @@
         <fieldset>
           <legend>Pagamento</legend>
           <select name="payment_method" id="paymentMethod" required></select>
+          <label class="cash-change-field" id="cashChangeField" hidden>Troco para quanto?
+            <input name="change_for" inputmode="decimal" placeholder="Ex: 100,00">
+          </label>
           <div class="coupon-row">
             <input name="coupon_code" id="couponCode" placeholder="Cupom de desconto">
             <button class="ghost-button compact" id="applyCouponButton" type="button">Aplicar</button>
@@ -203,6 +208,7 @@
           </div>
         </section>
         <div id="productModifierGroups"></div>
+        <section class="product-choice-summary" id="productChoiceSummary" hidden></section>
         <label>Observação do item<textarea name="notes" placeholder="Ex: sem cebola, ponto da carne, embalagem separada"></textarea></label>
         <div class="checkout-review-totals">
           <div class="grand-total"><span>Total do item</span><strong id="productDialogTotal">R$ 0,00</strong></div>
