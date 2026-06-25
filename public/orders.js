@@ -1,4 +1,13 @@
 const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
+const THEME_DEFAULTS = {
+  primaryColor: '#d71920',
+  secondaryColor: '#1f1f1f',
+  backgroundColor: '#f5f5f4',
+  buttonColor: '#d71920',
+  buttonTextColor: '#ffffff',
+  selectionColor: '#d71920',
+  selectionTextColor: '#ffffff'
+};
 
 const state = {
   customer: null,
@@ -20,6 +29,7 @@ els.refresh.addEventListener('click', () => loadOnlineOrders({ showLoading: true
 init();
 
 async function init() {
+  loadStoreTheme().catch(() => {});
   const cached = loadAccountCache();
   if (cached?.customer) {
     state.customer = cached.customer;
@@ -43,6 +53,31 @@ async function init() {
     clearAccountCache();
     renderLogin();
   }
+}
+
+async function loadStoreTheme() {
+  const data = await request('/api/store');
+  applyStoreTheme(data.store?.theme_settings);
+}
+
+function applyStoreTheme(theme = {}) {
+  const settings = { ...THEME_DEFAULTS, ...(theme || {}) };
+  const variables = {
+    primaryColor: '--color-primary',
+    secondaryColor: '--color-secondary',
+    backgroundColor: '--color-background',
+    buttonColor: '--color-button',
+    buttonTextColor: '--color-button-text',
+    selectionColor: '--color-selection',
+    selectionTextColor: '--color-selection-text'
+  };
+  Object.entries(variables).forEach(([key, variable]) => {
+    document.documentElement.style.setProperty(variable, validThemeColor(settings[key]) ? settings[key] : THEME_DEFAULTS[key]);
+  });
+}
+
+function validThemeColor(value) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim());
 }
 
 async function loadOnlineOrders(options = {}) {
@@ -126,6 +161,7 @@ function orderCard(order) {
       <div>
         <strong>#${escapeHtml(order.public_code)}</strong>
         <p>${new Date(order.created_at).toLocaleString('pt-BR')}</p>
+        <p class="order-origin-line">${escapeHtml(orderOriginLabel(order))}</p>
       </div>
       <span class="order-history-status">${statusLabel(order.status)}</span>
     </div>
@@ -155,6 +191,21 @@ function orderItemHtml(item) {
       ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
     </div>
   `;
+}
+
+function orderOriginLabel(order) {
+  const method = order.fulfillment_method || 'delivery';
+  const tableName = order.table_snapshot?.name;
+  const tabName = order.tab_snapshot?.name;
+  if (method === 'tab') {
+    return tableName
+      ? `Comanda ${tabName || ''} - ${tableName}`.trim()
+      : `Comanda ${tabName || ''}`.trim();
+  }
+  if (method === 'table') return tableName ? `Mesa ${tableName}` : 'Pedido na mesa';
+  if (method === 'counter') return 'Pedido no balcão';
+  if (method === 'pickup') return 'Retirada no estabelecimento';
+  return 'Delivery';
 }
 
 function repeatOrder(order) {

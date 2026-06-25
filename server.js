@@ -118,6 +118,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/tables/resolve') {
+    json(res, 200, { table: await resolveDiningTable(url.searchParams.get('table') || url.searchParams.get('mesa')) });
+    return;
+  }
+
   if (method === 'POST' && url.pathname === '/api/orders') {
     json(res, 201, await createOrder(req, await readJson(req)));
     return;
@@ -245,8 +250,60 @@ async function handleApi(req, res, url) {
       categories: await getMenu(true),
       orders: await listOrders(),
       customers: await listCustomers(),
-      promotions: await listPromotions()
+      promotions: await listPromotions(),
+      dining_tables: await listDiningTables(),
+      customer_tabs: await listCustomerTabs()
     });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/tables') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 200, { tables: await listDiningTables(), tabs: await listCustomerTabs() });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/tables') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 201, { table: await createDiningTable(await readJson(req)) });
+    return;
+  }
+
+  const tableMatch = url.pathname.match(/^\/api\/admin\/tables\/([a-f0-9-]+)$/i);
+  if (tableMatch) {
+    if (!(await requireAdmin(req, res))) return;
+    if (method === 'PATCH' || method === 'PUT') {
+      json(res, 200, { table: await updateDiningTable(tableMatch[1], await readJson(req)) });
+      return;
+    }
+    if (method === 'DELETE') {
+      await deleteDiningTable(tableMatch[1]);
+      json(res, 200, { ok: true });
+      return;
+    }
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/tabs') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 201, { tab: await openCustomerTab(await readJson(req)) });
+    return;
+  }
+
+  const tabItemMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/items$/i);
+  if (tabItemMatch && method === 'POST') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 201, await addItemToCustomerTab(req, tabItemMatch[1], await readJson(req)));
+    return;
+  }
+
+  const tabMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/(close|transfer)$/i);
+  if (tabMatch) {
+    if (!(await requireAdmin(req, res))) return;
+    const body = await readJson(req);
+    const tab = tabMatch[2] === 'close'
+      ? await closeCustomerTab(tabMatch[1], body)
+      : await transferCustomerTab(tabMatch[1], body);
+    json(res, 200, { tab });
     return;
   }
 
@@ -261,6 +318,14 @@ async function handleApi(req, res, url) {
   if (method === 'PUT' && url.pathname === '/api/admin/loyalty') {
     if (!(await requireAdmin(req, res))) return;
     const store = await updateLoyaltyProgram(await readJson(req));
+    clearPublicBootstrapCache();
+    json(res, 200, { store });
+    return;
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/admin/print-settings') {
+    if (!(await requireAdmin(req, res))) return;
+    const store = await updatePrintSettings(await readJson(req));
     clearPublicBootstrapCache();
     json(res, 200, { store });
     return;
@@ -286,6 +351,12 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && url.pathname === '/api/admin/orders') {
     if (!(await requireAdmin(req, res))) return;
     json(res, 200, { orders: await listOrders() });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/print-logs') {
+    if (!(await requireAdmin(req, res))) return;
+    json(res, 201, { log: await createPrintLog(await readJson(req)) });
     return;
   }
 
@@ -907,13 +978,17 @@ async function getStoreSettings() {
     payment_methods: ['Pix', 'Cartão', 'Dinheiro'],
     business_hours: defaultBusinessHours(),
     loyalty_program: defaultLoyaltyProgram(),
+    theme_settings: defaultThemeSettings(),
+    print_settings: defaultPrintSettings(),
     onboarding_completed: false
   };
   return {
     ...store,
     delivery_neighborhood_fees: isPlainObject(store.delivery_neighborhood_fees) ? store.delivery_neighborhood_fees : defaultNeighborhoodFees(),
     business_hours: isPlainObject(store.business_hours) ? store.business_hours : defaultBusinessHours(),
-    loyalty_program: sanitizeLoyaltyProgram(store.loyalty_program || {})
+    loyalty_program: sanitizeLoyaltyProgram(store.loyalty_program || {}),
+    theme_settings: sanitizeThemeSettings(store.theme_settings || {}),
+    print_settings: sanitizePrintSettings(store.print_settings || {})
   };
 }
 
@@ -974,6 +1049,33 @@ async function updateLoyaltyProgram(data) {
   return {
     ...created,
     loyalty_program: sanitizeLoyaltyProgram(created.loyalty_program || {})
+  };
+}
+
+async function updatePrintSettings(data) {
+  const current = await getStoreSettings();
+  const payload = {
+    print_settings: sanitizePrintSettings(data.print_settings || data)
+  };
+
+  if (current.id) {
+    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    return {
+      ...updated,
+      print_settings: sanitizePrintSettings(updated.print_settings || {})
+    };
+  }
+
+  const [created] = await supabase('POST', 'store_settings', {}, {
+    name: current.name || 'Menu da Casa',
+    slug: current.slug || 'menu-da-casa',
+    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
+    print_settings: payload.print_settings
+  }, ['Prefer: return=representation']);
+  return {
+    ...created,
+    print_settings: sanitizePrintSettings(created.print_settings || {})
   };
 }
 
@@ -1051,10 +1153,12 @@ async function getMenu(admin) {
   return [...byCategory.values()];
 }
 
-async function createOrder(req, data) {
+async function createOrder(req, data, options = {}) {
   const session = await readPersistentSession(parseCookies(req)[CUSTOMER_COOKIE], 'customer');
-  const customer = sanitizeCustomer(data.customer || {});
-  const fulfillmentMethod = data.fulfillment_method === 'pickup' ? 'pickup' : 'delivery';
+  let fulfillmentMethod = ['delivery', 'pickup', 'counter', 'table', 'tab'].includes(data.fulfillment_method)
+    ? data.fulfillment_method
+    : 'delivery';
+  const customer = sanitizeOrderCustomer(data.customer || {}, fulfillmentMethod);
   const address = fulfillmentMethod === 'delivery' ? sanitizeAddress(data.address || {}) : null;
   const paymentMethod = cleanText(data.payment_method || '');
   const paymentDetails = sanitizePaymentDetails(data.payment_details || {}, paymentMethod);
@@ -1081,7 +1185,9 @@ async function createOrder(req, data) {
     if (!menuItem) throw httpError(422, 'Um item escolhido não está mais disponível.');
 
     const quantity = clampInteger(requested.quantity, 1, 99);
-    const selectedModifiers = validateSelectedModifiers(menuItem.id, requested.modifier_ids, modifierCatalog);
+    const selectedModifiers = options.skipModifierValidation
+      ? validateExistingSelectedModifiers(menuItem.id, requested.modifier_ids, modifierCatalog)
+      : validateSelectedModifiers(menuItem.id, requested.modifier_ids, modifierCatalog);
     const basePrice = moneyNumber(menuItem.price);
     const modifiersTotal = selectedModifiers.reduce((sum, modifier) => sum + moneyNumber(modifier.price_delta), 0);
     const unitPrice = roundMoney(basePrice + modifiersTotal);
@@ -1111,12 +1217,24 @@ async function createOrder(req, data) {
   });
 
   const store = await getStoreSettings();
-  if (store.is_open === false) {
+  if (store.is_open === false && !options.allowClosedStore) {
     throw httpError(423, 'A loja está fechada no momento e não está aceitando pedidos.');
   }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
   const deliveryFee = fulfillmentMethod === 'delivery' ? deliveryFeeForAddress(store, address) : 0;
-  const customerRow = session ? await getCustomerProfile(session.data.id) : await upsertCustomer(customer);
+  const table = ['table', 'tab'].includes(fulfillmentMethod) ? await requireActiveDiningTable(data.dining_table_id || data.table_code) : null;
+  let tab = null;
+  if (fulfillmentMethod === 'tab') {
+    tab = await requireOpenTab(data.customer_tab_id, table?.id);
+  } else if (fulfillmentMethod === 'table' && table?.id) {
+    tab = await findOpenTabForTable(table.id);
+    if (tab) fulfillmentMethod = 'tab';
+  }
+  const customerRow = session
+    ? await getCustomerProfile(session.data.id)
+    : customer.phone
+      ? await upsertCustomer(customer)
+      : null;
   const coupon = couponCode ? await findActivePromotion(couponCode, {
     subtotal,
     deliveryFee,
@@ -1133,12 +1251,16 @@ async function createOrder(req, data) {
 
   const orderPayload = {
     public_code: createPublicCode(),
-    customer_id: customerRow.id,
+    customer_id: customerRow?.id || null,
     status: 'new',
     fulfillment_method: fulfillmentMethod,
     payment_method: paymentMethod,
     customer_snapshot: customer,
     address_snapshot: address,
+    dining_table_id: table?.id || null,
+    customer_tab_id: tab?.id || null,
+    table_snapshot: table ? { id: table.id, name: table.name, code: table.code } : null,
+    tab_snapshot: tab ? { id: tab.id, name: tab.name, customer_name: tab.customer_name } : null,
     subtotal,
     delivery_fee: deliveryFee,
     discount,
@@ -1249,6 +1371,17 @@ function validateSelectedModifiers(menuItemId, selectedIds, catalog) {
   }
 
   return selected;
+}
+
+function validateExistingSelectedModifiers(menuItemId, selectedIds, catalog) {
+  const ids = Array.isArray(selectedIds) ? [...new Set(selectedIds.map(cleanText).filter(Boolean))] : [];
+  return ids.map((id) => {
+    const modifier = catalog.modifiersById.get(id);
+    if (!modifier || modifier.menu_item_id !== menuItemId) {
+      throw httpError(422, 'Adicional inválido para um item escolhido.');
+    }
+    return modifier;
+  });
 }
 
 async function ensureUniqueModifierGroupName(menuItemId, name) {
@@ -1455,6 +1588,193 @@ async function listOrders() {
   return attachOrderItems(orders);
 }
 
+async function createPrintLog(data) {
+  const payload = sanitizePrintLog(data);
+  const [log] = await supabase('POST', 'order_print_logs', {}, payload, ['Prefer: return=representation']);
+  return log;
+}
+
+function sanitizePrintLog(data) {
+  return {
+    order_id: cleanText(data.order_id || '') || null,
+    print_type: ['kitchen', 'customer', 'both'].includes(data.print_type) ? data.print_type : 'kitchen',
+    paper_width: ['58', '80'].includes(String(data.paper_width)) ? String(data.paper_width) : '80',
+    copies: clampInteger(data.copies, 1, 10),
+    reason: ['manual', 'auto', 'retry', 'preview'].includes(data.reason) ? data.reason : 'manual',
+    status: ['attempted', 'blocked', 'completed'].includes(data.status) ? data.status : 'attempted'
+  };
+}
+
+async function listDiningTables() {
+  const tables = await supabase('GET', 'dining_tables', {
+    select: '*',
+    order: 'name.asc'
+  });
+  const tabs = await listCustomerTabs();
+  return tables.map((table) => ({
+    ...table,
+    open_tabs: tabs.filter((tab) => tab.status === 'open' && tab.dining_table_id === table.id),
+    open_tab: tabs.find((tab) => tab.status === 'open' && tab.dining_table_id === table.id) || null
+  }));
+}
+
+async function listCustomerTabs() {
+  const tabs = await supabase('GET', 'customer_tabs', {
+    select: '*',
+    order: 'opened_at.desc',
+    limit: '200'
+  });
+  const openTabIds = tabs.filter((tab) => tab.status === 'open').map((tab) => tab.id);
+  let ordersByTab = new Map();
+  if (openTabIds.length) {
+    const orders = await attachOrderItems(await supabase('GET', 'orders', {
+      select: '*',
+      customer_tab_id: `in.(${openTabIds.join(',')})`,
+      order: 'created_at.desc',
+      limit: '500'
+    }));
+    ordersByTab = orders.reduce((map, order) => {
+      const list = map.get(order.customer_tab_id) || [];
+      list.push(order);
+      map.set(order.customer_tab_id, list);
+      return map;
+    }, new Map());
+  }
+  return tabs.map((tab) => {
+    const orders = ordersByTab.get(tab.id) || [];
+    const total = roundMoney(orders
+      .filter((order) => order.status !== 'cancelled')
+      .reduce((sum, order) => sum + moneyNumber(order.total), 0));
+    return { ...tab, orders, current_total: total };
+  });
+}
+
+async function resolveDiningTable(code) {
+  const cleanCode = cleanSlug(code || '');
+  if (!cleanCode) throw httpError(404, 'Mesa não informada.');
+  const rows = await supabase('GET', 'dining_tables', {
+    select: '*',
+    code: `eq.${cleanCode}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  const table = rows[0];
+  if (!table) throw httpError(404, 'Mesa não encontrada ou inativa.');
+  const tabs = await supabase('GET', 'customer_tabs', {
+    select: '*',
+    dining_table_id: `eq.${table.id}`,
+    status: 'eq.open',
+    order: 'opened_at.asc',
+    limit: '50'
+  });
+  let openTab = tabs.length === 1 ? tabs[0] : null;
+  if (openTab) {
+    const orders = await supabase('GET', 'orders', {
+      select: '*',
+      customer_tab_id: `eq.${openTab.id}`,
+      order: 'created_at.desc',
+      limit: '200'
+    });
+    openTab = {
+      ...openTab,
+      current_total: roundMoney(orders
+        .filter((order) => order.status !== 'cancelled')
+        .reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+      order_count: orders.length
+    };
+  }
+  return { ...table, open_tab: openTab, open_tabs: tabs };
+}
+
+async function createDiningTable(data) {
+  const payload = sanitizeDiningTable(data, true);
+  const [table] = await supabase('POST', 'dining_tables', {}, payload, ['Prefer: return=representation']);
+  return table;
+}
+
+async function updateDiningTable(id, data) {
+  const [table] = await supabase('PATCH', 'dining_tables', { id: `eq.${id}` }, sanitizeDiningTable(data, false), ['Prefer: return=representation']);
+  return table;
+}
+
+async function deleteDiningTable(id) {
+  await supabase('DELETE', 'dining_tables', { id: `eq.${id}` }, undefined, ['Prefer: return=minimal']);
+}
+
+async function openCustomerTab(data) {
+  const tableId = cleanText(data.dining_table_id || '');
+  const payload = {
+    name: cleanText(data.name || `Comanda ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`),
+    customer_name: cleanText(data.customer_name || '') || null,
+    dining_table_id: tableId || null,
+    status: 'open'
+  };
+  const [tab] = await supabase('POST', 'customer_tabs', {}, payload, ['Prefer: return=representation']);
+  return tab;
+}
+
+async function closeCustomerTab(id, data = {}) {
+  const orders = await supabase('GET', 'orders', {
+    select: '*',
+    customer_tab_id: `eq.${id}`,
+    order: 'created_at.asc',
+    limit: '500'
+  });
+  const total = roundMoney(orders
+    .filter((order) => order.status !== 'cancelled')
+    .reduce((sum, order) => sum + moneyNumber(order.total), 0));
+  const discount = roundMoney(Number.parseFloat(data.discount) || 0);
+  const [tab] = await supabase('PATCH', 'customer_tabs', { id: `eq.${id}`, status: 'eq.open' }, {
+    status: 'closed',
+    closed_at: new Date().toISOString(),
+    payment_method: cleanText(data.payment_method || ''),
+    discount,
+    total: roundMoney(Math.max(0, total - discount))
+  }, ['Prefer: return=representation']);
+  if (!tab) throw httpError(409, 'Comanda não encontrada ou já fechada.');
+  return tab;
+}
+
+async function transferCustomerTab(id, data = {}) {
+  const tableId = cleanText(data.dining_table_id || '');
+  if (!tableId) throw httpError(422, 'Informe a mesa de destino.');
+  const [tab] = await supabase('PATCH', 'customer_tabs', { id: `eq.${id}`, status: 'eq.open' }, {
+    dining_table_id: tableId
+  }, ['Prefer: return=representation']);
+  if (!tab) throw httpError(409, 'Comanda não encontrada ou já fechada.');
+  return tab;
+}
+
+async function addItemToCustomerTab(req, tabId, data = {}) {
+  const tab = await requireOpenTab(tabId);
+  if (!tab.dining_table_id) throw httpError(422, 'Vincule a comanda a uma mesa antes de adicionar itens pelo admin.');
+  const itemId = cleanText(data.item_id || '');
+  if (!itemId) throw httpError(422, 'Selecione um item do cardápio.');
+  const quantity = clampInteger(data.quantity, 1, 99);
+  const result = await createOrder(req, {
+    fulfillment_method: 'tab',
+    dining_table_id: tab.dining_table_id,
+    customer_tab_id: tab.id,
+    customer: {
+      name: tab.customer_name || tab.name || 'Cliente da mesa',
+      phone: ''
+    },
+    payment_method: 'Pagamento no fechamento',
+    payment_details: {},
+    notes: cleanText(data.notes || 'Lançado pelo admin na comanda.'),
+    items: [{
+      id: itemId,
+      quantity,
+      modifier_ids: [],
+      notes: cleanText(data.item_notes || '')
+    }]
+  }, {
+    allowClosedStore: true,
+    skipModifierValidation: true
+  });
+  return { order: result.order };
+}
+
 async function clearOrderQueue(data = {}) {
   const mode = ['close_open', 'archive_closed'].includes(data.mode) ? data.mode : 'close_open';
   const openStatuses = ['new', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
@@ -1560,6 +1880,7 @@ async function orderReportBetween(start, end, period) {
     },
     by_status: groupOrderTotals(withItems, 'status'),
     by_payment: groupOrderTotals(withItems.filter((order) => order.status !== 'cancelled'), 'payment_method'),
+    by_origin: groupOrderTotals(withItems.filter((order) => order.status !== 'cancelled'), 'fulfillment_method'),
     cash_closing: cashClosingTotals(withItems),
     top_products: topProductTotals(withItems.filter((order) => order.status !== 'cancelled')),
     orders: withItems
@@ -1893,6 +2214,51 @@ function defaultLoyaltyProgram() {
   };
 }
 
+function defaultThemeSettings() {
+  return {
+    primaryColor: '#f97316',
+    secondaryColor: '#111827',
+    backgroundColor: '#fff7ed',
+    buttonColor: '#f97316',
+    buttonTextColor: '#ffffff',
+    selectionColor: '#ffedd5',
+    selectionTextColor: '#9a3412'
+  };
+}
+
+function defaultPrintSettings() {
+  return {
+    paperWidth: '80',
+    kitchenCopies: 1,
+    customerCopies: 1,
+    autoPrintKitchen: false,
+    showKitchenPrices: false,
+    highlightNotes: true
+  };
+}
+
+function sanitizePrintSettings(value) {
+  const defaults = defaultPrintSettings();
+  const data = isPlainObject(value) ? value : {};
+  return {
+    paperWidth: ['58', '80'].includes(String(data.paperWidth)) ? String(data.paperWidth) : defaults.paperWidth,
+    kitchenCopies: clampInteger(data.kitchenCopies, 1, 5),
+    customerCopies: clampInteger(data.customerCopies, 1, 5),
+    autoPrintKitchen: Boolean(data.autoPrintKitchen),
+    showKitchenPrices: Boolean(data.showKitchenPrices),
+    highlightNotes: data.highlightNotes === undefined ? defaults.highlightNotes : Boolean(data.highlightNotes)
+  };
+}
+
+function sanitizeThemeSettings(value) {
+  const defaults = defaultThemeSettings();
+  const data = isPlainObject(value) ? value : {};
+  return Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => {
+    const color = String(data[key] || '').trim();
+    return [key, /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : fallback];
+  }));
+}
+
 function sanitizeLoyaltyProgram(value) {
   const defaults = defaultLoyaltyProgram();
   const data = isPlainObject(value) ? value : {};
@@ -2057,6 +2423,8 @@ function sanitizeStore(data) {
     payment_methods: 'array',
     business_hours: 'object',
     loyalty_program: 'object',
+    theme_settings: 'object',
+    print_settings: 'object',
     onboarding_completed: 'boolean'
   }, ['name']);
   if ('delivery_neighborhood_fees' in store) {
@@ -2065,7 +2433,25 @@ function sanitizeStore(data) {
   if ('loyalty_program' in store) {
     store.loyalty_program = sanitizeLoyaltyProgram(store.loyalty_program);
   }
+  if ('theme_settings' in store) {
+    store.theme_settings = sanitizeThemeSettings(store.theme_settings);
+  }
+  if ('print_settings' in store) {
+    store.print_settings = sanitizePrintSettings(store.print_settings);
+  }
   return store;
+}
+
+function sanitizeDiningTable(data, creating) {
+  const table = sanitize(data, {
+    name: 'string',
+    code: 'string',
+    is_active: 'boolean'
+  }, creating ? ['name'] : []);
+  if ('code' in table) table.code = cleanSlug(table.code || table.name);
+  if (!table.code && table.name) table.code = cleanSlug(table.name);
+  if (creating && !table.code) throw httpError(422, 'Informe o código da mesa.');
+  return table;
 }
 
 function sanitizeNeighborhoodFees(value) {
@@ -2187,6 +2573,77 @@ function sanitizeCustomer(data) {
   return customer;
 }
 
+function sanitizeOrderCustomer(data, fulfillmentMethod) {
+  if (fulfillmentMethod === 'delivery' || fulfillmentMethod === 'pickup') return sanitizeCustomer(data);
+  if (fulfillmentMethod === 'table' || fulfillmentMethod === 'tab') {
+    const customer = sanitize(data, {
+      name: 'nullable_string',
+      phone: 'phone',
+      email: 'nullable_email'
+    }, []);
+    if (customer.phone && customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido ou deixe em branco.');
+    customer.name = cleanText(customer.name || 'Cliente da mesa');
+    return customer;
+  }
+  const customer = sanitize(data, {
+    name: 'string',
+    phone: 'phone',
+    email: 'nullable_email'
+  }, ['name']);
+  if (customer.phone && customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido ou deixe em branco.');
+  return customer;
+}
+
+async function requireActiveDiningTable(idOrCode) {
+  const value = cleanText(idOrCode || '');
+  if (!value) throw httpError(422, 'Mesa não informada.');
+  const query = {
+    select: '*',
+    is_active: 'eq.true',
+    limit: '1'
+  };
+  if (/^[a-f0-9-]{36}$/i.test(value)) query.id = `eq.${value}`;
+  else query.code = `eq.${cleanSlug(value)}`;
+  const rows = await supabase('GET', 'dining_tables', query);
+  if (!rows[0]) throw httpError(422, 'Mesa não encontrada ou inativa.');
+  return rows[0];
+}
+
+async function requireOpenTab(tabId, tableId) {
+  const id = cleanText(tabId || '');
+  let rows = [];
+  if (id) {
+    rows = await supabase('GET', 'customer_tabs', {
+      select: '*',
+      id: `eq.${id}`,
+      status: 'eq.open',
+      limit: '1'
+    });
+  } else if (tableId) {
+    rows = await supabase('GET', 'customer_tabs', {
+      select: '*',
+      dining_table_id: `eq.${tableId}`,
+      status: 'eq.open',
+      limit: '1'
+    });
+  }
+  if (!rows[0]) throw httpError(422, 'Comanda aberta não encontrada.');
+  return rows[0];
+}
+
+async function findOpenTabForTable(tableId) {
+  const id = cleanText(tableId || '');
+  if (!id) return null;
+  const rows = await supabase('GET', 'customer_tabs', {
+    select: '*',
+    dining_table_id: `eq.${id}`,
+    status: 'eq.open',
+    order: 'opened_at.asc',
+    limit: '2'
+  });
+  return rows.length === 1 ? rows[0] : null;
+}
+
 function sanitizeAddress(data) {
   return sanitize(data, {
     label: 'string',
@@ -2284,15 +2741,18 @@ function fieldLabel(field) {
 }
 
 function buildWhatsappMessage(store, order, items, customer, address) {
+  const origin = orderOriginLabel(order);
   const lines = [
     `Novo pedido #${order.public_code}`,
     '',
     `Cliente: ${customer.name}`,
-    `Telefone: ${customer.phone}`,
-    `Tipo: ${order.fulfillment_method === 'delivery' ? 'Entrega' : 'Retirada'}`,
+    customer.phone ? `Telefone: ${customer.phone}` : null,
+    `Tipo: ${origin}`,
+    order.table_snapshot?.name ? `Mesa: ${order.table_snapshot.name}` : null,
+    order.tab_snapshot?.name ? `Comanda: ${order.tab_snapshot.name}` : null,
     `Pagamento: ${order.payment_method}`,
     ''
-  ];
+  ].filter(Boolean);
 
   if (address) {
     lines.push('Endereço:');
@@ -2328,6 +2788,16 @@ function buildWhatsappMessage(store, order, items, customer, address) {
   if (store.name) lines.push('', store.name);
 
   return lines.join('\n');
+}
+
+function orderOriginLabel(order) {
+  return ({
+    delivery: 'Delivery',
+    pickup: 'Retirada',
+    counter: 'Balcão',
+    table: 'Mesa',
+    tab: 'Comanda'
+  })[order.fulfillment_method] || order.fulfillment_method || 'Pedido';
 }
 
 function modifierWhatsappLine(modifier) {
@@ -2427,6 +2897,17 @@ function createPublicCode() {
 
 function cleanText(value) {
   return String(value ?? '').trim().slice(0, 500);
+}
+
+function cleanSlug(value) {
+  return String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
 }
 
 function normalizeName(value) {

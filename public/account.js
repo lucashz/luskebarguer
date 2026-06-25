@@ -8,6 +8,15 @@ const state = {
 
 const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
 const RECENT_ORDERS_LIMIT = 2;
+const THEME_DEFAULTS = {
+  primaryColor: '#d71920',
+  secondaryColor: '#1f1f1f',
+  backgroundColor: '#f5f5f4',
+  buttonColor: '#d71920',
+  buttonTextColor: '#ffffff',
+  selectionColor: '#d71920',
+  selectionTextColor: '#ffffff'
+};
 
 const els = {
   loading: document.querySelector('#accountLoading'),
@@ -57,6 +66,7 @@ els.resetPasswordForm.addEventListener('submit', resetPassword);
 els.registerForm.addEventListener('submit', register);
 els.profileForm.addEventListener('submit', saveProfile);
 els.newAddressForm.addEventListener('submit', createSavedAddress);
+decorateAddressInputs(els.newAddressForm);
 document.querySelectorAll('input[inputmode="tel"]').forEach((field) => {
   field.addEventListener('input', () => {
     field.value = formatPhone(field.value);
@@ -75,6 +85,7 @@ els.logoutButton.addEventListener('click', logout);
 init();
 
 async function init() {
+  loadStoreTheme().catch(() => {});
   applyPageMode();
   const cached = loadAccountCache();
   let hadCachedAccount = false;
@@ -324,6 +335,7 @@ function renderOrders() {
         <span class="order-history-status">${statusLabel(order.status)}</span>
       </div>
       <p>${money(order.total)} - ${new Date(order.created_at).toLocaleString('pt-BR')}</p>
+      <p class="order-origin-line">${escapeHtml(orderOriginLabel(order))}</p>
       <details class="account-order-details">
         <summary>Ver itens do pedido</summary>
         <div class="account-order-items">${(order.items || []).map(accountOrderItemHtml).join('')}</div>
@@ -377,6 +389,21 @@ function accountOrderItemHtml(item) {
       <button class="text-button compact" type="button" data-repeat-item="${escapeAttribute(item.id)}">Pedir só este item</button>
     </div>
   `;
+}
+
+function orderOriginLabel(order) {
+  const method = order.fulfillment_method || 'delivery';
+  const tableName = order.table_snapshot?.name;
+  const tabName = order.tab_snapshot?.name;
+  if (method === 'tab') {
+    return tableName
+      ? `Comanda ${tabName || ''} - ${tableName}`.trim()
+      : `Comanda ${tabName || ''}`.trim();
+  }
+  if (method === 'table') return tableName ? `Mesa ${tableName}` : 'Pedido na mesa';
+  if (method === 'counter') return 'Pedido no balcão';
+  if (method === 'pickup') return 'Retirada no estabelecimento';
+  return 'Delivery';
 }
 
 function orderStatusTimeline(status) {
@@ -461,6 +488,31 @@ function renderLoyaltyProgress() {
   `;
 }
 
+async function loadStoreTheme() {
+  const data = await request('/api/store');
+  applyStoreTheme(data.store?.theme_settings);
+}
+
+function applyStoreTheme(theme = {}) {
+  const settings = { ...THEME_DEFAULTS, ...(theme || {}) };
+  const variables = {
+    primaryColor: '--color-primary',
+    secondaryColor: '--color-secondary',
+    backgroundColor: '--color-background',
+    buttonColor: '--color-button',
+    buttonTextColor: '--color-button-text',
+    selectionColor: '--color-selection',
+    selectionTextColor: '--color-selection-text'
+  };
+  Object.entries(variables).forEach(([key, variable]) => {
+    document.documentElement.style.setProperty(variable, validThemeColor(settings[key]) ? settings[key] : THEME_DEFAULTS[key]);
+  });
+}
+
+function validThemeColor(value) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim());
+}
+
 function loyaltyProgressText() {
   const loyalty = state.customer?.loyalty || {};
   if (!loyalty.is_active) return 'Acompanhe seus pedidos e recompensas por aqui.';
@@ -537,9 +589,32 @@ function accountAddressForm(address) {
   `;
 
   const form = details.querySelector('form');
+  decorateAddressInputs(form);
   form.addEventListener('submit', (event) => saveSavedAddress(event, address.id));
   details.querySelector('[data-delete-address]').addEventListener('click', () => removeSavedAddress(address.id));
   return details;
+}
+
+function decorateAddressInputs(form) {
+  if (!form) return;
+  const labels = {
+    label: 'Apelido',
+    street: 'Rua / Avenida',
+    number: 'Número',
+    neighborhood: 'Bairro',
+    city: 'Cidade',
+    complement: 'Complemento',
+    reference: 'Referência'
+  };
+  Object.entries(labels).forEach(([name, text]) => {
+    const input = form.querySelector(`[name="${name}"]`);
+    if (!input || input.closest('.address-field')) return;
+    const wrapper = document.createElement('label');
+    wrapper.className = 'address-field';
+    wrapper.textContent = text;
+    input.replaceWith(wrapper);
+    wrapper.append(input);
+  });
 }
 
 async function saveSavedAddress(event, addressId) {

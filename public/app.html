@@ -130,7 +130,11 @@
           <div class="segmented">
             <label><input type="radio" name="fulfillment_method" value="delivery" checked> Entrega</label>
             <label><input type="radio" name="fulfillment_method" value="pickup"> Retirada</label>
+            <label><input type="radio" name="fulfillment_method" value="counter"> Balcão</label>
+            <label><input type="radio" name="fulfillment_method" value="table"> Mesa</label>
+            <label><input type="radio" name="fulfillment_method" value="tab"> Comanda</label>
           </div>
+          <section class="table-context" id="tableContext" hidden></section>
           <input name="label" list="checkoutAddressLabelSuggestions" placeholder="Apelido do endereço: Casa, Trabalho">
           <input name="postal_code" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="CEP">
           <input name="street" required autocomplete="address-line1" placeholder="Rua / Avenida">

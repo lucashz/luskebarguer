@@ -18,6 +18,8 @@ create table if not exists public.store_settings (
   payment_methods text[] not null default array['Pix', 'Cartao', 'Dinheiro'],
   business_hours jsonb not null default '{}'::jsonb,
   loyalty_program jsonb not null default '{}'::jsonb,
+  theme_settings jsonb not null default '{}'::jsonb,
+  print_settings jsonb not null default '{}'::jsonb,
   onboarding_completed boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -27,6 +29,8 @@ alter table public.store_settings
   add column if not exists business_hours jsonb not null default '{}'::jsonb,
   add column if not exists delivery_neighborhood_fees jsonb not null default '{}'::jsonb,
   add column if not exists loyalty_program jsonb not null default '{}'::jsonb,
+  add column if not exists theme_settings jsonb not null default '{}'::jsonb,
+  add column if not exists print_settings jsonb not null default '{}'::jsonb,
   add column if not exists onboarding_completed boolean not null default false;
 
 create table if not exists public.menu_categories (
@@ -116,8 +120,12 @@ create table if not exists public.orders (
     'completed',
     'cancelled'
   )),
-  fulfillment_method text not null default 'delivery' check (fulfillment_method in ('delivery', 'pickup')),
+  fulfillment_method text not null default 'delivery' check (fulfillment_method in ('delivery', 'pickup', 'counter', 'table', 'tab')),
   payment_method text not null,
+  dining_table_id uuid,
+  customer_tab_id uuid,
+  table_snapshot jsonb,
+  tab_snapshot jsonb,
   customer_snapshot jsonb not null default '{}',
   address_snapshot jsonb,
   subtotal numeric(10, 2) not null default 0,
@@ -136,7 +144,73 @@ create table if not exists public.orders (
 alter table public.orders
   add column if not exists archived_at timestamptz,
   add column if not exists promotion_code text,
-  add column if not exists payment_details jsonb not null default '{}'::jsonb;
+  add column if not exists payment_details jsonb not null default '{}'::jsonb,
+  add column if not exists dining_table_id uuid,
+  add column if not exists customer_tab_id uuid,
+  add column if not exists table_snapshot jsonb,
+  add column if not exists tab_snapshot jsonb;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_fulfillment_method_check'
+      and conrelid = 'public.orders'::regclass
+  ) then
+    alter table public.orders drop constraint orders_fulfillment_method_check;
+  end if;
+  alter table public.orders
+    add constraint orders_fulfillment_method_check
+    check (fulfillment_method in ('delivery', 'pickup', 'counter', 'table', 'tab'));
+end $$;
+
+create table if not exists public.dining_tables (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  code text not null unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.customer_tabs (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  customer_name text,
+  dining_table_id uuid references public.dining_tables(id) on delete set null,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  opened_at timestamptz not null default now(),
+  closed_at timestamptz,
+  payment_method text,
+  discount numeric(10, 2) not null default 0,
+  total numeric(10, 2) not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'orders_dining_table_id_fkey'
+  ) then
+    alter table public.orders
+      add constraint orders_dining_table_id_fkey
+      foreign key (dining_table_id) references public.dining_tables(id) on delete set null;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'orders_customer_tab_id_fkey'
+  ) then
+    alter table public.orders
+      add constraint orders_customer_tab_id_fkey
+      foreign key (customer_tab_id) references public.customer_tabs(id) on delete set null;
+  end if;
+end $$;
+
+alter table public.customer_tabs
+  add column if not exists payment_method text,
+  add column if not exists discount numeric(10, 2) not null default 0,
+  add column if not exists total numeric(10, 2) not null default 0;
 
 create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
@@ -147,6 +221,17 @@ create table if not exists public.order_items (
   unit_price numeric(10, 2) not null,
   total numeric(10, 2) not null,
   notes text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.order_print_logs (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid references public.orders(id) on delete cascade,
+  print_type text not null check (print_type in ('kitchen', 'customer', 'both')),
+  paper_width text not null default '80' check (paper_width in ('58', '80')),
+  copies integer not null default 1,
+  reason text not null default 'manual' check (reason in ('manual', 'auto', 'retry', 'preview')),
+  status text not null default 'attempted' check (status in ('attempted', 'blocked', 'completed')),
   created_at timestamptz not null default now()
 );
 
@@ -261,6 +346,9 @@ create index if not exists orders_status_archived_created_idx
 create index if not exists order_items_order_idx
   on public.order_items (order_id);
 
+create index if not exists order_print_logs_order_created_idx
+  on public.order_print_logs (order_id, created_at desc);
+
 create index if not exists order_items_menu_item_idx
   on public.order_items (menu_item_id);
 
@@ -346,6 +434,7 @@ alter table public.customers enable row level security;
 alter table public.customer_addresses enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
+alter table public.order_print_logs enable row level security;
 alter table public.menu_modifier_groups enable row level security;
 alter table public.menu_modifiers enable row level security;
 alter table public.promotions enable row level security;

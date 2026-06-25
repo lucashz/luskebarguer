@@ -12,12 +12,23 @@
   closedStoreNoticeKey: null,
   orderSubmitting: false,
   favorites: loadFavorites(),
-  coupon: null
+  coupon: null,
+  diningTable: null,
+  customerTab: null
 };
 
 const BOOTSTRAP_CACHE_KEY = 'cardapio_bootstrap_cache_v1';
 const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
 const FAVORITES_KEY = 'customer_favorites_v1';
+const THEME_DEFAULTS = {
+  primaryColor: '#d71920',
+  secondaryColor: '#1f1f1f',
+  backgroundColor: '#f5f5f4',
+  buttonColor: '#d71920',
+  buttonTextColor: '#ffffff',
+  selectionColor: '#d71920',
+  selectionTextColor: '#ffffff'
+};
 
 const els = {
   storeCover: document.querySelector('#storeCover'),
@@ -61,6 +72,7 @@ const els = {
   checkoutCustomerName: document.querySelector('#checkoutCustomerName'),
   checkoutCustomerPhone: document.querySelector('#checkoutCustomerPhone'),
   deliveryFeeHint: document.querySelector('#deliveryFeeHint'),
+  tableContext: document.querySelector('#tableContext'),
   paymentMethod: document.querySelector('#paymentMethod'),
   cashChangeField: document.querySelector('#cashChangeField'),
   couponCode: document.querySelector('#couponCode'),
@@ -112,6 +124,7 @@ els.checkoutForm.addEventListener('change', (event) => {
     state.coupon = null;
     clearCouponFeedback();
     updateCheckoutDeliveryFields();
+    renderCheckoutCustomerSection();
     renderCart();
     renderCheckoutReview();
   }
@@ -162,9 +175,23 @@ els.deleteSavedAddressButton.addEventListener('click', deleteSelectedSavedAddres
 renderCachedCustomer();
 renderCheckoutCustomerSection();
 renderCachedBootstrap();
+resolveTableFromUrl().catch(() => {});
 loadLoggedCustomer().catch(() => {});
 loadBootstrap();
 renderCart();
+
+async function resolveTableFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('mesa') || params.get('table');
+  if (!code) return;
+  const data = await request(`/api/tables/resolve?table=${encodeURIComponent(code)}`);
+  state.diningTable = data.table || null;
+  state.customerTab = data.table?.open_tab || null;
+  updateDineInModes({ preferTableContext: true });
+  renderTableContext();
+  renderStore();
+  renderCart();
+}
 
 async function loadBootstrap() {
   setStatus(state.categories.length ? 'Atualizando cardápio...' : 'Carregando cardápio...');
@@ -172,6 +199,7 @@ async function loadBootstrap() {
     const data = await request('/api/bootstrap');
     state.store = data.store || null;
     state.categories = data.categories || [];
+    applyStoreTheme(state.store?.theme_settings);
     saveCachedBootstrap(data);
     render();
     setStatus(isStoreClosed() ? 'Loja fechada no momento. Pedidos pausados.' : `${countItems(state.categories)} produtos disponiveis`);
@@ -187,6 +215,7 @@ function renderCachedBootstrap() {
   if (!cached) return;
   state.store = cached.store || null;
   state.categories = cached.categories || [];
+  applyStoreTheme(state.store?.theme_settings);
   render();
   setStatus(isStoreClosed() ? 'Loja fechada no momento. Pedidos pausados.' : `${countItems(state.categories)} produtos disponiveis`);
 }
@@ -223,6 +252,10 @@ function renderStore() {
   els.storeStatus.classList.toggle('closed', store.is_open === false);
   els.deliveryMeta.textContent = store.accepts_delivery === false ? 'Somente retirada' : `Entrega ${money(store.delivery_fee || 0)}`;
   els.minimumMeta.textContent = `Mínimo ${money(store.minimum_order || 0)}`;
+  if (state.diningTable) {
+    els.deliveryMeta.textContent = `Mesa: ${state.diningTable.name}`;
+    els.minimumMeta.textContent = state.customerTab ? `Comanda: ${state.customerTab.name}` : 'Pedido entregue na mesa';
+  }
 
   if (store.cover_url) {
     els.storeCover.style.backgroundImage = `url("${store.cover_url}")`;
@@ -233,6 +266,65 @@ function renderStore() {
   }
 
   handleStoreClosedState();
+}
+
+function renderTableContext() {
+  if (!els.tableContext) return;
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  const show = ['table', 'tab'].includes(method) && state.diningTable;
+  els.tableContext.hidden = !show;
+  if (!show) {
+    els.tableContext.innerHTML = '';
+    return;
+  }
+  els.tableContext.innerHTML = `
+    <strong>${method === 'tab' ? 'Comanda' : 'Mesa'}: ${escapeHtml(state.diningTable.name)}</strong>
+    <p>${method === 'tab' && state.customerTab ? `Este pedido será adicionado automaticamente à ${escapeHtml(state.customerTab.name)}. Total atual: ${money(state.customerTab.current_total || 0)}.` : 'Seu pedido será entregue nesta mesa. Se houver comanda aberta, o sistema adiciona os itens nela.'}</p>
+  `;
+}
+
+function updateDineInModes(options = {}) {
+  if (!els.checkoutForm) return;
+  const tableRadio = els.checkoutForm.querySelector('input[name="fulfillment_method"][value="table"]');
+  const tabRadio = els.checkoutForm.querySelector('input[name="fulfillment_method"][value="tab"]');
+  const deliveryRadio = els.checkoutForm.querySelector('input[name="fulfillment_method"][value="delivery"]');
+  if (tableRadio) {
+    tableRadio.disabled = !state.diningTable;
+    tableRadio.closest('label')?.classList.toggle('disabled-option', tableRadio.disabled);
+    tableRadio.closest('label')?.setAttribute('title', tableRadio.disabled ? 'Acesse pelo QR Code da mesa.' : 'Pedido entregue nesta mesa.');
+  }
+  if (tabRadio) {
+    tabRadio.disabled = !state.customerTab;
+    tabRadio.closest('label')?.classList.toggle('disabled-option', tabRadio.disabled);
+    tabRadio.closest('label')?.setAttribute('title', tabRadio.disabled ? 'Abra uma comanda para esta mesa no admin.' : 'Pedido adicionado à comanda aberta.');
+  }
+  if (!options.preferTableContext) return;
+  const target = state.customerTab ? tabRadio : state.diningTable ? tableRadio : null;
+  if (target) {
+    target.checked = true;
+  } else if ((tableRadio?.checked || tabRadio?.checked) && deliveryRadio) {
+    deliveryRadio.checked = true;
+  }
+}
+
+function applyStoreTheme(theme = {}) {
+  const settings = { ...THEME_DEFAULTS, ...(theme || {}) };
+  const variables = {
+    primaryColor: '--color-primary',
+    secondaryColor: '--color-secondary',
+    backgroundColor: '--color-background',
+    buttonColor: '--color-button',
+    buttonTextColor: '--color-button-text',
+    selectionColor: '--color-selection',
+    selectionTextColor: '--color-selection-text'
+  };
+  Object.entries(variables).forEach(([key, variable]) => {
+    document.documentElement.style.setProperty(variable, validThemeColor(settings[key]) ? settings[key] : THEME_DEFAULTS[key]);
+  });
+}
+
+function validThemeColor(value) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim());
 }
 
 function renderNav() {
@@ -531,7 +623,8 @@ function openProductDialog(item, options = {}) {
   els.productForm.reset();
   els.productQuantity.value = String(options.quantity || 1);
   els.productDialogTitle.textContent = item.name;
-  els.productDialogDescription.textContent = item.description || 'Confira o item antes de adicionar a sacola.';
+  els.productDialogDescription.textContent = item.image_url ? '' : (item.description || 'Confira o item antes de adicionar a sacola.');
+  els.productDialogDescription.hidden = Boolean(item.image_url);
   renderProductDialogMedia(item);
   els.productModifierGroups.replaceChildren(...(item.modifier_groups || []).map(modifierGroupFieldset));
   if (options.modifierIds?.length) {
@@ -565,11 +658,19 @@ function editCartItem(key) {
 }
 
 function renderProductDialogMedia(item) {
+  const description = item.description || '';
+  els.productDialogMedia.classList.toggle('has-image', Boolean(item.image_url));
   if (item.image_url) {
-    els.productDialogMedia.innerHTML = `<img src="${escapeAttribute(item.image_url)}" alt="${escapeAttribute(item.name)}">`;
+    els.productDialogMedia.innerHTML = `
+      <img src="${escapeAttribute(item.image_url)}" alt="${escapeAttribute(item.name)}">
+      ${description ? `<div class="product-dialog-caption">${escapeHtml(description)}</div>` : ''}
+    `;
     return;
   }
-  els.productDialogMedia.innerHTML = `<div class="product-dialog-fallback">${escapeHtml((item.name || 'P').slice(0, 1).toUpperCase())}</div>`;
+  els.productDialogMedia.innerHTML = `
+    <div class="product-dialog-fallback">${escapeHtml((item.name || 'P').slice(0, 1).toUpperCase())}</div>
+    ${description ? `<div class="product-dialog-caption fallback-caption">${escapeHtml(description)}</div>` : ''}
+  `;
 }
 
 function changeProductDialogQuantity(delta) {
@@ -803,6 +904,7 @@ async function openCheckout() {
   if (!state.customerChecked) {
     await loadLoggedCustomer();
   }
+  updateDineInModes({ preferTableContext: true });
   prefillCheckoutFromCustomer();
   updateCheckoutDeliveryFields();
   updatePaymentDetailsVisibility();
@@ -823,12 +925,14 @@ function renderCheckoutReview() {
         <div>
           <div class="checkout-review-title">
             <strong>${item.quantity}x ${escapeHtml(item.name)}</strong>
-            <button class="text-button mini-edit-button" type="button" data-edit-cart-item="${escapeAttribute(item.key)}">Editar</button>
           </div>
           <p>${money(item.price)} cada${item.modifiers?.length ? ` - ${item.modifiers.map(modifierText).map(escapeHtml).join(', ')}` : ''}</p>
           ${item.notes ? `<p>Obs: ${escapeHtml(item.notes)}</p>` : ''}
         </div>
-        <span>${money(total)}</span>
+        <div class="checkout-review-side">
+          <button class="text-button mini-edit-button" type="button" data-edit-cart-item="${escapeAttribute(item.key)}">Editar</button>
+          <span>${money(total)}</span>
+        </div>
       `;
       row.querySelector('[data-edit-cart-item]').addEventListener('click', () => editCartItem(item.key));
       return row;
@@ -853,7 +957,8 @@ async function submitOrder(event) {
   }
   syncLoggedCustomerFields();
   const data = new FormData(els.checkoutForm);
-  const method = data.get('fulfillment_method');
+  const selectedMethod = data.get('fulfillment_method');
+  const method = selectedMethod === 'table' && state.customerTab ? 'tab' : selectedMethod;
   const selectedAddress = method === 'delivery' && state.savedAddressApplied ? selectedSavedAddress() : null;
   if (selectedAddress) {
     applySavedCustomerAddress(selectedAddress, { force: true });
@@ -864,6 +969,8 @@ async function submitOrder(event) {
   const payload = {
     customer,
     fulfillment_method: method,
+    dining_table_id: ['table', 'tab'].includes(method) ? state.diningTable?.id : null,
+    customer_tab_id: method === 'tab' ? state.customerTab?.id : null,
     address: method === 'delivery' ? {
       label: normalizedData.get('label') || selectedAddress?.label || 'Casa',
       postal_code: normalizedData.get('postal_code') || selectedAddress?.postal_code,
@@ -874,7 +981,7 @@ async function submitOrder(event) {
       complement: normalizedData.get('complement') || selectedAddress?.complement,
       reference: normalizedData.get('reference') || selectedAddress?.reference
     } : null,
-    payment_method: normalizedData.get('payment_method'),
+    payment_method: method === 'tab' ? 'Pagamento no fechamento' : normalizedData.get('payment_method'),
     payment_details: paymentDetailsFromForm(normalizedData),
     coupon_code: state.coupon?.code || normalizedData.get('coupon_code') || '',
     notes: normalizedData.get('notes'),
@@ -964,13 +1071,14 @@ function clearCouponFeedback() {
 function renderCheckoutSnapshot(totals) {
   if (!els.checkoutConfirmSnapshot) return;
   const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  const origin = checkoutOriginText(method);
   const address = method === 'delivery'
     ? [els.checkoutForm.elements.street.value, els.checkoutForm.elements.number.value, els.checkoutForm.elements.neighborhood.value, els.checkoutForm.elements.city.value].filter(Boolean).join(', ')
-    : 'Retirada no balcão';
-  const payment = els.paymentMethod.value || 'Pagamento não selecionado';
+    : origin;
+  const payment = method === 'tab' ? 'Pagamento no fechamento' : (els.paymentMethod.value || 'Pagamento não selecionado');
   const changeFor = new FormData(els.checkoutForm).get('change_for');
   els.checkoutConfirmSnapshot.innerHTML = `
-    <div><strong>Entrega</strong><span>${escapeHtml(address || 'Endereço será conferido acima.')}</span></div>
+    <div><strong>Como será</strong><span>${escapeHtml(address || 'Endereço será conferido acima.')}</span></div>
     <div><strong>Pagamento</strong><span>${escapeHtml(payment)}</span></div>
     ${isCashPayment(payment) && changeFor ? `<div><strong>Troco</strong><span>Para ${money(parseMoneyInput(changeFor))}</span></div>` : ''}
     <div><strong>Subtotal</strong><span>${money(totals.subtotal)}</span></div>
@@ -993,21 +1101,31 @@ function renderPaymentOptions() {
 
 function updateCheckoutDeliveryFields() {
   const method = new FormData(els.checkoutForm).get('fulfillment_method');
+  if (method === 'table' && !state.diningTable) {
+    setStatus('Para pedir na mesa, acesse o QR Code da mesa.');
+  }
+  if (method === 'tab' && (!state.diningTable || !state.customerTab)) {
+    setStatus('Para pedir na comanda, a mesa precisa ter uma comanda aberta.');
+  }
   ['label', 'postal_code', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     const field = els.checkoutForm.elements[name];
-    field.disabled = method === 'pickup';
+    field.disabled = method !== 'delivery';
   });
   ['street', 'number', 'neighborhood', 'city'].forEach((name) => {
-    els.checkoutForm.elements[name].required = method !== 'pickup';
+    els.checkoutForm.elements[name].required = method === 'delivery';
   });
+  renderTableContext();
   updateDeliveryFeeHint();
 }
 
 function validateCheckoutData(data, method, customer = checkoutCustomerFromState(data)) {
   const phone = onlyDigits(customer.phone);
-  if (!isValidBrazilianPhone(phone)) {
+  if (['delivery', 'pickup'].includes(method) && !isValidBrazilianPhone(phone)) {
     return focusCheckoutField('phone', 'Informe um telefone válido com DDD. Exemplo: (11) 99999-9999.');
   }
+  if (!['table', 'tab'].includes(method) && !String(customer.name || '').trim()) return focusCheckoutField('name', 'Informe o nome do cliente.');
+  if (method === 'table' && !state.diningTable) return focusCheckoutField('notes', 'Acesse pelo QR Code da mesa para fazer pedido na mesa.');
+  if (method === 'tab' && !state.customerTab) return focusCheckoutField('notes', 'Esta mesa não possui comanda aberta.');
 
   if (method === 'delivery') {
     const labels = {
@@ -1139,6 +1257,9 @@ function syncLoggedCustomerFields() {
 
 function renderCheckoutCustomerSection() {
   const isLogged = Boolean(state.customer);
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  const phoneRequired = ['delivery', 'pickup'].includes(method);
+  const nameRequired = !['table', 'tab'].includes(method);
   els.checkoutCustomerSummary.hidden = !isLogged;
   els.checkoutCustomerName.textContent = state.customer?.name || 'Cliente';
   els.checkoutCustomerPhone.textContent = state.customer?.phone ? formatPhone(state.customer.phone) : 'Telefone não informado';
@@ -1148,7 +1269,9 @@ function renderCheckoutCustomerSection() {
     if (!field) return;
     field.hidden = isLogged;
     field.disabled = isLogged;
-    field.required = !isLogged;
+    field.required = !isLogged && (name === 'name' ? nameRequired : phoneRequired);
+    if (name === 'name') field.placeholder = nameRequired ? 'Nome completo' : 'Nome opcional';
+    if (name === 'phone') field.placeholder = phoneRequired ? 'Telefone com DDD' : 'Telefone opcional';
     field.classList.toggle('readonly-field', isLogged);
   });
 }
@@ -1163,10 +1286,19 @@ function checkoutCustomerFromState(data) {
   }
 
   return {
-    name: data.get('name'),
+    name: data.get('name') || (state.diningTable ? `Cliente ${state.diningTable.name}` : 'Cliente'),
     phone: data.get('phone'),
     email: null
   };
+}
+
+function checkoutOriginText(method) {
+  if (method === 'delivery') return 'Delivery';
+  if (method === 'pickup') return 'Retirada no estabelecimento';
+  if (method === 'counter') return 'Pedido no balcão';
+  if (method === 'table') return state.diningTable ? `Mesa ${state.diningTable.name}` : 'Mesa';
+  if (method === 'tab') return state.customerTab ? `Comanda ${state.customerTab.name}` : 'Comanda';
+  return 'Pedido';
 }
 
 function setOrderSubmitting(isSubmitting) {
@@ -1416,7 +1548,7 @@ function matchesQuery(item) {
 function cartTotals(options = {}) {
   const subtotal = state.cart.reduce((sum, item) => sum + Number(item.price || 0) * item.quantity, 0);
   const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
-  const deliveryFee = method === 'pickup' ? 0 : deliveryFeeForNeighborhood(els.checkoutForm.elements.neighborhood?.value);
+  const deliveryFee = method === 'delivery' ? deliveryFeeForNeighborhood(els.checkoutForm.elements.neighborhood?.value) : 0;
   const discount = options.ignoreCoupon ? 0 : Math.min(subtotal + deliveryFee, Number(state.coupon?.discount || 0));
   updateDeliveryFeeHint(deliveryFee);
   return { subtotal, deliveryFee, discount, total: subtotal + deliveryFee - discount };
@@ -1436,8 +1568,8 @@ function deliveryFeeForNeighborhood(neighborhood) {
 function updateDeliveryFeeHint(currentFee = deliveryFeeForNeighborhood(els.checkoutForm.elements.neighborhood?.value)) {
   if (!els.deliveryFeeHint) return;
   const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
-  if (method === 'pickup') {
-    els.deliveryFeeHint.textContent = 'Retirada no balcão não tem taxa de entrega.';
+  if (method !== 'delivery') {
+    els.deliveryFeeHint.textContent = `${checkoutOriginText(method)} não tem taxa de entrega.`;
     return;
   }
   const neighborhood = els.checkoutForm.elements.neighborhood?.value?.trim();
@@ -1448,10 +1580,11 @@ function updateDeliveryFeeHint(currentFee = deliveryFeeForNeighborhood(els.check
 
 function updatePaymentDetailsVisibility() {
   if (!els.cashChangeField) return;
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
   const payment = els.paymentMethod?.value || '';
-  els.cashChangeField.hidden = !isCashPayment(payment);
+  els.cashChangeField.hidden = method === 'tab' || !isCashPayment(payment);
   els.checkoutForm.elements.change_for.required = false;
-  if (!isCashPayment(payment)) setValue(els.checkoutForm.elements.change_for, '');
+  if (method === 'tab' || !isCashPayment(payment)) setValue(els.checkoutForm.elements.change_for, '');
 }
 
 function paymentDetailsFromForm(data) {

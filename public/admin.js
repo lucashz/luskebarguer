@@ -5,12 +5,16 @@
   orders: [],
   customers: [],
   promotions: [],
+  diningTables: [],
+  customerTabs: [],
   knownOrderIds: new Set(),
   initialOrdersLoaded: false,
   orderPollTimer: null,
   soundEnabled: localStorage.getItem('adminSoundEnabled') === 'true',
   kitchenMode: localStorage.getItem('adminKitchenMode') === 'true',
   autoPrintAccepted: localStorage.getItem('adminAutoPrintAccepted') === 'true',
+  autoPrintedKitchenIds: new Set(JSON.parse(localStorage.getItem('adminAutoPrintedKitchenIds') || '[]')),
+  orderOriginFilter: 'all',
   audioContext: null,
   storeFormDirty: false,
   editingCategoryId: null,
@@ -20,16 +24,75 @@
   pendingModifierPresetOptions: [],
   openModifierGroupIds: new Set(),
   openCustomerIds: new Set(),
+  openOrderDetailIds: new Set(),
+  openTabMenuIds: new Set(),
   modifierCreateDrafts: new Map(),
   currentReport: null,
   draggedOrderId: null,
   updatingOrderIds: new Set(),
   onboardingStep: 0,
-  onboardingCategoryId: null
+  onboardingCategoryId: null,
+  activeAdminTab: 'operation'
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v1';
 const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
+const THEME_DEFAULTS = {
+  primaryColor: '#f97316',
+  secondaryColor: '#111827',
+  backgroundColor: '#fff7ed',
+  buttonColor: '#f97316',
+  buttonTextColor: '#ffffff',
+  selectionColor: '#ffedd5',
+  selectionTextColor: '#9a3412'
+};
+const THEME_PRESETS = {
+  classic: {
+    primaryColor: '#d71920',
+    secondaryColor: '#18181b',
+    backgroundColor: '#f5f5f4',
+    buttonColor: '#d71920',
+    buttonTextColor: '#ffffff',
+    selectionColor: '#d71920',
+    selectionTextColor: '#ffffff'
+  },
+  burger: {
+    primaryColor: '#f97316',
+    secondaryColor: '#111827',
+    backgroundColor: '#fff7ed',
+    buttonColor: '#ea580c',
+    buttonTextColor: '#ffffff',
+    selectionColor: '#ea580c',
+    selectionTextColor: '#ffffff'
+  },
+  fresh: {
+    primaryColor: '#64748b',
+    secondaryColor: '#0f172a',
+    backgroundColor: '#f8fafc',
+    buttonColor: '#334155',
+    buttonTextColor: '#ffffff',
+    selectionColor: '#334155',
+    selectionTextColor: '#ffffff'
+  },
+  premium: {
+    primaryColor: '#f59e0b',
+    secondaryColor: '#111827',
+    backgroundColor: '#fafaf9',
+    buttonColor: '#111827',
+    buttonTextColor: '#fef3c7',
+    selectionColor: '#92400e',
+    selectionTextColor: '#ffffff'
+  },
+  modern: {
+    primaryColor: '#2563eb',
+    secondaryColor: '#172554',
+    backgroundColor: '#eff6ff',
+    buttonColor: '#2563eb',
+    buttonTextColor: '#ffffff',
+    selectionColor: '#2563eb',
+    selectionTextColor: '#ffffff'
+  }
+};
 const businessDayLabels = [
   ['monday', '18:00', '23:00'],
   ['tuesday', '18:00', '23:00'],
@@ -73,6 +136,7 @@ const els = {
   metricOpen: document.querySelector('#metricOpen'),
   metricCustomers: document.querySelector('#metricCustomers'),
   adminOrders: document.querySelector('#adminOrders'),
+  orderOriginFilter: document.querySelector('#orderOriginFilter'),
   adminCustomers: document.querySelector('#adminCustomers'),
   categoryEditorList: document.querySelector('#categoryEditorList'),
   productEditorList: document.querySelector('#productEditorList'),
@@ -89,6 +153,11 @@ const els = {
   reportSummary: document.querySelector('#reportSummary'),
   reportOrdersTitle: document.querySelector('#reportOrdersTitle'),
   reportOrders: document.querySelector('#reportOrders'),
+  refreshTablesButton: document.querySelector('#refreshTablesButton'),
+  tableForm: document.querySelector('#tableForm'),
+  tabForm: document.querySelector('#tabForm'),
+  tabTableSelect: document.querySelector('#tabTableSelect'),
+  tablesBoard: document.querySelector('#tablesBoard'),
   enableSoundButton: document.querySelector('#enableSoundButton'),
   kitchenModeButton: document.querySelector('#kitchenModeButton'),
   autoPrintButton: document.querySelector('#autoPrintButton'),
@@ -122,11 +191,14 @@ const els = {
   refreshModifiersButton: document.querySelector('#refreshModifiersButton'),
   modifierGroupForm: document.querySelector('#modifierGroupForm'),
   storeForm: document.querySelector('#storeForm'),
+  printSettingsForm: document.querySelector('#printSettingsForm'),
+  themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
   promotionForm: document.querySelector('#promotionForm'),
   promotionList: document.querySelector('#promotionList'),
   promotionFormTitle: document.querySelector('#promotionFormTitle'),
+  promotionFormPlaceholder: document.querySelector('#promotionFormPlaceholder'),
   savePromotionButton: document.querySelector('#savePromotionButton'),
   cancelPromotionEditButton: document.querySelector('#cancelPromotionEditButton'),
   openPromotionFormButton: document.querySelector('#openPromotionFormButton'),
@@ -166,6 +238,10 @@ els.refreshAdminButton.addEventListener('click', () => loadSummary());
 els.adminOrders.addEventListener('dragover', handleOrderBoardDragOver);
 els.adminOrders.addEventListener('dragleave', handleOrderBoardDragLeave);
 els.adminOrders.addEventListener('drop', handleOrderBoardDrop);
+els.orderOriginFilter?.addEventListener('change', () => {
+  state.orderOriginFilter = els.orderOriginFilter.value || 'all';
+  renderOrders();
+});
 els.refreshCategoriesButton.addEventListener('click', () => loadSummary());
 els.refreshProductsButton.addEventListener('click', () => loadSummary());
 els.refreshModifiersButton?.addEventListener('click', () => loadSummary());
@@ -175,8 +251,12 @@ els.archiveClosedOrdersButton?.addEventListener('click', archiveClosedOrders);
 els.loadReportButton.addEventListener('click', loadDailyReport);
 els.exportReportCsvButton?.addEventListener('click', exportCurrentReportCsv);
 els.printReportButton?.addEventListener('click', printCurrentReport);
+els.refreshTablesButton?.addEventListener('click', () => loadSummary());
+els.tableForm?.addEventListener('submit', submitTable);
+els.tabForm?.addEventListener('submit', submitTab);
 els.kitchenModeButton?.addEventListener('click', toggleKitchenMode);
 els.autoPrintButton?.addEventListener('click', toggleAutoPrint);
+els.printSettingsForm?.addEventListener('submit', submitPrintSettings);
 els.reportPresetButtons.forEach((button) => {
   button.addEventListener('click', () => loadReportPreset(button.dataset.reportPreset));
 });
@@ -197,9 +277,16 @@ els.modifierGroupForm?.addEventListener('submit', submitModifierGroupFromDialog)
 els.storeForm.addEventListener('submit', submitStore);
 els.storeForm.addEventListener('input', () => {
   state.storeFormDirty = true;
+  renderThemePreview();
 });
 els.storeForm.addEventListener('change', () => {
   state.storeFormDirty = true;
+  renderThemePreview();
+});
+els.storeForm.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-theme-preset]');
+  if (!button) return;
+  applyThemePreset(button.dataset.themePreset);
 });
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
@@ -297,6 +384,8 @@ async function loadSummary(options = {}) {
   state.orders = data.orders || [];
   state.customers = data.customers || [];
   state.promotions = data.promotions || [];
+  state.diningTables = data.dining_tables || [];
+  state.customerTabs = data.customer_tabs || [];
   saveAdminCache();
   detectNewOrders(previousIds, state.orders, options);
   state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
@@ -311,10 +400,12 @@ function render() {
   renderOrders();
   renderCustomers();
   renderPromotions();
+  renderTables();
   renderPromotionOptions();
   renderMenu();
   renderCategoryOptions();
   fillStoreForm();
+  fillPrintSettingsForm();
   fillLoyaltyForm();
   fillAccountForm();
   renderOnboarding();
@@ -325,6 +416,273 @@ function renderOrderMetrics() {
   els.metricOrders.textContent = todaysOrders().length;
   els.metricOpen.textContent = state.orders.filter((order) => !['completed', 'cancelled'].includes(order.status)).length;
   els.metricCustomers.textContent = state.customers.length;
+}
+
+function renderTables() {
+  if (!els.tablesBoard) return;
+  rememberOpenTabMenus();
+  const sortedTables = [...state.diningTables].sort((a, b) =>
+    Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name, 'pt-BR')
+  );
+  if (els.tabTableSelect) {
+    els.tabTableSelect.replaceChildren(
+      optionElement('', 'Sem mesa'),
+      ...sortedTables.map((table) => optionElement(table.id, table.is_active ? table.name : `${table.name} (inativa)`))
+    );
+  }
+  if (!state.diningTables.length && !state.customerTabs.length) {
+    els.tablesBoard.innerHTML = '<p class="empty-state">Nenhuma mesa cadastrada ainda.</p>';
+    return;
+  }
+  const tableCards = sortedTables.map((table) => {
+    const openTabs = (table.open_tabs?.length ? table.open_tabs : state.customerTabs.filter((tab) => tab.status === 'open' && tab.dining_table_id === table.id));
+    const qrUrl = `${window.location.origin}/?mesa=${encodeURIComponent(table.code)}`;
+    const activeText = table.is_active ? (openTabs.length ? `${openTabs.length} comanda(s)` : 'Livre') : 'Inativa';
+    return `
+      <article class="table-card ${table.is_active ? '' : 'muted-card'}">
+        <div class="table-card-head">
+          <div>
+            <strong>${escapeHtml(table.name)}</strong>
+            <small>${activeText}</small>
+          </div>
+          <span class="pill ${openTabs.length ? 'pill-warn' : table.is_active ? 'pill-ok' : 'pill-muted'}">${openTabs.length ? 'Ocupada' : table.is_active ? 'Livre' : 'Inativa'}</span>
+        </div>
+        <p class="table-link-line"><strong>Link da mesa</strong><span>${escapeHtml(qrUrl)}</span></p>
+        ${openTabs.length ? renderTableOpenTabs(openTabs, sortedTables, table.id) : '<p class="muted">Abra uma comanda para lançar itens pelo admin ou use o QR da mesa.</p>'}
+        <div class="row-actions">
+          <button class="ghost-button compact" type="button" data-copy-table-qr="${escapeAttribute(qrUrl)}">Copiar link</button>
+          <button class="ghost-button compact" type="button" data-view-table-qr="${escapeAttribute(table.id)}">Ver QR</button>
+          <button class="ghost-button compact" type="button" data-print-table-qr="${escapeAttribute(table.id)}">Imprimir QR</button>
+          <button class="ghost-button compact" type="button" data-toggle-table="${escapeAttribute(table.id)}">${table.is_active ? 'Desativar' : 'Ativar'}</button>
+          <button class="danger-button compact" type="button" data-delete-table="${escapeAttribute(table.id)}">Excluir</button>
+          <button class="primary-button compact" type="button" data-open-tab="${escapeAttribute(table.id)}">Abrir comanda</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+  const looseTabs = state.customerTabs
+    .filter((tab) => tab.status === 'open' && !tab.dining_table_id)
+    .map((tab) => `
+      <article class="table-card">
+        <div class="table-card-head"><strong>${escapeHtml(tab.name)}</strong><span class="pill pill-warn">Comanda sem mesa</span></div>
+        <p>${escapeHtml(tab.customer_name || 'Cliente não informado')} - ${money(tab.current_total || 0)}</p>
+        <div class="row-actions"><button class="primary-button compact" type="button" data-close-tab="${escapeAttribute(tab.id)}">Fechar comanda</button></div>
+      </article>
+    `).join('');
+  els.tablesBoard.innerHTML = tableCards + looseTabs;
+  els.tablesBoard.querySelectorAll('[data-copy-table-qr]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await navigator.clipboard?.writeText(button.dataset.copyTableQr);
+      toast('Link/QR da mesa copiado.');
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-toggle-table]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const table = state.diningTables.find((entry) => entry.id === button.dataset.toggleTable);
+      await updateDiningTable(table.id, { is_active: !table.is_active });
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-delete-table]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const table = state.diningTables.find((entry) => entry.id === button.dataset.deleteTable);
+      if (!table) return;
+      const openTabs = table.open_tabs?.length ? table.open_tabs : state.customerTabs.filter((tab) => tab.status === 'open' && tab.dining_table_id === table.id);
+      if (openTabs.length) {
+        toast('Feche ou transfira as comandas antes de excluir esta mesa.');
+        return;
+      }
+      if (!window.confirm(`Excluir ${table.name}? Esta ação não pode ser desfeita.`)) return;
+      await deleteDiningTable(table.id);
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-print-table-qr]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const table = state.diningTables.find((entry) => entry.id === button.dataset.printTableQr);
+      if (table) printTableQr(table);
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-view-table-qr]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const table = state.diningTables.find((entry) => entry.id === button.dataset.viewTableQr);
+      if (table) printTableQr(table, { autoPrint: false });
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-open-tab]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await createCustomerTab({ name: `Comanda ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, dining_table_id: button.dataset.openTab });
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-close-tab]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await closeCustomerTab(button.dataset.closeTab, { payment_method: 'Pagamento no fechamento' });
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-transfer-tab]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const select = els.tablesBoard.querySelector(`[data-transfer-select="${CSS.escape(button.dataset.transferTab)}"]`);
+      if (!select?.value) {
+        toast('Selecione uma mesa de destino ativa.');
+        return;
+      }
+      await transferCustomerTab(button.dataset.transferTab, { dining_table_id: select.value });
+    });
+  });
+  els.tablesBoard.querySelectorAll('[data-add-tab-item]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const row = button.closest('.tab-menu-item');
+      const quantity = Number.parseInt(row?.querySelector('[data-tab-item-qty]')?.value, 10) || 1;
+      button.disabled = true;
+      try {
+        await addItemToCustomerTab(button.dataset.addTabItem, {
+          item_id: button.dataset.itemId,
+          quantity
+        });
+      } catch (error) {
+        toast(error.message || 'Não foi possível adicionar o item.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+  els.tablesBoard.querySelectorAll('.tab-menu-picker').forEach((details) => {
+    details.addEventListener('toggle', () => {
+      const id = details.dataset.tabMenuId;
+      if (!id) return;
+      if (details.open) state.openTabMenuIds.add(id);
+      else state.openTabMenuIds.delete(id);
+    });
+  });
+}
+
+function rememberOpenTabMenus() {
+  if (!els.tablesBoard) return;
+  els.tablesBoard.querySelectorAll('.tab-menu-picker').forEach((details) => {
+    const id = details.dataset.tabMenuId;
+    if (!id) return;
+    if (details.open) state.openTabMenuIds.add(id);
+    else state.openTabMenuIds.delete(id);
+  });
+}
+
+function renderTableOpenTabs(tabs, sortedTables, currentTableId) {
+  return `
+    <div class="table-tabs-list">
+      ${tabs.map((tab) => `
+        <section class="table-tab-card">
+          <div class="table-tab-summary">
+            <strong>${escapeHtml(tab.name)}</strong>
+            <span>${money(tab.current_total || 0)} em consumo</span>
+            ${tab.customer_name ? `<small>${escapeHtml(tab.customer_name)}</small>` : ''}
+          </div>
+          ${renderTabMenuPicker(tab)}
+          <div class="table-transfer">
+            <select data-transfer-select="${escapeAttribute(tab.id)}">
+              ${sortedTables.filter((target) => target.id !== currentTableId && target.is_active).map((target) => `<option value="${escapeAttribute(target.id)}">${escapeHtml(target.name)}</option>`).join('')}
+            </select>
+            <button class="ghost-button compact" type="button" data-transfer-tab="${escapeAttribute(tab.id)}">Transferir</button>
+            <button class="primary-button compact" type="button" data-close-tab="${escapeAttribute(tab.id)}">Fechar comanda</button>
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderTabMenuPicker(tab) {
+  const categories = state.categories
+    .map((category) => ({
+      ...category,
+      items: (category.items || []).filter((item) => item.is_available !== false)
+    }))
+    .filter((category) => category.items.length);
+
+  if (!categories.length) {
+    return '<p class="muted">Nenhum item disponível no cardápio para lançar nesta comanda.</p>';
+  }
+
+  return `
+    <details class="tab-menu-picker" data-tab-menu-id="${escapeAttribute(tab.id)}" ${state.openTabMenuIds.has(String(tab.id)) ? 'open' : ''}>
+      <summary>Adicionar itens do cardápio</summary>
+      <div class="tab-menu-category-list">
+        ${categories.map((category) => `
+          <section class="tab-menu-category">
+            <h4>${escapeHtml(category.name)}</h4>
+            ${category.items.map((item) => {
+              const requiredGroups = (item.modifier_groups || []).filter((group) => group.is_required);
+              return `
+                <div class="tab-menu-item">
+                  <div>
+                    <strong>${escapeHtml(item.name)}</strong>
+                    <small>${money(item.price)}${requiredGroups.length ? ' - possui adicionais obrigatórios' : ''}</small>
+                  </div>
+                  <input data-tab-item-qty type="number" min="1" max="99" value="1" aria-label="Quantidade de ${escapeAttribute(item.name)}">
+                  <button class="primary-button compact" type="button" data-add-tab-item="${escapeAttribute(tab.id)}" data-item-id="${escapeAttribute(item.id)}">Adicionar</button>
+                </div>
+              `;
+            }).join('')}
+          </section>
+        `).join('')}
+      </div>
+    </details>
+  `;
+}
+
+function optionElement(value, label) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function tableQrUrl(table) {
+  return `${window.location.origin}/?mesa=${encodeURIComponent(table.code)}`;
+}
+
+function tableQrImageUrl(table) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(tableQrUrl(table))}`;
+}
+
+function printTableQr(table, options = {}) {
+  const autoPrint = options.autoPrint !== false;
+  const popup = window.open('', '_blank', 'width=420,height=620');
+  if (!popup) {
+    toast('Permita pop-ups para imprimir o QR Code.');
+    return;
+  }
+  const url = tableQrUrl(table);
+  popup.document.write(`
+    <!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8">
+        <title>QR Code - ${escapeHtml(table.name)}</title>
+        <style>
+          body { margin: 0; font-family: Arial, sans-serif; color: #111827; }
+          main { width: 80mm; margin: 0 auto; padding: 10mm 6mm; text-align: center; }
+          h1 { margin: 0 0 4mm; font-size: 22px; }
+          p { margin: 0 0 5mm; font-size: 13px; }
+          img { width: 58mm; height: 58mm; }
+          small { display: block; margin-top: 4mm; word-break: break-all; font-size: 10px; color: #4b5563; }
+          @media print { @page { size: 80mm auto; margin: 0; } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>${escapeHtml(table.name)}</h1>
+          <p>Aponte a câmera para abrir o cardápio e pedir nesta mesa.</p>
+          <img src="${escapeAttribute(tableQrImageUrl(table))}" alt="QR Code">
+          <small>${escapeHtml(url)}</small>
+        </main>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+  if (autoPrint) {
+    popup.setTimeout(() => {
+      popup.print();
+    }, 400);
+  }
 }
 
 function renderOperation() {
@@ -688,6 +1046,9 @@ function renderDailyReport(report) {
   const paymentRows = (report.by_payment || []).map((row) => `
     <span><strong>${escapeHtml(row.key)}</strong><small>${row.count} - ${money(row.total)} - ticket ${money(row.average_ticket || 0)}</small></span>
   `).join('');
+  const originRows = (report.by_origin || []).map((row) => `
+    <span><strong>${escapeHtml(originLabel(row.key))}</strong><small>${row.count} - ${money(row.total)} - ticket ${money(row.average_ticket || 0)}</small></span>
+  `).join('');
   const productRows = (report.top_products || []).map((row) => `
     <span><strong>${escapeHtml(row.name)}</strong><small>${row.quantity} un. - ${money(row.total)}</small></span>
   `).join('');
@@ -696,6 +1057,7 @@ function renderDailyReport(report) {
     <article class="report-breakdown">
       <div><h3>Por status</h3>${statusRows || '<p class="muted">Sem pedidos.</p>'}</div>
       <div><h3>Por pagamento</h3>${paymentRows || '<p class="muted">Sem faturamento.</p>'}</div>
+      <div><h3>Por origem</h3>${originRows || '<p class="muted">Sem faturamento.</p>'}</div>
       <div><h3>Mais vendidos</h3>${productRows || '<p class="muted">Sem itens vendidos.</p>'}</div>
     </article>
     ${(report.orders || []).map(reportOrderCard).join('') || '<p class="muted">Nenhum pedido nesta data.</p>'}
@@ -733,6 +1095,19 @@ function exportCurrentReportCsv() {
   }
   rows.push(
     [],
+    ['Por origem'],
+    ['Origem', 'Pedidos', 'Total', 'Ticket médio']
+  );
+  for (const origin of report.by_origin || []) {
+    rows.push([
+      originLabel(origin.key),
+      origin.count || 0,
+      money(origin.total),
+      money(origin.average_ticket || 0)
+    ]);
+  }
+  rows.push(
+    [],
     ['Produtos mais vendidos'],
     ['Produto', 'Quantidade', 'Total']
   );
@@ -745,7 +1120,7 @@ function exportCurrentReportCsv() {
   }
   rows.push(
     [],
-    ['Pedido', 'Data', 'Cliente', 'Telefone', 'Status', 'Pagamento', 'Total']
+    ['Pedido', 'Data', 'Cliente', 'Telefone', 'Origem', 'Status', 'Pagamento', 'Total']
   );
   for (const order of report.orders || []) {
     const customer = order.customer_snapshot || {};
@@ -754,6 +1129,7 @@ function exportCurrentReportCsv() {
       new Date(order.created_at).toLocaleString('pt-BR'),
       customer.name || '',
       customer.phone || '',
+      originLabel(order.fulfillment_method),
       statusLabel(order.status),
       order.payment_method || '',
       money(order.total)
@@ -794,26 +1170,54 @@ function formatDeltaNumber(value) {
   return `${number > 0 ? '+' : ''}${number}`;
 }
 
+function originLabel(value) {
+  return ({
+    delivery: 'Delivery',
+    pickup: 'Retirada',
+    counter: 'Balcão',
+    table: 'Mesa',
+    tab: 'Comanda'
+  })[value] || value || 'Não informado';
+}
+
 function reportOrderCard(order) {
   const customer = order.customer_snapshot || {};
   return `
     <article class="list-card report-order-row status-${order.status}">
       <div>
         <strong>#${escapeHtml(order.public_code)} - ${escapeHtml(customer.name || 'Cliente')}</strong>
-        <p>${new Date(order.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${statusLabel(order.status)} - ${escapeHtml(order.payment_method || 'Pagamento não informado')}</p>
+        <p>${new Date(order.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - ${statusLabel(order.status)} - ${escapeHtml(orderOriginLabel(order))} - ${escapeHtml(order.payment_method || 'Pagamento não informado')}</p>
       </div>
       <strong>${money(order.total)}</strong>
     </article>
   `;
 }
 
+function rememberOpenOrderDetails() {
+  if (!els.adminOrders) return;
+  els.adminOrders.querySelectorAll('.order-card').forEach((card) => {
+    const id = String(card.dataset.orderId || '');
+    const details = card.querySelector('.order-details');
+    if (!id || !details) return;
+    if (details.open) {
+      state.openOrderDetailIds.add(id);
+    } else {
+      state.openOrderDetailIds.delete(id);
+    }
+  });
+}
+
 function renderOrders() {
+  rememberOpenOrderDetails();
   const groups = ['new', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'cancelled'];
+  const visible = state.orderOriginFilter === 'all'
+    ? state.orders
+    : state.orders.filter((order) => order.fulfillment_method === state.orderOriginFilter);
   els.adminOrders.replaceChildren(...groups.map((status) => {
     const column = document.createElement('section');
     column.className = `order-column status-${status}`;
     column.dataset.orderStatus = status;
-    const orders = state.orders.filter((order) => order.status === status);
+    const orders = visible.filter((order) => order.status === status);
     column.innerHTML = `<h3><span>${statusLabel(status)}</span><strong>${orders.length}</strong></h3>`;
     column.append(...orders.map(orderCard));
     return column;
@@ -827,7 +1231,7 @@ function orderCard(order) {
   card.dataset.orderId = order.id;
   card.dataset.orderStatus = order.status;
   const customer = order.customer_snapshot || {};
-  const fulfillment = order.fulfillment_method === 'pickup' ? 'Retirada' : 'Entrega';
+  const fulfillment = orderOriginLabel(order);
   const payment = order.payment_method ? escapeHtml(order.payment_method) : 'Pagamento não informado';
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
   const createdAt = new Date(order.created_at);
@@ -835,7 +1239,7 @@ function orderCard(order) {
     <div class="order-card-top">
       <div>
         <strong>#${escapeHtml(order.public_code)}</strong>
-        <p>${escapeHtml(customer.name || 'Cliente')} - ${createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+        <p>${escapeHtml(orderCardSubtitle(order, createdAt, customer))}</p>
       </div>
       <span class="order-status-badge">${statusLabel(order.status)}</span>
     </div>
@@ -848,13 +1252,15 @@ function orderCard(order) {
       <span>${payment}</span>
       ${customer.phone ? `<span>${escapeHtml(customer.phone)}</span>` : ''}
     </div>
-    <details class="order-details">
+    <details class="order-details" ${state.openOrderDetailIds.has(String(order.id)) ? 'open' : ''}>
       <summary>Ver detalhes</summary>
       <div class="order-details-body">
         <dl>
           <div><dt>Horário</dt><dd>${createdAt.toLocaleString('pt-BR')}</dd></div>
           <div><dt>Telefone</dt><dd>${escapeHtml(customer.phone || 'Sem telefone')}</dd></div>
-          <div><dt>Tipo</dt><dd>${fulfillment}</dd></div>
+          <div><dt>Origem</dt><dd>${fulfillment}</dd></div>
+          ${order.table_snapshot?.name ? `<div><dt>Mesa</dt><dd>${escapeHtml(order.table_snapshot.name)}</dd></div>` : ''}
+          ${order.tab_snapshot?.name ? `<div><dt>Comanda</dt><dd>${escapeHtml(order.tab_snapshot.name)}</dd></div>` : ''}
           <div><dt>Pagamento</dt><dd>${payment}</dd></div>
           ${order.payment_details?.change_for ? `<div><dt>Troco</dt><dd>Para ${money(order.payment_details.change_for)}</dd></div>` : ''}
           <div><dt>Subtotal</dt><dd>${money(order.subtotal)}</dd></div>
@@ -864,17 +1270,29 @@ function orderCard(order) {
         ${order.notes ? `<p class="order-note"><strong>Obs.</strong> ${escapeHtml(order.notes)}</p>` : ''}
         <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
         <div class="row-actions order-detail-actions">
-          <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}">${order.status === 'new' ? 'Imprimir etiqueta' : 'Reimprimir etiqueta'}</button>
-          <button class="ghost-button compact print-order-button" type="button" data-print-order-copy="${escapeAttribute(order.id)}">Imprimir 2 vias</button>
+          <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="kitchen">Imprimir cozinha</button>
+          <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="customer">Imprimir cliente</button>
+          <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="both">Imprimir ambas</button>
+          <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
           <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar cliente</button>
         </div>
       </div>
     </details>
   `;
-  card.querySelector('.order-details')?.addEventListener('mousedown', (event) => event.stopPropagation());
-  card.querySelector('.order-details')?.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
-  card.querySelector('[data-print-order]')?.addEventListener('click', () => printOrderLabel(order));
-  card.querySelector('[data-print-order-copy]')?.addEventListener('click', () => printOrderLabel(order, 2));
+  const details = card.querySelector('.order-details');
+  details?.addEventListener('mousedown', (event) => event.stopPropagation());
+  details?.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
+  details?.addEventListener('toggle', () => {
+    if (details.open) {
+      state.openOrderDetailIds.add(String(order.id));
+    } else {
+      state.openOrderDetailIds.delete(String(order.id));
+    }
+  });
+  card.querySelectorAll('[data-print-order]').forEach((button) => {
+    button.addEventListener('click', () => printOrder(order, { type: button.dataset.printType || 'kitchen', reason: 'manual' }));
+  });
+  card.querySelector('[data-preview-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', preview: true, reason: 'preview' }));
   card.querySelector('[data-whatsapp-status]')?.addEventListener('click', () => notifyOrderStatus(order));
   card.addEventListener('dragstart', (event) => {
     if (event.target.closest('.order-details') || event.target.closest('button') || event.target.closest('select')) {
@@ -945,20 +1363,83 @@ function modifierText(modifier) {
   return `${group}${modifier.name}${delta > 0 ? ` (+ ${money(delta)})` : ''}`;
 }
 
+function orderOriginLabel(order) {
+  return ({
+    delivery: 'Delivery',
+    pickup: 'Retirada',
+    counter: 'Balcão',
+    table: order.table_snapshot?.name ? `Mesa ${order.table_snapshot.name}` : 'Mesa',
+    tab: order.tab_snapshot?.name ? `Comanda ${order.tab_snapshot.name}` : 'Comanda'
+  })[order.fulfillment_method] || order.fulfillment_method || 'Pedido';
+}
+
+function orderCardSubtitle(order, createdAt = new Date(order.created_at), customer = order.customer_snapshot || {}) {
+  const time = createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (order.fulfillment_method === 'tab') {
+    return `${orderTableLabel(order)} - Comanda - Horário: ${time}`;
+  }
+  if (order.fulfillment_method === 'table') {
+    return `${orderTableLabel(order)} - Horário: ${time}`;
+  }
+  return `${customer.name || 'Cliente'} - ${time}`;
+}
+
+function orderTableLabel(order) {
+  const tableName = String(order.table_snapshot?.name || '').trim();
+  if (!tableName) return 'Mesa não informada';
+  return /^mesa\b/i.test(tableName) ? tableName : `Mesa ${tableName}`;
+}
+
+function shouldAutoPrintKitchen(order, status, previousStatus) {
+  if (!order?.id) return false;
+  if (!currentPrintSettings().autoPrintKitchen) return false;
+  if (status !== 'accepted' || previousStatus === 'accepted') return false;
+  return !state.autoPrintedKitchenIds.has(String(order.id));
+}
+
+function markAutoPrintedKitchen(orderId) {
+  state.autoPrintedKitchenIds.add(String(orderId));
+  const ids = [...state.autoPrintedKitchenIds].slice(-500);
+  state.autoPrintedKitchenIds = new Set(ids);
+  localStorage.setItem('adminAutoPrintedKitchenIds', JSON.stringify(ids));
+}
+
 function printOrderLabel(order, copies = 1) {
+  printOrder(order, { type: 'both', kitchenCopies: copies, customerCopies: copies, reason: 'manual' });
+}
+
+async function printOrder(order, options = {}) {
+  const settings = currentPrintSettings();
+  const type = ['kitchen', 'customer', 'both'].includes(options.type) ? options.type : 'kitchen';
+  const paperWidth = options.paperWidth || settings.paperWidth;
+  const kitchenCopies = options.kitchenCopies || settings.kitchenCopies;
+  const customerCopies = options.customerCopies || settings.customerCopies;
+  const preview = Boolean(options.preview);
   const popup = window.open('', '_blank', 'width=420,height=640');
   if (!popup) {
+    await registerPrintLog(order, type, paperWidth, type === 'customer' ? customerCopies : kitchenCopies, options.reason || 'manual', 'blocked');
     toast('Permita pop-ups para imprimir a etiqueta.');
     return;
   }
 
-  popup.document.write(orderLabelDocument(order, copies));
+  await registerPrintLog(order, type, paperWidth, type === 'customer' ? customerCopies : kitchenCopies, options.reason || 'manual', 'attempted');
+  popup.document.write(orderThermalDocument(order, {
+    type,
+    paperWidth,
+    kitchenCopies,
+    customerCopies,
+    showKitchenPrices: settings.showKitchenPrices,
+    highlightNotes: settings.highlightNotes
+  }));
   popup.document.close();
   popup.focus();
-  popup.setTimeout(() => {
-    popup.print();
-    popup.setTimeout(() => popup.close(), 500);
-  }, 150);
+  if (!preview) {
+    popup.setTimeout(() => {
+      popup.print();
+      registerPrintLog(order, type, paperWidth, type === 'customer' ? customerCopies : kitchenCopies, options.reason || 'manual', 'completed').catch(() => {});
+      popup.setTimeout(() => popup.close(), 500);
+    }, 150);
+  }
 }
 
 function notifyOrderStatus(order) {
@@ -980,6 +1461,180 @@ function notifyOrderStatus(order) {
   };
   const message = messages[order.status] || `Atualização do pedido #${order.public_code}: ${statusLabel(order.status)}.`;
   window.open(`https://wa.me/55${phone.replace(/^55/, '')}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
+}
+
+function currentPrintSettings() {
+  return {
+    paperWidth: ['58', '80'].includes(String(state.store?.print_settings?.paperWidth)) ? String(state.store.print_settings.paperWidth) : '80',
+    kitchenCopies: clampNumber(state.store?.print_settings?.kitchenCopies, 1, 5, 1),
+    customerCopies: clampNumber(state.store?.print_settings?.customerCopies, 1, 5, 1),
+    autoPrintKitchen: Boolean(state.store?.print_settings?.autoPrintKitchen),
+    showKitchenPrices: Boolean(state.store?.print_settings?.showKitchenPrices),
+    highlightNotes: state.store?.print_settings?.highlightNotes !== false
+  };
+}
+
+async function registerPrintLog(order, type, paperWidth, copies, reason, status) {
+  await request('/api/admin/print-logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      order_id: order.id,
+      print_type: type,
+      paper_width: paperWidth,
+      copies,
+      reason,
+      status
+    })
+  });
+}
+
+function orderThermalDocument(order, options = {}) {
+  const type = options.type || 'kitchen';
+  const paperWidth = ['58', '80'].includes(String(options.paperWidth)) ? String(options.paperWidth) : '80';
+  const sections = [];
+  if (['kitchen', 'both'].includes(type)) {
+    sections.push(...repeatCopies(options.kitchenCopies, (copy, total) => kitchenReceiptHtml(order, { ...options, copy, totalCopies: total })));
+  }
+  if (['customer', 'both'].includes(type)) {
+    sections.push(...repeatCopies(options.customerCopies, (copy, total) => customerReceiptHtml(order, { ...options, copy, totalCopies: total })));
+  }
+  return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>Pedido #${escapeHtml(order.public_code)}</title>
+    <style>
+      @page { size: ${paperWidth}mm auto; margin: 0; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: #000;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: ${paperWidth === '58' ? '10px' : '11px'};
+      }
+      .receipt {
+        width: ${paperWidth}mm;
+        padding: ${paperWidth === '58' ? '3mm 2.5mm' : '4mm'};
+        overflow-wrap: anywhere;
+      }
+      .receipt + .receipt {
+        break-before: page;
+        page-break-before: always;
+      }
+      h1, h2, h3, p { margin: 0; }
+      h1 {
+        border-bottom: 2px solid #000;
+        padding-bottom: 4px;
+        font-family: "Courier New", monospace;
+        font-size: ${paperWidth === '58' ? '17px' : '21px'};
+      }
+      h2 {
+        margin-top: 7px;
+        font-size: ${paperWidth === '58' ? '11px' : '12px'};
+        text-transform: uppercase;
+      }
+      .center { text-align: center; }
+      .store { font-weight: 900; text-transform: uppercase; }
+      .meta, .box { border-bottom: 1px dashed #000; padding: 6px 0; }
+      .meta p, .box p { margin-top: 3px; line-height: 1.35; }
+      .line { display: flex; justify-content: space-between; gap: 8px; }
+      ul { list-style: none; margin: 5px 0 0; padding: 0; }
+      li { border-top: 1px dashed #999; padding: 6px 0; }
+      li:first-child { border-top: 0; }
+      .item-title { display: flex; justify-content: space-between; gap: 8px; font-size: ${paperWidth === '58' ? '13px' : '15px'}; font-weight: 900; }
+      .modifier, .item-note, .order-note { display: block; margin-top: 3px; line-height: 1.25; }
+      .item-note, .order-note { ${options.highlightNotes === false ? '' : 'border: 1px solid #000; padding: 3px; font-weight: 900;'} }
+      .total { border-top: 2px solid #000; margin-top: 7px; padding-top: 7px; font-size: ${paperWidth === '58' ? '16px' : '18px'}; font-weight: 900; }
+      .cut { border-top: 1px dashed #000; margin-top: 10px; padding-top: 5px; text-align: center; font-size: 9px; }
+      @media print { body { width: ${paperWidth}mm; } }
+    </style>
+  </head>
+  <body>${sections.join('')}</body>
+</html>`;
+}
+
+function repeatCopies(copies, render) {
+  const count = Math.max(1, Math.min(5, Number(copies) || 1));
+  return Array.from({ length: count }, (_, index) => render(index + 1, count));
+}
+
+function kitchenReceiptHtml(order, options = {}) {
+  const createdAt = new Date(order.created_at);
+  const type = orderOriginLabel(order);
+  const mesa = order.table_snapshot?.name ? `<p><strong>Mesa:</strong> ${escapeHtml(order.table_snapshot.name)}</p>` : '';
+  const copy = options.totalCopies > 1 ? ` - Via ${options.copy}/${options.totalCopies}` : '';
+  return `
+    <main class="receipt">
+      <p class="center store">VIA DA COZINHA${copy}</p>
+      <h1>#${escapeHtml(order.public_code)}</h1>
+      <section class="meta">
+        ${mesa}
+        <p><strong>Tipo:</strong> ${escapeHtml(type)}</p>
+        <p><strong>Horário:</strong> ${createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+      </section>
+      <section class="box">
+        <h2>Itens</h2>
+        <ul>${(order.items || []).map((item) => thermalItemHtml(item, { showPrices: options.showKitchenPrices })).join('')}</ul>
+      </section>
+      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p class="order-note">${escapeHtml(order.notes)}</p></section>` : ''}
+      <p class="cut">corte aqui</p>
+    </main>
+  `;
+}
+
+function customerReceiptHtml(order, options = {}) {
+  const customer = order.customer_snapshot || {};
+  const createdAt = new Date(order.created_at);
+  const addressLines = order.fulfillment_method === 'delivery'
+    ? orderAddressLines(order.address_snapshot || {}).map((line) => `<p>${escapeHtml(line)}</p>`).join('')
+    : '';
+  const paymentDetails = order.payment_details || {};
+  const copy = options.totalCopies > 1 ? ` - Via ${options.copy}/${options.totalCopies}` : '';
+  return `
+    <main class="receipt">
+      <p class="center store">${escapeHtml(state.store?.name || 'Cardápio')}${copy}</p>
+      ${state.store?.address ? `<p class="center">${escapeHtml(state.store.address)}</p>` : ''}
+      <h1>#${escapeHtml(order.public_code)}</h1>
+      <section class="meta">
+        <p><strong>Data:</strong> ${createdAt.toLocaleDateString('pt-BR')}</p>
+        <p><strong>Horário:</strong> ${createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+        <p><strong>Tipo:</strong> ${escapeHtml(orderOriginLabel(order))}</p>
+        <p><strong>Pagamento:</strong> ${escapeHtml(order.payment_method || 'Não informado')}</p>
+        ${paymentDetails.change_for ? `<p><strong>Troco:</strong> Para ${money(paymentDetails.change_for)}</p>` : ''}
+      </section>
+      <section class="box">
+        <h2>Cliente</h2>
+        <p><strong>${escapeHtml(customer.name || 'Cliente')}</strong></p>
+        ${customer.phone ? `<p>${escapeHtml(customer.phone)}</p>` : ''}
+      </section>
+      ${addressLines ? `<section class="box"><h2>Endereço</h2>${addressLines}</section>` : ''}
+      <section class="box">
+        <h2>Itens</h2>
+        <ul>${(order.items || []).map((item) => thermalItemHtml(item, { showPrices: true })).join('')}</ul>
+      </section>
+      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p class="order-note">${escapeHtml(order.notes)}</p></section>` : ''}
+      <section class="box">
+        <p class="line"><span>Subtotal</span><strong>${money(order.subtotal)}</strong></p>
+        ${Number(order.delivery_fee || 0) > 0 ? `<p class="line"><span>Entrega</span><strong>${money(order.delivery_fee)}</strong></p>` : ''}
+        ${Number(order.discount || 0) > 0 ? `<p class="line"><span>Desconto</span><strong>- ${money(order.discount)}</strong></p>` : ''}
+      </section>
+      <div class="line total"><span>Total</span><strong>${money(order.total)}</strong></div>
+      <p class="cut">corte aqui</p>
+    </main>
+  `;
+}
+
+function thermalItemHtml(item, options = {}) {
+  const name = item.item_snapshot?.name || 'Item';
+  const modifiers = item.item_snapshot?.modifiers || [];
+  return `
+    <li>
+      <div class="item-title"><span>${Number(item.quantity || 0)}x ${escapeHtml(name)}</span>${options.showPrices ? `<span>${money(item.total)}</span>` : ''}</div>
+      ${modifiers.map((modifier) => `<span class="modifier">+ ${escapeHtml(modifierText(modifier))}${options.showPrices && Number(modifier.price_delta || 0) > 0 ? ` (${money(modifier.price_delta)})` : ''}</span>`).join('')}
+      ${item.notes ? `<span class="item-note">Obs: ${escapeHtml(item.notes)}</span>` : ''}
+    </li>
+  `;
 }
 
 function orderLabelDocument(order, copies = 1) {
@@ -1009,7 +1664,7 @@ function orderLabelDocument(order, copies = 1) {
       <span class="status">${escapeHtml(statusLabel(order.status))}</span>
       <section class="meta">
         <p><strong>Horário:</strong> ${escapeHtml(createdAt)}</p>
-        <p><strong>Tipo:</strong> ${order.fulfillment_method === 'pickup' ? 'Retirada' : 'Entrega'}</p>
+        <p><strong>Origem:</strong> ${escapeHtml(orderOriginLabel(order))}</p>
         <p><strong>Pagamento:</strong> ${escapeHtml(order.payment_method || 'Não informado')}</p>
       </section>
       <section class="box">
@@ -1239,8 +1894,9 @@ async function updateOrderStatus(orderId, status) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
-    if (state.autoPrintAccepted && status === 'accepted' && previousStatus !== 'accepted' && order) {
-      printOrderLabel({ ...order, status });
+    if (shouldAutoPrintKitchen(order, status, previousStatus)) {
+      markAutoPrintedKitchen(order.id);
+      printOrder({ ...order, status }, { type: 'kitchen', reason: 'auto' });
     }
     loadSummary({ skipNotifications: true, silent: true }).catch(() => {});
   } catch (error) {
@@ -1484,21 +2140,25 @@ function editPromotion(promotion) {
 
 function showPromotionForm() {
   if (els.promotionForm) els.promotionForm.hidden = false;
+  if (els.promotionFormPlaceholder) els.promotionFormPlaceholder.hidden = true;
   hideLoyaltyForm();
 }
 
 function hidePromotionForm() {
   if (els.promotionForm) els.promotionForm.hidden = true;
+  if (els.promotionFormPlaceholder && els.loyaltyForm?.hidden !== false) els.promotionFormPlaceholder.hidden = false;
 }
 
 function showLoyaltyForm() {
   if (els.loyaltyForm) els.loyaltyForm.hidden = false;
+  if (els.promotionFormPlaceholder) els.promotionFormPlaceholder.hidden = true;
   hidePromotionForm();
   els.loyaltyForm?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function hideLoyaltyForm() {
   if (els.loyaltyForm) els.loyaltyForm.hidden = true;
+  if (els.promotionFormPlaceholder && els.promotionForm?.hidden !== false) els.promotionFormPlaceholder.hidden = false;
 }
 
 function resetPromotionForm(options = {}) {
@@ -2692,6 +3352,82 @@ async function submitItem(event) {
   });
 }
 
+async function submitTable(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(els.tableForm));
+  data.is_active = els.tableForm.elements.is_active.checked;
+  await request('/api/admin/tables', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  els.tableForm.reset();
+  els.tableForm.elements.is_active.checked = true;
+  await loadSummary();
+  toast('Mesa cadastrada.');
+}
+
+async function submitTab(event) {
+  event.preventDefault();
+  await createCustomerTab(Object.fromEntries(new FormData(els.tabForm)));
+  els.tabForm.reset();
+}
+
+async function updateDiningTable(id, payload) {
+  await request(`/api/admin/tables/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  await loadSummary();
+}
+
+async function deleteDiningTable(id) {
+  await request(`/api/admin/tables/${id}`, { method: 'DELETE' });
+  await loadSummary();
+  toast('Mesa excluída.');
+}
+
+async function createCustomerTab(payload) {
+  await request('/api/admin/tabs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  await loadSummary();
+  toast('Comanda aberta.');
+}
+
+async function closeCustomerTab(id, payload) {
+  await request(`/api/admin/tabs/${id}/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  await loadSummary();
+  toast('Comanda fechada.');
+}
+
+async function transferCustomerTab(id, payload) {
+  await request(`/api/admin/tabs/${id}/transfer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  await loadSummary();
+  toast('Comanda transferida.');
+}
+
+async function addItemToCustomerTab(id, payload) {
+  await request(`/api/admin/tabs/${id}/items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  await loadSummary();
+  toast('Item adicionado à comanda.');
+}
+
 async function submitStore(event) {
   event.preventDefault();
   const payload = formToStore(els.storeForm);
@@ -2719,6 +3455,48 @@ async function submitStore(event) {
     fillStoreForm();
     toast(`Loja atualizada. WhatsApp salvo: ${payload.whatsapp_number}`);
   });
+}
+
+async function submitPrintSettings(event) {
+  event.preventDefault();
+  const payload = printSettingsFromForm();
+  await withSaving(els.printSettingsForm, async () => {
+    const result = await request('/api/admin/print-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    state.store = result.store || { ...(state.store || {}), print_settings: payload.print_settings };
+    saveAdminCache();
+    fillPrintSettingsForm();
+    renderAutoPrintButton();
+    toast('Configurações de impressão salvas.');
+  });
+}
+
+function printSettingsFromForm() {
+  const form = els.printSettingsForm;
+  return {
+    print_settings: {
+      paperWidth: form.elements.paperWidth.value,
+      kitchenCopies: form.elements.kitchenCopies.value,
+      customerCopies: form.elements.customerCopies.value,
+      autoPrintKitchen: form.elements.autoPrintKitchen.checked,
+      showKitchenPrices: form.elements.showKitchenPrices.checked,
+      highlightNotes: form.elements.highlightNotes.checked
+    }
+  };
+}
+
+function fillPrintSettingsForm() {
+  if (!els.printSettingsForm) return;
+  const settings = currentPrintSettings();
+  setValue(els.printSettingsForm.elements.paperWidth, settings.paperWidth);
+  setValue(els.printSettingsForm.elements.kitchenCopies, settings.kitchenCopies);
+  setValue(els.printSettingsForm.elements.customerCopies, settings.customerCopies);
+  els.printSettingsForm.elements.autoPrintKitchen.checked = settings.autoPrintKitchen;
+  els.printSettingsForm.elements.showKitchenPrices.checked = settings.showKitchenPrices;
+  els.printSettingsForm.elements.highlightNotes.checked = settings.highlightNotes;
 }
 
 async function updateCategory(id, payload, options = {}) {
@@ -2908,11 +3686,13 @@ function activateAdminTab(tab) {
     orders: 'Pedidos',
     menu: 'Cardápio',
     reports: 'Relatórios',
+    tables: 'Mesas e comandas',
     promotions: 'Promoções',
     customers: 'Clientes',
     store: 'Loja',
     account: 'Conta'
   };
+  state.activeAdminTab = tab;
   els.adminTitle.textContent = titles[tab] || 'Painel';
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
     button.classList.toggle('active', button.dataset.adminTab === tab);
@@ -2971,6 +3751,8 @@ function fillStoreForm() {
   els.storeForm.elements.accepts_delivery.checked = store.accepts_delivery !== false;
   els.storeForm.elements.accepts_pickup.checked = store.accepts_pickup !== false;
   fillBusinessHours(store.business_hours || {});
+  fillThemeSettings(store.theme_settings || {});
+  renderThemePreview();
 }
 
 function fillAccountForm() {
@@ -2992,6 +3774,7 @@ function notifyNewOrder(order) {
   const customer = order.customer_snapshot || {};
   toast(`Novo pedido #${order.public_code}`);
   playNewOrderSound().catch(() => {});
+  if (state.activeAdminTab !== 'orders') return;
   els.newOrderTitle.textContent = `Pedido #${order.public_code}`;
   els.newOrderDetails.innerHTML = `
     <div><strong>${escapeHtml(customer.name || 'Cliente')}</strong><span>${escapeHtml(customer.phone || '')}</span></div>
@@ -3028,16 +3811,24 @@ function renderKitchenModeButton() {
   els.kitchenModeButton.classList.toggle('sound-enabled', state.kitchenMode);
 }
 
-function toggleAutoPrint() {
-  state.autoPrintAccepted = !state.autoPrintAccepted;
-  localStorage.setItem('adminAutoPrintAccepted', String(state.autoPrintAccepted));
+async function toggleAutoPrint() {
+  const settings = currentPrintSettings();
+  const next = { print_settings: { ...settings, autoPrintKitchen: !settings.autoPrintKitchen } };
+  await request('/api/admin/print-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(next)
+  });
+  state.store = { ...(state.store || {}), print_settings: next.print_settings };
+  fillPrintSettingsForm();
   renderAutoPrintButton();
 }
 
 function renderAutoPrintButton() {
   if (!els.autoPrintButton) return;
-  els.autoPrintButton.textContent = state.autoPrintAccepted ? 'Auto impressão ativa' : 'Auto imprimir';
-  els.autoPrintButton.classList.toggle('sound-enabled', state.autoPrintAccepted);
+  const enabled = currentPrintSettings().autoPrintKitchen;
+  els.autoPrintButton.textContent = enabled ? 'Auto cozinha ativa' : 'Auto cozinha';
+  els.autoPrintButton.classList.toggle('sound-enabled', enabled);
 }
 
 async function playNewOrderSound() {
@@ -3173,10 +3964,51 @@ function formToStore(form) {
     minimum_order: data.get('minimum_order'),
     payment_methods: [...new Set(paymentMethods)],
     business_hours: businessHoursFromForm(data),
+    theme_settings: themeSettingsFromForm(form),
     is_open: data.get('is_open') === 'on',
     accepts_delivery: data.get('accepts_delivery') === 'on',
     accepts_pickup: data.get('accepts_pickup') === 'on'
   };
+}
+
+function fillThemeSettings(theme = {}) {
+  const settings = { ...THEME_DEFAULTS, ...theme };
+  Object.entries(settings).forEach(([key, value]) => {
+    const input = els.storeForm.elements[`theme_${key}`];
+    if (input) setValue(input, validThemeColor(value) ? value : THEME_DEFAULTS[key]);
+  });
+}
+
+function applyThemePreset(presetKey) {
+  const preset = THEME_PRESETS[presetKey];
+  if (!preset) return;
+  fillThemeSettings(preset);
+  state.storeFormDirty = true;
+  renderThemePreview();
+  toast('Tema aplicado. Clique em Salvar loja para gravar.');
+}
+
+function themeSettingsFromForm(form) {
+  return Object.fromEntries(Object.entries(THEME_DEFAULTS).map(([key, fallback]) => {
+    const value = form.elements[`theme_${key}`]?.value;
+    return [key, validThemeColor(value) ? value : fallback];
+  }));
+}
+
+function renderThemePreview() {
+  if (!els.themePreview || !els.storeForm) return;
+  const theme = themeSettingsFromForm(els.storeForm);
+  els.themePreview.style.setProperty('--preview-primary', theme.primaryColor);
+  els.themePreview.style.setProperty('--preview-secondary', theme.secondaryColor);
+  els.themePreview.style.setProperty('--preview-background', theme.backgroundColor);
+  els.themePreview.style.setProperty('--preview-button', theme.buttonColor);
+  els.themePreview.style.setProperty('--preview-button-text', theme.buttonTextColor);
+  els.themePreview.style.setProperty('--preview-selection', theme.selectionColor);
+  els.themePreview.style.setProperty('--preview-selection-text', theme.selectionTextColor);
+}
+
+function validThemeColor(value) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim());
 }
 
 function neighborhoodFeesToText(value) {
@@ -3320,6 +4152,12 @@ function fileToBase64(file) {
 
 function setValue(field, value) {
   if (field) field.value = value ?? '';
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
 }
 
 function digits(value) {

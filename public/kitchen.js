@@ -83,8 +83,8 @@ function kitchenCard(order) {
       <strong>#${escapeHtml(order.public_code)}</strong>
       <span>${timeSince(createdAt)}</span>
     </div>
-    <h3>${escapeHtml(customer.name || 'Cliente')}</h3>
-    <p>${money(order.total)} - ${itemCount} ${itemCount === 1 ? 'item' : 'itens'}</p>
+    <h3>${escapeHtml(orderCardTitle(order, customer))}</h3>
+    <p>${money(order.total)} - ${itemCount} ${itemCount === 1 ? 'item' : 'itens'} - ${escapeHtml(orderOriginLabel(order))}</p>
     ${waitingTooLong ? '<div class="kitchen-late-alert">Aguardando há mais de 15 min</div>' : ''}
     <div class="kitchen-items">${(order.items || []).map(kitchenItemHtml).join('')}</div>
     <div class="kitchen-card-actions">
@@ -118,6 +118,28 @@ function nextStatusButton(order) {
   }[order.status];
   if (!next) return '';
   return `<button class="primary-button compact" type="button" data-next-status="${next[0]}">${next[1]}</button>`;
+}
+
+function orderOriginLabel(order) {
+  return ({
+    delivery: 'Delivery',
+    pickup: 'Retirada',
+    counter: 'Balcão',
+    table: order.table_snapshot?.name ? `Mesa ${order.table_snapshot.name}` : 'Mesa',
+    tab: order.tab_snapshot?.name ? `Comanda ${order.tab_snapshot.name}` : 'Comanda'
+  })[order.fulfillment_method] || order.fulfillment_method || 'Pedido';
+}
+
+function orderCardTitle(order, customer = order.customer_snapshot || {}) {
+  if (order.fulfillment_method === 'tab') {
+    const tableName = order.table_snapshot?.name || 'sem mesa';
+    return `(Mesa ${tableName}) Comanda`;
+  }
+  if (order.fulfillment_method === 'table') {
+    const tableName = order.table_snapshot?.name || 'sem mesa';
+    return `(Mesa ${tableName})`;
+  }
+  return customer.name || 'Cliente';
 }
 
 async function updateOrderStatus(order, status) {

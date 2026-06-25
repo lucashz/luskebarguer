@@ -15,6 +15,7 @@
           <button data-admin-tab="orders" type="button">Pedidos</button>
           <button data-admin-tab="menu" type="button">Cardápio</button>
           <button data-admin-tab="reports" type="button">Relatórios</button>
+          <button data-admin-tab="tables" type="button">Mesas</button>
           <button data-admin-tab="promotions" type="button">Promoções</button>
           <button data-admin-tab="customers" type="button">Clientes</button>
           <button data-admin-tab="store" type="button">Loja</button>
@@ -174,6 +175,14 @@
             <div class="section-actions">
               <h2>Pedidos recentes</h2>
               <div class="row-actions">
+                <select class="compact-date" id="orderOriginFilter">
+                  <option value="all">Todas origens</option>
+                  <option value="delivery">Delivery</option>
+                  <option value="pickup">Retirada</option>
+                  <option value="counter">Balcão</option>
+                  <option value="table">Mesa</option>
+                  <option value="tab">Comanda</option>
+                </select>
                 <button class="ghost-button compact" id="enableSoundButton" type="button">Ativar som</button>
                 <button class="ghost-button compact" id="kitchenModeButton" type="button">Modo cozinha</button>
                 <a class="ghost-button compact" href="/cozinha" target="_blank" rel="noopener">Tela cozinha</a>
@@ -183,6 +192,24 @@
                 <button class="ghost-button compact" id="refreshAdminButton" type="button">Atualizar</button>
               </div>
             </div>
+            <form class="panel print-settings-panel" id="printSettingsForm">
+              <div>
+                <p class="eyebrow">Impressão térmica</p>
+                <strong>Configurações rápidas</strong>
+              </div>
+              <label>Papel
+                <select name="paperWidth">
+                  <option value="80">80 mm</option>
+                  <option value="58">58 mm</option>
+                </select>
+              </label>
+              <label>Vias cozinha<input name="kitchenCopies" type="number" min="1" max="5" value="1"></label>
+              <label>Vias cliente<input name="customerCopies" type="number" min="1" max="5" value="1"></label>
+              <label class="check"><input name="autoPrintKitchen" type="checkbox"> Auto cozinha</label>
+              <label class="check"><input name="showKitchenPrices" type="checkbox"> Valores na cozinha</label>
+              <label class="check"><input name="highlightNotes" type="checkbox" checked> Destacar observações</label>
+              <button class="primary-button compact">Salvar impressão</button>
+            </form>
             <div class="order-board" id="adminOrders"></div>
           </section>
 
@@ -214,6 +241,33 @@
               </div>
               <div class="admin-list" id="reportOrders"></div>
             </section>
+          </section>
+
+          <section class="admin-section" data-admin-section="tables">
+            <div class="section-actions">
+              <div>
+                <p class="eyebrow">Salão</p>
+                <h2>Mesas e comandas</h2>
+              </div>
+              <button class="ghost-button compact" id="refreshTablesButton" type="button">Atualizar</button>
+            </div>
+            <div class="management-grid">
+              <form id="tableForm" class="panel stack-form">
+                <h2>Cadastrar mesa</h2>
+                <input name="name" required placeholder="Ex: Mesa 1, Área externa 3">
+                <input name="code" placeholder="Código para QR. Ex: mesa-1">
+                <label class="check"><input name="is_active" type="checkbox" checked> Mesa ativa</label>
+                <button class="primary-button">Salvar mesa</button>
+              </form>
+              <form id="tabForm" class="panel stack-form">
+                <h2>Abrir comanda</h2>
+                <input name="name" required placeholder="Ex: Comanda Lucas">
+                <input name="customer_name" placeholder="Nome do cliente opcional">
+                <select name="dining_table_id" id="tabTableSelect"></select>
+                <button class="primary-button">Abrir comanda</button>
+              </form>
+            </div>
+            <div class="tables-board" id="tablesBoard"></div>
           </section>
 
           <section class="admin-section" data-admin-section="menu">
@@ -339,16 +393,25 @@
               </div>
             </div>
             <section class="promo-layout">
+              <section class="panel menu-list-panel promotion-list-panel">
+                <div class="section-actions">
+                  <div>
+                    <h3>Campanhas cadastradas</h3>
+                    <p class="muted">Gerencie cupons, combos e ações de fidelidade em um só lugar.</p>
+                  </div>
+                </div>
+                <div class="promotion-board" id="promotionList"></div>
+              </section>
+
               <div class="promotion-form-slot panel">
                 <div class="promotion-empty-state" id="promotionFormPlaceholder">
-                  <p class="eyebrow">Box 1</p>
-                  <h3>Escolha o que deseja criar</h3>
-                  <p>Use os botões acima para cadastrar uma promoção ou uma campanha de fidelidade.</p>
+                  <h3>Crie uma ação comercial</h3>
+                  <p>Escolha promoção para desconto/cupom ou campanha para fidelidade.</p>
                 </div>
                 <form id="promotionForm" class="stack-form promo-form" hidden>
                   <div>
                     <h3 id="promotionFormTitle">Criar promoção</h3>
-                    <p class="muted">Crie cupons sem alterar preços dos produtos. Depois você pode divulgar o código para o cliente.</p>
+                    <p class="muted">Configure desconto, validade e regras de uso do cupom.</p>
                   </div>
                   <input name="name" required placeholder="Nome da promoção">
                   <input name="code" required placeholder="Código: PRIMEIRA10">
@@ -406,7 +469,7 @@
                 <form id="loyaltyForm" class="panel stack-form loyalty-form" hidden>
                   <div>
                     <h3>Programa de fidelidade</h3>
-                    <p class="muted">Configure uma recompensa simples para o cliente acompanhar na conta.</p>
+                    <p class="muted">Defina a regra e a recompensa que o cliente acompanhará na conta.</p>
                   </div>
                   <label class="check"><input name="is_active" type="checkbox"> Fidelidade ativa</label>
                   <label>Modo
@@ -427,17 +490,6 @@
                   </div>
                 </form>
               </div>
-
-              <section class="panel menu-list-panel promotion-list-panel">
-                <div class="section-actions">
-                  <div>
-                    <p class="eyebrow">Box 2</p>
-                    <h3>Campanhas cadastradas</h3>
-                    <p class="muted">Cupons e campanhas criadas aparecem aqui para editar, pausar ou excluir.</p>
-                  </div>
-                </div>
-                <div class="promotion-board" id="promotionList"></div>
-              </section>
             </section>
           </section>
 
@@ -554,6 +606,59 @@
                   <div class="two-cols">
                     <label>URL do logo<input name="logo_url" placeholder="https://..."></label>
                     <label>URL da capa<input name="cover_url" placeholder="https://..."></label>
+                  </div>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Personalização visual</strong>
+                  <p>Defina as cores principais que aparecem no cardápio público.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="theme-preset-grid" aria-label="Temas prontos">
+                    <button type="button" data-theme-preset="classic">
+                      <span style="--swatch:#d71920"></span>
+                      <strong>Clássico delivery</strong>
+                      <small>Vermelho, fundo neutro e ação forte.</small>
+                    </button>
+                    <button type="button" data-theme-preset="burger">
+                      <span style="--swatch:#f97316"></span>
+                      <strong>Burger quente</strong>
+                      <small>Laranja, preto suave e fundo acolhedor.</small>
+                    </button>
+                    <button type="button" data-theme-preset="fresh">
+                      <span style="--swatch:#64748b"></span>
+                      <strong>Urbano slate</strong>
+                      <small>Azul acinzentado, limpo e moderno.</small>
+                    </button>
+                    <button type="button" data-theme-preset="premium">
+                      <span style="--swatch:#f59e0b"></span>
+                      <strong>Premium escuro</strong>
+                      <small>Dourado, grafite e contraste elegante.</small>
+                    </button>
+                    <button type="button" data-theme-preset="modern">
+                      <span style="--swatch:#2563eb"></span>
+                      <strong>Moderno azul</strong>
+                      <small>Azul limpo, direto e confiável.</small>
+                    </button>
+                  </div>
+                  <div class="theme-color-grid">
+                    <label>Cor principal<input name="theme_primaryColor" type="color" value="#f97316"></label>
+                    <label>Cor secundária<input name="theme_secondaryColor" type="color" value="#111827"></label>
+                    <label>Cor de fundo<input name="theme_backgroundColor" type="color" value="#fff7ed"></label>
+                    <label>Cor dos botões<input name="theme_buttonColor" type="color" value="#f97316"></label>
+                    <label>Cor do texto dos botões<input name="theme_buttonTextColor" type="color" value="#ffffff"></label>
+                    <label>Cor de seleção<input name="theme_selectionColor" type="color" value="#ffedd5"></label>
+                    <label>Texto da seleção<input name="theme_selectionTextColor" type="color" value="#9a3412"></label>
+                  </div>
+                  <div class="theme-preview" id="themePreview">
+                    <div>
+                      <strong>Prévia do cardápio</strong>
+                      <span>Veja como as cores principais vão aparecer para o cliente.</span>
+                    </div>
+                    <button type="button">Botão de exemplo</button>
+                    <span>Badge de exemplo</span>
                   </div>
                 </div>
               </section>
