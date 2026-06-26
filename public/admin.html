@@ -251,16 +251,24 @@
               </div>
               <button class="ghost-button compact" id="refreshTablesButton" type="button">Atualizar</button>
             </div>
-            <div class="management-grid">
+            <div class="management-grid tables-control-grid">
               <form id="tableForm" class="panel stack-form">
-                <h2>Cadastrar mesa</h2>
+                <div>
+                  <p class="eyebrow">Passo 1</p>
+                  <h2>Cadastrar mesa</h2>
+                  <p class="muted">Crie a mesa, gere o QR Code e deixe ativa para receber pedidos.</p>
+                </div>
                 <input name="name" required placeholder="Ex: Mesa 1, Área externa 3">
                 <input name="code" placeholder="Código para QR. Ex: mesa-1">
                 <label class="check"><input name="is_active" type="checkbox" checked> Mesa ativa</label>
                 <button class="primary-button">Salvar mesa</button>
               </form>
               <form id="tabForm" class="panel stack-form">
-                <h2>Abrir comanda</h2>
+                <div>
+                  <p class="eyebrow">Passo 2</p>
+                  <h2>Abrir comanda</h2>
+                  <p class="muted">Vincule uma comanda à mesa e lance itens pelo próprio painel.</p>
+                </div>
                 <input name="name" required placeholder="Ex: Comanda Lucas">
                 <input name="customer_name" placeholder="Nome do cliente opcional">
                 <select name="dining_table_id" id="tabTableSelect"></select>

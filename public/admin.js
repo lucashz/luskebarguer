@@ -448,8 +448,13 @@ function renderTables() {
           <span class="pill ${openTabs.length ? 'pill-warn' : table.is_active ? 'pill-ok' : 'pill-muted'}">${openTabs.length ? 'Ocupada' : table.is_active ? 'Livre' : 'Inativa'}</span>
         </div>
         <p class="table-link-line"><strong>Link da mesa</strong><span>${escapeHtml(qrUrl)}</span></p>
-        ${openTabs.length ? renderTableOpenTabs(openTabs, sortedTables, table.id) : '<p class="muted">Abra uma comanda para lançar itens pelo admin ou use o QR da mesa.</p>'}
-        <div class="row-actions">
+        ${openTabs.length ? renderTableOpenTabs(openTabs, sortedTables, table.id) : `
+          <section class="table-empty-state">
+            <strong>Nenhuma comanda aberta</strong>
+            <p>Abra uma comanda para lançar itens pelo admin ou deixe o cliente pedir pelo QR Code.</p>
+          </section>
+        `}
+        <div class="row-actions table-card-actions">
           <button class="ghost-button compact" type="button" data-copy-table-qr="${escapeAttribute(qrUrl)}">Copiar link</button>
           <button class="ghost-button compact" type="button" data-view-table-qr="${escapeAttribute(table.id)}">Ver QR</button>
           <button class="ghost-button compact" type="button" data-print-table-qr="${escapeAttribute(table.id)}">Imprimir QR</button>
@@ -568,21 +573,28 @@ function renderTableOpenTabs(tabs, sortedTables, currentTableId) {
   return `
     <div class="table-tabs-list">
       ${tabs.map((tab) => `
-        <section class="table-tab-card">
-          <div class="table-tab-summary">
+      <section class="table-tab-card">
+        <div class="table-tab-summary">
+          <div>
             <strong>${escapeHtml(tab.name)}</strong>
-            <span>${money(tab.current_total || 0)} em consumo</span>
-            ${tab.customer_name ? `<small>${escapeHtml(tab.customer_name)}</small>` : ''}
+            ${tab.customer_name ? `<small>${escapeHtml(tab.customer_name)}</small>` : '<small>Cliente não informado</small>'}
           </div>
-          ${renderTabMenuPicker(tab)}
-          <div class="table-transfer">
+          <span>${money(tab.current_total || 0)} em consumo</span>
+        </div>
+        ${renderTabMenuPicker(tab)}
+        <div class="table-transfer">
+          <label>
+            Transferir comanda
             <select data-transfer-select="${escapeAttribute(tab.id)}">
               ${sortedTables.filter((target) => target.id !== currentTableId && target.is_active).map((target) => `<option value="${escapeAttribute(target.id)}">${escapeHtml(target.name)}</option>`).join('')}
             </select>
+          </label>
+          <div class="table-tab-actions">
             <button class="ghost-button compact" type="button" data-transfer-tab="${escapeAttribute(tab.id)}">Transferir</button>
             <button class="primary-button compact" type="button" data-close-tab="${escapeAttribute(tab.id)}">Fechar comanda</button>
           </div>
-        </section>
+        </div>
+      </section>
       `).join('')}
     </div>
   `;
@@ -602,12 +614,13 @@ function renderTabMenuPicker(tab) {
 
   return `
     <details class="tab-menu-picker" data-tab-menu-id="${escapeAttribute(tab.id)}" ${state.openTabMenuIds.has(String(tab.id)) ? 'open' : ''}>
-      <summary>Adicionar itens do cardápio</summary>
+      <summary><span>Adicionar itens do cardápio</span><small>${categories.reduce((sum, category) => sum + category.items.length, 0)} itens</small></summary>
       <div class="tab-menu-category-list">
         ${categories.map((category) => `
-          <section class="tab-menu-category">
-            <h4>${escapeHtml(category.name)}</h4>
-            ${category.items.map((item) => {
+          <details class="tab-menu-category">
+            <summary><span>${escapeHtml(category.name)}</span><small>${category.items.length} item(ns)</small></summary>
+            <div class="tab-menu-items">
+              ${category.items.map((item) => {
               const requiredGroups = (item.modifier_groups || []).filter((group) => group.is_required);
               return `
                 <div class="tab-menu-item">
@@ -620,7 +633,8 @@ function renderTabMenuPicker(tab) {
                 </div>
               `;
             }).join('')}
-          </section>
+            </div>
+          </details>
         `).join('')}
       </div>
     </details>
@@ -965,41 +979,45 @@ async function archiveClosedOrders() {
 
 async function loadDailyReport() {
   if (!state.admin || !els.reportDate.value) return;
-  setReportPresetActive(null);
-  const data = await request(`/api/admin/reports/daily?date=${encodeURIComponent(els.reportDate.value)}`);
-  renderDailyReport(data.report);
+  await withReportLoading(async () => {
+    setReportPresetActive(null);
+    const data = await request(`/api/admin/reports/daily?date=${encodeURIComponent(els.reportDate.value)}`);
+    renderDailyReport(data.report);
+  });
 }
 
 async function loadReportPreset(preset = 'today') {
   if (!state.admin) return;
-  setReportPresetActive(preset);
+  await withReportLoading(async () => {
+    setReportPresetActive(preset);
 
-  if (preset === 'today') {
-    els.reportDate.value = localDateInputValue();
-    await loadPresetDailyReport(els.reportDate.value, preset);
-    return;
-  }
+    if (preset === 'today') {
+      els.reportDate.value = localDateInputValue();
+      await loadPresetDailyReport(els.reportDate.value, preset);
+      return;
+    }
 
-  if (preset === 'yesterday') {
-    const date = addDays(new Date(), -1);
-    els.reportDate.value = localDateInputValue(date);
-    await loadPresetDailyReport(els.reportDate.value, preset);
-    return;
-  }
+    if (preset === 'yesterday') {
+      const date = addDays(new Date(), -1);
+      els.reportDate.value = localDateInputValue(date);
+      await loadPresetDailyReport(els.reportDate.value, preset);
+      return;
+    }
 
-  if (preset === 'month') {
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), 1);
-    const data = await request(`/api/admin/reports/range?start=${encodeURIComponent(localDateInputValue(start))}&end=${encodeURIComponent(localDateInputValue(today))}`);
-    renderDailyReport(data.report);
-    return;
-  }
+    if (preset === 'month') {
+      const today = new Date();
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      const data = await request(`/api/admin/reports/range?start=${encodeURIComponent(localDateInputValue(start))}&end=${encodeURIComponent(localDateInputValue(today))}`);
+      renderDailyReport(data.report);
+      return;
+    }
 
-  const days = Number.parseInt(preset, 10);
-  if ([7, 15, 30].includes(days)) {
-    const data = await request(`/api/admin/reports/range?days=${days}`);
-    renderDailyReport(data.report);
-  }
+    const days = Number.parseInt(preset, 10);
+    if ([7, 15, 30].includes(days)) {
+      const data = await request(`/api/admin/reports/range?days=${days}`);
+      renderDailyReport(data.report);
+    }
+  });
 }
 
 async function loadPresetDailyReport(date, preset) {
@@ -1016,6 +1034,23 @@ function setReportPresetActive(preset) {
 
 function activeReportPreset() {
   return [...els.reportPresetButtons].find((button) => button.classList.contains('active'))?.dataset.reportPreset || null;
+}
+
+async function withReportLoading(callback) {
+  const buttons = [els.loadReportButton, ...els.reportPresetButtons].filter(Boolean);
+  buttons.forEach((button) => { button.disabled = true; });
+  const previousTitle = els.reportOrdersTitle.textContent;
+  els.reportOrdersTitle.textContent = 'Carregando relatório...';
+  try {
+    await callback();
+  } catch (error) {
+    toast(error.message || 'Não foi possível carregar o relatório.');
+    els.reportSummary.innerHTML = '<p class="muted">Não foi possível carregar o relatório com esse filtro.</p>';
+    els.reportOrders.innerHTML = '';
+    els.reportOrdersTitle.textContent = previousTitle || 'Pedidos do período';
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
 }
 
 function renderDailyReport(report) {

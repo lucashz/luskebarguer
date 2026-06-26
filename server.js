@@ -1854,13 +1854,15 @@ async function orderReportBetween(start, end, period) {
   const previousStart = new Date(start.getTime() - spanMs);
   const orders = await supabase('GET', 'orders', {
     select: '*',
-    created_at: `gte.${previousStart.toISOString()}`,
+    and: `(created_at.gte.${previousStart.toISOString()},created_at.lt.${end.toISOString()})`,
     order: 'created_at.desc',
     limit: '5000'
   });
-  const periodOrders = orders.filter((order) => new Date(order.created_at) < end);
-  const currentOrders = periodOrders.filter((order) => new Date(order.created_at) >= start);
-  const previousOrders = periodOrders.filter((order) => {
+  const currentOrders = orders.filter((order) => {
+    const createdAt = new Date(order.created_at);
+    return createdAt >= start && createdAt < end;
+  });
+  const previousOrders = orders.filter((order) => {
     const createdAt = new Date(order.created_at);
     return createdAt >= previousStart && createdAt < start;
   });
@@ -1907,7 +1909,14 @@ function reportDateStart(value) {
 }
 
 function localReportDate(date) {
-  return date.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }
 
 function formatReportDate(value) {
@@ -1960,7 +1969,7 @@ function topProductTotals(orders) {
 
 function validReportDate(value) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  return new Date().toISOString().slice(0, 10);
+  return localReportDate(new Date());
 }
 
 async function attachOrderItems(orders) {

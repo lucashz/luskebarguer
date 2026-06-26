@@ -2567,9 +2567,20 @@ legend {
 
 .tables-board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  align-items: start;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.tables-control-grid {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  align-items: stretch;
+}
+
+.tables-control-grid .panel {
+  height: 100%;
+  align-content: start;
 }
 
 .table-card {
@@ -2581,6 +2592,7 @@ legend {
   background: var(--surface);
   box-shadow: var(--shadow);
   padding: 14px;
+  align-self: start;
 }
 
 .table-card-head {
@@ -2610,6 +2622,33 @@ legend {
   padding: 10px;
 }
 
+.table-empty-state {
+  display: grid;
+  gap: 4px;
+  min-height: 78px;
+  align-content: center;
+  border: 1px dashed color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-selection) 22%, #fff);
+  padding: 12px;
+}
+
+.table-empty-state p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.table-card-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.table-card-actions button {
+  width: 100%;
+  min-width: 0;
+}
+
 .table-link-line span,
 .table-tab-summary span {
   color: var(--muted);
@@ -2619,8 +2658,26 @@ legend {
 
 .table-transfer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+}
+
+.table-transfer label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.table-tab-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.table-tab-actions button {
+  width: 100%;
 }
 
 .table-tabs-list {
@@ -2635,6 +2692,22 @@ legend {
   border-radius: 8px;
   background: #fff;
   padding: 10px;
+}
+
+.table-tab-summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.table-tab-summary div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.table-tab-summary small {
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .tab-menu-picker {
@@ -2655,32 +2728,61 @@ legend {
   font-weight: 900;
 }
 
+.tab-menu-picker summary small {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, #fff);
+  color: var(--accent);
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 .tab-menu-category-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border-top: 1px solid var(--line);
   padding: 10px;
 }
 
 .tab-menu-category {
-  display: grid;
-  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: hidden;
 }
 
-.tab-menu-category h4 {
-  margin: 0;
+.tab-menu-category summary {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 8px 10px;
   color: var(--text);
   font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.tab-menu-category summary small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.tab-menu-items {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 8px;
 }
 
 .tab-menu-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px auto;
+  grid-template-columns: minmax(0, 1fr) 58px minmax(96px, auto);
   gap: 8px;
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f8fafc;
+  background: #fff;
   padding: 8px;
 }
 
@@ -2694,6 +2796,29 @@ legend {
   min-height: 34px;
   padding: 6px 8px;
   text-align: center;
+}
+
+@media (max-width: 860px) {
+  .tables-control-grid,
+  .tables-board {
+    grid-template-columns: 1fr;
+  }
+
+  .table-card-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .table-card-actions,
+  .table-tab-actions,
+  .tab-menu-item {
+    grid-template-columns: 1fr;
+  }
+
+  .table-tab-summary {
+    grid-template-columns: 1fr;
+  }
 }
 
 .segmented label.disabled-option {
