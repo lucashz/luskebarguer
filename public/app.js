@@ -14,7 +14,8 @@
   favorites: loadFavorites(),
   coupon: null,
   diningTable: null,
-  customerTab: null
+  customerTab: null,
+  customerTabs: []
 };
 
 const BOOTSTRAP_CACHE_KEY = 'cardapio_bootstrap_cache_v1';
@@ -186,7 +187,8 @@ async function resolveTableFromUrl() {
   if (!code) return;
   const data = await request(`/api/tables/resolve?table=${encodeURIComponent(code)}`);
   state.diningTable = data.table || null;
-  state.customerTab = data.table?.open_tab || null;
+  state.customerTabs = Array.isArray(data.table?.open_tabs) ? data.table.open_tabs : [];
+  state.customerTab = data.table?.open_tab || state.customerTabs[0] || null;
   updateDineInModes({ preferTableContext: true });
   renderTableContext();
   renderStore();
@@ -277,10 +279,32 @@ function renderTableContext() {
     els.tableContext.innerHTML = '';
     return;
   }
+  const openTabs = state.customerTabs || [];
+  const selectedTabId = state.customerTab?.id || '';
+  const tabPicker = method === 'tab' && openTabs.length > 1
+    ? `
+      <label class="table-tab-picker">
+        Escolha a comanda
+        <select data-table-tab-select>
+          ${openTabs.map((tab) => `
+            <option value="${escapeAttribute(tab.id)}" ${tab.id === selectedTabId ? 'selected' : ''}>
+              ${escapeHtml(tab.name)}${tab.customer_name ? ` - ${escapeHtml(tab.customer_name)}` : ''}
+            </option>
+          `).join('')}
+        </select>
+      </label>
+    `
+    : '';
   els.tableContext.innerHTML = `
     <strong>${method === 'tab' ? 'Comanda' : 'Mesa'}: ${escapeHtml(state.diningTable.name)}</strong>
     <p>${method === 'tab' && state.customerTab ? `Este pedido será adicionado automaticamente à ${escapeHtml(state.customerTab.name)}. Total atual: ${money(state.customerTab.current_total || 0)}.` : 'Seu pedido será entregue nesta mesa. Se houver comanda aberta, o sistema adiciona os itens nela.'}</p>
+    ${tabPicker}
   `;
+  els.tableContext.querySelector('[data-table-tab-select]')?.addEventListener('change', (event) => {
+    state.customerTab = openTabs.find((tab) => tab.id === event.target.value) || null;
+    renderTableContext();
+    renderCheckoutReview();
+  });
 }
 
 function updateDineInModes(options = {}) {
@@ -293,13 +317,14 @@ function updateDineInModes(options = {}) {
     tableRadio.closest('label')?.classList.toggle('disabled-option', tableRadio.disabled);
     tableRadio.closest('label')?.setAttribute('title', tableRadio.disabled ? 'Acesse pelo QR Code da mesa.' : 'Pedido entregue nesta mesa.');
   }
+  const openTabs = state.customerTabs || [];
   if (tabRadio) {
-    tabRadio.disabled = !state.customerTab;
+    tabRadio.disabled = !openTabs.length;
     tabRadio.closest('label')?.classList.toggle('disabled-option', tabRadio.disabled);
     tabRadio.closest('label')?.setAttribute('title', tabRadio.disabled ? 'Abra uma comanda para esta mesa no admin.' : 'Pedido adicionado à comanda aberta.');
   }
   if (!options.preferTableContext) return;
-  const target = state.customerTab ? tabRadio : state.diningTable ? tableRadio : null;
+  const target = openTabs.length ? tabRadio : state.diningTable ? tableRadio : null;
   if (target) {
     target.checked = true;
   } else if ((tableRadio?.checked || tabRadio?.checked) && deliveryRadio) {
@@ -959,6 +984,9 @@ async function submitOrder(event) {
   const data = new FormData(els.checkoutForm);
   const selectedMethod = data.get('fulfillment_method');
   const method = selectedMethod === 'table' && state.customerTab ? 'tab' : selectedMethod;
+  if (method === 'tab' && !state.customerTab && state.customerTabs.length) {
+    state.customerTab = state.customerTabs[0];
+  }
   const selectedAddress = method === 'delivery' && state.savedAddressApplied ? selectedSavedAddress() : null;
   if (selectedAddress) {
     applySavedCustomerAddress(selectedAddress, { force: true });
@@ -1104,7 +1132,7 @@ function updateCheckoutDeliveryFields() {
   if (method === 'table' && !state.diningTable) {
     setStatus('Para pedir na mesa, acesse o QR Code da mesa.');
   }
-  if (method === 'tab' && (!state.diningTable || !state.customerTab)) {
+  if (method === 'tab' && (!state.diningTable || !(state.customerTab || state.customerTabs.length))) {
     setStatus('Para pedir na comanda, a mesa precisa ter uma comanda aberta.');
   }
   ['label', 'postal_code', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
@@ -1125,7 +1153,7 @@ function validateCheckoutData(data, method, customer = checkoutCustomerFromState
   }
   if (!['table', 'tab'].includes(method) && !String(customer.name || '').trim()) return focusCheckoutField('name', 'Informe o nome do cliente.');
   if (method === 'table' && !state.diningTable) return focusCheckoutField('notes', 'Acesse pelo QR Code da mesa para fazer pedido na mesa.');
-  if (method === 'tab' && !state.customerTab) return focusCheckoutField('notes', 'Esta mesa não possui comanda aberta.');
+  if (method === 'tab' && !state.customerTab && !state.customerTabs.length) return focusCheckoutField('notes', 'Esta mesa não possui comanda aberta.');
 
   if (method === 'delivery') {
     const labels = {

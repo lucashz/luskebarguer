@@ -192,24 +192,6 @@
                 <button class="ghost-button compact" id="refreshAdminButton" type="button">Atualizar</button>
               </div>
             </div>
-            <form class="panel print-settings-panel" id="printSettingsForm">
-              <div>
-                <p class="eyebrow">Impressão térmica</p>
-                <strong>Configurações rápidas</strong>
-              </div>
-              <label>Papel
-                <select name="paperWidth">
-                  <option value="80">80 mm</option>
-                  <option value="58">58 mm</option>
-                </select>
-              </label>
-              <label>Vias cozinha<input name="kitchenCopies" type="number" min="1" max="5" value="1"></label>
-              <label>Vias cliente<input name="customerCopies" type="number" min="1" max="5" value="1"></label>
-              <label class="check"><input name="autoPrintKitchen" type="checkbox"> Auto cozinha</label>
-              <label class="check"><input name="showKitchenPrices" type="checkbox"> Valores na cozinha</label>
-              <label class="check"><input name="highlightNotes" type="checkbox" checked> Destacar observações</label>
-              <button class="primary-button compact">Salvar impressão</button>
-            </form>
             <div class="order-board" id="adminOrders"></div>
           </section>
 
@@ -670,6 +652,41 @@
                   </div>
                 </div>
               </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Impressão térmica</strong>
+                  <p>Defina o padrão usado nos botões de impressão dos pedidos e na impressão automática da cozinha.</p>
+                </div>
+                <div class="store-settings-fields print-settings-panel" id="printSettingsForm">
+                  <div class="print-settings-intro">
+                    <p class="eyebrow">Padrão da loja</p>
+                    <strong>Essas opções valem para todos os pedidos.</strong>
+                    <span>Na aba Pedidos ficam apenas os botões de imprimir, pré-visualizar e reimprimir.</span>
+                  </div>
+                  <label>Largura do papel
+                    <select name="paperWidth">
+                      <option value="80">80 mm</option>
+                      <option value="58">58 mm</option>
+                    </select>
+                  </label>
+                  <label>Vias da cozinha<input name="kitchenCopies" type="number" min="1" max="5" value="1"></label>
+                  <label>Vias do cliente<input name="customerCopies" type="number" min="1" max="5" value="1"></label>
+                  <label>Auto imprimir quando
+                    <select name="autoPrintKitchenStatus">
+                      <option value="new">Pedido novo</option>
+                      <option value="accepted">Pedido aceito</option>
+                      <option value="preparing">Em preparo</option>
+                    </select>
+                  </label>
+                  <div class="print-settings-checks">
+                    <label class="check"><input name="autoPrintKitchen" type="checkbox"> Imprimir cozinha automaticamente</label>
+                    <label class="check"><input name="showKitchenPrices" type="checkbox"> Mostrar valores na via da cozinha</label>
+                    <label class="check"><input name="highlightNotes" type="checkbox" checked> Destacar observações</label>
+                  </div>
+                  <p class="muted">A impressão automática fica desativada por padrão e só dispara uma vez por pedido no status escolhido.</p>
+                </div>
+              </section>
             </form>
           </section>
 
@@ -689,8 +706,44 @@
                 <button class="primary-button">Atualizar senha</button>
               </form>
             </div>
+
+            <section class="panel admin-users-panel" id="adminUsersPanel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Equipe</p>
+                  <h2>Contas e permissões</h2>
+                  <p class="muted">Crie acessos separados para administrador, garçom e cozinha.</p>
+                </div>
+              </div>
+
+              <form id="adminUserForm" class="admin-user-create-form">
+                <input name="name" required placeholder="Nome da pessoa">
+                <input name="email" required type="email" placeholder="E-mail de acesso">
+                <input name="password" required type="password" minlength="8" placeholder="Senha inicial">
+                <select name="role">
+                  <option value="admin">Administrador</option>
+                  <option value="waiter">Garçom</option>
+                  <option value="kitchen">Cozinha</option>
+                </select>
+                <button class="primary-button compact">Criar conta</button>
+              </form>
+
+              <div class="admin-users-list" id="adminUsersList"></div>
+            </section>
           </section>
         </section>
+
+        <dialog class="dialog table-manager-dialog" id="tableManagerDialog">
+          <form method="dialog" class="dialog-header">
+            <div>
+              <p class="eyebrow">Gerenciar mesa</p>
+              <h2 id="tableManagerTitle">Mesa</h2>
+              <p class="muted" id="tableManagerSubtitle">Comandas, pedidos e QR Code.</p>
+            </div>
+            <button class="icon-button" id="tableManagerCloseButton" type="button" title="Fechar" aria-label="Fechar">X</button>
+          </form>
+          <div class="table-manager-body" id="tableManagerBody"></div>
+        </dialog>
 
         <dialog class="new-order-dialog" id="newOrderDialog">
           <div class="new-order-modal">

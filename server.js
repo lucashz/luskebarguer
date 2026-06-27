@@ -243,35 +243,59 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/admin/users') {
+    if (!(await requireAdminPermission(req, res, 'admin_users'))) return;
+    json(res, 200, { admins: await listAdminUsers() });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/users') {
+    if (!(await requireAdminPermission(req, res, 'admin_users'))) return;
+    json(res, 201, { admin: await createAdminUser(await readJson(req)) });
+    return;
+  }
+
+  const adminUserMatch = url.pathname.match(/^\/api\/admin\/users\/([a-f0-9-]+)$/i);
+  if (adminUserMatch && (method === 'PUT' || method === 'PATCH')) {
+    const session = await requireAdminPermission(req, res, 'admin_users');
+    if (!session) return;
+    json(res, 200, { admin: await updateAdminUser(adminUserMatch[1], await readJson(req), session) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/summary') {
-    if (!(await requireAdmin(req, res))) return;
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    const permissions = adminPermissions(admin);
     json(res, 200, {
       store: await getStoreSettings(),
-      categories: await getMenu(true),
+      categories: permissions.includes('menu') || permissions.includes('tables') ? await getMenu(true) : [],
       orders: await listOrders(),
-      customers: await listCustomers(),
-      promotions: await listPromotions(),
-      dining_tables: await listDiningTables(),
-      customer_tabs: await listCustomerTabs()
+      customers: permissions.includes('customers') ? await listCustomers() : [],
+      promotions: permissions.includes('promotions') ? await listPromotions() : [],
+      dining_tables: permissions.includes('tables') ? await listDiningTables() : [],
+      customer_tabs: permissions.includes('tables') ? await listCustomerTabs() : [],
+      admins: permissions.includes('admin_users') ? await listAdminUsers() : [],
+      permissions
     });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/tables') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'tables'))) return;
     json(res, 200, { tables: await listDiningTables(), tabs: await listCustomerTabs() });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/tables') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'tables'))) return;
     json(res, 201, { table: await createDiningTable(await readJson(req)) });
     return;
   }
 
   const tableMatch = url.pathname.match(/^\/api\/admin\/tables\/([a-f0-9-]+)$/i);
   if (tableMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'tables'))) return;
     if (method === 'PATCH' || method === 'PUT') {
       json(res, 200, { table: await updateDiningTable(tableMatch[1], await readJson(req)) });
       return;
@@ -284,21 +308,21 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/tabs') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'tables'))) return;
     json(res, 201, { tab: await openCustomerTab(await readJson(req)) });
     return;
   }
 
   const tabItemMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/items$/i);
   if (tabItemMatch && method === 'POST') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'tables'))) return;
     json(res, 201, await addItemToCustomerTab(req, tabItemMatch[1], await readJson(req)));
     return;
   }
 
   const tabMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/(close|transfer)$/i);
   if (tabMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'tables'))) return;
     const body = await readJson(req);
     const tab = tabMatch[2] === 'close'
       ? await closeCustomerTab(tabMatch[1], body)
@@ -308,7 +332,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/store') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'store'))) return;
     const result = await updateStoreSettings(await readJson(req));
     clearPublicBootstrapCache();
     json(res, 200, result);
@@ -316,7 +340,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/loyalty') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     const store = await updateLoyaltyProgram(await readJson(req));
     clearPublicBootstrapCache();
     json(res, 200, { store });
@@ -324,7 +348,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/print-settings') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'store'))) return;
     const store = await updatePrintSettings(await readJson(req));
     clearPublicBootstrapCache();
     json(res, 200, { store });
@@ -332,7 +356,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/operation/start') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const queue = await clearOrderQueue({ mode: 'close_open' });
     const store = await setStoreOpen(true);
     clearPublicBootstrapCache();
@@ -341,7 +365,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/operation/stop') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const store = await setStoreOpen(false);
     clearPublicBootstrapCache();
     json(res, 200, { store });
@@ -349,20 +373,21 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/orders') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'orders'))) return;
     json(res, 200, { orders: await listOrders() });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/print-logs') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'orders'))) return;
     json(res, 201, { log: await createPrintLog(await readJson(req)) });
     return;
   }
 
   const orderStatusMatch = url.pathname.match(/^\/api\/admin\/orders\/([a-f0-9-]+)\/status$/i);
   if (orderStatusMatch && method === 'PATCH') {
-    if (!(await requireAdmin(req, res))) return;
+    const admin = await requireAdminPermission(req, res, 'orders');
+    if (!admin) return;
     const body = await readJson(req);
     if (!orderStatuses.has(body.status)) {
       throw httpError(422, 'Status de pedido inválido.');
@@ -374,21 +399,21 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/orders/clear-queue') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const result = await clearOrderQueue(await readJson(req));
     json(res, 200, result);
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/reports/daily') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'reports'))) return;
     const date = cleanText(url.searchParams.get('date') || '');
     json(res, 200, { report: await dailyOrderReport(date) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/reports/range') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'reports'))) return;
     json(res, 200, {
       report: await rangeOrderReport({
         days: url.searchParams.get('days'),
@@ -400,20 +425,20 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/customers') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'customers'))) return;
     json(res, 200, { customers: await listCustomers() });
     return;
   }
 
   const adminCustomerMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)$/i);
   if (adminCustomerMatch && (method === 'PUT' || method === 'PATCH')) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'customers'))) return;
     json(res, 200, { customer: await updateCustomerByAdmin(adminCustomerMatch[1], await readJson(req)) });
     return;
   }
 
   if (adminCustomerMatch && method === 'DELETE') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'customers'))) return;
     await deleteCustomerByAdmin(adminCustomerMatch[1]);
     json(res, 200, { ok: true });
     return;
@@ -421,14 +446,14 @@ async function handleApi(req, res, url) {
 
   const adminCustomerAddressCreateMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)\/addresses$/i);
   if (adminCustomerAddressCreateMatch && method === 'POST') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'customers'))) return;
     json(res, 201, { customer: await createCustomerAddressByAdmin(adminCustomerAddressCreateMatch[1], await readJson(req)) });
     return;
   }
 
   const adminCustomerAddressMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)\/addresses\/([a-f0-9-]+)$/i);
   if (adminCustomerAddressMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'customers'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       json(res, 200, { customer: await updateCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2], await readJson(req)) });
       return;
@@ -440,13 +465,13 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/promotions') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     json(res, 200, { promotions: await listPromotions() });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/promotions') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     const [promotion] = await supabase('POST', 'promotions', {}, sanitizePromotion(await readJson(req), true), ['Prefer: return=representation']);
     json(res, 201, { promotion });
     return;
@@ -454,7 +479,7 @@ async function handleApi(req, res, url) {
 
   const promotionMatch = url.pathname.match(/^\/api\/admin\/promotions\/([a-f0-9-]+)$/i);
   if (promotionMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const [promotion] = await supabase('PATCH', 'promotions', { id: `eq.${promotionMatch[1]}` }, sanitizePromotion(await readJson(req), false), ['Prefer: return=representation']);
       json(res, 200, { promotion });
@@ -468,13 +493,13 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/uploads') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     json(res, 201, await uploadImage(await readJson(req)));
     return;
   }
 
   if (url.pathname === '/api/categories' && method === 'POST') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     const result = await supabase('POST', 'menu_categories', {}, sanitizeCategory(await readJson(req), true), ['Prefer: return=representation']);
     clearPublicBootstrapCache();
     json(res, 201, result);
@@ -483,7 +508,7 @@ async function handleApi(req, res, url) {
 
   const categoryMatch = url.pathname.match(/^\/api\/categories\/([a-f0-9-]+)$/i);
   if (categoryMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_categories', { id: `eq.${categoryMatch[1]}` }, sanitizeCategory(await readJson(req), false), ['Prefer: return=representation']);
       clearPublicBootstrapCache();
@@ -499,7 +524,7 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname === '/api/items' && method === 'POST') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     const result = await supabase('POST', 'menu_items', {}, sanitizeItem(await readJson(req), true), ['Prefer: return=representation']);
     clearPublicBootstrapCache();
     json(res, 201, result);
@@ -508,7 +533,7 @@ async function handleApi(req, res, url) {
 
   const itemMatch = url.pathname.match(/^\/api\/items\/([a-f0-9-]+)$/i);
   if (itemMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_items', { id: `eq.${itemMatch[1]}` }, sanitizeItem(await readJson(req), false), ['Prefer: return=representation']);
       clearPublicBootstrapCache();
@@ -525,7 +550,7 @@ async function handleApi(req, res, url) {
 
   const modifierGroupMatch = url.pathname.match(/^\/api\/items\/([a-f0-9-]+)\/modifier-groups$/i);
   if (modifierGroupMatch && method === 'POST') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     const payload = sanitizeModifierGroup(await readJson(req), true);
     await ensureUniqueModifierGroupName(modifierGroupMatch[1], payload.name);
     const result = await supabase('POST', 'menu_modifier_groups', {}, {
@@ -539,7 +564,7 @@ async function handleApi(req, res, url) {
 
   const modifierGroupIdMatch = url.pathname.match(/^\/api\/modifier-groups\/([a-f0-9-]+)$/i);
   if (modifierGroupIdMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, sanitizeModifierGroup(await readJson(req), false), ['Prefer: return=representation']);
       clearPublicBootstrapCache();
@@ -556,7 +581,7 @@ async function handleApi(req, res, url) {
 
   const modifierCreateMatch = url.pathname.match(/^\/api\/modifier-groups\/([a-f0-9-]+)\/modifiers$/i);
   if (modifierCreateMatch && method === 'POST') {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     const payload = sanitizeModifier(await readJson(req), true);
     await ensureUniqueModifierName(modifierCreateMatch[1], payload.name);
     const result = await supabase('POST', 'menu_modifiers', {}, {
@@ -570,7 +595,7 @@ async function handleApi(req, res, url) {
 
   const modifierMatch = url.pathname.match(/^\/api\/modifiers\/([a-f0-9-]+)$/i);
   if (modifierMatch) {
-    if (!(await requireAdmin(req, res))) return;
+    if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, sanitizeModifier(await readJson(req), false), ['Prefer: return=representation']);
       clearPublicBootstrapCache();
@@ -648,6 +673,51 @@ async function getAdminById(adminId) {
   return rows[0];
 }
 
+async function listAdminUsers() {
+  const rows = await supabase('GET', 'admin_users', {
+    select: 'id,name,email,role,is_active,last_login_at,created_at',
+    order: 'name.asc',
+    limit: '200'
+  });
+  return rows.map(publicAdmin);
+}
+
+async function createAdminUser(data) {
+  const admin = sanitizeAdminUser(data);
+  const password = validatePassword(data.password);
+  const [created] = await supabase('POST', 'admin_users', {}, {
+    ...admin,
+    password_hash: hashPassword(password),
+    role: sanitizeAdminRole(data.role),
+    is_active: data.is_active === undefined ? true : Boolean(data.is_active)
+  }, ['Prefer: return=representation']);
+  return publicAdmin(created);
+}
+
+async function updateAdminUser(id, data, session) {
+  const target = await getAdminById(id);
+  const payload = {};
+  if ('name' in data) payload.name = cleanText(data.name);
+  if ('email' in data) payload.email = cleanEmail(data.email);
+  if ('role' in data) payload.role = sanitizeAdminRole(data.role);
+  if ('is_active' in data) payload.is_active = Boolean(data.is_active);
+  if ('password' in data && String(data.password || '').trim()) {
+    payload.password_hash = hashPassword(validatePassword(data.password));
+  }
+  if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
+
+  if (target.id === session.id && payload.is_active === false) {
+    throw httpError(422, 'Você não pode desativar sua própria conta.');
+  }
+  if (target.id === session.id && payload.role && !isFullAdminRole(payload.role)) {
+    throw httpError(422, 'Você não pode remover seu próprio acesso de administrador.');
+  }
+
+  const [updated] = await supabase('PATCH', 'admin_users', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
+  if (!updated) throw httpError(404, 'Conta admin não encontrada.');
+  return publicAdmin(updated);
+}
+
 async function updateAdminAccount(session, data) {
   const payload = {};
   if ('name' in data) payload.name = cleanText(data.name);
@@ -683,7 +753,7 @@ async function createAdminSession(admin) {
     id: admin.id,
     name: admin.name,
     email: admin.email,
-    role: admin.role
+    role: normalizeAdminRole(admin.role)
   });
   return { sessionId, body: { admin: publicAdmin(admin) } };
 }
@@ -695,6 +765,40 @@ async function requireAdmin(req, res) {
     return null;
   }
   return session.data;
+}
+
+async function requireAdminPermission(req, res, permission) {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return null;
+  if (!adminCan(admin, permission)) {
+    json(res, 403, { error: 'Sua conta não tem permissão para acessar esta área.' });
+    return null;
+  }
+  return admin;
+}
+
+function adminPermissions(admin) {
+  const role = normalizeAdminRole(admin?.role);
+  if (role === 'admin') {
+    return ['operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'account', 'admin_users'];
+  }
+  if (role === 'waiter') return ['orders', 'tables', 'account'];
+  if (role === 'kitchen') return ['orders', 'account'];
+  return ['account'];
+}
+
+function adminCan(admin, permission) {
+  return adminPermissions(admin).includes(permission);
+}
+
+function normalizeAdminRole(role) {
+  if (role === 'owner' || role === 'manager') return 'admin';
+  if (role === 'waiter' || role === 'kitchen' || role === 'admin') return role;
+  return 'admin';
+}
+
+function isFullAdminRole(role) {
+  return normalizeAdminRole(role) === 'admin';
 }
 
 async function registerCustomer(data) {
@@ -1667,23 +1771,34 @@ async function resolveDiningTable(code) {
     order: 'opened_at.asc',
     limit: '50'
   });
-  let openTab = tabs.length === 1 ? tabs[0] : null;
-  if (openTab) {
+  let enrichedTabs = tabs;
+  if (tabs.length) {
+    const tabIds = tabs.map((tab) => tab.id);
     const orders = await supabase('GET', 'orders', {
       select: '*',
-      customer_tab_id: `eq.${openTab.id}`,
+      customer_tab_id: `in.(${tabIds.join(',')})`,
       order: 'created_at.desc',
-      limit: '200'
+      limit: '500'
     });
-    openTab = {
-      ...openTab,
-      current_total: roundMoney(orders
-        .filter((order) => order.status !== 'cancelled')
-        .reduce((sum, order) => sum + moneyNumber(order.total), 0)),
-      order_count: orders.length
-    };
+    const ordersByTab = orders.reduce((map, order) => {
+      const list = map.get(order.customer_tab_id) || [];
+      list.push(order);
+      map.set(order.customer_tab_id, list);
+      return map;
+    }, new Map());
+    enrichedTabs = tabs.map((tab) => {
+      const tabOrders = ordersByTab.get(tab.id) || [];
+      return {
+        ...tab,
+        current_total: roundMoney(tabOrders
+          .filter((order) => order.status !== 'cancelled')
+          .reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+        order_count: tabOrders.length
+      };
+    });
   }
-  return { ...table, open_tab: openTab, open_tabs: tabs };
+  const openTab = enrichedTabs.length === 1 ? enrichedTabs[0] : null;
+  return { ...table, open_tab: openTab, open_tabs: enrichedTabs };
 }
 
 async function createDiningTable(data) {
@@ -2241,6 +2356,7 @@ function defaultPrintSettings() {
     kitchenCopies: 1,
     customerCopies: 1,
     autoPrintKitchen: false,
+    autoPrintKitchenStatus: 'accepted',
     showKitchenPrices: false,
     highlightNotes: true
   };
@@ -2254,6 +2370,9 @@ function sanitizePrintSettings(value) {
     kitchenCopies: clampInteger(data.kitchenCopies, 1, 5),
     customerCopies: clampInteger(data.customerCopies, 1, 5),
     autoPrintKitchen: Boolean(data.autoPrintKitchen),
+    autoPrintKitchenStatus: ['new', 'accepted', 'preparing'].includes(String(data.autoPrintKitchenStatus))
+      ? String(data.autoPrintKitchenStatus)
+      : defaults.autoPrintKitchenStatus,
     showKitchenPrices: Boolean(data.showKitchenPrices),
     highlightNotes: data.highlightNotes === undefined ? defaults.highlightNotes : Boolean(data.highlightNotes)
   };
@@ -2412,6 +2531,12 @@ function sanitizeAdminUser(data) {
     email: 'email'
   }, ['name', 'email']);
   return admin;
+}
+
+function sanitizeAdminRole(role) {
+  const value = String(role || '').trim();
+  if (['admin', 'waiter', 'kitchen'].includes(value)) return value;
+  return 'admin';
 }
 
 function sanitizeStore(data) {
@@ -2628,13 +2753,18 @@ async function requireOpenTab(tabId, tableId) {
       status: 'eq.open',
       limit: '1'
     });
+    if (rows[0] && tableId && rows[0].dining_table_id !== tableId) {
+      throw httpError(422, 'A comanda selecionada não pertence a esta mesa.');
+    }
   } else if (tableId) {
     rows = await supabase('GET', 'customer_tabs', {
       select: '*',
       dining_table_id: `eq.${tableId}`,
       status: 'eq.open',
-      limit: '1'
+      order: 'opened_at.asc',
+      limit: '2'
     });
+    if (rows.length > 1) throw httpError(422, 'Escolha qual comanda desta mesa receberá o pedido.');
   }
   if (!rows[0]) throw httpError(422, 'Comanda aberta não encontrada.');
   return rows[0];
@@ -2865,8 +2995,23 @@ function publicAdmin(admin) {
     id: admin.id,
     name: admin.name,
     email: admin.email,
-    role: admin.role
+    role: normalizeAdminRole(admin.role),
+    role_label: adminRoleLabel(admin.role),
+    permissions: adminPermissions(admin),
+    is_active: admin.is_active !== false,
+    last_login_at: admin.last_login_at || null,
+    created_at: admin.created_at || null
   };
+}
+
+function adminRoleLabel(role) {
+  return ({
+    admin: 'Administrador',
+    owner: 'Administrador',
+    manager: 'Administrador',
+    waiter: 'Garçom',
+    kitchen: 'Cozinha'
+  })[role] || 'Administrador';
 }
 
 function publicCustomer(customer) {

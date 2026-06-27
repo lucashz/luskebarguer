@@ -131,9 +131,8 @@ async function login(event) {
   state.customer = result.customer;
   const me = await request('/api/customer/me');
   state.customer = me.customer;
-  showShell();
-  await loadOrders();
   saveAccountCache();
+  window.location.href = '/';
 }
 
 async function register(event) {

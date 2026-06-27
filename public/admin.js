@@ -5,6 +5,7 @@
   orders: [],
   customers: [],
   promotions: [],
+  adminUsers: [],
   diningTables: [],
   customerTabs: [],
   knownOrderIds: new Set(),
@@ -26,6 +27,7 @@
   openCustomerIds: new Set(),
   openOrderDetailIds: new Set(),
   openTabMenuIds: new Set(),
+  selectedTableId: null,
   modifierCreateDrafts: new Map(),
   currentReport: null,
   draggedOrderId: null,
@@ -158,6 +160,11 @@ const els = {
   tabForm: document.querySelector('#tabForm'),
   tabTableSelect: document.querySelector('#tabTableSelect'),
   tablesBoard: document.querySelector('#tablesBoard'),
+  tableManagerDialog: document.querySelector('#tableManagerDialog'),
+  tableManagerTitle: document.querySelector('#tableManagerTitle'),
+  tableManagerSubtitle: document.querySelector('#tableManagerSubtitle'),
+  tableManagerBody: document.querySelector('#tableManagerBody'),
+  tableManagerCloseButton: document.querySelector('#tableManagerCloseButton'),
   enableSoundButton: document.querySelector('#enableSoundButton'),
   kitchenModeButton: document.querySelector('#kitchenModeButton'),
   autoPrintButton: document.querySelector('#autoPrintButton'),
@@ -195,6 +202,9 @@ const els = {
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
+  adminUserForm: document.querySelector('#adminUserForm'),
+  adminUsersList: document.querySelector('#adminUsersList'),
+  adminUsersPanel: document.querySelector('#adminUsersPanel'),
   promotionForm: document.querySelector('#promotionForm'),
   promotionList: document.querySelector('#promotionList'),
   promotionFormTitle: document.querySelector('#promotionFormTitle'),
@@ -254,9 +264,12 @@ els.printReportButton?.addEventListener('click', printCurrentReport);
 els.refreshTablesButton?.addEventListener('click', () => loadSummary());
 els.tableForm?.addEventListener('submit', submitTable);
 els.tabForm?.addEventListener('submit', submitTab);
+els.tableManagerCloseButton?.addEventListener('click', () => closeTableManager());
+els.tableManagerDialog?.addEventListener('close', () => {
+  state.selectedTableId = null;
+});
 els.kitchenModeButton?.addEventListener('click', toggleKitchenMode);
 els.autoPrintButton?.addEventListener('click', toggleAutoPrint);
-els.printSettingsForm?.addEventListener('submit', submitPrintSettings);
 els.reportPresetButtons.forEach((button) => {
   button.addEventListener('click', () => loadReportPreset(button.dataset.reportPreset));
 });
@@ -290,6 +303,7 @@ els.storeForm.addEventListener('click', (event) => {
 });
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
+els.adminUserForm?.addEventListener('submit', submitAdminUser);
 els.promotionForm?.addEventListener('submit', submitPromotion);
 els.cancelPromotionEditButton?.addEventListener('click', resetPromotionForm);
 els.openPromotionFormButton?.addEventListener('click', () => {
@@ -370,7 +384,7 @@ async function logout() {
 async function loadAdminData() {
   try {
     await loadSummary();
-    await loadReportPreset('today');
+    if (hasPermission('reports')) await loadReportPreset('today');
   } catch (error) {
     toast(error.message || 'Não foi possível atualizar os dados do painel.');
   }
@@ -384,6 +398,7 @@ async function loadSummary(options = {}) {
   state.orders = data.orders || [];
   state.customers = data.customers || [];
   state.promotions = data.promotions || [];
+  state.adminUsers = data.admins || [];
   state.diningTables = data.dining_tables || [];
   state.customerTabs = data.customer_tabs || [];
   saveAdminCache();
@@ -401,9 +416,12 @@ function render() {
   renderCustomers();
   renderPromotions();
   renderTables();
+  renderTableManager();
   renderPromotionOptions();
   renderMenu();
   renderCategoryOptions();
+  renderPermissionedNavigation();
+  renderAdminUsers();
   fillStoreForm();
   fillPrintSettingsForm();
   fillLoyaltyForm();
@@ -436,7 +454,7 @@ function renderTables() {
   }
   const tableCards = sortedTables.map((table) => {
     const openTabs = (table.open_tabs?.length ? table.open_tabs : state.customerTabs.filter((tab) => tab.status === 'open' && tab.dining_table_id === table.id));
-    const qrUrl = `${window.location.origin}/?mesa=${encodeURIComponent(table.code)}`;
+    const openTotal = openTabs.reduce((sum, tab) => sum + Number(tab.current_total || 0), 0);
     const activeText = table.is_active ? (openTabs.length ? `${openTabs.length} comanda(s)` : 'Livre') : 'Inativa';
     return `
       <article class="table-card ${table.is_active ? '' : 'muted-card'}">
@@ -447,20 +465,12 @@ function renderTables() {
           </div>
           <span class="pill ${openTabs.length ? 'pill-warn' : table.is_active ? 'pill-ok' : 'pill-muted'}">${openTabs.length ? 'Ocupada' : table.is_active ? 'Livre' : 'Inativa'}</span>
         </div>
-        <p class="table-link-line"><strong>Link da mesa</strong><span>${escapeHtml(qrUrl)}</span></p>
-        ${openTabs.length ? renderTableOpenTabs(openTabs, sortedTables, table.id) : `
-          <section class="table-empty-state">
-            <strong>Nenhuma comanda aberta</strong>
-            <p>Abra uma comanda para lançar itens pelo admin ou deixe o cliente pedir pelo QR Code.</p>
-          </section>
-        `}
+        <div class="table-card-summary">
+          <span><small>Comandas</small><strong>${openTabs.length}</strong></span>
+          <span><small>Total aberto</small><strong>${money(openTotal)}</strong></span>
+        </div>
         <div class="row-actions table-card-actions">
-          <button class="ghost-button compact" type="button" data-copy-table-qr="${escapeAttribute(qrUrl)}">Copiar link</button>
-          <button class="ghost-button compact" type="button" data-view-table-qr="${escapeAttribute(table.id)}">Ver QR</button>
-          <button class="ghost-button compact" type="button" data-print-table-qr="${escapeAttribute(table.id)}">Imprimir QR</button>
-          <button class="ghost-button compact" type="button" data-toggle-table="${escapeAttribute(table.id)}">${table.is_active ? 'Desativar' : 'Ativar'}</button>
-          <button class="danger-button compact" type="button" data-delete-table="${escapeAttribute(table.id)}">Excluir</button>
-          <button class="primary-button compact" type="button" data-open-tab="${escapeAttribute(table.id)}">Abrir comanda</button>
+          <button class="primary-button compact" type="button" data-manage-table="${escapeAttribute(table.id)}">Gerenciar mesa</button>
         </div>
       </article>
     `;
@@ -475,19 +485,27 @@ function renderTables() {
       </article>
     `).join('');
   els.tablesBoard.innerHTML = tableCards + looseTabs;
-  els.tablesBoard.querySelectorAll('[data-copy-table-qr]').forEach((button) => {
+  bindTableManagementActions(els.tablesBoard);
+}
+
+function bindTableManagementActions(root) {
+  if (!root) return;
+  root.querySelectorAll('[data-manage-table]').forEach((button) => {
+    button.addEventListener('click', () => openTableManager(button.dataset.manageTable));
+  });
+  root.querySelectorAll('[data-copy-table-qr]').forEach((button) => {
     button.addEventListener('click', async () => {
       await navigator.clipboard?.writeText(button.dataset.copyTableQr);
       toast('Link/QR da mesa copiado.');
     });
   });
-  els.tablesBoard.querySelectorAll('[data-toggle-table]').forEach((button) => {
+  root.querySelectorAll('[data-toggle-table]').forEach((button) => {
     button.addEventListener('click', async () => {
       const table = state.diningTables.find((entry) => entry.id === button.dataset.toggleTable);
       await updateDiningTable(table.id, { is_active: !table.is_active });
     });
   });
-  els.tablesBoard.querySelectorAll('[data-delete-table]').forEach((button) => {
+  root.querySelectorAll('[data-delete-table]').forEach((button) => {
     button.addEventListener('click', async () => {
       const table = state.diningTables.find((entry) => entry.id === button.dataset.deleteTable);
       if (!table) return;
@@ -500,31 +518,31 @@ function renderTables() {
       await deleteDiningTable(table.id);
     });
   });
-  els.tablesBoard.querySelectorAll('[data-print-table-qr]').forEach((button) => {
+  root.querySelectorAll('[data-print-table-qr]').forEach((button) => {
     button.addEventListener('click', () => {
       const table = state.diningTables.find((entry) => entry.id === button.dataset.printTableQr);
       if (table) printTableQr(table);
     });
   });
-  els.tablesBoard.querySelectorAll('[data-view-table-qr]').forEach((button) => {
+  root.querySelectorAll('[data-view-table-qr]').forEach((button) => {
     button.addEventListener('click', () => {
       const table = state.diningTables.find((entry) => entry.id === button.dataset.viewTableQr);
       if (table) printTableQr(table, { autoPrint: false });
     });
   });
-  els.tablesBoard.querySelectorAll('[data-open-tab]').forEach((button) => {
+  root.querySelectorAll('[data-open-tab]').forEach((button) => {
     button.addEventListener('click', async () => {
       await createCustomerTab({ name: `Comanda ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, dining_table_id: button.dataset.openTab });
     });
   });
-  els.tablesBoard.querySelectorAll('[data-close-tab]').forEach((button) => {
+  root.querySelectorAll('[data-close-tab]').forEach((button) => {
     button.addEventListener('click', async () => {
       await closeCustomerTab(button.dataset.closeTab, { payment_method: 'Pagamento no fechamento' });
     });
   });
-  els.tablesBoard.querySelectorAll('[data-transfer-tab]').forEach((button) => {
+  root.querySelectorAll('[data-transfer-tab]').forEach((button) => {
     button.addEventListener('click', async () => {
-      const select = els.tablesBoard.querySelector(`[data-transfer-select="${CSS.escape(button.dataset.transferTab)}"]`);
+      const select = root.querySelector(`[data-transfer-select="${CSS.escape(button.dataset.transferTab)}"]`);
       if (!select?.value) {
         toast('Selecione uma mesa de destino ativa.');
         return;
@@ -532,7 +550,7 @@ function renderTables() {
       await transferCustomerTab(button.dataset.transferTab, { dining_table_id: select.value });
     });
   });
-  els.tablesBoard.querySelectorAll('[data-add-tab-item]').forEach((button) => {
+  root.querySelectorAll('[data-add-tab-item]').forEach((button) => {
     button.addEventListener('click', async () => {
       const row = button.closest('.tab-menu-item');
       const quantity = Number.parseInt(row?.querySelector('[data-tab-item-qty]')?.value, 10) || 1;
@@ -549,7 +567,7 @@ function renderTables() {
       }
     });
   });
-  els.tablesBoard.querySelectorAll('.tab-menu-picker').forEach((details) => {
+  root.querySelectorAll('.tab-menu-picker').forEach((details) => {
     details.addEventListener('toggle', () => {
       const id = details.dataset.tabMenuId;
       if (!id) return;
@@ -557,6 +575,127 @@ function renderTables() {
       else state.openTabMenuIds.delete(id);
     });
   });
+}
+
+function openTableManager(tableId) {
+  state.selectedTableId = tableId;
+  renderTableManager();
+  els.tableManagerDialog?.showModal();
+}
+
+function closeTableManager() {
+  state.selectedTableId = null;
+  els.tableManagerDialog?.close();
+}
+
+function renderTableManager() {
+  if (!els.tableManagerDialog || !els.tableManagerBody) return;
+  if (!els.tableManagerDialog.open && !state.selectedTableId) return;
+  const table = state.diningTables.find((entry) => entry.id === state.selectedTableId);
+  if (!table) {
+    if (els.tableManagerDialog.open) closeTableManager();
+    return;
+  }
+  const sortedTables = [...state.diningTables].sort((a, b) =>
+    Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name, 'pt-BR')
+  );
+  const openTabs = openTabsForTable(table);
+  const tableOrders = ordersForTable(table.id);
+  const qrUrl = tableQrUrl(table);
+  els.tableManagerTitle.textContent = table.name;
+  els.tableManagerSubtitle.textContent = `${table.is_active ? 'Mesa ativa' : 'Mesa inativa'} - ${openTabs.length ? `${openTabs.length} comanda(s) aberta(s)` : 'sem comanda aberta'}`;
+  els.tableManagerBody.innerHTML = `
+    <section class="table-manager-overview">
+      <article>
+        <small>Status</small>
+        <strong>${table.is_active ? 'Ativa' : 'Inativa'}</strong>
+      </article>
+      <article>
+        <small>Comandas abertas</small>
+        <strong>${openTabs.length}</strong>
+      </article>
+      <article>
+        <small>Pedidos da mesa</small>
+        <strong>${tableOrders.length}</strong>
+      </article>
+      <article>
+        <small>Total em aberto</small>
+        <strong>${money(openTabs.reduce((sum, tab) => sum + Number(tab.current_total || 0), 0))}</strong>
+      </article>
+    </section>
+
+    <section class="table-manager-actions">
+      <button class="primary-button compact" type="button" data-open-tab="${escapeAttribute(table.id)}">Abrir nova comanda</button>
+      <button class="ghost-button compact" type="button" data-copy-table-qr="${escapeAttribute(qrUrl)}">Copiar link da mesa</button>
+      <button class="ghost-button compact" type="button" data-view-table-qr="${escapeAttribute(table.id)}">Ver QR</button>
+      <button class="ghost-button compact" type="button" data-print-table-qr="${escapeAttribute(table.id)}">Imprimir QR</button>
+      <button class="ghost-button compact" type="button" data-toggle-table="${escapeAttribute(table.id)}">${table.is_active ? 'Desativar mesa' : 'Ativar mesa'}</button>
+      <button class="danger-button compact" type="button" data-delete-table="${escapeAttribute(table.id)}">Excluir mesa</button>
+    </section>
+
+    <section class="table-manager-section">
+      <div class="section-actions compact-section-actions">
+        <div>
+          <p class="eyebrow">Comandas</p>
+          <h3>Gerenciamento da mesa</h3>
+        </div>
+      </div>
+      ${openTabs.length ? renderTableOpenTabs(openTabs, sortedTables, table.id) : `
+        <div class="table-empty-state">
+          <strong>Nenhuma comanda aberta nesta mesa</strong>
+          <p>Abra uma comanda para lançar itens ou deixe o cliente iniciar o pedido pelo QR Code.</p>
+        </div>
+      `}
+    </section>
+
+    <section class="table-manager-section">
+      <div>
+        <p class="eyebrow">Itens pedidos</p>
+        <h3>Histórico desta mesa</h3>
+      </div>
+      ${renderTableOrders(tableOrders)}
+    </section>
+  `;
+  bindTableManagementActions(els.tableManagerBody);
+}
+
+function openTabsForTable(table) {
+  return table.open_tabs?.length
+    ? table.open_tabs
+    : state.customerTabs.filter((tab) => tab.status === 'open' && tab.dining_table_id === table.id);
+}
+
+function ordersForTable(tableId) {
+  return state.orders
+    .filter((order) => order.dining_table_id === tableId || order.table_snapshot?.id === tableId)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+function renderTableOrders(orders) {
+  if (!orders.length) {
+    return '<p class="empty-state">Nenhum pedido registrado para esta mesa ainda.</p>';
+  }
+  return `
+    <div class="table-order-list">
+      ${orders.map((order) => {
+        const createdAt = new Date(order.created_at);
+        const tab = order.tab_snapshot?.name ? ` - ${escapeHtml(order.tab_snapshot.name)}` : '';
+        return `
+          <article class="table-order-card">
+            <div class="table-order-head">
+              <div>
+                <strong>#${escapeHtml(order.public_code)}${tab}</strong>
+                <small>${createdAt.toLocaleString('pt-BR')} - ${statusLabel(order.status)}</small>
+              </div>
+              <span class="order-status-badge">${statusLabel(order.status)}</span>
+            </div>
+            <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
+            ${order.notes ? `<p class="order-note"><strong>Obs.</strong> ${escapeHtml(order.notes)}</p>` : ''}
+          </article>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function rememberOpenTabMenus() {
@@ -581,6 +720,7 @@ function renderTableOpenTabs(tabs, sortedTables, currentTableId) {
           </div>
           <span>${money(tab.current_total || 0)} em consumo</span>
         </div>
+        ${renderTabOrderSummary(tab.id)}
         ${renderTabMenuPicker(tab)}
         <div class="table-transfer">
           <label>
@@ -598,6 +738,32 @@ function renderTableOpenTabs(tabs, sortedTables, currentTableId) {
       `).join('')}
     </div>
   `;
+}
+
+function renderTabOrderSummary(tabId) {
+  const orders = ordersForTab(tabId).filter((order) => order.status !== 'cancelled');
+  if (!orders.length) {
+    return '<p class="table-tab-empty">Nenhum item lançado nesta comanda ainda.</p>';
+  }
+  return `
+    <details class="table-tab-orders">
+      <summary><span>Itens pedidos</span><small>${orders.length} pedido(s)</small></summary>
+      <div class="table-tab-order-list">
+        ${orders.map((order) => `
+          <article>
+            <strong>#${escapeHtml(order.public_code)} - ${statusLabel(order.status)}</strong>
+            <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
+          </article>
+        `).join('')}
+      </div>
+    </details>
+  `;
+}
+
+function ordersForTab(tabId) {
+  return state.orders
+    .filter((order) => order.customer_tab_id === tabId || order.tab_snapshot?.id === tabId)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
 
 function renderTabMenuPicker(tab) {
@@ -1266,10 +1432,10 @@ function orderCard(order) {
   card.dataset.orderId = order.id;
   card.dataset.orderStatus = order.status;
   const customer = order.customer_snapshot || {};
-  const fulfillment = orderOriginLabel(order);
+  const createdAt = new Date(order.created_at);
+  const fulfillment = orderCardOriginLabel(order, createdAt);
   const payment = order.payment_method ? escapeHtml(order.payment_method) : 'Pagamento não informado';
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
-  const createdAt = new Date(order.created_at);
   card.innerHTML = `
     <div class="order-card-top">
       <div>
@@ -1309,6 +1475,7 @@ function orderCard(order) {
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="customer">Imprimir cliente</button>
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="both">Imprimir ambas</button>
           <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
+          <button class="ghost-button compact print-order-button" type="button" data-reprint-order="${escapeAttribute(order.id)}">Reimprimir</button>
           <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar cliente</button>
         </div>
       </div>
@@ -1328,6 +1495,7 @@ function orderCard(order) {
     button.addEventListener('click', () => printOrder(order, { type: button.dataset.printType || 'kitchen', reason: 'manual' }));
   });
   card.querySelector('[data-preview-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', preview: true, reason: 'preview' }));
+  card.querySelector('[data-reprint-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', reason: 'retry' }));
   card.querySelector('[data-whatsapp-status]')?.addEventListener('click', () => notifyOrderStatus(order));
   card.addEventListener('dragstart', (event) => {
     if (event.target.closest('.order-details') || event.target.closest('button') || event.target.closest('select')) {
@@ -1399,13 +1567,28 @@ function modifierText(modifier) {
 }
 
 function orderOriginLabel(order) {
-  return ({
-    delivery: 'Delivery',
-    pickup: 'Retirada',
-    counter: 'Balcão',
-    table: order.table_snapshot?.name ? `Mesa ${order.table_snapshot.name}` : 'Mesa',
-    tab: order.tab_snapshot?.name ? `Comanda ${order.tab_snapshot.name}` : 'Comanda'
-  })[order.fulfillment_method] || order.fulfillment_method || 'Pedido';
+  if (order.fulfillment_method === 'delivery') return 'Delivery';
+  if (order.fulfillment_method === 'pickup') return 'Retirada';
+  if (order.fulfillment_method === 'counter') return 'Balcão';
+  if (order.fulfillment_method === 'table') return order.table_snapshot?.name ? orderTableLabel(order) : 'Mesa';
+  if (order.fulfillment_method === 'tab') {
+    const tabName = orderTabDisplayName(order);
+    return tabName ? `Comanda ${tabName}` : 'Comanda';
+  }
+  return order.fulfillment_method || 'Pedido';
+}
+
+function orderCardOriginLabel(order, createdAt = new Date(order.created_at)) {
+  if (order.fulfillment_method === 'tab') {
+    const time = createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const tabName = orderTabDisplayName(order);
+    return ['Comanda', tabName, orderTableLabel(order), time].filter(Boolean).join(' ');
+  }
+  if (order.fulfillment_method === 'table') {
+    const time = createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `${orderTableLabel(order)} ${time}`;
+  }
+  return orderOriginLabel(order);
 }
 
 function orderCardSubtitle(order, createdAt = new Date(order.created_at), customer = order.customer_snapshot || {}) {
@@ -1419,6 +1602,13 @@ function orderCardSubtitle(order, createdAt = new Date(order.created_at), custom
   return `${customer.name || 'Cliente'} - ${time}`;
 }
 
+function orderTabDisplayName(order) {
+  const rawName = String(order.tab_snapshot?.name || '').trim();
+  if (!rawName) return '';
+  const withoutPrefix = rawName.replace(/^comanda\b\s*/i, '').trim();
+  return withoutPrefix || rawName;
+}
+
 function orderTableLabel(order) {
   const tableName = String(order.table_snapshot?.name || '').trim();
   if (!tableName) return 'Mesa não informada';
@@ -1427,8 +1617,9 @@ function orderTableLabel(order) {
 
 function shouldAutoPrintKitchen(order, status, previousStatus) {
   if (!order?.id) return false;
-  if (!currentPrintSettings().autoPrintKitchen) return false;
-  if (status !== 'accepted' || previousStatus === 'accepted') return false;
+  const settings = currentPrintSettings();
+  if (!settings.autoPrintKitchen) return false;
+  if (status !== settings.autoPrintKitchenStatus || previousStatus === settings.autoPrintKitchenStatus) return false;
   return !state.autoPrintedKitchenIds.has(String(order.id));
 }
 
@@ -1504,6 +1695,9 @@ function currentPrintSettings() {
     kitchenCopies: clampNumber(state.store?.print_settings?.kitchenCopies, 1, 5, 1),
     customerCopies: clampNumber(state.store?.print_settings?.customerCopies, 1, 5, 1),
     autoPrintKitchen: Boolean(state.store?.print_settings?.autoPrintKitchen),
+    autoPrintKitchenStatus: ['new', 'accepted', 'preparing'].includes(String(state.store?.print_settings?.autoPrintKitchenStatus))
+      ? String(state.store.print_settings.autoPrintKitchenStatus)
+      : 'accepted',
     showKitchenPrices: Boolean(state.store?.print_settings?.showKitchenPrices),
     highlightNotes: state.store?.print_settings?.highlightNotes !== false
   };
@@ -2531,6 +2725,107 @@ async function submitPassword(event) {
   toast('Senha atualizada.');
 }
 
+async function submitAdminUser(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(els.adminUserForm));
+  const result = await request('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  state.adminUsers = [result.admin, ...state.adminUsers.filter((admin) => admin.id !== result.admin.id)];
+  els.adminUserForm.reset();
+  renderAdminUsers();
+  toast('Conta criada.');
+}
+
+function renderAdminUsers() {
+  if (!els.adminUsersPanel || !els.adminUsersList) return;
+  const canManage = hasPermission('admin_users');
+  els.adminUsersPanel.hidden = !canManage;
+  if (!canManage) return;
+  if (!state.adminUsers.length) {
+    els.adminUsersList.innerHTML = '<p class="empty-state">Nenhuma conta cadastrada além da atual.</p>';
+    return;
+  }
+  els.adminUsersList.innerHTML = state.adminUsers.map((admin) => `
+    <article class="admin-user-card">
+      <div class="admin-user-main">
+        <div>
+          <strong>${escapeHtml(admin.name)}</strong>
+          <small>${escapeHtml(admin.email)}</small>
+        </div>
+        <span class="pill ${admin.is_active ? 'pill-ok' : 'pill-muted'}">${admin.is_active ? 'Ativa' : 'Inativa'}</span>
+      </div>
+      <div class="admin-user-permissions">
+        <span>${escapeHtml(admin.role_label || adminRoleLabel(admin.role))}</span>
+        <small>${adminPermissionSummary(admin.role)}</small>
+      </div>
+      <form class="admin-user-edit-form" data-admin-user-id="${escapeAttribute(admin.id)}">
+        <label>Função
+          <select name="role">
+            ${adminRoleOptions(admin.role)}
+          </select>
+        </label>
+        <label>Status
+          <select name="is_active">
+            <option value="true" ${admin.is_active ? 'selected' : ''}>Ativa</option>
+            <option value="false" ${!admin.is_active ? 'selected' : ''}>Inativa</option>
+          </select>
+        </label>
+        <label>Nova senha
+          <input name="password" type="password" minlength="8" placeholder="Opcional">
+        </label>
+        <button class="ghost-button compact">Salvar</button>
+      </form>
+    </article>
+  `).join('');
+  els.adminUsersList.querySelectorAll('.admin-user-edit-form').forEach((form) => {
+    form.addEventListener('submit', submitAdminUserUpdate);
+  });
+}
+
+async function submitAdminUserUpdate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  data.is_active = data.is_active === 'true';
+  if (!String(data.password || '').trim()) delete data.password;
+  const result = await request(`/api/admin/users/${form.dataset.adminUserId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  state.adminUsers = state.adminUsers.map((admin) => admin.id === result.admin.id ? result.admin : admin);
+  if (state.admin?.id === result.admin.id) state.admin = result.admin;
+  render();
+  toast('Conta atualizada.');
+}
+
+function adminRoleOptions(selectedRole) {
+  return [
+    ['admin', 'Administrador'],
+    ['waiter', 'Garçom'],
+    ['kitchen', 'Cozinha']
+  ].map(([value, label]) => `<option value="${value}" ${value === selectedRole ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function adminRoleLabel(role) {
+  return ({
+    admin: 'Administrador',
+    waiter: 'Garçom',
+    kitchen: 'Cozinha'
+  })[role] || 'Administrador';
+}
+
+function adminPermissionSummary(role) {
+  return ({
+    admin: 'Acesso completo ao painel.',
+    waiter: 'Pedidos, mesas e comandas.',
+    kitchen: 'Pedidos e produção da cozinha.'
+  })[role] || 'Acesso completo ao painel.';
+}
+
 function renderCategoryEditors() {
   if (state.categories.length === 0) {
     els.categoryEditorList.innerHTML = '<p class="muted">Nenhuma categoria cadastrada.</p>';
@@ -3492,33 +3787,17 @@ async function submitStore(event) {
   });
 }
 
-async function submitPrintSettings(event) {
-  event.preventDefault();
-  const payload = printSettingsFromForm();
-  await withSaving(els.printSettingsForm, async () => {
-    const result = await request('/api/admin/print-settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    state.store = result.store || { ...(state.store || {}), print_settings: payload.print_settings };
-    saveAdminCache();
-    fillPrintSettingsForm();
-    renderAutoPrintButton();
-    toast('Configurações de impressão salvas.');
-  });
-}
-
 function printSettingsFromForm() {
-  const form = els.printSettingsForm;
+  const field = (name) => els.printSettingsForm?.querySelector(`[name="${name}"]`);
   return {
     print_settings: {
-      paperWidth: form.elements.paperWidth.value,
-      kitchenCopies: form.elements.kitchenCopies.value,
-      customerCopies: form.elements.customerCopies.value,
-      autoPrintKitchen: form.elements.autoPrintKitchen.checked,
-      showKitchenPrices: form.elements.showKitchenPrices.checked,
-      highlightNotes: form.elements.highlightNotes.checked
+      paperWidth: field('paperWidth')?.value,
+      kitchenCopies: field('kitchenCopies')?.value,
+      customerCopies: field('customerCopies')?.value,
+      autoPrintKitchenStatus: field('autoPrintKitchenStatus')?.value,
+      autoPrintKitchen: Boolean(field('autoPrintKitchen')?.checked),
+      showKitchenPrices: Boolean(field('showKitchenPrices')?.checked),
+      highlightNotes: field('highlightNotes') ? Boolean(field('highlightNotes').checked) : true
     }
   };
 }
@@ -3526,12 +3805,14 @@ function printSettingsFromForm() {
 function fillPrintSettingsForm() {
   if (!els.printSettingsForm) return;
   const settings = currentPrintSettings();
-  setValue(els.printSettingsForm.elements.paperWidth, settings.paperWidth);
-  setValue(els.printSettingsForm.elements.kitchenCopies, settings.kitchenCopies);
-  setValue(els.printSettingsForm.elements.customerCopies, settings.customerCopies);
-  els.printSettingsForm.elements.autoPrintKitchen.checked = settings.autoPrintKitchen;
-  els.printSettingsForm.elements.showKitchenPrices.checked = settings.showKitchenPrices;
-  els.printSettingsForm.elements.highlightNotes.checked = settings.highlightNotes;
+  const field = (name) => els.printSettingsForm.querySelector(`[name="${name}"]`);
+  setValue(field('paperWidth'), settings.paperWidth);
+  setValue(field('kitchenCopies'), settings.kitchenCopies);
+  setValue(field('customerCopies'), settings.customerCopies);
+  setValue(field('autoPrintKitchenStatus'), settings.autoPrintKitchenStatus);
+  if (field('autoPrintKitchen')) field('autoPrintKitchen').checked = settings.autoPrintKitchen;
+  if (field('showKitchenPrices')) field('showKitchenPrices').checked = settings.showKitchenPrices;
+  if (field('highlightNotes')) field('highlightNotes').checked = settings.highlightNotes;
 }
 
 async function updateCategory(id, payload, options = {}) {
@@ -3716,6 +3997,13 @@ function stopOrderPolling() {
 }
 
 function activateAdminTab(tab) {
+  if (!canAccessTab(tab)) {
+    const fallback = firstAllowedAdminTab();
+    if (fallback && fallback !== tab) {
+      activateAdminTab(fallback);
+    }
+    return;
+  }
   const titles = {
     operation: 'Operação',
     orders: 'Pedidos',
@@ -3735,6 +4023,44 @@ function activateAdminTab(tab) {
   document.querySelectorAll('[data-admin-section]').forEach((section) => {
     section.classList.toggle('active', section.dataset.adminSection === tab);
   });
+}
+
+function renderPermissionedNavigation() {
+  document.querySelectorAll('[data-admin-tab]').forEach((button) => {
+    const allowed = canAccessTab(button.dataset.adminTab);
+    button.hidden = !allowed;
+  });
+  document.querySelectorAll('[data-admin-section]').forEach((section) => {
+    section.hidden = !canAccessTab(section.dataset.adminSection);
+  });
+  if (!canAccessTab(state.activeAdminTab)) {
+    activateAdminTab(firstAllowedAdminTab());
+  }
+}
+
+function firstAllowedAdminTab() {
+  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'account']
+    .find((tab) => canAccessTab(tab)) || 'account';
+}
+
+function canAccessTab(tab) {
+  if (tab === 'account') return true;
+  const permission = ({
+    operation: 'operation',
+    orders: 'orders',
+    menu: 'menu',
+    reports: 'reports',
+    tables: 'tables',
+    promotions: 'promotions',
+    customers: 'customers',
+    store: 'store'
+  })[tab];
+  return !permission || hasPermission(permission);
+}
+
+function hasPermission(permission) {
+  const permissions = state.admin?.permissions || [];
+  return permissions.includes(permission);
 }
 
 function activateMenuView(view) {
@@ -3787,6 +4113,7 @@ function fillStoreForm() {
   els.storeForm.elements.accepts_pickup.checked = store.accepts_pickup !== false;
   fillBusinessHours(store.business_hours || {});
   fillThemeSettings(store.theme_settings || {});
+  fillPrintSettingsForm();
   renderThemePreview();
 }
 
@@ -4000,6 +4327,7 @@ function formToStore(form) {
     payment_methods: [...new Set(paymentMethods)],
     business_hours: businessHoursFromForm(data),
     theme_settings: themeSettingsFromForm(form),
+    print_settings: printSettingsFromForm().print_settings,
     is_open: data.get('is_open') === 'on',
     accepts_delivery: data.get('accepts_delivery') === 'on',
     accepts_pickup: data.get('accepts_pickup') === 'on'

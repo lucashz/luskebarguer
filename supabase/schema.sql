@@ -63,12 +63,17 @@ create table if not exists public.admin_users (
   name text not null,
   email text not null,
   password_hash text not null,
-  role text not null default 'manager' check (role in ('owner', 'manager')),
+  role text not null default 'admin' check (role in ('owner', 'manager', 'admin', 'waiter', 'kitchen')),
   is_active boolean not null default true,
   last_login_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.admin_users
+  alter column role set default 'admin',
+  drop constraint if exists admin_users_role_check,
+  add constraint admin_users_role_check check (role in ('owner', 'manager', 'admin', 'waiter', 'kitchen'));
 
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
