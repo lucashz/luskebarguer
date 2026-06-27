@@ -589,6 +589,53 @@
 
               <section class="store-settings-section">
                 <div class="store-settings-copy">
+                  <strong>Integrações</strong>
+                  <p>Configure envios automáticos de WhatsApp e pagamento online via Pix. Essas credenciais não aparecem no cardápio público.</p>
+                </div>
+                <div class="store-settings-fields integration-settings-grid">
+                  <section class="integration-card">
+                    <div>
+                      <strong>WhatsApp automático</strong>
+                      <p>Usa API oficial ou webhook próprio. Não usa WhatsApp Web.</p>
+                    </div>
+                    <label class="check"><input name="integration_whatsapp_enabled" type="checkbox"> Ativar mensagens automáticas</label>
+                    <label>Provedor
+                      <select name="integration_whatsapp_provider">
+                        <option value="official">API oficial</option>
+                        <option value="webhook">Webhook próprio</option>
+                        <option value="mock">Simulado/local</option>
+                      </select>
+                    </label>
+                    <label>ID do número<input name="integration_whatsapp_phoneNumberId" placeholder="Phone Number ID"></label>
+                    <label>Token/API key<input name="integration_whatsapp_accessToken" type="password" autocomplete="new-password" placeholder="Token do provedor"></label>
+                    <label>URL da API/webhook<input name="integration_whatsapp_apiUrl" placeholder="https://..."></label>
+                  </section>
+
+                  <section class="integration-card">
+                    <div>
+                      <strong>Pix online</strong>
+                      <p>Primeira etapa com provedor configurável e modo simulado para testes.</p>
+                    </div>
+                    <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
+                    <label>Provedor
+                      <select name="integration_pix_provider">
+                        <option value="mock">Simulado/local</option>
+                        <option value="mercadopago">Mercado Pago</option>
+                        <option value="efi">Efí/Gerencianet</option>
+                        <option value="asaas">Asaas</option>
+                      </select>
+                    </label>
+                    <label>Chave/API key<input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Credencial do provedor"></label>
+                    <label>Segredo webhook<input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Webhook secret"></label>
+                    <label>Expiração do Pix (min)<input name="integration_pix_expirationMinutes" type="number" min="5" max="120" value="15"></label>
+                  </section>
+                  <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar integrações</button>
+                  <p class="muted" id="integrationStatusText">Configure e salve para ativar as integrações.</p>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
                   <strong>Aparencia</strong>
                   <p>Imagens opcionais para deixar o cardápio mais parecido com a marca da loja.</p>
                 </div>

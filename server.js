@@ -114,7 +114,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && url.pathname === '/api/store') {
-    json(res, 200, { store: await getStoreSettings() });
+    json(res, 200, { store: publicStore(await getStoreSettings()) });
     return;
   }
 
@@ -125,6 +125,21 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/orders') {
     json(res, 201, await createOrder(req, await readJson(req)));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/payments/order') {
+    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order')));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/payments/regenerate-pix') {
+    json(res, 200, await regeneratePixPayment(await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/payments/webhook') {
+    json(res, 200, await receivePaymentWebhook(await readJson(req)));
     return;
   }
 
@@ -355,6 +370,20 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'PUT' && url.pathname === '/api/admin/integrations') {
+    if (!(await requireAdminPermission(req, res, 'store'))) return;
+    const store = await updateIntegrationSettings(await readJson(req));
+    clearPublicBootstrapCache();
+    json(res, 200, { store });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/integrations/test') {
+    if (!(await requireAdminPermission(req, res, 'store'))) return;
+    json(res, 200, { result: await testIntegrations(await readJson(req)) });
+    return;
+  }
+
   if (method === 'POST' && url.pathname === '/api/admin/operation/start') {
     if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const queue = await clearOrderQueue({ mode: 'close_open' });
@@ -392,9 +421,22 @@ async function handleApi(req, res, url) {
     if (!orderStatuses.has(body.status)) {
       throw httpError(422, 'Status de pedido inválido.');
     }
-    json(res, 200, await supabase('PATCH', 'orders', { id: `eq.${orderStatusMatch[1]}` }, {
-      status: body.status
-    }, ['Prefer: return=representation']));
+    const patch = { status: body.status };
+    if (body.status === 'cancelled') patch.financial_status = 'cancelled';
+    const updated = await supabase('PATCH', 'orders', { id: `eq.${orderStatusMatch[1]}` }, patch, ['Prefer: return=representation']);
+    const messageLog = await sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false }).catch((error) => ({
+      delivery_status: 'failed',
+      error_message: error.message || 'Falha ao enviar WhatsApp.'
+    }));
+    json(res, 200, { order: updated[0] || null, whatsapp_log: messageLog });
+    return;
+  }
+
+  const orderWhatsappMatch = url.pathname.match(/^\/api\/admin\/orders\/([a-f0-9-]+)\/whatsapp$/i);
+  if (orderWhatsappMatch && method === 'POST') {
+    if (!(await requireAdminPermission(req, res, 'orders'))) return;
+    const body = await readJson(req);
+    json(res, 200, { log: await sendOrderStatusWhatsapp(orderWhatsappMatch[1], body.status, { manual: true }) });
     return;
   }
 
@@ -1092,7 +1134,8 @@ async function getStoreSettings() {
     business_hours: isPlainObject(store.business_hours) ? store.business_hours : defaultBusinessHours(),
     loyalty_program: sanitizeLoyaltyProgram(store.loyalty_program || {}),
     theme_settings: sanitizeThemeSettings(store.theme_settings || {}),
-    print_settings: sanitizePrintSettings(store.print_settings || {})
+    print_settings: sanitizePrintSettings(store.print_settings || {}),
+    integration_settings: sanitizeIntegrationSettings(store.integration_settings || {})
   };
 }
 
@@ -1106,7 +1149,7 @@ async function getPublicBootstrap() {
     getStoreSettings(),
     getMenu(false)
   ]);
-  const data = { store, categories };
+  const data = { store: publicStore(store), categories };
   publicBootstrapCache = {
     data,
     expiresAt: now + PUBLIC_BOOTSTRAP_CACHE_MS
@@ -1180,6 +1223,52 @@ async function updatePrintSettings(data) {
   return {
     ...created,
     print_settings: sanitizePrintSettings(created.print_settings || {})
+  };
+}
+
+async function updateIntegrationSettings(data) {
+  const current = await getStoreSettings();
+  const payload = {
+    integration_settings: sanitizeIntegrationSettings(data.integration_settings || data)
+  };
+
+  if (current.id) {
+    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    return {
+      ...updated,
+      integration_settings: sanitizeIntegrationSettings(updated.integration_settings || {})
+    };
+  }
+
+  const [created] = await supabase('POST', 'store_settings', {}, {
+    name: current.name || 'Menu da Casa',
+    slug: current.slug || 'menu-da-casa',
+    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
+    integration_settings: payload.integration_settings
+  }, ['Prefer: return=representation']);
+  return {
+    ...created,
+    integration_settings: sanitizeIntegrationSettings(created.integration_settings || {})
+  };
+}
+
+async function testIntegrations(data = {}) {
+  const store = await getStoreSettings();
+  const settings = sanitizeIntegrationSettings(data.integration_settings || store.integration_settings || {});
+  return {
+    whatsapp: {
+      enabled: settings.whatsapp.enabled,
+      provider: settings.whatsapp.provider,
+      ok: settings.whatsapp.enabled ? Boolean(settings.whatsapp.phoneNumberId || settings.whatsapp.apiUrl || settings.whatsapp.accessToken) : true,
+      message: settings.whatsapp.enabled ? 'Configuração de WhatsApp pronta para envio via provedor.' : 'WhatsApp automático desativado.'
+    },
+    pix: {
+      enabled: settings.pix.enabled,
+      provider: settings.pix.provider,
+      ok: settings.pix.enabled ? Boolean(settings.pix.provider) : true,
+      message: settings.pix.enabled ? 'Pix online pronto para gerar cobranças.' : 'Pix online desativado.'
+    }
   };
 }
 
@@ -1324,6 +1413,9 @@ async function createOrder(req, data, options = {}) {
   if (store.is_open === false && !options.allowClosedStore) {
     throw httpError(423, 'A loja está fechada no momento e não está aceitando pedidos.');
   }
+  if (isOnlinePixPayment(paymentMethod) && !sanitizeIntegrationSettings(store.integration_settings || {}).pix.enabled) {
+    throw httpError(422, 'Pix online não está ativo nesta loja.');
+  }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
   const deliveryFee = fulfillmentMethod === 'delivery' ? deliveryFeeForAddress(store, address) : 0;
   const table = ['table', 'tab'].includes(fulfillmentMethod) ? await requireActiveDiningTable(data.dining_table_id || data.table_code) : null;
@@ -1371,6 +1463,8 @@ async function createOrder(req, data, options = {}) {
     total,
     notes,
     payment_details: paymentDetails,
+    financial_status: isOnlinePixPayment(paymentMethod) ? 'pending' : 'pending',
+    payment_provider: isOnlinePixPayment(paymentMethod) ? sanitizeIntegrationSettings(store.integration_settings || {}).pix.provider : null,
     promotion_code: coupon?.code || null
   };
 
@@ -1388,13 +1482,22 @@ async function createOrder(req, data, options = {}) {
     whatsapp_message: whatsappMessage
   }, ['Prefer: return=representation']);
 
+  let payment = null;
+  let finalOrder = updatedOrder;
+  if (isOnlinePixPayment(paymentMethod)) {
+    payment = await createPixPayment(updatedOrder);
+    finalOrder = payment.order;
+  }
+  await sendOrderStatusWhatsapp(order.id, 'new', { manual: false }).catch(() => null);
+
   const whatsappNumber = onlyDigits(store.whatsapp_number || STORE_WHATSAPP_NUMBER);
   const whatsappUrl = whatsappNumber
     ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}`
     : null;
 
   return {
-    order: { ...updatedOrder, items: itemsWithOrder },
+    order: { ...finalOrder, items: itemsWithOrder },
+    payment,
     whatsapp_url: whatsappUrl,
     whatsapp_message: whatsappMessage
   };
@@ -1689,13 +1792,313 @@ async function listOrders() {
     limit: '100'
   });
 
-  return attachOrderItems(orders);
+  const withItems = await attachOrderItems(orders);
+  return attachOrderIntegrationLogs(withItems);
+}
+
+async function attachOrderIntegrationLogs(orders) {
+  if (!orders.length) return orders;
+  const ids = orders.map((order) => order.id);
+  const [whatsappLogs, paymentEvents] = await Promise.all([
+    supabase('GET', 'order_whatsapp_logs', {
+      select: '*',
+      order_id: `in.(${ids.join(',')})`,
+      order: 'created_at.desc',
+      limit: '500'
+    }),
+    supabase('GET', 'order_payment_events', {
+      select: '*',
+      order_id: `in.(${ids.join(',')})`,
+      order: 'created_at.desc',
+      limit: '500'
+    })
+  ]);
+  const whatsByOrder = new Map();
+  const paymentsByOrder = new Map();
+  for (const log of whatsappLogs) {
+    if (!whatsByOrder.has(log.order_id)) whatsByOrder.set(log.order_id, []);
+    whatsByOrder.get(log.order_id).push(log);
+  }
+  for (const event of paymentEvents) {
+    if (!paymentsByOrder.has(event.order_id)) paymentsByOrder.set(event.order_id, []);
+    paymentsByOrder.get(event.order_id).push(event);
+  }
+  return orders.map((order) => ({
+    ...order,
+    whatsapp_logs: whatsByOrder.get(order.id) || [],
+    payment_events: paymentsByOrder.get(order.id) || []
+  }));
 }
 
 async function createPrintLog(data) {
   const payload = sanitizePrintLog(data);
   const [log] = await supabase('POST', 'order_print_logs', {}, payload, ['Prefer: return=representation']);
   return log;
+}
+
+async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
+  const manual = Boolean(options.manual);
+  const [order] = await supabase('GET', 'orders', {
+    select: '*',
+    id: `eq.${orderId}`,
+    limit: '1'
+  });
+  if (!order) throw httpError(404, 'Pedido não encontrado.');
+  const targetStatus = cleanText(status || order.status);
+  if (!manual) {
+    const existing = await supabase('GET', 'order_whatsapp_logs', {
+      select: 'id,delivery_status,created_at,error_message',
+      order_id: `eq.${order.id}`,
+      order_status: `eq.${targetStatus}`,
+      is_manual: 'eq.false',
+      limit: '1'
+    });
+    if (existing[0]) return existing[0];
+  }
+  const store = await getStoreSettings();
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  const phone = onlyDigits(order.customer_snapshot?.phone || '');
+  const message = orderStatusWhatsappMessage(store, order, targetStatus);
+  if (!phone) {
+    return createWhatsappLog(order, targetStatus, message, {
+      recipient_phone: '',
+      delivery_status: 'skipped',
+      error_message: 'Pedido sem telefone do cliente.',
+      is_manual: manual,
+      provider: integrations.whatsapp.provider
+    });
+  }
+  if (!integrations.whatsapp.enabled) {
+    return createWhatsappLog(order, targetStatus, message, {
+      recipient_phone: phone,
+      delivery_status: 'skipped',
+      error_message: 'WhatsApp automático desativado.',
+      is_manual: manual,
+      provider: integrations.whatsapp.provider
+    });
+  }
+
+  try {
+    const providerResult = await sendWhatsappViaProvider(integrations.whatsapp, phone, message);
+    return createWhatsappLog(order, targetStatus, message, {
+      recipient_phone: phone,
+      delivery_status: 'sent',
+      provider: integrations.whatsapp.provider,
+      provider_message_id: providerResult.id,
+      is_manual: manual
+    });
+  } catch (error) {
+    return createWhatsappLog(order, targetStatus, message, {
+      recipient_phone: phone,
+      delivery_status: 'failed',
+      error_message: error.message || 'Falha no provedor de WhatsApp.',
+      is_manual: manual,
+      provider: integrations.whatsapp.provider
+    });
+  }
+}
+
+async function createWhatsappLog(order, status, message, data) {
+  const payload = {
+    order_id: order.id,
+    order_status: status,
+    recipient_phone: data.recipient_phone || null,
+    message,
+    delivery_status: data.delivery_status || 'pending',
+    provider: data.provider || null,
+    provider_message_id: data.provider_message_id || null,
+    error_message: data.error_message || null,
+    is_manual: Boolean(data.is_manual)
+  };
+  const [log] = await supabase('POST', 'order_whatsapp_logs', {}, payload, ['Prefer: return=representation']);
+  return log;
+}
+
+async function sendWhatsappViaProvider(settings, phone, message) {
+  if (settings.provider === 'mock' || !settings.apiUrl) {
+    return { id: `mock_${Date.now()}` };
+  }
+  if (settings.provider === 'official') {
+    const url = settings.apiUrl || `https://graph.facebook.com/v19.0/${settings.phoneNumberId}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${settings.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'text',
+        text: { body: message }
+      })
+    });
+    const data = await safeResponse(response);
+    if (!response.ok) throw httpError(response.status, 'Erro no provedor de WhatsApp.', data);
+    return { id: data?.messages?.[0]?.id || data?.id || `wa_${Date.now()}` };
+  }
+  const response = await fetch(settings.apiUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: settings.accessToken ? `Bearer ${settings.accessToken}` : '',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ phone, message })
+  });
+  const data = await safeResponse(response);
+  if (!response.ok) throw httpError(response.status, 'Erro no webhook de WhatsApp.', data);
+  return { id: data?.id || `webhook_${Date.now()}` };
+}
+
+function orderStatusWhatsappMessage(store, order, status) {
+  const name = order.customer_snapshot?.name || 'cliente';
+  const code = order.public_code;
+  const origin = order.fulfillment_method;
+  const readyText = origin === 'delivery'
+    ? `Seu pedido #${code} está pronto e em breve sairá para entrega.`
+    : origin === 'pickup'
+      ? `Seu pedido #${code} está pronto para retirada.`
+      : origin === 'table' || origin === 'tab'
+        ? `Seu pedido #${code} está pronto e será levado até sua mesa.`
+        : `Seu pedido #${code} está pronto.`;
+  return ({
+    new: `Olá, ${name}! Recebemos seu pedido #${code}. Vamos confirmar em instantes.`,
+    accepted: `Olá, ${name}! Seu pedido #${code} foi aceito e já entrou na fila de preparo.`,
+    preparing: `Seu pedido #${code} está em preparo.`,
+    ready: readyText,
+    out_for_delivery: `Seu pedido #${code} saiu para entrega.`,
+    completed: `Seu pedido #${code} foi concluído. Obrigado pela preferência!`,
+    cancelled: `Seu pedido #${code} foi cancelado. Entre em contato com a loja em caso de dúvida.`
+  })[status] || `Atualização do pedido #${code}: ${status}.`;
+}
+
+async function createPixPayment(order) {
+  const store = await getStoreSettings();
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  if (!integrations.pix.enabled) throw httpError(422, 'Pix online não está ativo nesta loja.');
+  if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
+  const expiresAt = new Date(Date.now() + integrations.pix.expirationMinutes * 60000).toISOString();
+  const transactionId = `pix_${order.public_code}_${Date.now()}`;
+  const pixCode = buildMockPixCode(store, order, transactionId);
+  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+    financial_status: 'pending',
+    payment_provider: integrations.pix.provider,
+    payment_transaction_id: transactionId,
+    payment_expires_at: expiresAt,
+    payment_details: {
+      ...(order.payment_details || {}),
+      pix_code: pixCode,
+      pix_qr_url: `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`
+    }
+  }, ['Prefer: return=representation']);
+  return { order: updated, pix: publicPaymentPayload(updated) };
+}
+
+async function publicPaymentStatus(code) {
+  const order = await getOrderByPublicCode(code);
+  if (!order) throw httpError(404, 'Pedido não encontrado.');
+  if (order.financial_status === 'pending' && order.payment_expires_at && new Date(order.payment_expires_at).getTime() < Date.now()) {
+    const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}`, financial_status: 'eq.pending' }, {
+      financial_status: 'expired'
+    }, ['Prefer: return=representation']);
+    return { order: publicPaymentOrder(updated || order), payment: publicPaymentPayload(updated || order) };
+  }
+  return { order: publicPaymentOrder(order), payment: publicPaymentPayload(order) };
+}
+
+async function regeneratePixPayment(data) {
+  const order = await getOrderByPublicCode(data.code || data.order);
+  if (!order) throw httpError(404, 'Pedido não encontrado.');
+  if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
+  if (order.financial_status === 'paid') throw httpError(422, 'Pedido já pago.');
+  const payment = await createPixPayment(order);
+  return { order: publicPaymentOrder(payment.order), payment: payment.pix };
+}
+
+async function receivePaymentWebhook(data) {
+  const provider = cleanText(data.provider || 'mock');
+  const eventId = cleanText(data.event_id || data.id || '');
+  if (!eventId) throw httpError(422, 'Evento sem identificador.');
+  const existing = await supabase('GET', 'order_payment_events', {
+    select: 'id',
+    provider: `eq.${provider}`,
+    provider_event_id: `eq.${eventId}`,
+    limit: '1'
+  });
+  if (existing[0]) return { ok: true, duplicate: true };
+  const transactionId = cleanText(data.transaction_id || data.payment_transaction_id || '');
+  const status = sanitizeFinancialStatus(data.status || data.financial_status || 'paid');
+  const order = transactionId
+    ? (await supabase('GET', 'orders', { select: '*', payment_transaction_id: `eq.${transactionId}`, limit: '1' }))[0]
+    : await getOrderByPublicCode(data.order_code || data.code);
+  if (!order) throw httpError(404, 'Pedido do pagamento não encontrado.');
+  if (order.status === 'cancelled' && status === 'paid') throw httpError(422, 'Pedido cancelado não pode receber pagamento.');
+  const amount = roundMoney(Number.parseFloat(data.amount || order.total) || 0);
+  await supabase('POST', 'order_payment_events', {}, {
+    order_id: order.id,
+    provider,
+    provider_event_id: eventId,
+    transaction_id: transactionId || order.payment_transaction_id,
+    financial_status: status,
+    amount,
+    raw_payload: data
+  }, ['Prefer: return=minimal']);
+  const patch = {
+    financial_status: status,
+    payment_provider: provider,
+    payment_transaction_id: transactionId || order.payment_transaction_id,
+    paid_amount: status === 'paid' ? amount : order.paid_amount,
+    paid_at: status === 'paid' ? new Date().toISOString() : order.paid_at
+  };
+  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  return { ok: true, order: publicPaymentOrder(updated) };
+}
+
+async function getOrderByPublicCode(code) {
+  const cleanCode = cleanText(code || '').replace(/^#/, '').toUpperCase();
+  if (!cleanCode) return null;
+  const rows = await supabase('GET', 'orders', {
+    select: '*',
+    public_code: `eq.${cleanCode}`,
+    limit: '1'
+  });
+  return rows[0] || null;
+}
+
+function publicPaymentOrder(order) {
+  return {
+    public_code: order.public_code,
+    total: moneyNumber(order.total),
+    status: order.status,
+    financial_status: order.financial_status || 'pending',
+    payment_method: order.payment_method,
+    payment_transaction_id: order.payment_transaction_id || null,
+    paid_amount: order.paid_amount || null,
+    paid_at: order.paid_at || null,
+    payment_expires_at: order.payment_expires_at || null
+  };
+}
+
+function publicPaymentPayload(order) {
+  const details = order.payment_details || {};
+  return {
+    status: order.financial_status || 'pending',
+    provider: order.payment_provider || null,
+    transaction_id: order.payment_transaction_id || null,
+    expires_at: order.payment_expires_at || null,
+    pix_code: details.pix_code || '',
+    pix_qr_url: details.pix_qr_url || ''
+  };
+}
+
+function buildMockPixCode(store, order, transactionId) {
+  return `PIXONLINE|${store.slug || 'loja'}|${order.public_code}|${formatMoney(order.total)}|${transactionId}`;
+}
+
+function sanitizeFinancialStatus(status) {
+  const value = String(status || '').toLowerCase();
+  if (['pending', 'paid', 'failed', 'expired', 'cancelled', 'refunded'].includes(value)) return value;
+  return 'pending';
 }
 
 function sanitizePrintLog(data) {
@@ -2362,6 +2765,25 @@ function defaultPrintSettings() {
   };
 }
 
+function defaultIntegrationSettings() {
+  return {
+    whatsapp: {
+      enabled: false,
+      provider: 'official',
+      phoneNumberId: '',
+      accessToken: '',
+      apiUrl: ''
+    },
+    pix: {
+      enabled: false,
+      provider: 'mock',
+      apiKey: '',
+      webhookSecret: '',
+      expirationMinutes: 15
+    }
+  };
+}
+
 function sanitizePrintSettings(value) {
   const defaults = defaultPrintSettings();
   const data = isPlainObject(value) ? value : {};
@@ -2376,6 +2798,43 @@ function sanitizePrintSettings(value) {
     showKitchenPrices: Boolean(data.showKitchenPrices),
     highlightNotes: data.highlightNotes === undefined ? defaults.highlightNotes : Boolean(data.highlightNotes)
   };
+}
+
+function sanitizeIntegrationSettings(value) {
+  const defaults = defaultIntegrationSettings();
+  const data = isPlainObject(value) ? value : {};
+  const whatsapp = isPlainObject(data.whatsapp) ? data.whatsapp : {};
+  const pix = isPlainObject(data.pix) ? data.pix : {};
+  return {
+    whatsapp: {
+      enabled: Boolean(whatsapp.enabled),
+      provider: ['official', 'webhook', 'mock'].includes(String(whatsapp.provider)) ? String(whatsapp.provider) : defaults.whatsapp.provider,
+      phoneNumberId: cleanText(whatsapp.phoneNumberId || '').slice(0, 120),
+      accessToken: cleanText(whatsapp.accessToken || '').slice(0, 500),
+      apiUrl: cleanText(whatsapp.apiUrl || '').slice(0, 500)
+    },
+    pix: {
+      enabled: Boolean(pix.enabled),
+      provider: ['mock', 'mercadopago', 'efi', 'asaas'].includes(String(pix.provider)) ? String(pix.provider) : defaults.pix.provider,
+      apiKey: cleanText(pix.apiKey || '').slice(0, 500),
+      webhookSecret: cleanText(pix.webhookSecret || '').slice(0, 500),
+      expirationMinutes: clampInteger(pix.expirationMinutes || defaults.pix.expirationMinutes, 5, 120)
+    }
+  };
+}
+
+function publicStore(store) {
+  const copy = { ...store };
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  copy.integration_settings = {
+    whatsapp: { enabled: integrations.whatsapp.enabled },
+    pix: {
+      enabled: integrations.pix.enabled,
+      provider: integrations.pix.enabled ? integrations.pix.provider : 'mock',
+      expirationMinutes: integrations.pix.expirationMinutes
+    }
+  };
+  return copy;
 }
 
 function sanitizeThemeSettings(value) {
@@ -2498,6 +2957,7 @@ function routePath(requestPath) {
   if (requestPath === '/') return '/app.html';
   if (requestPath === '/admin') return '/admin.html';
   if (requestPath === '/cozinha') return '/kitchen.html';
+  if (requestPath === '/pagamento') return '/payment.html';
   if (requestPath === '/conta' || requestPath === '/cliente') return '/account.html';
   if (requestPath === '/pedidos') return '/orders.html';
   return decodeURIComponent(requestPath);
@@ -2559,6 +3019,7 @@ function sanitizeStore(data) {
     loyalty_program: 'object',
     theme_settings: 'object',
     print_settings: 'object',
+    integration_settings: 'object',
     onboarding_completed: 'boolean'
   }, ['name']);
   if ('delivery_neighborhood_fees' in store) {
@@ -2572,6 +3033,9 @@ function sanitizeStore(data) {
   }
   if ('print_settings' in store) {
     store.print_settings = sanitizePrintSettings(store.print_settings);
+  }
+  if ('integration_settings' in store) {
+    store.integration_settings = sanitizeIntegrationSettings(store.integration_settings);
   }
   return store;
 }
@@ -2827,6 +3291,11 @@ function validatePaymentDetails(details, paymentMethod, total) {
 
 function isCashPayment(paymentMethod) {
   return normalizeName(paymentMethod).includes('dinheiro');
+}
+
+function isOnlinePixPayment(paymentMethod) {
+  const normalized = normalizeName(paymentMethod);
+  return normalized.includes('pix') && (normalized.includes('online') || normalized.includes('pagamento online'));
 }
 
 function sanitize(data, allowed, required) {

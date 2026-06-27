@@ -1037,6 +1037,11 @@ async function submitOrder(event) {
     els.checkoutDialog.close();
     setStatus(`Pedido ${result.order.public_code} criado.`);
 
+    if (result.payment?.pix) {
+      window.location.href = `/pagamento?pedido=${encodeURIComponent(result.order.public_code)}`;
+      return;
+    }
+
     if (result.whatsapp_url) {
       window.open(result.whatsapp_url, '_blank', 'noopener');
     }
@@ -1117,7 +1122,10 @@ function renderCheckoutSnapshot(totals) {
 }
 
 function renderPaymentOptions() {
-  const methods = state.store?.payment_methods?.length ? state.store.payment_methods : ['Pix', 'Cartão', 'Dinheiro'];
+  const methods = state.store?.payment_methods?.length ? [...state.store.payment_methods] : ['Pix', 'Cartão', 'Dinheiro'];
+  if (state.store?.integration_settings?.pix?.enabled && !methods.includes('Pix online')) {
+    methods.unshift('Pix online');
+  }
   els.paymentMethod.replaceChildren(...methods.map((method) => {
     const option = document.createElement('option');
     option.value = method;

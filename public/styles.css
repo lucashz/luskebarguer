@@ -2668,6 +2668,125 @@ legend {
   padding: 0;
 }
 
+.integration-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.integration-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.integration-card p {
+  color: var(--muted);
+  margin: 3px 0 0;
+}
+
+.integration-card label {
+  display: grid;
+  gap: 5px;
+}
+
+.integration-card .check {
+  display: flex;
+  align-items: center;
+}
+
+.order-message-history {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 10px;
+}
+
+.order-message-history > strong {
+  color: var(--ink);
+}
+
+.order-message-history span {
+  display: grid;
+  gap: 2px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 7px;
+}
+
+.order-message-history small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.order-message-history em {
+  color: #374151;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.payment-page {
+  background: #f8fafc;
+}
+
+.payment-shell {
+  width: min(720px, calc(100vw - 24px));
+  margin: 0 auto;
+  padding: 28px 0;
+}
+
+.payment-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.10);
+  padding: 18px;
+}
+
+.payment-status-box {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payment-status-box div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.payment-status-box span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.payment-qr {
+  width: min(320px, 100%);
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  justify-self: center;
+}
+
+.payment-copy-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.payment-copy-field textarea {
+  min-height: 110px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .orders-empty {
   display: grid;
   gap: 10px;
@@ -3080,7 +3199,9 @@ legend {
 
 @media (max-width: 860px) {
   .store-settings-fields.print-settings-panel,
-  .print-settings-checks {
+  .print-settings-checks,
+  .integration-settings-grid,
+  .payment-status-box {
     grid-template-columns: 1fr;
   }
 

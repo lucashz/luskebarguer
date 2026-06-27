@@ -199,6 +199,8 @@ const els = {
   modifierGroupForm: document.querySelector('#modifierGroupForm'),
   storeForm: document.querySelector('#storeForm'),
   printSettingsForm: document.querySelector('#printSettingsForm'),
+  testIntegrationsButton: document.querySelector('#testIntegrationsButton'),
+  integrationStatusText: document.querySelector('#integrationStatusText'),
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
@@ -301,6 +303,7 @@ els.storeForm.addEventListener('click', (event) => {
   if (!button) return;
   applyThemePreset(button.dataset.themePreset);
 });
+els.testIntegrationsButton?.addEventListener('click', testIntegrations);
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
 els.adminUserForm?.addEventListener('submit', submitAdminUser);
@@ -1435,6 +1438,7 @@ function orderCard(order) {
   const createdAt = new Date(order.created_at);
   const fulfillment = orderCardOriginLabel(order, createdAt);
   const payment = order.payment_method ? escapeHtml(order.payment_method) : 'Pagamento não informado';
+  const latestWhatsapp = (order.whatsapp_logs || [])[0];
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
   card.innerHTML = `
     <div class="order-card-top">
@@ -1451,6 +1455,7 @@ function orderCard(order) {
     <div class="order-compact-tags">
       <span>${fulfillment}</span>
       <span>${payment}</span>
+      <span>${financialStatusLabel(order.financial_status)}</span>
       ${customer.phone ? `<span>${escapeHtml(customer.phone)}</span>` : ''}
     </div>
     <details class="order-details" ${state.openOrderDetailIds.has(String(order.id)) ? 'open' : ''}>
@@ -1463,6 +1468,11 @@ function orderCard(order) {
           ${order.table_snapshot?.name ? `<div><dt>Mesa</dt><dd>${escapeHtml(order.table_snapshot.name)}</dd></div>` : ''}
           ${order.tab_snapshot?.name ? `<div><dt>Comanda</dt><dd>${escapeHtml(order.tab_snapshot.name)}</dd></div>` : ''}
           <div><dt>Pagamento</dt><dd>${payment}</dd></div>
+          <div><dt>Status financeiro</dt><dd>${financialStatusLabel(order.financial_status)}</dd></div>
+          ${order.payment_transaction_id ? `<div><dt>Transação</dt><dd>${escapeHtml(order.payment_transaction_id)}</dd></div>` : ''}
+          ${order.paid_amount ? `<div><dt>Valor pago</dt><dd>${money(order.paid_amount)}</dd></div>` : ''}
+          ${order.paid_at ? `<div><dt>Pago em</dt><dd>${new Date(order.paid_at).toLocaleString('pt-BR')}</dd></div>` : ''}
+          ${latestWhatsapp ? `<div><dt>Último WhatsApp</dt><dd>${whatsappLogLabel(latestWhatsapp)}</dd></div>` : ''}
           ${order.payment_details?.change_for ? `<div><dt>Troco</dt><dd>Para ${money(order.payment_details.change_for)}</dd></div>` : ''}
           <div><dt>Subtotal</dt><dd>${money(order.subtotal)}</dd></div>
           <div><dt>Entrega</dt><dd>${money(order.delivery_fee)}</dd></div>
@@ -1470,13 +1480,14 @@ function orderCard(order) {
         ${orderAddressHtml(order)}
         ${order.notes ? `<p class="order-note"><strong>Obs.</strong> ${escapeHtml(order.notes)}</p>` : ''}
         <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
+        ${renderWhatsappLogs(order)}
         <div class="row-actions order-detail-actions">
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="kitchen">Imprimir cozinha</button>
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="customer">Imprimir cliente</button>
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="both">Imprimir ambas</button>
           <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
           <button class="ghost-button compact print-order-button" type="button" data-reprint-order="${escapeAttribute(order.id)}">Reimprimir</button>
-          <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar cliente</button>
+          <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Reenviar WhatsApp</button>
         </div>
       </div>
     </details>
@@ -1540,6 +1551,42 @@ function orderItemHtml(item) {
       ${notes}
     </span>
   `;
+}
+
+function renderWhatsappLogs(order) {
+  const logs = order.whatsapp_logs || [];
+  if (!logs.length) return '<p class="order-note"><strong>WhatsApp</strong> Nenhuma mensagem registrada.</p>';
+  return `
+    <div class="order-message-history">
+      <strong>Histórico de WhatsApp</strong>
+      ${logs.slice(0, 4).map((log) => `
+        <span>
+          <small>${new Date(log.created_at).toLocaleString('pt-BR')} - ${escapeHtml(statusLabel(log.order_status))}</small>
+          <em>${escapeHtml(whatsappLogLabel(log))}${log.error_message ? `: ${escapeHtml(log.error_message)}` : ''}</em>
+        </span>
+      `).join('')}
+    </div>
+  `;
+}
+
+function whatsappLogLabel(log = {}) {
+  return ({
+    sent: 'enviado',
+    failed: 'falhou',
+    skipped: 'não enviado',
+    pending: 'pendente'
+  })[log.delivery_status] || 'registrado';
+}
+
+function financialStatusLabel(status) {
+  return ({
+    pending: 'Pagamento pendente',
+    paid: 'Pago',
+    failed: 'Pagamento falhou',
+    expired: 'Pix expirado',
+    cancelled: 'Pagamento cancelado',
+    refunded: 'Estornado'
+  })[status] || 'Pagamento pendente';
 }
 
 function orderAddressHtml(order) {
@@ -1668,25 +1715,18 @@ async function printOrder(order, options = {}) {
   }
 }
 
-function notifyOrderStatus(order) {
-  const customer = order.customer_snapshot || {};
-  const phone = digits(customer.phone || '');
-  if (phone.length < 10) {
-    toast('Cliente sem telefone válido para WhatsApp.');
-    return;
+async function notifyOrderStatus(order) {
+  try {
+    const result = await request(`/api/admin/orders/${order.id}/whatsapp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: order.status })
+    });
+    toast(`WhatsApp: ${whatsappLogLabel(result.log)}.`);
+    await loadSummary({ skipNotifications: true, silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível reenviar a mensagem.');
   }
-  const storeName = state.store?.name || 'loja';
-  const messages = {
-    new: `Recebemos seu pedido #${order.public_code} na ${storeName}. Vamos confirmar em instantes.`,
-    accepted: `Seu pedido #${order.public_code} foi aceito pela ${storeName}.`,
-    preparing: `Seu pedido #${order.public_code} está em preparo.`,
-    ready: `Seu pedido #${order.public_code} está pronto.`,
-    out_for_delivery: `Seu pedido #${order.public_code} saiu para entrega.`,
-    completed: `Seu pedido #${order.public_code} foi concluído. Obrigado pela preferência!`,
-    cancelled: `Seu pedido #${order.public_code} foi cancelado. Fale conosco para mais detalhes.`
-  };
-  const message = messages[order.status] || `Atualização do pedido #${order.public_code}: ${statusLabel(order.status)}.`;
-  window.open(`https://wa.me/55${phone.replace(/^55/, '')}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
 }
 
 function currentPrintSettings() {
@@ -3815,6 +3855,68 @@ function fillPrintSettingsForm() {
   if (field('highlightNotes')) field('highlightNotes').checked = settings.highlightNotes;
 }
 
+function integrationSettingsFromForm(form) {
+  return {
+    whatsapp: {
+      enabled: form.elements.integration_whatsapp_enabled?.checked || false,
+      provider: form.elements.integration_whatsapp_provider?.value || 'official',
+      phoneNumberId: form.elements.integration_whatsapp_phoneNumberId?.value || '',
+      accessToken: form.elements.integration_whatsapp_accessToken?.value || '',
+      apiUrl: form.elements.integration_whatsapp_apiUrl?.value || ''
+    },
+    pix: {
+      enabled: form.elements.integration_pix_enabled?.checked || false,
+      provider: form.elements.integration_pix_provider?.value || 'mock',
+      apiKey: form.elements.integration_pix_apiKey?.value || '',
+      webhookSecret: form.elements.integration_pix_webhookSecret?.value || '',
+      expirationMinutes: form.elements.integration_pix_expirationMinutes?.value || 15
+    }
+  };
+}
+
+function fillIntegrationSettings(settings = {}) {
+  const whatsapp = settings.whatsapp || {};
+  const pix = settings.pix || {};
+  const form = els.storeForm;
+  if (!form) return;
+  if (form.elements.integration_whatsapp_enabled) form.elements.integration_whatsapp_enabled.checked = Boolean(whatsapp.enabled);
+  setValue(form.elements.integration_whatsapp_provider, whatsapp.provider || 'official');
+  setValue(form.elements.integration_whatsapp_phoneNumberId, whatsapp.phoneNumberId || '');
+  setValue(form.elements.integration_whatsapp_accessToken, whatsapp.accessToken || '');
+  setValue(form.elements.integration_whatsapp_apiUrl, whatsapp.apiUrl || '');
+  if (form.elements.integration_pix_enabled) form.elements.integration_pix_enabled.checked = Boolean(pix.enabled);
+  setValue(form.elements.integration_pix_provider, pix.provider || 'mock');
+  setValue(form.elements.integration_pix_apiKey, pix.apiKey || '');
+  setValue(form.elements.integration_pix_webhookSecret, pix.webhookSecret || '');
+  setValue(form.elements.integration_pix_expirationMinutes, pix.expirationMinutes || 15);
+  renderIntegrationStatus(settings);
+}
+
+function renderIntegrationStatus(settings = state.store?.integration_settings || {}) {
+  if (!els.integrationStatusText) return;
+  const whatsapp = settings.whatsapp || {};
+  const pix = settings.pix || {};
+  els.integrationStatusText.textContent = `WhatsApp automático: ${whatsapp.enabled ? 'ativo' : 'desativado'} - Pix online: ${pix.enabled ? 'ativo' : 'desativado'}.`;
+}
+
+async function testIntegrations() {
+  try {
+    const result = await request('/api/admin/integrations/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ integration_settings: integrationSettingsFromForm(els.storeForm) })
+    });
+    const whatsapp = result.result?.whatsapp;
+    const pix = result.result?.pix;
+    if (els.integrationStatusText) {
+      els.integrationStatusText.textContent = `${whatsapp?.message || 'WhatsApp verificado.'} ${pix?.message || 'Pix verificado.'}`;
+    }
+    toast('Teste de integrações concluído.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível testar as integrações.');
+  }
+}
+
 async function updateCategory(id, payload, options = {}) {
   await request(`/api/categories/${id}`, {
     method: 'PATCH',
@@ -4114,6 +4216,7 @@ function fillStoreForm() {
   fillBusinessHours(store.business_hours || {});
   fillThemeSettings(store.theme_settings || {});
   fillPrintSettingsForm();
+  fillIntegrationSettings(store.integration_settings || {});
   renderThemePreview();
 }
 
@@ -4328,6 +4431,7 @@ function formToStore(form) {
     business_hours: businessHoursFromForm(data),
     theme_settings: themeSettingsFromForm(form),
     print_settings: printSettingsFromForm().print_settings,
+    integration_settings: integrationSettingsFromForm(form),
     is_open: data.get('is_open') === 'on',
     accepts_delivery: data.get('accepts_delivery') === 'on',
     accepts_pickup: data.get('accepts_pickup') === 'on'

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pagamento Pix</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="client-page payment-page">
+    <main class="payment-shell">
+      <section class="payment-card">
+        <p class="eyebrow">Pagamento online</p>
+        <h1 id="paymentTitle">Pix do pedido</h1>
+        <p class="muted" id="paymentSubtitle">Carregando dados do pagamento...</p>
+
+        <div class="payment-status-box" id="paymentStatusBox"></div>
+        <img class="payment-qr" id="paymentQr" alt="QR Code Pix" hidden>
+
+        <label class="payment-copy-field">
+          Código Pix copia e cola
+          <textarea id="paymentPixCode" readonly></textarea>
+        </label>
+
+        <div class="row-actions payment-actions">
+          <button class="primary-button compact" id="copyPixButton" type="button">Copiar código</button>
+          <button class="ghost-button compact" id="refreshPaymentButton" type="button">Atualizar status</button>
+          <button class="ghost-button compact" id="newPixButton" type="button" hidden>Gerar novo Pix</button>
+        </div>
+
+        <a class="text-button" href="/pedidos">Ver meus pedidos</a>
+      </section>
+    </main>
+    <script src="/payment.js" type="module"></script>
+  </body>
+</html>

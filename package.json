@@ -9,7 +9,7 @@
     "db:schema": "node scripts/apply-schema.mjs",
     "db:backup": "node scripts/backup-supabase.mjs",
     "admin:create": "node scripts/create-admin.mjs",
-    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js",
+    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js",
     "test:local": "node scripts/local-audit.mjs"
   },
   "dependencies": {

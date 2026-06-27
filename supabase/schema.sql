@@ -20,6 +20,7 @@ create table if not exists public.store_settings (
   loyalty_program jsonb not null default '{}'::jsonb,
   theme_settings jsonb not null default '{}'::jsonb,
   print_settings jsonb not null default '{}'::jsonb,
+  integration_settings jsonb not null default '{}'::jsonb,
   onboarding_completed boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -31,6 +32,7 @@ alter table public.store_settings
   add column if not exists loyalty_program jsonb not null default '{}'::jsonb,
   add column if not exists theme_settings jsonb not null default '{}'::jsonb,
   add column if not exists print_settings jsonb not null default '{}'::jsonb,
+  add column if not exists integration_settings jsonb not null default '{}'::jsonb,
   add column if not exists onboarding_completed boolean not null default false;
 
 create table if not exists public.menu_categories (
@@ -139,6 +141,12 @@ create table if not exists public.orders (
   total numeric(10, 2) not null default 0,
   notes text,
   payment_details jsonb not null default '{}'::jsonb,
+  financial_status text not null default 'pending' check (financial_status in ('pending', 'paid', 'failed', 'expired', 'cancelled', 'refunded')),
+  payment_provider text,
+  payment_transaction_id text,
+  paid_amount numeric(10, 2),
+  paid_at timestamptz,
+  payment_expires_at timestamptz,
   promotion_code text,
   whatsapp_message text,
   archived_at timestamptz,
@@ -150,6 +158,12 @@ alter table public.orders
   add column if not exists archived_at timestamptz,
   add column if not exists promotion_code text,
   add column if not exists payment_details jsonb not null default '{}'::jsonb,
+  add column if not exists financial_status text not null default 'pending',
+  add column if not exists payment_provider text,
+  add column if not exists payment_transaction_id text,
+  add column if not exists paid_amount numeric(10, 2),
+  add column if not exists paid_at timestamptz,
+  add column if not exists payment_expires_at timestamptz,
   add column if not exists dining_table_id uuid,
   add column if not exists customer_tab_id uuid,
   add column if not exists table_snapshot jsonb,
@@ -168,6 +182,21 @@ begin
   alter table public.orders
     add constraint orders_fulfillment_method_check
     check (fulfillment_method in ('delivery', 'pickup', 'counter', 'table', 'tab'));
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_financial_status_check'
+      and conrelid = 'public.orders'::regclass
+  ) then
+    alter table public.orders drop constraint orders_financial_status_check;
+  end if;
+  alter table public.orders
+    add constraint orders_financial_status_check
+    check (financial_status in ('pending', 'paid', 'failed', 'expired', 'cancelled', 'refunded'));
 end $$;
 
 create table if not exists public.dining_tables (
@@ -239,6 +268,39 @@ create table if not exists public.order_print_logs (
   status text not null default 'attempted' check (status in ('attempted', 'blocked', 'completed')),
   created_at timestamptz not null default now()
 );
+
+create table if not exists public.order_whatsapp_logs (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  order_status text not null,
+  recipient_phone text,
+  message text not null,
+  delivery_status text not null default 'pending' check (delivery_status in ('pending', 'sent', 'failed', 'skipped')),
+  provider text,
+  provider_message_id text,
+  error_message text,
+  is_manual boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists order_whatsapp_logs_auto_unique_idx
+  on public.order_whatsapp_logs (order_id, order_status)
+  where is_manual = false;
+
+create table if not exists public.order_payment_events (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  provider text not null,
+  provider_event_id text not null,
+  transaction_id text,
+  financial_status text not null,
+  amount numeric(10, 2),
+  raw_payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists order_payment_events_provider_event_unique_idx
+  on public.order_payment_events (provider, provider_event_id);
 
 create table if not exists public.menu_modifier_groups (
   id uuid primary key default gen_random_uuid(),
@@ -354,6 +416,12 @@ create index if not exists order_items_order_idx
 create index if not exists order_print_logs_order_created_idx
   on public.order_print_logs (order_id, created_at desc);
 
+create index if not exists order_whatsapp_logs_order_created_idx
+  on public.order_whatsapp_logs (order_id, created_at desc);
+
+create index if not exists order_payment_events_order_created_idx
+  on public.order_payment_events (order_id, created_at desc);
+
 create index if not exists order_items_menu_item_idx
   on public.order_items (menu_item_id);
 
@@ -440,6 +508,8 @@ alter table public.customer_addresses enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.order_print_logs enable row level security;
+alter table public.order_whatsapp_logs enable row level security;
+alter table public.order_payment_events enable row level security;
 alter table public.menu_modifier_groups enable row level security;
 alter table public.menu_modifiers enable row level security;
 alter table public.promotions enable row level security;
