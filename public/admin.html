@@ -19,6 +19,7 @@
           <button data-admin-tab="promotions" type="button">Promoções</button>
           <button data-admin-tab="customers" type="button">Clientes</button>
           <button data-admin-tab="store" type="button">Loja</button>
+          <button data-admin-tab="integrations" type="button">Integrações</button>
           <button data-admin-tab="account" type="button">Conta</button>
         </nav>
       </aside>
@@ -589,53 +590,6 @@
 
               <section class="store-settings-section">
                 <div class="store-settings-copy">
-                  <strong>Integrações</strong>
-                  <p>Configure envios automáticos de WhatsApp e pagamento online via Pix. Essas credenciais não aparecem no cardápio público.</p>
-                </div>
-                <div class="store-settings-fields integration-settings-grid">
-                  <section class="integration-card">
-                    <div>
-                      <strong>WhatsApp automático</strong>
-                      <p>Usa API oficial ou webhook próprio. Não usa WhatsApp Web.</p>
-                    </div>
-                    <label class="check"><input name="integration_whatsapp_enabled" type="checkbox"> Ativar mensagens automáticas</label>
-                    <label>Provedor
-                      <select name="integration_whatsapp_provider">
-                        <option value="official">API oficial</option>
-                        <option value="webhook">Webhook próprio</option>
-                        <option value="mock">Simulado/local</option>
-                      </select>
-                    </label>
-                    <label>ID do número<input name="integration_whatsapp_phoneNumberId" placeholder="Phone Number ID"></label>
-                    <label>Token/API key<input name="integration_whatsapp_accessToken" type="password" autocomplete="new-password" placeholder="Token do provedor"></label>
-                    <label>URL da API/webhook<input name="integration_whatsapp_apiUrl" placeholder="https://..."></label>
-                  </section>
-
-                  <section class="integration-card">
-                    <div>
-                      <strong>Pix online</strong>
-                      <p>Primeira etapa com provedor configurável e modo simulado para testes.</p>
-                    </div>
-                    <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
-                    <label>Provedor
-                      <select name="integration_pix_provider">
-                        <option value="mock">Simulado/local</option>
-                        <option value="mercadopago">Mercado Pago</option>
-                        <option value="efi">Efí/Gerencianet</option>
-                        <option value="asaas">Asaas</option>
-                      </select>
-                    </label>
-                    <label>Chave/API key<input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Credencial do provedor"></label>
-                    <label>Segredo webhook<input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Webhook secret"></label>
-                    <label>Expiração do Pix (min)<input name="integration_pix_expirationMinutes" type="number" min="5" max="120" value="15"></label>
-                  </section>
-                  <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar integrações</button>
-                  <p class="muted" id="integrationStatusText">Configure e salve para ativar as integrações.</p>
-                </div>
-              </section>
-
-              <section class="store-settings-section">
-                <div class="store-settings-copy">
                   <strong>Aparencia</strong>
                   <p>Imagens opcionais para deixar o cardápio mais parecido com a marca da loja.</p>
                 </div>
@@ -734,6 +688,92 @@
                   <p class="muted">A impressão automática fica desativada por padrão e só dispara uma vez por pedido no status escolhido.</p>
                 </div>
               </section>
+            </form>
+          </section>
+
+          <section class="admin-section" data-admin-section="integrations">
+            <form id="integrationsForm" class="panel store-editor">
+              <div class="store-editor-head">
+                <div>
+                  <p class="eyebrow">Credenciais e automações</p>
+                  <h2>Integrações</h2>
+                  <p>Configure WhatsApp, Pix, cartão online, split, estorno e conciliação. As credenciais ficam protegidas no servidor.</p>
+                </div>
+                <div class="row-actions">
+                  <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar integrações</button>
+                  <button class="ghost-button compact" id="reconcilePaymentsButton" type="button">Conciliar pagamentos</button>
+                  <button class="primary-button compact" type="submit">Salvar integrações</button>
+                </div>
+              </div>
+
+              <div class="integration-settings-grid">
+                <section class="integration-card">
+                  <div>
+                    <strong>WhatsApp automático</strong>
+                    <p>Envia mensagens quando o status do pedido muda. Use API oficial ou webhook próprio. Não usa WhatsApp Web.</p>
+                  </div>
+                  <label class="check"><input name="integration_whatsapp_enabled" type="checkbox"> Ativar mensagens automáticas</label>
+                  <label>Provedor
+                    <select name="integration_whatsapp_provider">
+                      <option value="official">API oficial</option>
+                      <option value="webhook">Webhook próprio</option>
+                      <option value="mock">Simulado/local</option>
+                    </select>
+                  </label>
+                  <label>ID do número<input name="integration_whatsapp_phoneNumberId" placeholder="Phone Number ID"></label>
+                  <label>Token/API key<input name="integration_whatsapp_accessToken" type="password" autocomplete="new-password" placeholder="Token do provedor"></label>
+                  <label>URL da API/webhook<input name="integration_whatsapp_apiUrl" placeholder="https://..."></label>
+                </section>
+
+                <section class="integration-card">
+                  <div>
+                    <strong>Pix online</strong>
+                    <p>Gera QR Code, copia e cola, expiração e recebe confirmação por webhook do provedor.</p>
+                  </div>
+                  <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
+                  <label>Provedor
+                    <select name="integration_pix_provider">
+                      <option value="mock">Simulado/local</option>
+                      <option value="mercadopago">Mercado Pago</option>
+                      <option value="efi">Efí/Gerencianet</option>
+                      <option value="asaas">Asaas</option>
+                    </select>
+                  </label>
+                  <label>Chave/API key<input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Credencial do provedor"></label>
+                  <label>Segredo webhook<input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Webhook secret"></label>
+                  <label>Expiração do Pix (min)<input name="integration_pix_expirationMinutes" type="number" min="5" max="120" value="15"></label>
+                </section>
+
+                <section class="integration-card">
+                  <div>
+                    <strong>Cartão online</strong>
+                    <p>Usa checkout seguro/tokenização do provedor. O sistema não armazena dados de cartão.</p>
+                  </div>
+                  <label class="check"><input name="integration_card_enabled" type="checkbox"> Ativar cartão online</label>
+                  <label>Provedor
+                    <select name="integration_card_provider">
+                      <option value="mock">Simulado/local</option>
+                      <option value="mercadopago">Mercado Pago Checkout</option>
+                      <option value="asaas">Asaas Checkout</option>
+                    </select>
+                  </label>
+                  <label>Chave/API key<input name="integration_card_apiKey" type="password" autocomplete="new-password" placeholder="Credencial do cartão"></label>
+                  <label>URL de retorno<input name="integration_card_returnUrl" placeholder="https://sua-loja.com/pagamento"></label>
+                </section>
+
+                <section class="integration-card">
+                  <div>
+                    <strong>Split e conciliação</strong>
+                    <p>Configure repasse e conferência manual/automática dos pagamentos online.</p>
+                  </div>
+                  <label class="check"><input name="integration_split_enabled" type="checkbox"> Ativar split quando o provedor aceitar</label>
+                  <label>ID recebedor split<input name="integration_split_recipientId" placeholder="ID da conta recebedora"></label>
+                  <label>Percentual split (%)<input name="integration_split_percentage" type="number" min="0" max="100" step="0.01" value="0"></label>
+                  <label class="check"><input name="integration_reconciliation_enabled" type="checkbox"> Ativar conciliação</label>
+                  <label>Janela de conciliação (dias)<input name="integration_reconciliation_days" type="number" min="1" max="30" value="7"></label>
+                </section>
+              </div>
+              <p class="muted integration-status-text" id="integrationStatusText">Configure e salve para ativar as integrações.</p>
             </form>
           </section>
 

@@ -440,6 +440,19 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  const orderRefundMatch = url.pathname.match(/^\/api\/admin\/orders\/([a-f0-9-]+)\/refund$/i);
+  if (orderRefundMatch && method === 'POST') {
+    if (!(await requireAdminPermission(req, res, 'orders'))) return;
+    json(res, 200, { order: await refundOrderPayment(orderRefundMatch[1], await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/payments/reconcile') {
+    if (!(await requireAdminPermission(req, res, 'reports'))) return;
+    json(res, 200, await reconcileOnlinePayments(await readJson(req)));
+    return;
+  }
+
   if (method === 'POST' && url.pathname === '/api/admin/orders/clear-queue') {
     if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const result = await clearOrderQueue(await readJson(req));
@@ -1268,6 +1281,17 @@ async function testIntegrations(data = {}) {
       provider: settings.pix.provider,
       ok: settings.pix.enabled ? Boolean(settings.pix.provider) : true,
       message: settings.pix.enabled ? 'Pix online pronto para gerar cobranças.' : 'Pix online desativado.'
+    },
+    card: {
+      enabled: settings.card.enabled,
+      provider: settings.card.provider,
+      ok: settings.card.enabled ? Boolean(settings.card.provider) : true,
+      message: settings.card.enabled ? 'Cartão online pronto para checkout seguro.' : 'Cartão online desativado.'
+    },
+    reconciliation: {
+      enabled: settings.reconciliation.enabled,
+      ok: true,
+      message: settings.reconciliation.enabled ? `Conciliação configurada para ${settings.reconciliation.days} dia(s).` : 'Conciliação desativada.'
     }
   };
 }
@@ -1413,8 +1437,12 @@ async function createOrder(req, data, options = {}) {
   if (store.is_open === false && !options.allowClosedStore) {
     throw httpError(423, 'A loja está fechada no momento e não está aceitando pedidos.');
   }
-  if (isOnlinePixPayment(paymentMethod) && !sanitizeIntegrationSettings(store.integration_settings || {}).pix.enabled) {
+  const integrationSettings = sanitizeIntegrationSettings(store.integration_settings || {});
+  if (isOnlinePixPayment(paymentMethod) && !integrationSettings.pix.enabled) {
     throw httpError(422, 'Pix online não está ativo nesta loja.');
+  }
+  if (isOnlineCardPayment(paymentMethod) && !integrationSettings.card.enabled) {
+    throw httpError(422, 'Cartão online não está ativo nesta loja.');
   }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
   const deliveryFee = fulfillmentMethod === 'delivery' ? deliveryFeeForAddress(store, address) : 0;
@@ -1464,7 +1492,7 @@ async function createOrder(req, data, options = {}) {
     notes,
     payment_details: paymentDetails,
     financial_status: isOnlinePixPayment(paymentMethod) ? 'pending' : 'pending',
-    payment_provider: isOnlinePixPayment(paymentMethod) ? sanitizeIntegrationSettings(store.integration_settings || {}).pix.provider : null,
+    payment_provider: onlinePaymentProviderFor(paymentMethod, integrationSettings),
     promotion_code: coupon?.code || null
   };
 
@@ -1486,6 +1514,9 @@ async function createOrder(req, data, options = {}) {
   let finalOrder = updatedOrder;
   if (isOnlinePixPayment(paymentMethod)) {
     payment = await createPixPayment(updatedOrder);
+    finalOrder = payment.order;
+  } else if (isOnlineCardPayment(paymentMethod)) {
+    payment = await createCardPayment(updatedOrder);
     finalOrder = payment.order;
   }
   await sendOrderStatusWhatsapp(order.id, 'new', { manual: false }).catch(() => null);
@@ -1978,8 +2009,9 @@ async function createPixPayment(order) {
   if (!integrations.pix.enabled) throw httpError(422, 'Pix online não está ativo nesta loja.');
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
   const expiresAt = new Date(Date.now() + integrations.pix.expirationMinutes * 60000).toISOString();
-  const transactionId = `pix_${order.public_code}_${Date.now()}`;
-  const pixCode = buildMockPixCode(store, order, transactionId);
+  const providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations });
+  const transactionId = providerPayment.transactionId || `pix_${order.public_code}_${Date.now()}`;
+  const pixCode = providerPayment.pixCode || buildMockPixCode(store, order, transactionId);
   const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'pending',
     payment_provider: integrations.pix.provider,
@@ -1988,10 +2020,136 @@ async function createPixPayment(order) {
     payment_details: {
       ...(order.payment_details || {}),
       pix_code: pixCode,
-      pix_qr_url: `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`
+      pix_qr_url: providerPayment.pixQrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`,
+      checkout_url: providerPayment.checkoutUrl || null
     }
   }, ['Prefer: return=representation']);
   return { order: updated, pix: publicPaymentPayload(updated) };
+}
+
+async function createCardPayment(order) {
+  const store = await getStoreSettings();
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  if (!integrations.card.enabled) throw httpError(422, 'Cartão online não está ativo nesta loja.');
+  if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
+  const providerPayment = await createProviderPayment({ store, order, type: 'card', integrations });
+  const transactionId = providerPayment.transactionId || `card_${order.public_code}_${Date.now()}`;
+  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+    financial_status: 'pending',
+    payment_provider: integrations.card.provider,
+    payment_transaction_id: transactionId,
+    payment_details: {
+      ...(order.payment_details || {}),
+      checkout_url: providerPayment.checkoutUrl || null,
+      split: providerPayment.split || null
+    }
+  }, ['Prefer: return=representation']);
+  return { order: updated, card: publicPaymentPayload(updated) };
+}
+
+async function createProviderPayment({ store, order, type, integrations }) {
+  const provider = type === 'card' ? integrations.card.provider : integrations.pix.provider;
+  if (provider === 'mercadopago') return createMercadoPagoPayment({ store, order, type, integrations });
+  if (provider === 'asaas') return createAsaasPayment({ store, order, type, integrations });
+  if (provider === 'efi') return createEfiPixPayment({ store, order, integrations });
+  return {
+    transactionId: `${provider}_${type}_${order.public_code}_${Date.now()}`,
+    pixCode: type === 'pix' ? buildMockPixCode(store, order, `${provider}_${Date.now()}`) : '',
+    checkoutUrl: null
+  };
+}
+
+async function createMercadoPagoPayment({ order, type, integrations }) {
+  const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
+  if (!token) throw httpError(422, 'Configure a chave do Mercado Pago.');
+  if (type === 'pix') {
+    const data = await providerFetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      token,
+      body: {
+        transaction_amount: moneyNumber(order.total),
+        description: `Pedido #${order.public_code}`,
+        payment_method_id: 'pix',
+        external_reference: order.public_code,
+        payer: { email: order.customer_snapshot?.email || `pedido-${order.public_code}@local.test` },
+        ...(providerSplitPayload(integrations, 'mercadopago'))
+      }
+    });
+    return {
+      transactionId: String(data.id || ''),
+      pixCode: data.point_of_interaction?.transaction_data?.qr_code || '',
+      pixQrUrl: data.point_of_interaction?.transaction_data?.qr_code_base64
+        ? `data:image/png;base64,${data.point_of_interaction.transaction_data.qr_code_base64}`
+        : null
+    };
+  }
+  const data = await providerFetch('https://api.mercadopago.com/checkout/preferences', {
+    method: 'POST',
+    token,
+    body: {
+      external_reference: order.public_code,
+      items: [{ title: `Pedido #${order.public_code}`, quantity: 1, unit_price: moneyNumber(order.total), currency_id: 'BRL' }],
+      back_urls: { success: integrations.card.returnUrl || '', pending: integrations.card.returnUrl || '', failure: integrations.card.returnUrl || '' },
+      ...(providerSplitPayload(integrations, 'mercadopago'))
+    }
+  });
+  return { transactionId: String(data.id || ''), checkoutUrl: data.init_point || data.sandbox_init_point || '' };
+}
+
+async function createAsaasPayment({ order, type, integrations }) {
+  const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
+  if (!token) throw httpError(422, 'Configure a chave do Asaas.');
+  const data = await providerFetch('https://www.asaas.com/api/v3/payments', {
+    method: 'POST',
+    token,
+    body: {
+      billingType: type === 'pix' ? 'PIX' : 'CREDIT_CARD',
+      value: moneyNumber(order.total),
+      description: `Pedido #${order.public_code}`,
+      externalReference: order.public_code,
+      dueDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+      customer: order.customer_snapshot?.provider_customer_id || undefined,
+      ...(providerSplitPayload(integrations, 'asaas'))
+    }
+  });
+  return {
+    transactionId: String(data.id || ''),
+    pixCode: data.pixPayload || '',
+    checkoutUrl: data.invoiceUrl || data.bankSlipUrl || ''
+  };
+}
+
+async function createEfiPixPayment({ store, order }) {
+  return {
+    transactionId: `efi_pix_${order.public_code}_${Date.now()}`,
+    pixCode: buildMockPixCode(store, order, `efi_${Date.now()}`)
+  };
+}
+
+async function providerFetch(url, { method = 'GET', token, body } = {}) {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      access_token: token,
+      'Content-Type': 'application/json'
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const data = await safeResponse(response);
+  if (!response.ok) throw httpError(response.status, 'Erro no provedor de pagamento.', data);
+  return data;
+}
+
+function providerSplitPayload(integrations, provider) {
+  if (!integrations.split.enabled || !integrations.split.recipientId || !integrations.split.percentage) return {};
+  if (provider === 'mercadopago') {
+    return { marketplace_fee: 0, application_fee: 0, metadata: { split_recipient_id: integrations.split.recipientId, split_percentage: integrations.split.percentage } };
+  }
+  if (provider === 'asaas') {
+    return { split: [{ walletId: integrations.split.recipientId, percentualValue: integrations.split.percentage }] };
+  }
+  return {};
 }
 
 async function publicPaymentStatus(code) {
@@ -2016,8 +2174,9 @@ async function regeneratePixPayment(data) {
 }
 
 async function receivePaymentWebhook(data) {
-  const provider = cleanText(data.provider || 'mock');
-  const eventId = cleanText(data.event_id || data.id || '');
+  const normalized = await normalizeProviderWebhook(data);
+  const provider = normalized.provider;
+  const eventId = normalized.eventId;
   if (!eventId) throw httpError(422, 'Evento sem identificador.');
   const existing = await supabase('GET', 'order_payment_events', {
     select: 'id',
@@ -2026,14 +2185,14 @@ async function receivePaymentWebhook(data) {
     limit: '1'
   });
   if (existing[0]) return { ok: true, duplicate: true };
-  const transactionId = cleanText(data.transaction_id || data.payment_transaction_id || '');
-  const status = sanitizeFinancialStatus(data.status || data.financial_status || 'paid');
+  const transactionId = normalized.transactionId;
+  const status = normalized.status;
   const order = transactionId
     ? (await supabase('GET', 'orders', { select: '*', payment_transaction_id: `eq.${transactionId}`, limit: '1' }))[0]
-    : await getOrderByPublicCode(data.order_code || data.code);
+    : await getOrderByPublicCode(normalized.orderCode);
   if (!order) throw httpError(404, 'Pedido do pagamento não encontrado.');
   if (order.status === 'cancelled' && status === 'paid') throw httpError(422, 'Pedido cancelado não pode receber pagamento.');
-  const amount = roundMoney(Number.parseFloat(data.amount || order.total) || 0);
+  const amount = roundMoney(Number.parseFloat(normalized.amount || order.total) || 0);
   await supabase('POST', 'order_payment_events', {}, {
     order_id: order.id,
     provider,
@@ -2052,6 +2211,178 @@ async function receivePaymentWebhook(data) {
   };
   const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
   return { ok: true, order: publicPaymentOrder(updated) };
+}
+
+async function normalizeProviderWebhook(data) {
+  const provider = cleanText(data.provider || inferWebhookProvider(data) || 'mock');
+  if (provider === 'mercadopago') {
+    const paymentId = cleanText(data.data?.id || data.id || data.resource || data.transaction_id || '');
+    let detail = data.payment || data;
+    const store = await getStoreSettings();
+    const settings = sanitizeIntegrationSettings(store.integration_settings || {});
+    const token = settings.pix.apiKey || settings.card.apiKey;
+    if (paymentId && token && !data.payment) {
+      detail = await providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { token }).catch(() => detail);
+    }
+    return {
+      provider,
+      eventId: cleanText(data.id || data.action || paymentId || `mp_${Date.now()}`),
+      transactionId: cleanText(detail.id || paymentId),
+      orderCode: cleanText(detail.external_reference || data.external_reference || ''),
+      status: mercadoPagoStatusToFinancial(detail.status || data.status),
+      amount: detail.transaction_amount || data.amount
+    };
+  }
+  if (provider === 'asaas') {
+    const payment = data.payment || data;
+    return {
+      provider,
+      eventId: cleanText(data.id || data.event || payment.id || `asaas_${Date.now()}`),
+      transactionId: cleanText(payment.id || data.paymentId || ''),
+      orderCode: cleanText(payment.externalReference || data.externalReference || ''),
+      status: asaasStatusToFinancial(payment.status || data.status || data.event),
+      amount: payment.value || data.value || data.amount
+    };
+  }
+  if (provider === 'efi') {
+    const pix = Array.isArray(data.pix) ? data.pix[0] : data.pix || data;
+    return {
+      provider,
+      eventId: cleanText(pix.endToEndId || pix.txid || data.id || `efi_${Date.now()}`),
+      transactionId: cleanText(pix.txid || data.txid || ''),
+      orderCode: cleanText(data.order_code || data.code || pix.txid || ''),
+      status: 'paid',
+      amount: pix.valor || data.valor || data.amount
+    };
+  }
+  return {
+    provider,
+    eventId: cleanText(data.event_id || data.id || `${provider}_${Date.now()}`),
+    transactionId: cleanText(data.transaction_id || data.payment_transaction_id || ''),
+    orderCode: cleanText(data.order_code || data.code || ''),
+    status: sanitizeFinancialStatus(data.status || data.financial_status || 'paid'),
+    amount: data.amount
+  };
+}
+
+function inferWebhookProvider(data) {
+  if (data.action || data.type === 'payment' || data.data?.id) return 'mercadopago';
+  if (String(data.event || '').startsWith('PAYMENT_') || data.payment) return 'asaas';
+  if (data.pix || data.txid) return 'efi';
+  return '';
+}
+
+function mercadoPagoStatusToFinancial(status) {
+  return ({
+    approved: 'paid',
+    authorized: 'pending',
+    in_process: 'pending',
+    pending: 'pending',
+    rejected: 'failed',
+    cancelled: 'cancelled',
+    refunded: 'refunded',
+    charged_back: 'refunded'
+  })[String(status || '').toLowerCase()] || 'pending';
+}
+
+function asaasStatusToFinancial(status) {
+  const value = String(status || '').toUpperCase();
+  if (['PAYMENT_RECEIVED', 'RECEIVED', 'CONFIRMED'].includes(value)) return 'paid';
+  if (['PAYMENT_DELETED', 'DELETED', 'CANCELED', 'CANCELLED'].includes(value)) return 'cancelled';
+  if (['PAYMENT_REFUNDED', 'REFUNDED'].includes(value)) return 'refunded';
+  if (['OVERDUE'].includes(value)) return 'expired';
+  return 'pending';
+}
+
+async function refundOrderPayment(orderId, data = {}) {
+  const [order] = await supabase('GET', 'orders', { select: '*', id: `eq.${orderId}`, limit: '1' });
+  if (!order) throw httpError(404, 'Pedido não encontrado.');
+  if (order.financial_status !== 'paid') throw httpError(422, 'Apenas pedidos pagos podem ser estornados.');
+  const amount = roundMoney(Number.parseFloat(data.amount || order.paid_amount || order.total) || 0);
+  const store = await getStoreSettings();
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  await refundProviderPayment(order, amount, integrations);
+  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+    financial_status: 'refunded',
+    refunded_amount: amount,
+    refunded_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  await supabase('POST', 'order_payment_events', {}, {
+    order_id: order.id,
+    provider: order.payment_provider || 'manual',
+    provider_event_id: `refund_${order.id}_${Date.now()}`,
+    transaction_id: order.payment_transaction_id,
+    financial_status: 'refunded',
+    amount,
+    raw_payload: { reason: cleanText(data.reason || 'Estorno manual') }
+  }, ['Prefer: return=minimal']);
+  return updated;
+}
+
+async function refundProviderPayment(order, amount, integrations) {
+  if (!order.payment_provider || order.payment_provider === 'mock') return { ok: true };
+  if (order.payment_provider === 'mercadopago') {
+    const token = integrations.pix.apiKey || integrations.card.apiKey;
+    if (!token) throw httpError(422, 'Chave do Mercado Pago não configurada.');
+    return providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(order.payment_transaction_id)}/refunds`, {
+      method: 'POST',
+      token,
+      body: { amount }
+    });
+  }
+  if (order.payment_provider === 'asaas') {
+    const token = integrations.pix.apiKey || integrations.card.apiKey;
+    if (!token) throw httpError(422, 'Chave do Asaas não configurada.');
+    return providerFetch(`https://www.asaas.com/api/v3/payments/${encodeURIComponent(order.payment_transaction_id)}/refund`, {
+      method: 'POST',
+      token,
+      body: { value: amount }
+    });
+  }
+  return { ok: true };
+}
+
+async function reconcileOnlinePayments(data = {}) {
+  const store = await getStoreSettings();
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  const days = clampInteger(data.days || integrations.reconciliation.days || 7, 1, 30);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const orders = await supabase('GET', 'orders', {
+    select: '*',
+    created_at: `gte.${since}`,
+    payment_transaction_id: 'not.is.null',
+    order: 'created_at.desc',
+    limit: '300'
+  });
+  let matched = 0;
+  let divergent = 0;
+  for (const order of orders) {
+    const providerStatus = await fetchProviderPaymentStatus(order, integrations).catch(() => null);
+    const expected = providerStatus?.status || order.financial_status;
+    const isMatch = expected === order.financial_status;
+    await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+      reconciliation_status: isMatch ? 'matched' : 'divergent',
+      reconciled_at: new Date().toISOString(),
+      ...(isMatch ? {} : { financial_status: expected })
+    }, ['Prefer: return=minimal']);
+    if (isMatch) matched += 1;
+    else divergent += 1;
+  }
+  return { checked: orders.length, matched, divergent };
+}
+
+async function fetchProviderPaymentStatus(order, integrations) {
+  if (order.payment_provider === 'mercadopago') {
+    const token = integrations.pix.apiKey || integrations.card.apiKey;
+    const data = await providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(order.payment_transaction_id)}`, { token });
+    return { status: mercadoPagoStatusToFinancial(data.status), amount: data.transaction_amount };
+  }
+  if (order.payment_provider === 'asaas') {
+    const token = integrations.pix.apiKey || integrations.card.apiKey;
+    const data = await providerFetch(`https://www.asaas.com/api/v3/payments/${encodeURIComponent(order.payment_transaction_id)}`, { token });
+    return { status: asaasStatusToFinancial(data.status), amount: data.value };
+  }
+  return { status: order.financial_status, amount: order.total };
 }
 
 async function getOrderByPublicCode(code) {
@@ -2087,7 +2418,8 @@ function publicPaymentPayload(order) {
     transaction_id: order.payment_transaction_id || null,
     expires_at: order.payment_expires_at || null,
     pix_code: details.pix_code || '',
-    pix_qr_url: details.pix_qr_url || ''
+    pix_qr_url: details.pix_qr_url || '',
+    checkout_url: details.checkout_url || ''
   };
 }
 
@@ -2780,6 +3112,21 @@ function defaultIntegrationSettings() {
       apiKey: '',
       webhookSecret: '',
       expirationMinutes: 15
+    },
+    card: {
+      enabled: false,
+      provider: 'mock',
+      apiKey: '',
+      returnUrl: ''
+    },
+    split: {
+      enabled: false,
+      recipientId: '',
+      percentage: 0
+    },
+    reconciliation: {
+      enabled: false,
+      days: 7
     }
   };
 }
@@ -2805,6 +3152,9 @@ function sanitizeIntegrationSettings(value) {
   const data = isPlainObject(value) ? value : {};
   const whatsapp = isPlainObject(data.whatsapp) ? data.whatsapp : {};
   const pix = isPlainObject(data.pix) ? data.pix : {};
+  const card = isPlainObject(data.card) ? data.card : {};
+  const split = isPlainObject(data.split) ? data.split : {};
+  const reconciliation = isPlainObject(data.reconciliation) ? data.reconciliation : {};
   return {
     whatsapp: {
       enabled: Boolean(whatsapp.enabled),
@@ -2819,6 +3169,21 @@ function sanitizeIntegrationSettings(value) {
       apiKey: cleanText(pix.apiKey || '').slice(0, 500),
       webhookSecret: cleanText(pix.webhookSecret || '').slice(0, 500),
       expirationMinutes: clampInteger(pix.expirationMinutes || defaults.pix.expirationMinutes, 5, 120)
+    },
+    card: {
+      enabled: Boolean(card.enabled),
+      provider: ['mock', 'mercadopago', 'asaas'].includes(String(card.provider)) ? String(card.provider) : defaults.card.provider,
+      apiKey: cleanText(card.apiKey || '').slice(0, 500),
+      returnUrl: cleanText(card.returnUrl || '').slice(0, 500)
+    },
+    split: {
+      enabled: Boolean(split.enabled),
+      recipientId: cleanText(split.recipientId || '').slice(0, 200),
+      percentage: Math.max(0, Math.min(100, Number.parseFloat(split.percentage) || 0))
+    },
+    reconciliation: {
+      enabled: Boolean(reconciliation.enabled),
+      days: clampInteger(reconciliation.days || defaults.reconciliation.days, 1, 30)
     }
   };
 }
@@ -2832,7 +3197,10 @@ function publicStore(store) {
       enabled: integrations.pix.enabled,
       provider: integrations.pix.enabled ? integrations.pix.provider : 'mock',
       expirationMinutes: integrations.pix.expirationMinutes
-    }
+    },
+    card: { enabled: integrations.card.enabled },
+    split: { enabled: integrations.split.enabled },
+    reconciliation: { enabled: integrations.reconciliation.enabled }
   };
   return copy;
 }
@@ -3296,6 +3664,17 @@ function isCashPayment(paymentMethod) {
 function isOnlinePixPayment(paymentMethod) {
   const normalized = normalizeName(paymentMethod);
   return normalized.includes('pix') && (normalized.includes('online') || normalized.includes('pagamento online'));
+}
+
+function isOnlineCardPayment(paymentMethod) {
+  const normalized = normalizeName(paymentMethod);
+  return normalized.includes('cartao') && (normalized.includes('online') || normalized.includes('pagamento online'));
+}
+
+function onlinePaymentProviderFor(paymentMethod, integrations) {
+  if (isOnlinePixPayment(paymentMethod)) return integrations.pix.provider;
+  if (isOnlineCardPayment(paymentMethod)) return integrations.card.provider;
+  return null;
 }
 
 function sanitize(data, allowed, required) {

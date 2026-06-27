@@ -198,8 +198,10 @@ const els = {
   refreshModifiersButton: document.querySelector('#refreshModifiersButton'),
   modifierGroupForm: document.querySelector('#modifierGroupForm'),
   storeForm: document.querySelector('#storeForm'),
+  integrationsForm: document.querySelector('#integrationsForm'),
   printSettingsForm: document.querySelector('#printSettingsForm'),
   testIntegrationsButton: document.querySelector('#testIntegrationsButton'),
+  reconcilePaymentsButton: document.querySelector('#reconcilePaymentsButton'),
   integrationStatusText: document.querySelector('#integrationStatusText'),
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
@@ -290,6 +292,7 @@ els.modifierProductSelect?.addEventListener('change', () => {
 });
 els.modifierGroupForm?.addEventListener('submit', submitModifierGroupFromDialog);
 els.storeForm.addEventListener('submit', submitStore);
+els.integrationsForm?.addEventListener('submit', submitIntegrations);
 els.storeForm.addEventListener('input', () => {
   state.storeFormDirty = true;
   renderThemePreview();
@@ -304,6 +307,7 @@ els.storeForm.addEventListener('click', (event) => {
   applyThemePreset(button.dataset.themePreset);
 });
 els.testIntegrationsButton?.addEventListener('click', testIntegrations);
+els.reconcilePaymentsButton?.addEventListener('click', reconcilePayments);
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
 els.adminUserForm?.addEventListener('submit', submitAdminUser);
@@ -426,6 +430,7 @@ function render() {
   renderPermissionedNavigation();
   renderAdminUsers();
   fillStoreForm();
+  fillIntegrationSettings(state.store?.integration_settings || {});
   fillPrintSettingsForm();
   fillLoyaltyForm();
   fillAccountForm();
@@ -1488,6 +1493,7 @@ function orderCard(order) {
           <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
           <button class="ghost-button compact print-order-button" type="button" data-reprint-order="${escapeAttribute(order.id)}">Reimprimir</button>
           <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Reenviar WhatsApp</button>
+          ${order.financial_status === 'paid' ? `<button class="danger-button compact" type="button" data-refund-order="${escapeAttribute(order.id)}">Estornar pagamento</button>` : ''}
         </div>
       </div>
     </details>
@@ -1508,6 +1514,7 @@ function orderCard(order) {
   card.querySelector('[data-preview-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', preview: true, reason: 'preview' }));
   card.querySelector('[data-reprint-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', reason: 'retry' }));
   card.querySelector('[data-whatsapp-status]')?.addEventListener('click', () => notifyOrderStatus(order));
+  card.querySelector('[data-refund-order]')?.addEventListener('click', () => refundOrder(order));
   card.addEventListener('dragstart', (event) => {
     if (event.target.closest('.order-details') || event.target.closest('button') || event.target.closest('select')) {
       event.preventDefault();
@@ -1726,6 +1733,21 @@ async function notifyOrderStatus(order) {
     await loadSummary({ skipNotifications: true, silent: true });
   } catch (error) {
     toast(error.message || 'Não foi possível reenviar a mensagem.');
+  }
+}
+
+async function refundOrder(order) {
+  if (!window.confirm(`Estornar pagamento do pedido #${order.public_code}?`)) return;
+  try {
+    await request(`/api/admin/orders/${order.id}/refund`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'Estorno pelo painel administrativo' })
+    });
+    toast('Pagamento estornado.');
+    await loadSummary({ skipNotifications: true, silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível estornar o pagamento.');
   }
 }
 
@@ -3827,6 +3849,39 @@ async function submitStore(event) {
   });
 }
 
+async function submitIntegrations(event) {
+  event.preventDefault();
+  const payload = { integration_settings: integrationSettingsFromForm(els.integrationsForm) };
+  await withSaving(els.integrationsForm, async () => {
+    const result = await request('/api/admin/integrations', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    state.store = result.store || { ...(state.store || {}), integration_settings: payload.integration_settings };
+    state.storeFormDirty = false;
+    saveAdminCache();
+    fillIntegrationSettings(state.store.integration_settings || payload.integration_settings);
+    renderIntegrationStatus(state.store.integration_settings || payload.integration_settings);
+    toast('Integrações salvas.');
+  });
+}
+
+async function reconcilePayments() {
+  try {
+    const days = els.integrationsForm?.elements.integration_reconciliation_days?.value || 7;
+    const result = await request('/api/admin/payments/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days })
+    });
+    toast(`Conciliação: ${result.checked || 0} verificado(s), ${result.matched || 0} batido(s), ${result.divergent || 0} divergente(s).`);
+    await loadSummary({ skipNotifications: true, silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível conciliar os pagamentos.');
+  }
+}
+
 function printSettingsFromForm() {
   const field = (name) => els.printSettingsForm?.querySelector(`[name="${name}"]`);
   return {
@@ -3856,20 +3911,36 @@ function fillPrintSettingsForm() {
 }
 
 function integrationSettingsFromForm(form) {
+  const target = form || els.integrationsForm;
   return {
     whatsapp: {
-      enabled: form.elements.integration_whatsapp_enabled?.checked || false,
-      provider: form.elements.integration_whatsapp_provider?.value || 'official',
-      phoneNumberId: form.elements.integration_whatsapp_phoneNumberId?.value || '',
-      accessToken: form.elements.integration_whatsapp_accessToken?.value || '',
-      apiUrl: form.elements.integration_whatsapp_apiUrl?.value || ''
+      enabled: target?.elements.integration_whatsapp_enabled?.checked || false,
+      provider: target?.elements.integration_whatsapp_provider?.value || 'official',
+      phoneNumberId: target?.elements.integration_whatsapp_phoneNumberId?.value || '',
+      accessToken: target?.elements.integration_whatsapp_accessToken?.value || '',
+      apiUrl: target?.elements.integration_whatsapp_apiUrl?.value || ''
     },
     pix: {
-      enabled: form.elements.integration_pix_enabled?.checked || false,
-      provider: form.elements.integration_pix_provider?.value || 'mock',
-      apiKey: form.elements.integration_pix_apiKey?.value || '',
-      webhookSecret: form.elements.integration_pix_webhookSecret?.value || '',
-      expirationMinutes: form.elements.integration_pix_expirationMinutes?.value || 15
+      enabled: target?.elements.integration_pix_enabled?.checked || false,
+      provider: target?.elements.integration_pix_provider?.value || 'mock',
+      apiKey: target?.elements.integration_pix_apiKey?.value || '',
+      webhookSecret: target?.elements.integration_pix_webhookSecret?.value || '',
+      expirationMinutes: target?.elements.integration_pix_expirationMinutes?.value || 15
+    },
+    card: {
+      enabled: target?.elements.integration_card_enabled?.checked || false,
+      provider: target?.elements.integration_card_provider?.value || 'mock',
+      apiKey: target?.elements.integration_card_apiKey?.value || '',
+      returnUrl: target?.elements.integration_card_returnUrl?.value || ''
+    },
+    split: {
+      enabled: target?.elements.integration_split_enabled?.checked || false,
+      recipientId: target?.elements.integration_split_recipientId?.value || '',
+      percentage: target?.elements.integration_split_percentage?.value || 0
+    },
+    reconciliation: {
+      enabled: target?.elements.integration_reconciliation_enabled?.checked || false,
+      days: target?.elements.integration_reconciliation_days?.value || 7
     }
   };
 }
@@ -3877,7 +3948,10 @@ function integrationSettingsFromForm(form) {
 function fillIntegrationSettings(settings = {}) {
   const whatsapp = settings.whatsapp || {};
   const pix = settings.pix || {};
-  const form = els.storeForm;
+  const card = settings.card || {};
+  const split = settings.split || {};
+  const reconciliation = settings.reconciliation || {};
+  const form = els.integrationsForm;
   if (!form) return;
   if (form.elements.integration_whatsapp_enabled) form.elements.integration_whatsapp_enabled.checked = Boolean(whatsapp.enabled);
   setValue(form.elements.integration_whatsapp_provider, whatsapp.provider || 'official');
@@ -3889,6 +3963,15 @@ function fillIntegrationSettings(settings = {}) {
   setValue(form.elements.integration_pix_apiKey, pix.apiKey || '');
   setValue(form.elements.integration_pix_webhookSecret, pix.webhookSecret || '');
   setValue(form.elements.integration_pix_expirationMinutes, pix.expirationMinutes || 15);
+  if (form.elements.integration_card_enabled) form.elements.integration_card_enabled.checked = Boolean(card.enabled);
+  setValue(form.elements.integration_card_provider, card.provider || 'mock');
+  setValue(form.elements.integration_card_apiKey, card.apiKey || '');
+  setValue(form.elements.integration_card_returnUrl, card.returnUrl || '');
+  if (form.elements.integration_split_enabled) form.elements.integration_split_enabled.checked = Boolean(split.enabled);
+  setValue(form.elements.integration_split_recipientId, split.recipientId || '');
+  setValue(form.elements.integration_split_percentage, split.percentage || 0);
+  if (form.elements.integration_reconciliation_enabled) form.elements.integration_reconciliation_enabled.checked = Boolean(reconciliation.enabled);
+  setValue(form.elements.integration_reconciliation_days, reconciliation.days || 7);
   renderIntegrationStatus(settings);
 }
 
@@ -3896,7 +3979,9 @@ function renderIntegrationStatus(settings = state.store?.integration_settings ||
   if (!els.integrationStatusText) return;
   const whatsapp = settings.whatsapp || {};
   const pix = settings.pix || {};
-  els.integrationStatusText.textContent = `WhatsApp automático: ${whatsapp.enabled ? 'ativo' : 'desativado'} - Pix online: ${pix.enabled ? 'ativo' : 'desativado'}.`;
+  const card = settings.card || {};
+  const reconciliation = settings.reconciliation || {};
+  els.integrationStatusText.textContent = `WhatsApp: ${whatsapp.enabled ? 'ativo' : 'desativado'} - Pix: ${pix.enabled ? 'ativo' : 'desativado'} - Cartão: ${card.enabled ? 'ativo' : 'desativado'} - Conciliação: ${reconciliation.enabled ? 'ativa' : 'desativada'}.`;
 }
 
 async function testIntegrations() {
@@ -3904,12 +3989,19 @@ async function testIntegrations() {
     const result = await request('/api/admin/integrations/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ integration_settings: integrationSettingsFromForm(els.storeForm) })
+      body: JSON.stringify({ integration_settings: integrationSettingsFromForm(els.integrationsForm) })
     });
     const whatsapp = result.result?.whatsapp;
     const pix = result.result?.pix;
+    const card = result.result?.card;
+    const reconciliation = result.result?.reconciliation;
     if (els.integrationStatusText) {
-      els.integrationStatusText.textContent = `${whatsapp?.message || 'WhatsApp verificado.'} ${pix?.message || 'Pix verificado.'}`;
+      els.integrationStatusText.textContent = [
+        whatsapp?.message || 'WhatsApp verificado.',
+        pix?.message || 'Pix verificado.',
+        card?.message || 'Cartão verificado.',
+        reconciliation?.message || 'Conciliação verificada.'
+      ].join(' ');
     }
     toast('Teste de integrações concluído.');
   } catch (error) {
@@ -4115,6 +4207,7 @@ function activateAdminTab(tab) {
     promotions: 'Promoções',
     customers: 'Clientes',
     store: 'Loja',
+    integrations: 'Integrações',
     account: 'Conta'
   };
   state.activeAdminTab = tab;
@@ -4141,7 +4234,7 @@ function renderPermissionedNavigation() {
 }
 
 function firstAllowedAdminTab() {
-  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'account']
+  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'account']
     .find((tab) => canAccessTab(tab)) || 'account';
 }
 
@@ -4155,7 +4248,8 @@ function canAccessTab(tab) {
     tables: 'tables',
     promotions: 'promotions',
     customers: 'customers',
-    store: 'store'
+    store: 'store',
+    integrations: 'store'
   })[tab];
   return !permission || hasPermission(permission);
 }
@@ -4431,7 +4525,6 @@ function formToStore(form) {
     business_hours: businessHoursFromForm(data),
     theme_settings: themeSettingsFromForm(form),
     print_settings: printSettingsFromForm().print_settings,
-    integration_settings: integrationSettingsFromForm(form),
     is_open: data.get('is_open') === 'on',
     accepts_delivery: data.get('accepts_delivery') === 'on',
     accepts_pickup: data.get('accepts_pickup') === 'on'

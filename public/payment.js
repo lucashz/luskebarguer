@@ -7,6 +7,7 @@ const els = {
   status: document.querySelector('#paymentStatusBox'),
   qr: document.querySelector('#paymentQr'),
   pixCode: document.querySelector('#paymentPixCode'),
+  checkoutLink: document.querySelector('#paymentCheckoutLink'),
   copy: document.querySelector('#copyPixButton'),
   refresh: document.querySelector('#refreshPaymentButton'),
   newPix: document.querySelector('#newPixButton')
@@ -59,9 +60,17 @@ function renderPayment(data) {
     <div><span>Transação</span><strong>${escapeHtml(payment.transaction_id || 'Aguardando')}</strong></div>
   `;
   els.pixCode.value = payment.pix_code || '';
+  const hasPix = Boolean(payment.pix_code || payment.pix_qr_url);
+  const hasCheckout = Boolean(payment.checkout_url);
+  els.pixCode.closest('label').hidden = !hasPix;
+  els.copy.hidden = !hasPix;
   els.qr.hidden = !payment.pix_qr_url;
   if (payment.pix_qr_url) els.qr.src = payment.pix_qr_url;
-  els.newPix.hidden = order.financial_status !== 'expired';
+  if (els.checkoutLink) {
+    els.checkoutLink.hidden = !hasCheckout;
+    els.checkoutLink.href = hasCheckout ? payment.checkout_url : '#';
+  }
+  els.newPix.hidden = order.financial_status !== 'expired' || !hasPix;
 }
 
 function setStatus(message) {

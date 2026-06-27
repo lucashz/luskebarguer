@@ -46,6 +46,9 @@ const els = {
   categoryNav: document.querySelector('#categoryNav'),
   searchInput: document.querySelector('#searchInput'),
   searchSuggestions: document.querySelector('#searchSuggestions'),
+  customerOrdersLink: document.querySelector('#customerOrdersLink'),
+  customerAccountLink: document.querySelector('#customerAccountLink'),
+  customerCreateAccountLink: document.querySelector('#customerCreateAccountLink'),
   customerLogoutButton: document.querySelector('#customerLogoutButton'),
   refreshButton: document.querySelector('#refreshButton'),
   checkoutButton: document.querySelector('#checkoutButton'),
@@ -1037,7 +1040,7 @@ async function submitOrder(event) {
     els.checkoutDialog.close();
     setStatus(`Pedido ${result.order.public_code} criado.`);
 
-    if (result.payment?.pix) {
+    if (result.payment?.pix || result.payment?.card) {
       window.location.href = `/pagamento?pedido=${encodeURIComponent(result.order.public_code)}`;
       return;
     }
@@ -1125,6 +1128,9 @@ function renderPaymentOptions() {
   const methods = state.store?.payment_methods?.length ? [...state.store.payment_methods] : ['Pix', 'Cartão', 'Dinheiro'];
   if (state.store?.integration_settings?.pix?.enabled && !methods.includes('Pix online')) {
     methods.unshift('Pix online');
+  }
+  if (state.store?.integration_settings?.card?.enabled && !methods.includes('Cartão online')) {
+    methods.push('Cartão online');
   }
   els.paymentMethod.replaceChildren(...methods.map((method) => {
     const option = document.createElement('option');
@@ -1251,8 +1257,11 @@ function clearAccountCache() {
 }
 
 function renderCustomerActions() {
-  if (!els.customerLogoutButton) return;
-  els.customerLogoutButton.hidden = !state.customer;
+  const isLogged = Boolean(state.customer);
+  if (els.customerOrdersLink) els.customerOrdersLink.hidden = !isLogged;
+  if (els.customerAccountLink) els.customerAccountLink.hidden = !isLogged;
+  if (els.customerCreateAccountLink) els.customerCreateAccountLink.hidden = isLogged;
+  if (els.customerLogoutButton) els.customerLogoutButton.hidden = !isLogged;
 }
 
 function prefillCheckoutFromCustomer() {

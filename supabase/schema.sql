@@ -147,6 +147,10 @@ create table if not exists public.orders (
   paid_amount numeric(10, 2),
   paid_at timestamptz,
   payment_expires_at timestamptz,
+  refunded_amount numeric(10, 2),
+  refunded_at timestamptz,
+  reconciliation_status text not null default 'pending' check (reconciliation_status in ('pending', 'matched', 'divergent', 'ignored')),
+  reconciled_at timestamptz,
   promotion_code text,
   whatsapp_message text,
   archived_at timestamptz,
@@ -164,6 +168,10 @@ alter table public.orders
   add column if not exists paid_amount numeric(10, 2),
   add column if not exists paid_at timestamptz,
   add column if not exists payment_expires_at timestamptz,
+  add column if not exists refunded_amount numeric(10, 2),
+  add column if not exists refunded_at timestamptz,
+  add column if not exists reconciliation_status text not null default 'pending',
+  add column if not exists reconciled_at timestamptz,
   add column if not exists dining_table_id uuid,
   add column if not exists customer_tab_id uuid,
   add column if not exists table_snapshot jsonb,
@@ -182,6 +190,21 @@ begin
   alter table public.orders
     add constraint orders_fulfillment_method_check
     check (fulfillment_method in ('delivery', 'pickup', 'counter', 'table', 'tab'));
+end $$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_reconciliation_status_check'
+      and conrelid = 'public.orders'::regclass
+  ) then
+    alter table public.orders drop constraint orders_reconciliation_status_check;
+  end if;
+  alter table public.orders
+    add constraint orders_reconciliation_status_check
+    check (reconciliation_status in ('pending', 'matched', 'divergent', 'ignored'));
 end $$;
 
 do $$
