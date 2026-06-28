@@ -15,7 +15,7 @@ const els = {
 
 els.copy.addEventListener('click', async () => {
   await navigator.clipboard?.writeText(els.pixCode.value || '');
-  setStatus('Código Pix copiado.');
+  setStatus('Codigo Pix copiado.');
 });
 els.refresh.addEventListener('click', () => loadPayment());
 els.newPix.addEventListener('click', () => regeneratePix());
@@ -24,14 +24,14 @@ loadPayment();
 
 async function loadPayment() {
   if (!code) {
-    setStatus('Pedido não informado.');
+    setStatus('Pedido nao informado.');
     return;
   }
   try {
     const data = await request(`/api/payments/order?code=${encodeURIComponent(code)}`);
     renderPayment(data);
   } catch (error) {
-    setStatus(error.message || 'Não foi possível carregar o pagamento.');
+    setStatus(error.message || 'Nao foi possivel carregar o pagamento.');
   }
 }
 
@@ -45,30 +45,33 @@ async function regeneratePix() {
     renderPayment(data);
     setStatus('Novo Pix gerado.');
   } catch (error) {
-    setStatus(error.message || 'Não foi possível gerar um novo Pix.');
+    setStatus(error.message || 'Nao foi possivel gerar um novo Pix.');
   }
 }
 
 function renderPayment(data) {
   const order = data.order || {};
   const payment = data.payment || {};
+  const qrUrl = safeImageUrl(payment.pix_qr_url);
+  const checkoutUrl = safeHttpUrl(payment.checkout_url);
+  const hasPix = Boolean(payment.pix_code || qrUrl);
+  const hasCheckout = Boolean(checkoutUrl);
+
   els.title.textContent = `Pedido #${order.public_code || code}`;
   els.subtitle.textContent = `${money(order.total || 0)} - ${financialStatusLabel(order.financial_status)}`;
   els.status.innerHTML = `
     <div><span>Status</span><strong>${financialStatusLabel(order.financial_status)}</strong></div>
-    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleString('pt-BR') : 'Não informado'}</strong></div>
-    <div><span>Transação</span><strong>${escapeHtml(payment.transaction_id || 'Aguardando')}</strong></div>
+    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleString('pt-BR') : 'Nao informado'}</strong></div>
+    <div><span>Transacao</span><strong>${escapeHtml(payment.transaction_id || 'Aguardando')}</strong></div>
   `;
   els.pixCode.value = payment.pix_code || '';
-  const hasPix = Boolean(payment.pix_code || payment.pix_qr_url);
-  const hasCheckout = Boolean(payment.checkout_url);
   els.pixCode.closest('label').hidden = !hasPix;
   els.copy.hidden = !hasPix;
-  els.qr.hidden = !payment.pix_qr_url;
-  if (payment.pix_qr_url) els.qr.src = payment.pix_qr_url;
+  els.qr.hidden = !qrUrl;
+  els.qr.src = qrUrl || '';
   if (els.checkoutLink) {
     els.checkoutLink.hidden = !hasCheckout;
-    els.checkoutLink.href = hasCheckout ? payment.checkout_url : '#';
+    els.checkoutLink.href = checkoutUrl || '#';
   }
   els.newPix.hidden = order.financial_status !== 'expired' || !hasPix;
 }
@@ -80,7 +83,7 @@ function setStatus(message) {
 async function request(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Erro na requisição.');
+  if (!response.ok) throw new Error(data.error || 'Erro na requisicao.');
   return data;
 }
 
@@ -107,4 +110,27 @@ function escapeHtml(value) {
     '"': '&quot;',
     "'": '&#039;'
   })[char]);
+}
+
+function safeHttpUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text, window.location.origin);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function safeImageUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(text)) return text;
+  try {
+    const url = new URL(text, window.location.origin);
+    return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
 }

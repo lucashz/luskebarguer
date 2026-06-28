@@ -409,7 +409,7 @@ function renderFeatured() {
     card.className = 'featured-product';
     if (isStoreClosed()) card.classList.add('disabled');
     card.innerHTML = `
-      ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="">` : '<div class="image-fallback"></div>'}
+      ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="">` : '<div class="image-fallback"></div>'}
       <div>
         <strong>${escapeHtml(item.name)}</strong>
         <span>${money(item.price)}</span>
@@ -529,9 +529,9 @@ function productRow(item) {
       <strong>${money(item.price)}</strong>
       <div class="tags">${(item.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
     </div>
-    <button class="favorite-button ${state.favorites.has(item.id) ? 'active' : ''}" type="button" aria-label="Favoritar ${escapeHtml(item.name)}">${state.favorites.has(item.id) ? '♥' : '♡'}</button>
-    <button class="add-product" type="button" aria-label="Adicionar ${escapeHtml(item.name)}" ${storeClosed ? 'disabled' : ''}>
-      ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="">` : '<span>+</span>'}
+    <button class="favorite-button ${state.favorites.has(item.id) ? 'active' : ''}" type="button" aria-label="Favoritar ${escapeAttribute(item.name)}">${state.favorites.has(item.id) ? '♥' : '♡'}</button>
+    <button class="add-product" type="button" aria-label="Adicionar ${escapeAttribute(item.name)}" ${storeClosed ? 'disabled' : ''}>
+      ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="">` : '<span>+</span>'}
       <b>${storeClosed ? 'Fechado' : '+'}</b>
     </button>
   `;
@@ -1751,8 +1751,20 @@ function escapeAttribute(value) {
 }
 
 function cssImageUrl(value) {
-  const url = String(value || '').replace(/["\\\n\r]/g, '');
+  const url = safeImageUrl(value).replace(/["\\\n\r]/g, '');
   return url ? `url("${url}")` : '';
 }
 
+function safeImageUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(text)) return text;
+  try {
+    const url = new URL(text, window.location.origin);
+    if (['http:', 'https:', 'blob:'].includes(url.protocol)) return url.href;
+  } catch {
+    return '';
+  }
+  return '';
+}
 

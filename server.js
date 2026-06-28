@@ -154,7 +154,7 @@ async function handleApi(req, res, url) {
     const payload = await readJson(req);
     json(res, 200, await receivePaymentWebhook(payload, {
       provider: url.searchParams.get('provider') || '',
-      webhookSecret: url.searchParams.get('webhookSecret') || ''
+      webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || ''
     }));
     return;
   }
@@ -340,7 +340,7 @@ async function handleApi(req, res, url) {
 
   if (method === 'GET' && url.pathname === '/api/admin/store') {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
-    json(res, 200, { store: await getStoreSettings() });
+    json(res, 200, { store: adminStore(await getStoreSettings()) });
     return;
   }
 
@@ -408,7 +408,7 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
     const result = await updateStoreSettings(await readJson(req));
     clearStoreSettingsCache();
-    json(res, 200, result);
+    json(res, 200, { store: adminStore(Array.isArray(result) ? result[0] : result) });
     return;
   }
 
@@ -416,7 +416,7 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     const store = await updateLoyaltyProgram(await readJson(req));
     clearStoreSettingsCache();
-    json(res, 200, { store });
+    json(res, 200, { store: adminStore(store) });
     return;
   }
 
@@ -424,7 +424,7 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
     const store = await updatePrintSettings(await readJson(req));
     clearStoreSettingsCache();
-    json(res, 200, { store });
+    json(res, 200, { store: adminStore(store) });
     return;
   }
 
@@ -432,7 +432,7 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
     const store = await updateIntegrationSettings(await readJson(req));
     clearStoreSettingsCache();
-    json(res, 200, { store });
+    json(res, 200, { store: adminStore(store) });
     return;
   }
 
@@ -999,7 +999,7 @@ async function loginCustomer(data) {
 
 async function resetCustomerPassword(data) {
   const phone = onlyDigits(data.phone);
-  const orderCode = cleanText(data.order_code || '').replace(/^#/, '').toUpperCase();
+  const orderCode = cleanPublicCode(String(data.order_code || '').replace(/^#/, ''));
   const orderTotal = parseMoneyInput(data.order_total);
   const newPassword = validatePassword(data.new_password);
   if (!phone || !orderCode || orderTotal === null) {
@@ -1366,8 +1366,9 @@ async function updatePrintSettings(data) {
 
 async function updateIntegrationSettings(data) {
   const current = await getStoreSettings();
+  const nextSettings = mergeIntegrationSettings(current.integration_settings || {}, data.integration_settings || data);
   const payload = {
-    integration_settings: sanitizeIntegrationSettings(data.integration_settings || data)
+    integration_settings: nextSettings
   };
 
   if (current.id) {
@@ -1393,7 +1394,9 @@ async function updateIntegrationSettings(data) {
 
 async function testIntegrations(data = {}) {
   const store = await getStoreSettings();
-  const settings = sanitizeIntegrationSettings(data.integration_settings || store.integration_settings || {});
+  const settings = data.integration_settings
+    ? mergeIntegrationSettings(store.integration_settings || {}, data.integration_settings)
+    : sanitizeIntegrationSettings(store.integration_settings || {});
   const whatsappCheck = await testWhatsappIntegration(settings.whatsapp).catch((error) => ({
     ok: false,
     message: error.message || 'Não foi possível testar o WhatsApp.'
@@ -1564,19 +1567,19 @@ async function createOrder(req, data, options = {}) {
   if (!paymentMethod) throw httpError(422, 'Informe a forma de pagamento.');
   if (requestedItems.length === 0) throw httpError(422, 'Inclua ao menos um item no pedido.');
 
-  const itemIds = [...new Set(requestedItems.map((item) => cleanText(item.id)).filter(Boolean))];
+  const itemIds = cleanUuidArray(requestedItems.map((item) => item.id));
   if (itemIds.length === 0) throw httpError(422, 'Itens do pedido inválidos.');
 
   const menuItems = await supabase('GET', 'menu_items', {
     select: '*',
-    id: `in.(${itemIds.join(',')})`,
+    id: uuidInFilter(itemIds),
     is_available: 'eq.true'
   });
 
   const menuById = new Map(menuItems.map((item) => [item.id, item]));
   const modifierCatalog = await loadModifierCatalog(itemIds);
   const orderItems = requestedItems.map((requested) => {
-    const menuItem = menuById.get(cleanText(requested.id));
+    const menuItem = menuById.get(cleanUuid(requested.id));
     if (!menuItem) throw httpError(422, 'Um item escolhido não está mais disponível.');
 
     const quantity = clampInteger(requested.quantity, 1, 99);
@@ -1716,9 +1719,11 @@ async function createOrder(req, data, options = {}) {
 }
 
 async function loadModifierCatalog(itemIds) {
+  const cleanItemIds = cleanUuidArray(itemIds);
+  if (cleanItemIds.length === 0) return { groupsByItem: new Map(), modifiersById: new Map() };
   const groups = await supabase('GET', 'menu_modifier_groups', {
     select: '*',
-    menu_item_id: `in.(${itemIds.join(',')})`,
+    menu_item_id: uuidInFilter(cleanItemIds),
     order: 'sort_order.asc,name.asc'
   });
 
@@ -1726,10 +1731,10 @@ async function loadModifierCatalog(itemIds) {
     return { groupsByItem: new Map(), modifiersById: new Map() };
   }
 
-  const groupIds = groups.map((group) => group.id);
+  const groupIds = cleanUuidArray(groups.map((group) => group.id));
   const modifiers = await supabase('GET', 'menu_modifiers', {
     select: '*',
-    group_id: `in.(${groupIds.join(',')})`,
+    group_id: uuidInFilter(groupIds),
     is_available: 'eq.true',
     order: 'sort_order.asc,name.asc'
   });
@@ -1760,7 +1765,7 @@ async function loadModifierCatalog(itemIds) {
 }
 
 function validateSelectedModifiers(menuItemId, selectedIds, catalog) {
-  const ids = Array.isArray(selectedIds) ? [...new Set(selectedIds.map(cleanText).filter(Boolean))] : [];
+  const ids = cleanUuidArray(selectedIds || []);
   const selected = ids.map((id) => {
     const modifier = catalog.modifiersById.get(id);
     if (!modifier || modifier.menu_item_id !== menuItemId) {
@@ -1793,7 +1798,7 @@ function validateSelectedModifiers(menuItemId, selectedIds, catalog) {
 }
 
 function validateExistingSelectedModifiers(menuItemId, selectedIds, catalog) {
-  const ids = Array.isArray(selectedIds) ? [...new Set(selectedIds.map(cleanText).filter(Boolean))] : [];
+  const ids = cleanUuidArray(selectedIds || []);
   return ids.map((id) => {
     const modifier = catalog.modifiersById.get(id);
     if (!modifier || modifier.menu_item_id !== menuItemId) {
@@ -2038,17 +2043,18 @@ async function listOrders() {
 
 async function attachOrderIntegrationLogs(orders) {
   if (!orders.length) return orders;
-  const ids = orders.map((order) => order.id);
+  const ids = cleanUuidArray(orders.map((order) => order.id));
+  if (!ids.length) return orders;
   const [whatsappLogs, paymentEvents] = await Promise.all([
     supabase('GET', 'order_whatsapp_logs', {
       select: 'id,order_id,order_status,delivery_status,provider,error_message,created_at',
-      order_id: `in.(${ids.join(',')})`,
+      order_id: uuidInFilter(ids),
       order: 'created_at.desc',
       limit: String(Math.min(ids.length * 3, 180))
     }),
     supabase('GET', 'order_payment_events', {
       select: 'id,order_id,provider,financial_status,amount,created_at',
-      order_id: `in.(${ids.join(',')})`,
+      order_id: uuidInFilter(ids),
       order: 'created_at.desc',
       limit: String(Math.min(ids.length * 3, 180))
     })
@@ -2625,20 +2631,20 @@ async function assertPaymentWebhookSecret(provider, incomingSecret) {
 }
 
 async function normalizeProviderWebhook(data) {
-  const provider = cleanText(data.provider || inferWebhookProvider(data) || 'mock');
+  const provider = cleanProvider(data.provider || inferWebhookProvider(data) || 'mock');
   if (provider === 'abacatepay') {
     const payload = data.data || data.payment || data.pixQrCode || data.billing || data;
     return {
       provider,
-      eventId: cleanText(data.id || data.eventId || data.event || payload.id || `abacatepay_${Date.now()}`),
-      transactionId: cleanText(payload.id || data.paymentId || data.transaction_id || ''),
-      orderCode: cleanText(payload.metadata?.orderCode || payload.externalId || payload.externalReference || data.order_code || data.code || ''),
+      eventId: cleanExternalId(data.id || data.eventId || data.event || payload.id || `abacatepay_${Date.now()}`),
+      transactionId: cleanExternalId(payload.id || data.paymentId || data.transaction_id || ''),
+      orderCode: cleanPublicCode(payload.metadata?.orderCode || payload.externalId || payload.externalReference || data.order_code || data.code || ''),
       status: abacatePayStatusToFinancial(payload.status || data.status || data.event),
       amount: centsToMoney(payload.amount || payload.value || data.amount || data.value)
     };
   }
   if (provider === 'mercadopago') {
-    const paymentId = cleanText(data.data?.id || data.id || data.resource || data.transaction_id || '');
+    const paymentId = cleanExternalId(data.data?.id || data.id || data.resource || data.transaction_id || '');
     let detail = data.payment || data;
     const store = await getStoreSettings();
     const settings = sanitizeIntegrationSettings(store.integration_settings || {});
@@ -2648,9 +2654,9 @@ async function normalizeProviderWebhook(data) {
     }
     return {
       provider,
-      eventId: cleanText(data.id || data.action || paymentId || `mp_${Date.now()}`),
-      transactionId: cleanText(detail.id || paymentId),
-      orderCode: cleanText(detail.external_reference || data.external_reference || ''),
+      eventId: cleanExternalId(data.id || data.action || paymentId || `mp_${Date.now()}`),
+      transactionId: cleanExternalId(detail.id || paymentId),
+      orderCode: cleanPublicCode(detail.external_reference || data.external_reference || ''),
       status: mercadoPagoStatusToFinancial(detail.status || data.status),
       amount: detail.transaction_amount || data.amount
     };
@@ -2659,9 +2665,9 @@ async function normalizeProviderWebhook(data) {
     const payment = data.payment || data;
     return {
       provider,
-      eventId: cleanText(data.id || data.event || payment.id || `asaas_${Date.now()}`),
-      transactionId: cleanText(payment.id || data.paymentId || ''),
-      orderCode: cleanText(payment.externalReference || data.externalReference || ''),
+      eventId: cleanExternalId(data.id || data.event || payment.id || `asaas_${Date.now()}`),
+      transactionId: cleanExternalId(payment.id || data.paymentId || ''),
+      orderCode: cleanPublicCode(payment.externalReference || data.externalReference || ''),
       status: asaasStatusToFinancial(payment.status || data.status || data.event),
       amount: payment.value || data.value || data.amount
     };
@@ -2670,18 +2676,18 @@ async function normalizeProviderWebhook(data) {
     const pix = Array.isArray(data.pix) ? data.pix[0] : data.pix || data;
     return {
       provider,
-      eventId: cleanText(pix.endToEndId || pix.txid || data.id || `efi_${Date.now()}`),
-      transactionId: cleanText(pix.txid || data.txid || ''),
-      orderCode: cleanText(data.order_code || data.code || pix.txid || ''),
+      eventId: cleanExternalId(pix.endToEndId || pix.txid || data.id || `efi_${Date.now()}`),
+      transactionId: cleanExternalId(pix.txid || data.txid || ''),
+      orderCode: cleanPublicCode(data.order_code || data.code || pix.txid || ''),
       status: 'paid',
       amount: pix.valor || data.valor || data.amount
     };
   }
   return {
     provider,
-    eventId: cleanText(data.event_id || data.id || `${provider}_${Date.now()}`),
-    transactionId: cleanText(data.transaction_id || data.payment_transaction_id || ''),
-    orderCode: cleanText(data.order_code || data.code || ''),
+    eventId: cleanExternalId(data.event_id || data.id || `${provider}_${Date.now()}`),
+    transactionId: cleanExternalId(data.transaction_id || data.payment_transaction_id || ''),
+    orderCode: cleanPublicCode(data.order_code || data.code || ''),
     status: sanitizeFinancialStatus(data.status || data.financial_status || 'paid'),
     amount: data.amount
   };
@@ -2844,7 +2850,7 @@ async function fetchProviderPaymentStatus(order, integrations) {
 }
 
 async function getOrderByPublicCode(code) {
-  const cleanCode = cleanText(code || '').replace(/^#/, '').toUpperCase();
+  const cleanCode = cleanPublicCode(String(code || '').replace(/^#/, ''));
   if (!cleanCode) return null;
   const rows = await supabase('GET', 'orders', {
     select: '*',
@@ -2970,12 +2976,12 @@ async function listCustomerTabs() {
     order: 'opened_at.desc',
     limit: '200'
   });
-  const openTabIds = tabs.filter((tab) => tab.status === 'open').map((tab) => tab.id);
+  const openTabIds = cleanUuidArray(tabs.filter((tab) => tab.status === 'open').map((tab) => tab.id));
   let ordersByTab = new Map();
   if (openTabIds.length) {
     const orders = await supabase('GET', 'orders', {
       select: 'id,customer_tab_id,total,status,created_at',
-      customer_tab_id: `in.(${openTabIds.join(',')})`,
+      customer_tab_id: uuidInFilter(openTabIds),
       order: 'created_at.desc',
       limit: '500'
     });
@@ -3019,13 +3025,15 @@ async function resolveDiningTable(code) {
   });
   let enrichedTabs = tabs;
   if (tabs.length) {
-    const tabIds = tabs.map((tab) => tab.id);
-    const orders = await supabase('GET', 'orders', {
-      select: '*',
-      customer_tab_id: `in.(${tabIds.join(',')})`,
-      order: 'created_at.desc',
-      limit: '500'
-    });
+    const tabIds = cleanUuidArray(tabs.map((tab) => tab.id));
+    const orders = tabIds.length
+      ? await supabase('GET', 'orders', {
+        select: '*',
+        customer_tab_id: uuidInFilter(tabIds),
+        order: 'created_at.desc',
+        limit: '500'
+      })
+      : [];
     const ordersByTab = orders.reduce((map, order) => {
       const list = map.get(order.customer_tab_id) || [];
       list.push(order);
@@ -3336,10 +3344,11 @@ function validReportDate(value) {
 async function attachOrderItems(orders) {
   if (orders.length === 0) return [];
 
-  const ids = orders.map((order) => order.id);
+  const ids = cleanUuidArray(orders.map((order) => order.id));
+  if (ids.length === 0) return orders.map((order) => ({ ...order, items: [] }));
   const items = await supabase('GET', 'order_items', {
     select: '*',
-    order_id: `in.(${ids.join(',')})`,
+    order_id: uuidInFilter(ids),
     order: 'created_at.asc'
   });
 
@@ -3366,12 +3375,14 @@ async function listCustomers() {
     };
     return [];
   }
-  const ids = customers.map((customer) => customer.id);
-  const addresses = await supabase('GET', 'customer_addresses', {
-    select: '*',
-    customer_id: `in.(${ids.join(',')})`,
-    order: 'is_default.desc,created_at.desc'
-  });
+  const ids = cleanUuidArray(customers.map((customer) => customer.id));
+  const addresses = ids.length
+    ? await supabase('GET', 'customer_addresses', {
+      select: '*',
+      customer_id: uuidInFilter(ids),
+      order: 'is_default.desc,created_at.desc'
+    })
+    : [];
   const byCustomer = new Map();
   for (const address of addresses) {
     if (!byCustomer.has(address.customer_id)) byCustomer.set(address.customer_id, []);
@@ -3446,15 +3457,15 @@ async function promotionCustomerContext(req, data) {
 
 async function promotionItemsContext(rawItems) {
   const requestedItems = Array.isArray(rawItems) ? rawItems : [];
-  const itemIds = [...new Set(requestedItems.map((item) => cleanText(item.id)).filter(Boolean))];
+  const itemIds = cleanUuidArray(requestedItems.map((item) => item.id));
   if (itemIds.length === 0) return [];
   const items = await supabase('GET', 'menu_items', {
     select: 'id,name,category_id,price',
-    id: `in.(${itemIds.join(',')})`
+    id: uuidInFilter(itemIds)
   });
   const byId = new Map(items.map((item) => [item.id, item]));
   return requestedItems.map((requested) => {
-    const item = byId.get(cleanText(requested.id));
+    const item = byId.get(cleanUuid(requested.id));
     if (!item) return null;
     return {
       menu_item_id: item.id,
@@ -3575,7 +3586,7 @@ function isBirthdayWithinWindow(birthDate, windowDays) {
 
 function cleanIdArray(value) {
   if (!Array.isArray(value)) return [];
-  return value.map(cleanText).filter(Boolean);
+  return cleanUuidArray(value);
 }
 
 function couponDiscountAmount(coupon, subtotal, deliveryFee) {
@@ -3729,6 +3740,64 @@ function sanitizeIntegrationSettings(value) {
       days: clampInteger(reconciliation.days || defaults.reconciliation.days, 1, 30)
     }
   };
+}
+
+function mergeIntegrationSettings(currentValue, nextValue) {
+  const current = sanitizeIntegrationSettings(currentValue || {});
+  const next = sanitizeIntegrationSettings(nextValue || {});
+  const rawNext = isPlainObject(nextValue) ? nextValue : {};
+  const rawWhatsapp = isPlainObject(rawNext.whatsapp) ? rawNext.whatsapp : {};
+  const rawPix = isPlainObject(rawNext.pix) ? rawNext.pix : {};
+
+  if (shouldKeepExistingSecret(rawWhatsapp.accessToken)) {
+    next.whatsapp.accessToken = current.whatsapp.accessToken;
+  }
+  if (shouldKeepExistingSecret(rawPix.apiKey)) {
+    next.pix.apiKey = current.pix.apiKey;
+  }
+  if (shouldKeepExistingSecret(rawPix.webhookSecret)) {
+    next.pix.webhookSecret = current.pix.webhookSecret;
+  }
+
+  return next;
+}
+
+function shouldKeepExistingSecret(value) {
+  const text = String(value || '').trim();
+  return !text || /^••••/.test(text) || /^\*{4,}/.test(text);
+}
+
+function maskedSecret(value) {
+  const text = String(value || '');
+  if (!text) return '';
+  const tail = text.slice(-4);
+  return `••••${tail}`;
+}
+
+function adminStore(store) {
+  const copy = {
+    ...store,
+    loyalty_program: sanitizeLoyaltyProgram(store.loyalty_program || {}),
+    theme_settings: sanitizeThemeSettings(store.theme_settings || {}),
+    print_settings: sanitizePrintSettings(store.print_settings || {})
+  };
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  copy.integration_settings = {
+    ...integrations,
+    whatsapp: {
+      ...integrations.whatsapp,
+      accessToken: maskedSecret(integrations.whatsapp.accessToken),
+      hasAccessToken: Boolean(integrations.whatsapp.accessToken)
+    },
+    pix: {
+      ...integrations.pix,
+      apiKey: maskedSecret(integrations.pix.apiKey),
+      webhookSecret: maskedSecret(integrations.pix.webhookSecret),
+      hasApiKey: Boolean(integrations.pix.apiKey),
+      hasWebhookSecret: Boolean(integrations.pix.webhookSecret)
+    }
+  };
+  return copy;
 }
 
 function publicStore(store) {
@@ -3888,7 +3957,10 @@ function routePath(requestPath) {
 async function sendFile(res, filePath) {
   const ext = path.extname(filePath);
   const content = await readFile(filePath);
-  res.writeHead(200, { 'Content-Type': mimeTypes.get(ext) || 'application/octet-stream' });
+  res.writeHead(200, {
+    ...securityHeaders(),
+    'Content-Type': mimeTypes.get(ext) || 'application/octet-stream'
+  });
   res.end(content);
 }
 
@@ -4122,7 +4194,7 @@ async function requireActiveDiningTable(idOrCode) {
     is_active: 'eq.true',
     limit: '1'
   };
-  if (/^[a-f0-9-]{36}$/i.test(value)) query.id = `eq.${value}`;
+  if (/^[a-f0-9-]{36}$/i.test(value)) query.id = `eq.${cleanUuid(value, 'mesa')}`;
   else query.code = `eq.${cleanSlug(value)}`;
   const rows = await supabase('GET', 'dining_tables', query);
   if (!rows[0]) throw httpError(422, 'Mesa não encontrada ou inativa.');
@@ -4130,7 +4202,7 @@ async function requireActiveDiningTable(idOrCode) {
 }
 
 async function requireOpenTab(tabId, tableId) {
-  const id = cleanText(tabId || '');
+  const id = tabId ? cleanUuid(tabId, 'comanda') : '';
   let rows = [];
   if (id) {
     rows = await supabase('GET', 'customer_tabs', {
@@ -4277,7 +4349,8 @@ function fieldLabel(field) {
     number: 'número',
     neighborhood: 'bairro',
     city: 'cidade',
-    payment_method: 'forma de pagamento'
+    payment_method: 'forma de pagamento',
+    id: 'identificador'
   })[field] || field;
 }
 
@@ -4426,8 +4499,28 @@ function publicCustomer(customer) {
 }
 
 function json(res, status, data, headers = {}) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+  res.writeHead(status, { ...securityHeaders(), 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(data));
+}
+
+function securityHeaders() {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Content-Security-Policy': [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'"
+    ].join('; ')
+  };
 }
 
 async function safeResponse(response) {
@@ -4484,6 +4577,43 @@ function createPublicCode() {
 
 function cleanText(value) {
   return String(value ?? '').trim().slice(0, 500);
+}
+
+function cleanUuid(value, field = 'id') {
+  const text = cleanText(value).toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(text)) {
+    throw httpError(422, `${fieldLabel(field)} inválido.`);
+  }
+  return text;
+}
+
+function cleanUuidArray(value, field = 'id') {
+  if (!Array.isArray(value)) return [];
+  const unique = new Set();
+  for (const item of value) {
+    if (item === null || item === undefined || item === '') continue;
+    unique.add(cleanUuid(item, field));
+  }
+  return [...unique];
+}
+
+function uuidInFilter(ids) {
+  const cleanIds = cleanUuidArray(ids);
+  if (!cleanIds.length) throw httpError(422, 'Lista de identificadores inválida.');
+  return `in.(${cleanIds.join(',')})`;
+}
+
+function cleanPublicCode(value) {
+  return cleanText(value).toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+}
+
+function cleanProvider(value) {
+  const provider = cleanText(value).toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  return ['abacatepay', 'mercadopago', 'asaas', 'efi', 'mock'].includes(provider) ? provider : 'mock';
+}
+
+function cleanExternalId(value) {
+  return cleanText(value).replace(/[^a-zA-Z0-9._:-]/g, '').slice(0, 180);
 }
 
 function cleanSlug(value) {

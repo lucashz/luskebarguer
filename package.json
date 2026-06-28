@@ -10,7 +10,8 @@
     "db:backup": "node scripts/backup-supabase.mjs",
     "admin:create": "node scripts/create-admin.mjs",
     "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js",
-    "test:local": "node scripts/local-audit.mjs"
+    "test:local": "node scripts/local-audit.mjs",
+    "test:security": "node scripts/sql-injection-tests.mjs"
   },
   "dependencies": {
     "pg": "^8.16.3"

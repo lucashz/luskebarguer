@@ -4238,12 +4238,12 @@ function integrationTestMessage(label, result) {
 function renderAbacateWebhookUrl() {
   if (!els.abacateWebhookUrl) return;
   const origin = window.location.origin || '';
-  els.abacateWebhookUrl.textContent = `${origin}/api/payments/webhook?provider=abacatepay&webhookSecret=SEU_SEGREDO`;
+  els.abacateWebhookUrl.textContent = `${origin}/api/payments/webhook?provider=abacatepay`;
 }
 
 function openIntegrationHelp(type) {
   const origin = window.location.origin || 'https://sua-loja.com';
-  const webhookUrl = `${origin}/api/payments/webhook?provider=abacatepay&webhookSecret=SEU_SEGREDO`;
+  const webhookUrl = `${origin}/api/payments/webhook?provider=abacatepay`;
   const content = {
     'abacate-key': {
       eyebrow: 'Abacate Pay',
@@ -4268,7 +4268,7 @@ function openIntegrationHelp(type) {
         </ol>
         <code>${escapeHtml(webhookUrl)}</code>
         <ol start="3">
-          <li>Troque <strong>SEU_SEGREDO</strong> pelo mesmo texto cadastrado no campo <strong>Segredo do webhook</strong>.</li>
+          <li>Configure no provedor o header <strong>x-webhook-secret</strong> com o mesmo valor do campo <strong>Segredo do webhook</strong>.</li>
           <li>Salve as integrações antes de testar a confirmação do Pix.</li>
           <li>Faça um pedido teste com Pix online e confira se o status muda para pago após a confirmação.</li>
         </ol>
@@ -4964,7 +4964,12 @@ function saveAdminCache() {
 
 function loadAdminCache() {
   try {
-    return JSON.parse(localStorage.getItem(ADMIN_CACHE_KEY) || 'null');
+    const cached = JSON.parse(localStorage.getItem(ADMIN_CACHE_KEY) || 'null');
+    if (cached?.store?.integration_settings) {
+      delete cached.store.integration_settings;
+      localStorage.setItem(ADMIN_CACHE_KEY, JSON.stringify(cached));
+    }
+    return cached;
   } catch {
     return null;
   }
