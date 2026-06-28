@@ -590,13 +590,25 @@
 
               <section class="store-settings-section">
                 <div class="store-settings-copy">
-                  <strong>Aparencia</strong>
-                  <p>Imagens opcionais para deixar o cardápio mais parecido com a marca da loja.</p>
+                  <strong>Imagens da loja</strong>
+                  <p>Envie o logo e a imagem de fundo que aparecem no topo do cardápio do cliente.</p>
                 </div>
                 <div class="store-settings-fields">
+                  <div class="media-upload-grid">
+                    <label class="media-upload-card">
+                      Logo da loja
+                      <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
+                      <small>JPG, PNG ou WebP até 5 MB.</small>
+                    </label>
+                    <label class="media-upload-card">
+                      Imagem de fundo do cardápio
+                      <input name="cover_file" type="file" accept="image/jpeg,image/png,image/webp">
+                      <small>Use uma imagem horizontal para melhor resultado.</small>
+                    </label>
+                  </div>
                   <div class="two-cols">
                     <label>URL do logo<input name="logo_url" placeholder="https://..."></label>
-                    <label>URL da capa<input name="cover_url" placeholder="https://..."></label>
+                    <label>URL da imagem de fundo<input name="cover_url" placeholder="https://..."></label>
                   </div>
                 </div>
               </section>
@@ -615,7 +627,7 @@
                     </button>
                     <button type="button" data-theme-preset="burger">
                       <span style="--swatch:#f97316"></span>
-                      <strong>Burger quente</strong>
+                      <strong>Quente</strong>
                       <small>Laranja, preto suave e fundo acolhedor.</small>
                     </button>
                     <button type="button" data-theme-preset="fresh">
@@ -697,11 +709,10 @@
                 <div>
                   <p class="eyebrow">Credenciais e automações</p>
                   <h2>Integrações</h2>
-                  <p>Configure WhatsApp, Pix, cartão online, split, estorno e conciliação. As credenciais ficam protegidas no servidor.</p>
+                  <p>Configure WhatsApp automático e Pix online com Abacate Pay. As credenciais ficam protegidas no servidor.</p>
                 </div>
                 <div class="row-actions">
                   <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar integrações</button>
-                  <button class="ghost-button compact" id="reconcilePaymentsButton" type="button">Conciliar pagamentos</button>
                   <button class="primary-button compact" type="submit">Salvar integrações</button>
                 </div>
               </div>
@@ -715,62 +726,40 @@
                   <label class="check"><input name="integration_whatsapp_enabled" type="checkbox"> Ativar mensagens automáticas</label>
                   <label>Provedor
                     <select name="integration_whatsapp_provider">
+                      <option value="whatsevolution">WhatsEvolution</option>
                       <option value="official">API oficial</option>
                       <option value="webhook">Webhook próprio</option>
                       <option value="mock">Simulado/local</option>
                     </select>
                   </label>
-                  <label>ID do número<input name="integration_whatsapp_phoneNumberId" placeholder="Phone Number ID"></label>
+                  <label>Instância / ID do número<input name="integration_whatsapp_phoneNumberId" placeholder="Ex: minha-instancia"></label>
                   <label>Token/API key<input name="integration_whatsapp_accessToken" type="password" autocomplete="new-password" placeholder="Token do provedor"></label>
                   <label>URL da API/webhook<input name="integration_whatsapp_apiUrl" placeholder="https://..."></label>
                 </section>
 
                 <section class="integration-card">
                   <div>
-                    <strong>Pix online</strong>
-                    <p>Gera QR Code, copia e cola, expiração e recebe confirmação por webhook do provedor.</p>
+                    <p class="eyebrow">Pagamento online</p>
+                    <strong>Abacate Pay</strong>
+                    <p>Gera Pix copia e cola, QR Code e recebe confirmação automática pelo webhook.</p>
                   </div>
                   <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
-                  <label>Provedor
-                    <select name="integration_pix_provider">
-                      <option value="mock">Simulado/local</option>
-                      <option value="mercadopago">Mercado Pago</option>
-                      <option value="efi">Efí/Gerencianet</option>
-                      <option value="asaas">Asaas</option>
-                    </select>
+                  <input name="integration_pix_provider" type="hidden" value="abacatepay">
+                  <label>API key da Abacate Pay
+                    <input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Cole a API key">
                   </label>
-                  <label>Chave/API key<input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Credencial do provedor"></label>
-                  <label>Segredo webhook<input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Webhook secret"></label>
+                  <label>Segredo do webhook
+                    <input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Opcional, mas recomendado">
+                  </label>
                   <label>Expiração do Pix (min)<input name="integration_pix_expirationMinutes" type="number" min="5" max="120" value="15"></label>
-                </section>
-
-                <section class="integration-card">
-                  <div>
-                    <strong>Cartão online</strong>
-                    <p>Usa checkout seguro/tokenização do provedor. O sistema não armazena dados de cartão.</p>
+                  <div class="integration-help-actions">
+                    <button class="ghost-button compact" type="button" data-integration-help="abacate-key">Onde pego a API key?</button>
+                    <button class="ghost-button compact" type="button" data-integration-help="abacate-webhook">Como configuro o webhook?</button>
                   </div>
-                  <label class="check"><input name="integration_card_enabled" type="checkbox"> Ativar cartão online</label>
-                  <label>Provedor
-                    <select name="integration_card_provider">
-                      <option value="mock">Simulado/local</option>
-                      <option value="mercadopago">Mercado Pago Checkout</option>
-                      <option value="asaas">Asaas Checkout</option>
-                    </select>
-                  </label>
-                  <label>Chave/API key<input name="integration_card_apiKey" type="password" autocomplete="new-password" placeholder="Credencial do cartão"></label>
-                  <label>URL de retorno<input name="integration_card_returnUrl" placeholder="https://sua-loja.com/pagamento"></label>
-                </section>
-
-                <section class="integration-card">
-                  <div>
-                    <strong>Split e conciliação</strong>
-                    <p>Configure repasse e conferência manual/automática dos pagamentos online.</p>
+                  <div class="integration-webhook-url">
+                    <span>URL para cadastrar no webhook</span>
+                    <code id="abacateWebhookUrl">/api/payments/webhook?provider=abacatepay&amp;webhookSecret=SEU_SEGREDO</code>
                   </div>
-                  <label class="check"><input name="integration_split_enabled" type="checkbox"> Ativar split quando o provedor aceitar</label>
-                  <label>ID recebedor split<input name="integration_split_recipientId" placeholder="ID da conta recebedora"></label>
-                  <label>Percentual split (%)<input name="integration_split_percentage" type="number" min="0" max="100" step="0.01" value="0"></label>
-                  <label class="check"><input name="integration_reconciliation_enabled" type="checkbox"> Ativar conciliação</label>
-                  <label>Janela de conciliação (dias)<input name="integration_reconciliation_days" type="number" min="1" max="30" value="7"></label>
                 </section>
               </div>
               <p class="muted integration-status-text" id="integrationStatusText">Configure e salve para ativar as integrações.</p>
@@ -842,6 +831,17 @@
               <button class="ghost-button compact" id="newOrderCloseButton" type="button">Fechar</button>
             </div>
           </div>
+        </dialog>
+
+        <dialog class="dialog integration-help-dialog" id="integrationHelpDialog">
+          <form method="dialog" class="dialog-header">
+            <div>
+              <p class="eyebrow" id="integrationHelpEyebrow">Tutorial</p>
+              <h2 id="integrationHelpTitle">Integração</h2>
+            </div>
+            <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+          </form>
+          <section class="integration-help-body" id="integrationHelpBody"></section>
         </dialog>
 
         <dialog class="dialog category-admin-dialog" id="categoryDialog">

@@ -161,7 +161,10 @@ function orderCard(order) {
       <div>
         <strong>#${escapeHtml(order.public_code)}</strong>
         <p>${new Date(order.created_at).toLocaleString('pt-BR')}</p>
-        <p class="order-origin-line">${escapeHtml(orderOriginLabel(order))}</p>
+        <div class="order-info-badges">
+          ${orderOriginBadge(order)}
+          ${financialStatusBadge(order)}
+        </div>
       </div>
       <span class="order-history-status">${statusLabel(order.status)}</span>
     </div>
@@ -206,6 +209,11 @@ function orderOriginLabel(order) {
   if (method === 'counter') return 'Pedido no balcão';
   if (method === 'pickup') return 'Retirada no estabelecimento';
   return 'Delivery';
+}
+
+function orderOriginBadge(order) {
+  const method = order.fulfillment_method || 'delivery';
+  return `<span class="origin-badge origin-${escapeAttribute(method)}">${escapeHtml(orderOriginLabel(order))}</span>`;
 }
 
 function repeatOrder(order) {
@@ -287,6 +295,22 @@ function statusLabel(status) {
   })[status] || status;
 }
 
+function financialStatusLabel(status) {
+  return ({
+    pending: 'Pagamento pendente',
+    paid: 'Pagamento aprovado',
+    failed: 'Pagamento falhou',
+    expired: 'Pagamento expirado',
+    cancelled: 'Pagamento cancelado',
+    refunded: 'Pagamento estornado'
+  })[status] || 'Pagamento pendente';
+}
+
+function financialStatusBadge(order) {
+  const status = order.financial_status || 'pending';
+  return `<span class="financial-status-badge financial-status-${escapeAttribute(status)}">${financialStatusLabel(status)}</span>`;
+}
+
 function money(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
@@ -305,4 +329,8 @@ function escapeHtml(value) {
     '"': '&quot;',
     "'": '&#039;'
   })[char]);
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, '&#096;');
 }

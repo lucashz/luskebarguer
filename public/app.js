@@ -48,6 +48,7 @@ const els = {
   searchSuggestions: document.querySelector('#searchSuggestions'),
   customerOrdersLink: document.querySelector('#customerOrdersLink'),
   customerAccountLink: document.querySelector('#customerAccountLink'),
+  customerLoginLink: document.querySelector('#customerLoginLink'),
   customerCreateAccountLink: document.querySelector('#customerCreateAccountLink'),
   customerLogoutButton: document.querySelector('#customerLogoutButton'),
   refreshButton: document.querySelector('#refreshButton'),
@@ -76,6 +77,9 @@ const els = {
   checkoutCustomerName: document.querySelector('#checkoutCustomerName'),
   checkoutCustomerPhone: document.querySelector('#checkoutCustomerPhone'),
   deliveryFeeHint: document.querySelector('#deliveryFeeHint'),
+  checkoutFulfillmentFieldset: document.querySelector('#checkoutFulfillmentFieldset'),
+  checkoutFulfillmentLegend: document.querySelector('#checkoutFulfillmentLegend'),
+  fulfillmentMethodSelector: document.querySelector('#fulfillmentMethodSelector'),
   tableContext: document.querySelector('#tableContext'),
   paymentMethod: document.querySelector('#paymentMethod'),
   cashChangeField: document.querySelector('#cashChangeField'),
@@ -252,6 +256,7 @@ function renderStore() {
   els.storeName.textContent = name;
   els.storeLogo.textContent = '';
   els.storeLogo.style.backgroundImage = '';
+  els.storeCover.style.backgroundImage = '';
   els.storeDescription.textContent = store.description || 'Escolha seus itens e envie o pedido pelo WhatsApp da loja.';
   els.storeStatus.textContent = store.is_open === false ? 'Fechado agora' : 'Aberto agora';
   els.storeStatus.classList.toggle('closed', store.is_open === false);
@@ -263,11 +268,11 @@ function renderStore() {
   }
 
   if (store.cover_url) {
-    els.storeCover.style.backgroundImage = `url("${store.cover_url}")`;
+    els.storeCover.style.backgroundImage = cssImageUrl(store.cover_url);
   }
 
   if (store.logo_url) {
-    els.storeLogo.style.backgroundImage = `url("${store.logo_url}")`;
+    els.storeLogo.style.backgroundImage = cssImageUrl(store.logo_url);
   }
 
   handleStoreClosedState();
@@ -300,7 +305,7 @@ function renderTableContext() {
     : '';
   els.tableContext.innerHTML = `
     <strong>${method === 'tab' ? 'Comanda' : 'Mesa'}: ${escapeHtml(state.diningTable.name)}</strong>
-    <p>${method === 'tab' && state.customerTab ? `Este pedido será adicionado automaticamente à ${escapeHtml(state.customerTab.name)}. Total atual: ${money(state.customerTab.current_total || 0)}.` : 'Seu pedido será entregue nesta mesa. Se houver comanda aberta, o sistema adiciona os itens nela.'}</p>
+    <p>${method === 'tab' && state.customerTab ? `Pedido in loco para ${escapeHtml(state.customerTab.name)}. Total atual: ${money(state.customerTab.current_total || 0)}.` : 'Pedido in loco identificado pelo QR Code. A equipe entregará os itens nesta mesa.'}</p>
     ${tabPicker}
   `;
   els.tableContext.querySelector('[data-table-tab-select]')?.addEventListener('change', (event) => {
@@ -332,6 +337,21 @@ function updateDineInModes(options = {}) {
     target.checked = true;
   } else if ((tableRadio?.checked || tabRadio?.checked) && deliveryRadio) {
     deliveryRadio.checked = true;
+  }
+  renderDineInCheckoutMode();
+}
+
+function renderDineInCheckoutMode() {
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  const isTableQr = Boolean(state.diningTable);
+  els.checkoutFulfillmentFieldset?.classList.toggle('table-qr-checkout', isTableQr);
+  if (els.fulfillmentMethodSelector) els.fulfillmentMethodSelector.hidden = isTableQr;
+  if (els.checkoutFulfillmentLegend) {
+    els.checkoutFulfillmentLegend.textContent = isTableQr
+      ? 'Mesa identificada'
+      : method === 'delivery'
+        ? 'Entrega'
+        : 'Como será o pedido';
   }
 }
 
@@ -1153,9 +1173,13 @@ function updateCheckoutDeliveryFields() {
     const field = els.checkoutForm.elements[name];
     field.disabled = method !== 'delivery';
   });
+  document.querySelectorAll('.delivery-address-field').forEach((element) => {
+    element.hidden = method !== 'delivery';
+  });
   ['street', 'number', 'neighborhood', 'city'].forEach((name) => {
     els.checkoutForm.elements[name].required = method === 'delivery';
   });
+  renderDineInCheckoutMode();
   renderTableContext();
   updateDeliveryFeeHint();
 }
@@ -1260,6 +1284,7 @@ function renderCustomerActions() {
   const isLogged = Boolean(state.customer);
   if (els.customerOrdersLink) els.customerOrdersLink.hidden = !isLogged;
   if (els.customerAccountLink) els.customerAccountLink.hidden = !isLogged;
+  if (els.customerLoginLink) els.customerLoginLink.hidden = isLogged;
   if (els.customerCreateAccountLink) els.customerCreateAccountLink.hidden = isLogged;
   if (els.customerLogoutButton) els.customerLogoutButton.hidden = !isLogged;
 }
@@ -1273,6 +1298,13 @@ function prefillCheckoutFromCustomer() {
 
   syncLoggedCustomerFields();
   renderCheckoutCustomerSection();
+
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
+  if (['table', 'tab'].includes(method)) {
+    els.accountPrefill.hidden = true;
+    els.deleteSavedAddressButton.hidden = true;
+    return;
+  }
 
   const addresses = customerAddresses();
   const hasAddress = addresses.length > 0;
@@ -1718,5 +1750,9 @@ function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
 
+function cssImageUrl(value) {
+  const url = String(value || '').replace(/["\\\n\r]/g, '');
+  return url ? `url("${url}")` : '';
+}
 
 

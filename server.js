@@ -27,7 +27,18 @@ const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH |
 const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
 const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false);
 const PUBLIC_BOOTSTRAP_CACHE_MS = 1000 * 20;
+const STORE_SETTINGS_CACHE_MS = 1000 * 10;
+const MENU_CACHE_MS = 1000 * 15;
+const SESSION_CACHE_MS = 1000 * 30;
+const ADMIN_LIST_CACHE_MS = 1000 * 8;
 let publicBootstrapCache = null;
+let storeSettingsCache = null;
+const menuCache = new Map();
+const sessionCache = new Map();
+let adminCustomersCache = null;
+let adminPromotionsCache = null;
+let adminTablesCache = null;
+let adminUsersCache = null;
 const rateLimitBuckets = new Map();
 const allowedUploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -64,6 +75,7 @@ const server = createServer(async (req, res) => {
 
     await serveStatic(res, url.pathname);
   } catch (error) {
+    logServerError(error, req);
     json(res, error.status || 500, {
       error: error.message || 'Erro interno do servidor.',
       detail: EXPOSE_ERROR_DETAIL ? error.detail || undefined : undefined
@@ -139,7 +151,11 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/payments/webhook') {
-    json(res, 200, await receivePaymentWebhook(await readJson(req)));
+    const payload = await readJson(req);
+    json(res, 200, await receivePaymentWebhook(payload, {
+      provider: url.searchParams.get('provider') || '',
+      webhookSecret: url.searchParams.get('webhookSecret') || ''
+    }));
     return;
   }
 
@@ -281,30 +297,64 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && url.pathname === '/api/admin/summary') {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
+    const startedAt = Date.now();
     const permissions = adminPermissions(admin);
+    const [store, orders] = await Promise.all([
+      getStoreSettings(),
+      permissions.includes('orders') ? listOrders() : Promise.resolve([])
+    ]);
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > 1200) {
+      console.warn(`Resumo admin lento: ${elapsed}ms`);
+    }
     json(res, 200, {
-      store: await getStoreSettings(),
-      categories: permissions.includes('menu') || permissions.includes('tables') ? await getMenu(true) : [],
-      orders: await listOrders(),
-      customers: permissions.includes('customers') ? await listCustomers() : [],
-      promotions: permissions.includes('promotions') ? await listPromotions() : [],
-      dining_tables: permissions.includes('tables') ? await listDiningTables() : [],
-      customer_tabs: permissions.includes('tables') ? await listCustomerTabs() : [],
-      admins: permissions.includes('admin_users') ? await listAdminUsers() : [],
+      store,
+      orders,
       permissions
     });
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/admin/menu-data') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    const permissions = adminPermissions(admin);
+    if (!permissions.includes('menu') && !permissions.includes('tables') && !permissions.includes('promotions')) {
+      throw httpError(403, 'Sem permissão para acessar o cardápio.');
+    }
+    json(res, 200, { categories: await getMenu(true) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/customers') {
+    if (!(await requireAdminPermission(req, res, 'customers'))) return;
+    json(res, 200, { customers: await listCustomers() });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/promotions') {
+    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
+    json(res, 200, { promotions: await listPromotions() });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/store') {
+    if (!(await requireAdminPermission(req, res, 'store'))) return;
+    json(res, 200, { store: await getStoreSettings() });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/tables') {
     if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    json(res, 200, { tables: await listDiningTables(), tabs: await listCustomerTabs() });
+    json(res, 200, await listAdminTablesData());
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/tables') {
     if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    json(res, 201, { table: await createDiningTable(await readJson(req)) });
+    const table = await createDiningTable(await readJson(req));
+    clearAdminTablesCache();
+    json(res, 201, { table });
     return;
   }
 
@@ -312,11 +362,14 @@ async function handleApi(req, res, url) {
   if (tableMatch) {
     if (!(await requireAdminPermission(req, res, 'tables'))) return;
     if (method === 'PATCH' || method === 'PUT') {
-      json(res, 200, { table: await updateDiningTable(tableMatch[1], await readJson(req)) });
+      const table = await updateDiningTable(tableMatch[1], await readJson(req));
+      clearAdminTablesCache();
+      json(res, 200, { table });
       return;
     }
     if (method === 'DELETE') {
       await deleteDiningTable(tableMatch[1]);
+      clearAdminTablesCache();
       json(res, 200, { ok: true });
       return;
     }
@@ -324,14 +377,18 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/admin/tabs') {
     if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    json(res, 201, { tab: await openCustomerTab(await readJson(req)) });
+    const tab = await openCustomerTab(await readJson(req));
+    clearAdminTablesCache();
+    json(res, 201, { tab });
     return;
   }
 
   const tabItemMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/items$/i);
   if (tabItemMatch && method === 'POST') {
     if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    json(res, 201, await addItemToCustomerTab(req, tabItemMatch[1], await readJson(req)));
+    const result = await addItemToCustomerTab(req, tabItemMatch[1], await readJson(req));
+    clearAdminTablesCache();
+    json(res, 201, result);
     return;
   }
 
@@ -342,6 +399,7 @@ async function handleApi(req, res, url) {
     const tab = tabMatch[2] === 'close'
       ? await closeCustomerTab(tabMatch[1], body)
       : await transferCustomerTab(tabMatch[1], body);
+    clearAdminTablesCache();
     json(res, 200, { tab });
     return;
   }
@@ -349,7 +407,7 @@ async function handleApi(req, res, url) {
   if (method === 'PUT' && url.pathname === '/api/admin/store') {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
     const result = await updateStoreSettings(await readJson(req));
-    clearPublicBootstrapCache();
+    clearStoreSettingsCache();
     json(res, 200, result);
     return;
   }
@@ -357,7 +415,7 @@ async function handleApi(req, res, url) {
   if (method === 'PUT' && url.pathname === '/api/admin/loyalty') {
     if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     const store = await updateLoyaltyProgram(await readJson(req));
-    clearPublicBootstrapCache();
+    clearStoreSettingsCache();
     json(res, 200, { store });
     return;
   }
@@ -365,7 +423,7 @@ async function handleApi(req, res, url) {
   if (method === 'PUT' && url.pathname === '/api/admin/print-settings') {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
     const store = await updatePrintSettings(await readJson(req));
-    clearPublicBootstrapCache();
+    clearStoreSettingsCache();
     json(res, 200, { store });
     return;
   }
@@ -373,7 +431,7 @@ async function handleApi(req, res, url) {
   if (method === 'PUT' && url.pathname === '/api/admin/integrations') {
     if (!(await requireAdminPermission(req, res, 'store'))) return;
     const store = await updateIntegrationSettings(await readJson(req));
-    clearPublicBootstrapCache();
+    clearStoreSettingsCache();
     json(res, 200, { store });
     return;
   }
@@ -388,7 +446,7 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const queue = await clearOrderQueue({ mode: 'close_open' });
     const store = await setStoreOpen(true);
-    clearPublicBootstrapCache();
+    clearStoreSettingsCache();
     json(res, 200, { store, queue });
     return;
   }
@@ -396,7 +454,7 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/admin/operation/stop') {
     if (!(await requireAdminPermission(req, res, 'operation'))) return;
     const store = await setStoreOpen(false);
-    clearPublicBootstrapCache();
+    clearStoreSettingsCache();
     json(res, 200, { store });
     return;
   }
@@ -424,11 +482,10 @@ async function handleApi(req, res, url) {
     const patch = { status: body.status };
     if (body.status === 'cancelled') patch.financial_status = 'cancelled';
     const updated = await supabase('PATCH', 'orders', { id: `eq.${orderStatusMatch[1]}` }, patch, ['Prefer: return=representation']);
-    const messageLog = await sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false }).catch((error) => ({
-      delivery_status: 'failed',
-      error_message: error.message || 'Falha ao enviar WhatsApp.'
-    }));
-    json(res, 200, { order: updated[0] || null, whatsapp_log: messageLog });
+    sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false }).catch((error) => {
+      console.error('Falha ao enviar WhatsApp de status:', error.message || error);
+    });
+    json(res, 200, { order: updated[0] || null, whatsapp_log: null });
     return;
   }
 
@@ -488,13 +545,16 @@ async function handleApi(req, res, url) {
   const adminCustomerMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)$/i);
   if (adminCustomerMatch && (method === 'PUT' || method === 'PATCH')) {
     if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    json(res, 200, { customer: await updateCustomerByAdmin(adminCustomerMatch[1], await readJson(req)) });
+    const customer = await updateCustomerByAdmin(adminCustomerMatch[1], await readJson(req));
+    clearAdminCustomersCache();
+    json(res, 200, { customer });
     return;
   }
 
   if (adminCustomerMatch && method === 'DELETE') {
     if (!(await requireAdminPermission(req, res, 'customers'))) return;
     await deleteCustomerByAdmin(adminCustomerMatch[1]);
+    clearAdminCustomersCache();
     json(res, 200, { ok: true });
     return;
   }
@@ -502,7 +562,9 @@ async function handleApi(req, res, url) {
   const adminCustomerAddressCreateMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)\/addresses$/i);
   if (adminCustomerAddressCreateMatch && method === 'POST') {
     if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    json(res, 201, { customer: await createCustomerAddressByAdmin(adminCustomerAddressCreateMatch[1], await readJson(req)) });
+    const customer = await createCustomerAddressByAdmin(adminCustomerAddressCreateMatch[1], await readJson(req));
+    clearAdminCustomersCache();
+    json(res, 201, { customer });
     return;
   }
 
@@ -510,11 +572,15 @@ async function handleApi(req, res, url) {
   if (adminCustomerAddressMatch) {
     if (!(await requireAdminPermission(req, res, 'customers'))) return;
     if (method === 'PUT' || method === 'PATCH') {
-      json(res, 200, { customer: await updateCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2], await readJson(req)) });
+      const customer = await updateCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2], await readJson(req));
+      clearAdminCustomersCache();
+      json(res, 200, { customer });
       return;
     }
     if (method === 'DELETE') {
-      json(res, 200, { customer: await deleteCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2]) });
+      const customer = await deleteCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2]);
+      clearAdminCustomersCache();
+      json(res, 200, { customer });
       return;
     }
   }
@@ -528,6 +594,7 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/admin/promotions') {
     if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     const [promotion] = await supabase('POST', 'promotions', {}, sanitizePromotion(await readJson(req), true), ['Prefer: return=representation']);
+    clearAdminPromotionsCache();
     json(res, 201, { promotion });
     return;
   }
@@ -537,11 +604,13 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'promotions'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const [promotion] = await supabase('PATCH', 'promotions', { id: `eq.${promotionMatch[1]}` }, sanitizePromotion(await readJson(req), false), ['Prefer: return=representation']);
+      clearAdminPromotionsCache();
       json(res, 200, { promotion });
       return;
     }
     if (method === 'DELETE') {
       await supabase('DELETE', 'promotions', { id: `eq.${promotionMatch[1]}` }, undefined, ['Prefer: return=minimal']);
+      clearAdminPromotionsCache();
       json(res, 200, { ok: true });
       return;
     }
@@ -556,7 +625,7 @@ async function handleApi(req, res, url) {
   if (url.pathname === '/api/categories' && method === 'POST') {
     if (!(await requireAdminPermission(req, res, 'menu'))) return;
     const result = await supabase('POST', 'menu_categories', {}, sanitizeCategory(await readJson(req), true), ['Prefer: return=representation']);
-    clearPublicBootstrapCache();
+    clearMenuCache();
     json(res, 201, result);
     return;
   }
@@ -566,13 +635,13 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_categories', { id: `eq.${categoryMatch[1]}` }, sanitizeCategory(await readJson(req), false), ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
       const result = await supabase('DELETE', 'menu_categories', { id: `eq.${categoryMatch[1]}` }, undefined, ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
@@ -581,7 +650,7 @@ async function handleApi(req, res, url) {
   if (url.pathname === '/api/items' && method === 'POST') {
     if (!(await requireAdminPermission(req, res, 'menu'))) return;
     const result = await supabase('POST', 'menu_items', {}, sanitizeItem(await readJson(req), true), ['Prefer: return=representation']);
-    clearPublicBootstrapCache();
+    clearMenuCache();
     json(res, 201, result);
     return;
   }
@@ -591,13 +660,13 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_items', { id: `eq.${itemMatch[1]}` }, sanitizeItem(await readJson(req), false), ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
       const result = await supabase('DELETE', 'menu_items', { id: `eq.${itemMatch[1]}` }, undefined, ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
@@ -612,7 +681,7 @@ async function handleApi(req, res, url) {
       ...payload,
       menu_item_id: modifierGroupMatch[1]
     }, ['Prefer: return=representation']);
-    clearPublicBootstrapCache();
+    clearMenuCache();
     json(res, 201, result);
     return;
   }
@@ -622,13 +691,13 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, sanitizeModifierGroup(await readJson(req), false), ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
       const result = await supabase('DELETE', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, undefined, ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
@@ -643,7 +712,7 @@ async function handleApi(req, res, url) {
       ...payload,
       group_id: modifierCreateMatch[1]
     }, ['Prefer: return=representation']);
-    clearPublicBootstrapCache();
+    clearMenuCache();
     json(res, 201, result);
     return;
   }
@@ -653,13 +722,13 @@ async function handleApi(req, res, url) {
     if (!(await requireAdminPermission(req, res, 'menu'))) return;
     if (method === 'PUT' || method === 'PATCH') {
       const result = await supabase('PATCH', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, sanitizeModifier(await readJson(req), false), ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
       const result = await supabase('DELETE', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, undefined, ['Prefer: return=representation']);
-      clearPublicBootstrapCache();
+      clearMenuCache();
       json(res, 200, result);
       return;
     }
@@ -689,6 +758,7 @@ async function setupFirstAdmin(data) {
     role: 'owner',
     is_active: true
   }, ['Prefer: return=representation']);
+  clearAdminUsersCache();
 
   return createAdminSession(created);
 }
@@ -729,12 +799,19 @@ async function getAdminById(adminId) {
 }
 
 async function listAdminUsers() {
+  const now = Date.now();
+  if (adminUsersCache && adminUsersCache.expiresAt > now) return adminUsersCache.data;
   const rows = await supabase('GET', 'admin_users', {
     select: 'id,name,email,role,is_active,last_login_at,created_at',
     order: 'name.asc',
     limit: '200'
   });
-  return rows.map(publicAdmin);
+  const data = rows.map(publicAdmin);
+  adminUsersCache = {
+    data,
+    expiresAt: now + ADMIN_LIST_CACHE_MS
+  };
+  return data;
 }
 
 async function createAdminUser(data) {
@@ -746,6 +823,7 @@ async function createAdminUser(data) {
     role: sanitizeAdminRole(data.role),
     is_active: data.is_active === undefined ? true : Boolean(data.is_active)
   }, ['Prefer: return=representation']);
+  clearAdminUsersCache();
   return publicAdmin(created);
 }
 
@@ -770,6 +848,8 @@ async function updateAdminUser(id, data, session) {
 
   const [updated] = await supabase('PATCH', 'admin_users', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Conta admin não encontrada.');
+  clearSessionCacheByOwner('admin', id);
+  clearAdminUsersCache();
   return publicAdmin(updated);
 }
 
@@ -786,6 +866,8 @@ async function updateAdminAccount(session, data) {
   session.name = updated.name;
   session.email = updated.email;
   session.role = updated.role;
+  clearSessionCacheByOwner('admin', session.id);
+  clearAdminUsersCache();
   return publicAdmin(updated);
 }
 
@@ -801,6 +883,8 @@ async function changeAdminPassword(session, data) {
   await supabase('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=representation']);
+  clearSessionCacheByOwner('admin', session.id);
+  clearAdminUsersCache();
 }
 
 async function createAdminSession(admin) {
@@ -884,6 +968,7 @@ async function registerCustomer(data) {
   }
 
   if (address) await upsertAddress(row.id, address);
+  clearAdminCustomersCache();
 
   return createCustomerSession(row);
 }
@@ -907,6 +992,7 @@ async function loginCustomer(data) {
   await supabase('PATCH', 'customers', { id: `eq.${customer.id}` }, {
     last_login_at: new Date().toISOString()
   }, ['Prefer: return=representation']);
+  clearAdminCustomersCache();
 
   return createCustomerSession(customer);
 }
@@ -962,14 +1048,16 @@ async function requireCustomer(req, res) {
 }
 
 async function getCustomerProfile(customerId) {
-  const rows = await supabase('GET', 'customers', {
+  const [rows, addresses, loyalty] = await Promise.all([
+    supabase('GET', 'customers', {
     select: 'id,name,phone,email,birth_date,notes,created_at,updated_at',
     id: `eq.${customerId}`,
     limit: '1'
-  });
+    }),
+    listCustomerAddresses(customerId),
+    customerLoyaltyProgress(customerId)
+  ]);
   if (!rows[0]) throw httpError(404, 'Cliente não encontrado.');
-  const addresses = await listCustomerAddresses(customerId);
-  const loyalty = await customerLoyaltyProgress(customerId);
   return { ...rows[0], address: addresses[0] || null, addresses, loyalty };
 }
 
@@ -1033,6 +1121,7 @@ async function updateCustomerProfile(customerId, data) {
   if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
 
   const [updated] = await supabase('PATCH', 'customers', { id: `eq.${customerId}` }, payload, ['Prefer: return=representation']);
+  clearSessionCacheByOwner('customer', customerId);
   if (data.address?.street) {
     await upsertAddress(customerId, sanitizeAddress(data.address));
   }
@@ -1057,6 +1146,7 @@ async function updateCustomerByAdmin(customerId, data) {
   if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
   const [updated] = await supabase('PATCH', 'customers', { id: `eq.${customerId}` }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Cliente não encontrado.');
+  clearSessionCacheByOwner('customer', customerId);
   return getCustomerProfile(customerId);
 }
 
@@ -1118,6 +1208,10 @@ async function listCustomerAddresses(customerId) {
 }
 
 async function getStoreSettings() {
+  const now = Date.now();
+  if (storeSettingsCache && storeSettingsCache.expiresAt > now) {
+    return storeSettingsCache.data;
+  }
   const rows = await supabase('GET', 'store_settings', {
     select: '*',
     order: 'created_at.asc',
@@ -1141,7 +1235,7 @@ async function getStoreSettings() {
     print_settings: defaultPrintSettings(),
     onboarding_completed: false
   };
-  return {
+  const normalized = {
     ...store,
     delivery_neighborhood_fees: isPlainObject(store.delivery_neighborhood_fees) ? store.delivery_neighborhood_fees : defaultNeighborhoodFees(),
     business_hours: isPlainObject(store.business_hours) ? store.business_hours : defaultBusinessHours(),
@@ -1150,6 +1244,11 @@ async function getStoreSettings() {
     print_settings: sanitizePrintSettings(store.print_settings || {}),
     integration_settings: sanitizeIntegrationSettings(store.integration_settings || {})
   };
+  storeSettingsCache = {
+    data: normalized,
+    expiresAt: now + STORE_SETTINGS_CACHE_MS
+  };
+  return normalized;
 }
 
 async function getPublicBootstrap() {
@@ -1172,6 +1271,32 @@ async function getPublicBootstrap() {
 
 function clearPublicBootstrapCache() {
   publicBootstrapCache = null;
+}
+
+function clearStoreSettingsCache() {
+  storeSettingsCache = null;
+  clearPublicBootstrapCache();
+}
+
+function clearMenuCache() {
+  menuCache.clear();
+  clearPublicBootstrapCache();
+}
+
+function clearAdminCustomersCache() {
+  adminCustomersCache = null;
+}
+
+function clearAdminPromotionsCache() {
+  adminPromotionsCache = null;
+}
+
+function clearAdminTablesCache() {
+  adminTablesCache = null;
+}
+
+function clearAdminUsersCache() {
+  adminUsersCache = null;
 }
 
 async function updateStoreSettings(data) {
@@ -1269,31 +1394,73 @@ async function updateIntegrationSettings(data) {
 async function testIntegrations(data = {}) {
   const store = await getStoreSettings();
   const settings = sanitizeIntegrationSettings(data.integration_settings || store.integration_settings || {});
+  const whatsappCheck = await testWhatsappIntegration(settings.whatsapp).catch((error) => ({
+    ok: false,
+    message: error.message || 'Não foi possível testar o WhatsApp.'
+  }));
   return {
     whatsapp: {
       enabled: settings.whatsapp.enabled,
       provider: settings.whatsapp.provider,
-      ok: settings.whatsapp.enabled ? Boolean(settings.whatsapp.phoneNumberId || settings.whatsapp.apiUrl || settings.whatsapp.accessToken) : true,
-      message: settings.whatsapp.enabled ? 'Configuração de WhatsApp pronta para envio via provedor.' : 'WhatsApp automático desativado.'
+      ok: whatsappCheck.ok,
+      message: whatsappCheck.message
     },
     pix: {
       enabled: settings.pix.enabled,
       provider: settings.pix.provider,
-      ok: settings.pix.enabled ? Boolean(settings.pix.provider) : true,
-      message: settings.pix.enabled ? 'Pix online pronto para gerar cobranças.' : 'Pix online desativado.'
-    },
-    card: {
-      enabled: settings.card.enabled,
-      provider: settings.card.provider,
-      ok: settings.card.enabled ? Boolean(settings.card.provider) : true,
-      message: settings.card.enabled ? 'Cartão online pronto para checkout seguro.' : 'Cartão online desativado.'
-    },
-    reconciliation: {
-      enabled: settings.reconciliation.enabled,
-      ok: true,
-      message: settings.reconciliation.enabled ? `Conciliação configurada para ${settings.reconciliation.days} dia(s).` : 'Conciliação desativada.'
+      ok: settings.pix.enabled ? Boolean(settings.pix.apiKey) : true,
+      message: settings.pix.enabled
+        ? (settings.pix.apiKey ? 'Abacate Pay pronta para gerar Pix online.' : 'Informe a API key da Abacate Pay.')
+        : 'Pix online desativado.'
     }
   };
+}
+
+async function testWhatsappIntegration(settings) {
+  if (!settings.enabled) return { ok: true, message: 'WhatsApp automático desativado.' };
+  if (settings.provider === 'whatsevolution' || isWhatsEvolutionUrl(settings.apiUrl)) {
+    if (!settings.apiUrl || !settings.accessToken) {
+      return { ok: false, message: 'Informe URL da API e API key da WhatsEvolution.' };
+    }
+    if (!settings.phoneNumberId) {
+      if (isWhatsEvolutionManagedUrl(settings.apiUrl)) {
+        return { ok: true, message: 'WhatsEvolution configurada em modo gerenciado. Envio usará /send-message.' };
+      }
+      return { ok: false, message: 'Informe a instância da WhatsEvolution/Evolution API.' };
+    }
+    const response = await fetchWithTimeout(`${settings.apiUrl.replace(/\/$/, '')}/instance/connectionState/${encodeURIComponent(settings.phoneNumberId)}`, {
+      headers: {
+        apikey: settings.accessToken,
+        'Content-Type': 'application/json'
+      }
+    }, 7000);
+    const payload = await safeResponse(response);
+    if (!response.ok) {
+      return { ok: false, message: whatsappProviderError('Falha ao verificar instância WhatsEvolution.', payload) };
+    }
+    const state = payload?.instance?.state || payload?.state || 'desconhecido';
+    return { ok: String(state).toLowerCase() === 'open', message: `WhatsEvolution: instância ${state}.` };
+  }
+  const hasConfig = Boolean(settings.phoneNumberId || settings.apiUrl || settings.accessToken);
+  return {
+    ok: hasConfig,
+    message: hasConfig ? 'Configuração de WhatsApp pronta para envio via provedor.' : 'Preencha a configuração do WhatsApp.'
+  };
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw httpError(504, 'Tempo esgotado ao testar o provedor. Verifique URL, instância e conexão da API.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function setStoreOpen(isOpen) {
@@ -1323,6 +1490,12 @@ async function setStoreOpen(isOpen) {
 }
 
 async function getMenu(admin) {
+  const cacheKey = admin ? 'admin' : 'public';
+  const now = Date.now();
+  const cached = menuCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
   const [categories, items, groups, modifiers] = await Promise.all([
     supabase('GET', 'menu_categories', {
       select: admin ? '*' : 'id,name,description,sort_order',
@@ -1367,7 +1540,12 @@ async function getMenu(admin) {
     });
   }
 
-  return [...byCategory.values()];
+  const menu = [...byCategory.values()];
+  menuCache.set(cacheKey, {
+    data: menu,
+    expiresAt: now + MENU_CACHE_MS
+  });
+  return menu;
 }
 
 async function createOrder(req, data, options = {}) {
@@ -1503,6 +1681,7 @@ async function createOrder(req, data, options = {}) {
     await supabase('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
       used_count: Number(coupon.used_count || 0) + 1
     }, ['Prefer: return=minimal']);
+    clearAdminPromotionsCache();
   }
 
   const whatsappMessage = buildWhatsappMessage(store, order, itemsWithOrder, customer, address);
@@ -1520,6 +1699,8 @@ async function createOrder(req, data, options = {}) {
     finalOrder = payment.order;
   }
   await sendOrderStatusWhatsapp(order.id, 'new', { manual: false }).catch(() => null);
+  if (['table', 'tab'].includes(fulfillmentMethod)) clearAdminTablesCache();
+  if (customerRow?.id) clearAdminCustomersCache();
 
   const whatsappNumber = onlyDigits(store.whatsapp_number || STORE_WHATSAPP_NUMBER);
   const whatsappUrl = whatsappNumber
@@ -1712,11 +1893,20 @@ async function createPersistentSession(type, ownerId, data) {
     data,
     expires_at: expiresAt
   }, ['Prefer: return=minimal']);
+  sessionCache.set(`${type}:${token}`, {
+    session: { token, type, owner_id: ownerId, data, expires_at: expiresAt },
+    expiresAt: Date.now() + SESSION_CACHE_MS
+  });
   return token;
 }
 
 async function readPersistentSession(token, expectedType) {
   if (!token) return null;
+  const cacheKey = `${expectedType}:${token}`;
+  const cached = sessionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.session;
+  }
   const rows = await supabase('GET', 'app_sessions', {
     select: '*',
     token: `eq.${token}`,
@@ -1737,12 +1927,31 @@ async function readPersistentSession(token, expectedType) {
     }, ['Prefer: return=minimal']);
   }
 
+  sessionCache.set(cacheKey, {
+    session,
+    expiresAt: Date.now() + SESSION_CACHE_MS
+  });
   return session;
 }
 
 async function deleteSession(token) {
   if (!token) return;
+  clearSessionCacheToken(token);
   await supabase('DELETE', 'app_sessions', { token: `eq.${token}` }, undefined, ['Prefer: return=minimal']);
+}
+
+function clearSessionCacheToken(token) {
+  for (const key of sessionCache.keys()) {
+    if (key.endsWith(`:${token}`)) sessionCache.delete(key);
+  }
+}
+
+function clearSessionCacheByOwner(type, ownerId) {
+  for (const [key, entry] of sessionCache.entries()) {
+    if (key.startsWith(`${type}:`) && entry.session?.owner_id === ownerId) {
+      sessionCache.delete(key);
+    }
+  }
 }
 
 async function cleanExpiredSessions() {
@@ -1832,25 +2041,27 @@ async function attachOrderIntegrationLogs(orders) {
   const ids = orders.map((order) => order.id);
   const [whatsappLogs, paymentEvents] = await Promise.all([
     supabase('GET', 'order_whatsapp_logs', {
-      select: '*',
+      select: 'id,order_id,order_status,delivery_status,provider,error_message,created_at',
       order_id: `in.(${ids.join(',')})`,
       order: 'created_at.desc',
-      limit: '500'
+      limit: String(Math.min(ids.length * 3, 180))
     }),
     supabase('GET', 'order_payment_events', {
-      select: '*',
+      select: 'id,order_id,provider,financial_status,amount,created_at',
       order_id: `in.(${ids.join(',')})`,
       order: 'created_at.desc',
-      limit: '500'
+      limit: String(Math.min(ids.length * 3, 180))
     })
   ]);
   const whatsByOrder = new Map();
   const paymentsByOrder = new Map();
   for (const log of whatsappLogs) {
+    if ((whatsByOrder.get(log.order_id) || []).length >= 2) continue;
     if (!whatsByOrder.has(log.order_id)) whatsByOrder.set(log.order_id, []);
     whatsByOrder.get(log.order_id).push(log);
   }
   for (const event of paymentEvents) {
+    if ((paymentsByOrder.get(event.order_id) || []).length >= 2) continue;
     if (!paymentsByOrder.has(event.order_id)) paymentsByOrder.set(event.order_id, []);
     paymentsByOrder.get(event.order_id).push(event);
   }
@@ -1884,11 +2095,11 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
       is_manual: 'eq.false',
       limit: '1'
     });
-    if (existing[0]) return existing[0];
+    if (existing[0] && existing[0].delivery_status !== 'failed') return existing[0];
   }
   const store = await getStoreSettings();
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
-  const phone = onlyDigits(order.customer_snapshot?.phone || '');
+  const phone = whatsappRecipientPhone(order.customer_snapshot?.phone || '');
   const message = orderStatusWhatsappMessage(store, order, targetStatus);
   if (!phone) {
     return createWhatsappLog(order, targetStatus, message, {
@@ -1946,6 +2157,9 @@ async function createWhatsappLog(order, status, message, data) {
 }
 
 async function sendWhatsappViaProvider(settings, phone, message) {
+  if (settings.provider === 'whatsevolution' || isWhatsEvolutionUrl(settings.apiUrl)) {
+    return sendWhatsappViaWhatsEvolution(settings, phone, message);
+  }
   if (settings.provider === 'mock' || !settings.apiUrl) {
     return { id: `mock_${Date.now()}` };
   }
@@ -1965,7 +2179,7 @@ async function sendWhatsappViaProvider(settings, phone, message) {
       })
     });
     const data = await safeResponse(response);
-    if (!response.ok) throw httpError(response.status, 'Erro no provedor de WhatsApp.', data);
+    if (!response.ok) throw httpError(response.status, whatsappProviderError('Erro no provedor de WhatsApp.', data), data);
     return { id: data?.messages?.[0]?.id || data?.id || `wa_${Date.now()}` };
   }
   const response = await fetch(settings.apiUrl, {
@@ -1977,30 +2191,156 @@ async function sendWhatsappViaProvider(settings, phone, message) {
     body: JSON.stringify({ phone, message })
   });
   const data = await safeResponse(response);
-  if (!response.ok) throw httpError(response.status, 'Erro no webhook de WhatsApp.', data);
+  if (!response.ok) throw httpError(response.status, whatsappProviderError('Erro no webhook de WhatsApp.', data), data);
   return { id: data?.id || `webhook_${Date.now()}` };
 }
 
+async function sendWhatsappViaWhatsEvolution(settings, phone, message) {
+  if (!settings.apiUrl || !settings.accessToken) {
+    throw httpError(422, 'Configure URL da API e API key da WhatsEvolution.');
+  }
+  const baseUrl = settings.apiUrl.replace(/\/$/, '');
+  const instance = cleanText(settings.phoneNumberId || '');
+  const managedMode = isWhatsEvolutionManagedUrl(baseUrl);
+  if (!instance && !managedMode) {
+    throw httpError(422, 'Informe a instância da WhatsEvolution/Evolution API no campo "Instância / ID do número".');
+  }
+  if (managedMode && !instance) {
+    const endpoint = baseUrl.endsWith('/send-message') ? baseUrl : `${baseUrl}/send-message`;
+    return postWhatsEvolutionMessage(endpoint, {
+      Authorization: `Bearer ${settings.accessToken}`,
+      'Content-Type': 'application/json'
+    }, {
+      api_key: settings.accessToken,
+      number: phone,
+      message
+    });
+  }
+
+  const encodedInstance = encodeURIComponent(instance);
+  const headers = {
+    apikey: settings.accessToken,
+    'Content-Type': 'application/json'
+  };
+  const attempts = [
+    {
+      endpoint: `${baseUrl}/message/sendText/${encodedInstance}`,
+      body: {
+        number: phone,
+        text: message,
+        delay: 1200,
+        linkPreview: false
+      }
+    },
+    {
+      endpoint: `${baseUrl}/message/text/${encodedInstance}`,
+      body: { number: phone, message }
+    }
+  ];
+
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      return await postWhatsEvolutionMessage(attempt.endpoint, headers, attempt.body);
+    } catch (error) {
+      lastError = error;
+      if (![404, 405].includes(Number(error.status))) break;
+    }
+  }
+  throw lastError || httpError(502, 'Erro na WhatsEvolution.');
+}
+
+async function postWhatsEvolutionMessage(endpoint, headers, body) {
+  const response = await fetchWithTimeout(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  }, 10000);
+  const data = await safeResponse(response);
+  if (!response.ok) throw httpError(response.status, whatsappProviderError('Erro na WhatsEvolution.', data), data);
+  if (data?.success === false) throw httpError(422, whatsappProviderError('WhatsEvolution recusou a mensagem.', data), data);
+  return { id: data?.key?.id || data?.key || data?.message_id || data?.id || `whatsevolution_${Date.now()}` };
+}
+
+function isWhatsEvolutionUrl(url = '') {
+  const value = String(url || '').toLowerCase();
+  return value.includes('whatsevolution') || value.includes('relaxsolucoes');
+}
+
+function isWhatsEvolutionManagedUrl(url = '') {
+  const value = String(url || '').toLowerCase();
+  return value.includes('/functions/v1/send-message') || value.endsWith('/send-message');
+}
+
+function whatsappProviderError(fallback, data) {
+  const message = data?.message || data?.error || data?.response?.message || data?.details || data?.detail;
+  if (Array.isArray(message)) return `${fallback} ${message.join(' ')}`.slice(0, 500);
+  if (message && typeof message === 'object') return `${fallback} ${JSON.stringify(message)}`.slice(0, 500);
+  return message ? `${fallback} ${String(message)}`.slice(0, 500) : fallback;
+}
+
+function whatsappRecipientPhone(value) {
+  const digits = onlyDigits(value);
+  if (!digits) return '';
+  if (digits.startsWith('55') && digits.length >= 12) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
+}
+
 function orderStatusWhatsappMessage(store, order, status) {
-  const name = order.customer_snapshot?.name || 'cliente';
+  const name = firstName(order.customer_snapshot?.name || 'cliente');
   const code = order.public_code;
-  const origin = order.fulfillment_method;
-  const readyText = origin === 'delivery'
-    ? `Seu pedido #${code} está pronto e em breve sairá para entrega.`
-    : origin === 'pickup'
-      ? `Seu pedido #${code} está pronto para retirada.`
-      : origin === 'table' || origin === 'tab'
-        ? `Seu pedido #${code} está pronto e será levado até sua mesa.`
-        : `Seu pedido #${code} está pronto.`;
-  return ({
-    new: `Olá, ${name}! Recebemos seu pedido #${code}. Vamos confirmar em instantes.`,
-    accepted: `Olá, ${name}! Seu pedido #${code} foi aceito e já entrou na fila de preparo.`,
-    preparing: `Seu pedido #${code} está em preparo.`,
-    ready: readyText,
-    out_for_delivery: `Seu pedido #${code} saiu para entrega.`,
-    completed: `Seu pedido #${code} foi concluído. Obrigado pela preferência!`,
-    cancelled: `Seu pedido #${code} foi cancelado. Entre em contato com a loja em caso de dúvida.`
-  })[status] || `Atualização do pedido #${code}: ${status}.`;
+  const storeName = cleanText(store.name || 'Nossa loja') || 'Nossa loja';
+  const origin = whatsappOrderOrigin(order);
+  const total = formatMoney(order.total);
+  const header = `Olá, ${name}! ${storeName} informa sobre seu pedido #${code}.`;
+  const footer = `\n\nPedido: #${code}\nTipo: ${origin}\nTotal: ${total}`;
+  const messages = {
+    new: `${header}\n\nRecebemos seu pedido e ele está aguardando confirmação da loja.${footer}`,
+    accepted: `${header}\n\nSeu pedido foi aceito e já entrou na fila de preparo.${footer}`,
+    preparing: `${header}\n\nSeu pedido está sendo preparado agora.${footer}`,
+    ready: `${header}\n\n${whatsappReadyText(order)}${footer}`,
+    out_for_delivery: `${header}\n\n${whatsappOutForDeliveryText(order)}${footer}`,
+    completed: `${header}\n\nSeu pedido foi concluído. Obrigado pela preferência!${footer}`,
+    cancelled: `${header}\n\nSeu pedido foi cancelado. Entre em contato com a loja em caso de dúvida.${footer}`
+  };
+  return messages[status] || `${header}\n\nStatus atualizado: ${status}.${footer}`;
+}
+
+function firstName(value) {
+  return cleanText(value || '').split(/\s+/)[0] || 'cliente';
+}
+
+function whatsappOrderOrigin(order) {
+  const method = order.fulfillment_method || 'delivery';
+  if (method === 'delivery') return 'Delivery';
+  if (method === 'pickup') return 'Retirada no balcão';
+  if (method === 'counter') return 'Pedido no balcão';
+  if (method === 'table') return order.table_snapshot?.name ? `Mesa ${order.table_snapshot.name}` : 'Pedido na mesa';
+  if (method === 'tab') {
+    const table = order.table_snapshot?.name ? `Mesa ${order.table_snapshot.name}` : 'Mesa não informada';
+    const tab = order.tab_snapshot?.name ? ` - ${order.tab_snapshot.name}` : '';
+    return `Comanda ${table}${tab}`;
+  }
+  return 'Pedido';
+}
+
+function whatsappReadyText(order) {
+  const method = order.fulfillment_method || 'delivery';
+  if (method === 'delivery') return 'Seu pedido está pronto e será enviado para entrega em instantes.';
+  if (method === 'pickup') return 'Seu pedido está pronto para retirada no estabelecimento.';
+  if (method === 'counter') return 'Seu pedido está pronto para retirada no balcão.';
+  if (method === 'table' || method === 'tab') return 'Seu pedido está pronto e será levado até sua mesa.';
+  return 'Seu pedido está pronto.';
+}
+
+function whatsappOutForDeliveryText(order) {
+  const method = order.fulfillment_method || 'delivery';
+  if (method === 'delivery') return 'Seu pedido saiu para entrega.';
+  if (method === 'pickup') return 'Seu pedido está aguardando retirada no estabelecimento.';
+  if (method === 'counter') return 'Seu pedido está aguardando retirada no balcão.';
+  if (method === 'table' || method === 'tab') return 'Seu pedido saiu da cozinha e será entregue na mesa.';
+  return 'Seu pedido saiu para entrega.';
 }
 
 async function createPixPayment(order) {
@@ -2049,6 +2389,7 @@ async function createCardPayment(order) {
 
 async function createProviderPayment({ store, order, type, integrations }) {
   const provider = type === 'card' ? integrations.card.provider : integrations.pix.provider;
+  if (provider === 'abacatepay') return createAbacatePayPayment({ store, order, type, integrations });
   if (provider === 'mercadopago') return createMercadoPagoPayment({ store, order, type, integrations });
   if (provider === 'asaas') return createAsaasPayment({ store, order, type, integrations });
   if (provider === 'efi') return createEfiPixPayment({ store, order, integrations });
@@ -2056,6 +2397,60 @@ async function createProviderPayment({ store, order, type, integrations }) {
     transactionId: `${provider}_${type}_${order.public_code}_${Date.now()}`,
     pixCode: type === 'pix' ? buildMockPixCode(store, order, `${provider}_${Date.now()}`) : '',
     checkoutUrl: null
+  };
+}
+
+async function createAbacatePayPayment({ store, order, type, integrations }) {
+  const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
+  if (!token) throw httpError(422, 'Configure a chave da Abacate Pay.');
+  const customer = abacatePayCustomer(order);
+  const amount = moneyCents(order.total);
+
+  if (type === 'pix') {
+    const data = await providerFetch('https://api.abacatepay.com/v1/pixQrCode/create', {
+      method: 'POST',
+      token,
+      body: {
+        amount,
+        expiresIn: integrations.pix.expirationMinutes * 60,
+        description: `Pedido #${order.public_code} - ${store.name || 'Cardápio'}`,
+        customer,
+        metadata: { orderCode: order.public_code }
+      }
+    });
+    const payload = data.data || data;
+    return {
+      transactionId: String(payload.id || ''),
+      pixCode: payload.brCode || payload.pixCode || '',
+      pixQrUrl: normalizeQrImage(payload.brCodeBase64 || payload.qrCodeBase64 || ''),
+      checkoutUrl: payload.url || null
+    };
+  }
+
+  const returnUrl = integrations.card.returnUrl || integrations.pix.returnUrl || '';
+  const data = await providerFetch('https://api.abacatepay.com/v1/billing/create', {
+    method: 'POST',
+    token,
+    body: {
+      frequency: 'ONE_TIME',
+      methods: ['CREDIT_CARD'],
+      products: [{
+        externalId: order.public_code,
+        name: `Pedido #${order.public_code}`,
+        description: `Pedido realizado em ${store.name || 'Cardápio'}`,
+        quantity: 1,
+        price: amount
+      }],
+      returnUrl,
+      completionUrl: returnUrl,
+      customer,
+      metadata: { orderCode: order.public_code }
+    }
+  });
+  const payload = data.data || data;
+  return {
+    transactionId: String(payload.id || ''),
+    checkoutUrl: payload.url || payload.checkoutUrl || ''
   };
 }
 
@@ -2173,8 +2568,13 @@ async function regeneratePixPayment(data) {
   return { order: publicPaymentOrder(payment.order), payment: payment.pix };
 }
 
-async function receivePaymentWebhook(data) {
-  const normalized = await normalizeProviderWebhook(data);
+async function receivePaymentWebhook(data, options = {}) {
+  const incoming = {
+    ...data,
+    provider: cleanText(options.provider || data.provider || '')
+  };
+  await assertPaymentWebhookSecret(incoming.provider, options.webhookSecret);
+  const normalized = await normalizeProviderWebhook(incoming);
   const provider = normalized.provider;
   const eventId = normalized.eventId;
   if (!eventId) throw httpError(422, 'Evento sem identificador.');
@@ -2213,8 +2613,30 @@ async function receivePaymentWebhook(data) {
   return { ok: true, order: publicPaymentOrder(updated) };
 }
 
+async function assertPaymentWebhookSecret(provider, incomingSecret) {
+  if (provider !== 'abacatepay') return;
+  const store = await getStoreSettings();
+  const settings = sanitizeIntegrationSettings(store.integration_settings || {});
+  const expected = settings.pix.webhookSecret;
+  if (!expected) return;
+  if (!incomingSecret || incomingSecret !== expected) {
+    throw httpError(401, 'Webhook da Abacate Pay não autorizado.');
+  }
+}
+
 async function normalizeProviderWebhook(data) {
   const provider = cleanText(data.provider || inferWebhookProvider(data) || 'mock');
+  if (provider === 'abacatepay') {
+    const payload = data.data || data.payment || data.pixQrCode || data.billing || data;
+    return {
+      provider,
+      eventId: cleanText(data.id || data.eventId || data.event || payload.id || `abacatepay_${Date.now()}`),
+      transactionId: cleanText(payload.id || data.paymentId || data.transaction_id || ''),
+      orderCode: cleanText(payload.metadata?.orderCode || payload.externalId || payload.externalReference || data.order_code || data.code || ''),
+      status: abacatePayStatusToFinancial(payload.status || data.status || data.event),
+      amount: centsToMoney(payload.amount || payload.value || data.amount || data.value)
+    };
+  }
   if (provider === 'mercadopago') {
     const paymentId = cleanText(data.data?.id || data.id || data.resource || data.transaction_id || '');
     let detail = data.payment || data;
@@ -2266,10 +2688,26 @@ async function normalizeProviderWebhook(data) {
 }
 
 function inferWebhookProvider(data) {
+  const event = String(data.event || '').toLowerCase();
+  if (event.includes('abacate') || event.startsWith('billing.') || event.startsWith('pixqrcode.') || data.pixQrCode || data.billing) return 'abacatepay';
   if (data.action || data.type === 'payment' || data.data?.id) return 'mercadopago';
   if (String(data.event || '').startsWith('PAYMENT_') || data.payment) return 'asaas';
   if (data.pix || data.txid) return 'efi';
   return '';
+}
+
+function abacatePayStatusToFinancial(status) {
+  const value = String(status || '').toUpperCase();
+  if (['PAID', 'APPROVED', 'COMPLETED', 'BILLING_PAID', 'PIXQRCODE_PAID'].includes(value)) return 'paid';
+  if (['EXPIRED', 'PIXQRCODE_EXPIRED'].includes(value)) return 'expired';
+  if (['CANCELLED', 'CANCELED', 'CANCELLED_BY_CUSTOMER'].includes(value)) return 'cancelled';
+  if (['REFUNDED', 'CHARGEBACK'].includes(value)) return 'refunded';
+  if (['FAILED', 'REJECTED'].includes(value)) return 'failed';
+  if (value.includes('PAID')) return 'paid';
+  if (value.includes('EXPIRED')) return 'expired';
+  if (value.includes('CANCEL')) return 'cancelled';
+  if (value.includes('REFUND')) return 'refunded';
+  return 'pending';
 }
 
 function mercadoPagoStatusToFinancial(status) {
@@ -2321,6 +2759,18 @@ async function refundOrderPayment(orderId, data = {}) {
 
 async function refundProviderPayment(order, amount, integrations) {
   if (!order.payment_provider || order.payment_provider === 'mock') return { ok: true };
+  if (order.payment_provider === 'abacatepay') {
+    const token = integrations.pix.apiKey || integrations.card.apiKey;
+    if (!token) throw httpError(422, 'Chave da Abacate Pay não configurada.');
+    const endpoint = isOnlinePixPayment(order.payment_method) ? 'pixQrCode/refund' : 'billing/refund';
+    return providerFetch(`https://api.abacatepay.com/v1/${endpoint}`, {
+      method: 'POST',
+      token,
+      body: { id: order.payment_transaction_id, amount: moneyCents(amount) }
+    }).catch((error) => {
+      throw httpError(error.status || 422, 'Estorno automático não disponível para este pagamento na Abacate Pay. Faça o estorno no painel do provedor e depois concilie o pedido.', error.detail);
+    });
+  }
   if (order.payment_provider === 'mercadopago') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;
     if (!token) throw httpError(422, 'Chave do Mercado Pago não configurada.');
@@ -2372,6 +2822,14 @@ async function reconcileOnlinePayments(data = {}) {
 }
 
 async function fetchProviderPaymentStatus(order, integrations) {
+  if (order.payment_provider === 'abacatepay') {
+    const token = integrations.pix.apiKey || integrations.card.apiKey;
+    if (!token) throw httpError(422, 'Chave da Abacate Pay não configurada.');
+    const endpoint = isOnlinePixPayment(order.payment_method) ? 'pixQrCode/check' : 'billing/check';
+    const data = await providerFetch(`https://api.abacatepay.com/v1/${endpoint}?id=${encodeURIComponent(order.payment_transaction_id)}`, { token });
+    const payload = data.data || data;
+    return { status: abacatePayStatusToFinancial(payload.status), amount: centsToMoney(payload.amount || payload.value || order.total) };
+  }
   if (order.payment_provider === 'mercadopago') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;
     const data = await providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(order.payment_transaction_id)}`, { token });
@@ -2427,6 +2885,33 @@ function buildMockPixCode(store, order, transactionId) {
   return `PIXONLINE|${store.slug || 'loja'}|${order.public_code}|${formatMoney(order.total)}|${transactionId}`;
 }
 
+function abacatePayCustomer(order) {
+  const customer = order.customer_snapshot || {};
+  const payload = {
+    name: customer.name || `Cliente ${order.public_code}`,
+    email: customer.email || `pedido-${order.public_code}@cardapio.local`,
+    cellphone: onlyDigits(customer.phone || '')
+  };
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value));
+}
+
+function moneyCents(value) {
+  return Math.round(moneyNumber(value) * 100);
+}
+
+function centsToMoney(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return numeric > 999 ? roundMoney(numeric / 100) : roundMoney(numeric);
+}
+
+function normalizeQrImage(value) {
+  const data = String(value || '').trim();
+  if (!data) return '';
+  if (data.startsWith('data:image')) return data;
+  return `data:image/png;base64,${data}`;
+}
+
 function sanitizeFinancialStatus(status) {
   const value = String(status || '').toLowerCase();
   if (['pending', 'paid', 'failed', 'expired', 'cancelled', 'refunded'].includes(value)) return value;
@@ -2444,17 +2929,39 @@ function sanitizePrintLog(data) {
   };
 }
 
-async function listDiningTables() {
+async function listDiningTables(existingTabs = null) {
   const tables = await supabase('GET', 'dining_tables', {
     select: '*',
     order: 'name.asc'
   });
-  const tabs = await listCustomerTabs();
+  const tabs = existingTabs || await listCustomerTabs();
+  return enrichDiningTables(tables, tabs);
+}
+
+function enrichDiningTables(tables, tabs) {
   return tables.map((table) => ({
     ...table,
     open_tabs: tabs.filter((tab) => tab.status === 'open' && tab.dining_table_id === table.id),
     open_tab: tabs.find((tab) => tab.status === 'open' && tab.dining_table_id === table.id) || null
   }));
+}
+
+async function listAdminTablesData() {
+  const now = Date.now();
+  if (adminTablesCache && adminTablesCache.expiresAt > now) return adminTablesCache.data;
+  const [tables, tabs] = await Promise.all([
+    supabase('GET', 'dining_tables', {
+      select: '*',
+      order: 'name.asc'
+    }),
+    listCustomerTabs()
+  ]);
+  const data = { tables: enrichDiningTables(tables, tabs), tabs };
+  adminTablesCache = {
+    data,
+    expiresAt: now + ADMIN_LIST_CACHE_MS
+  };
+  return data;
 }
 
 async function listCustomerTabs() {
@@ -2466,12 +2973,12 @@ async function listCustomerTabs() {
   const openTabIds = tabs.filter((tab) => tab.status === 'open').map((tab) => tab.id);
   let ordersByTab = new Map();
   if (openTabIds.length) {
-    const orders = await attachOrderItems(await supabase('GET', 'orders', {
-      select: '*',
+    const orders = await supabase('GET', 'orders', {
+      select: 'id,customer_tab_id,total,status,created_at',
       customer_tab_id: `in.(${openTabIds.join(',')})`,
       order: 'created_at.desc',
       limit: '500'
-    }));
+    });
     ordersByTab = orders.reduce((map, order) => {
       const list = map.get(order.customer_tab_id) || [];
       list.push(order);
@@ -2484,7 +2991,11 @@ async function listCustomerTabs() {
     const total = roundMoney(orders
       .filter((order) => order.status !== 'cancelled')
       .reduce((sum, order) => sum + moneyNumber(order.total), 0));
-    return { ...tab, orders, current_total: total };
+    return {
+      ...tab,
+      order_count: orders.length,
+      current_total: total
+    };
   });
 }
 
@@ -2841,23 +3352,55 @@ async function attachOrderItems(orders) {
 }
 
 async function listCustomers() {
+  const now = Date.now();
+  if (adminCustomersCache && adminCustomersCache.expiresAt > now) return adminCustomersCache.data;
   const customers = await supabase('GET', 'customers', {
     select: 'id,name,phone,email,birth_date,notes,created_at,updated_at,last_login_at',
     order: 'created_at.desc',
     limit: '100'
   });
-  return Promise.all(customers.map(async (customer) => ({
+  if (!customers.length) {
+    adminCustomersCache = {
+      data: [],
+      expiresAt: now + ADMIN_LIST_CACHE_MS
+    };
+    return [];
+  }
+  const ids = customers.map((customer) => customer.id);
+  const addresses = await supabase('GET', 'customer_addresses', {
+    select: '*',
+    customer_id: `in.(${ids.join(',')})`,
+    order: 'is_default.desc,created_at.desc'
+  });
+  const byCustomer = new Map();
+  for (const address of addresses) {
+    if (!byCustomer.has(address.customer_id)) byCustomer.set(address.customer_id, []);
+    byCustomer.get(address.customer_id).push(address);
+  }
+  const data = customers.map((customer) => ({
     ...customer,
-    addresses: await listCustomerAddresses(customer.id)
-  })));
+    addresses: byCustomer.get(customer.id) || []
+  }));
+  adminCustomersCache = {
+    data,
+    expiresAt: now + ADMIN_LIST_CACHE_MS
+  };
+  return data;
 }
 
 async function listPromotions() {
+  const now = Date.now();
+  if (adminPromotionsCache && adminPromotionsCache.expiresAt > now) return adminPromotionsCache.data;
   try {
-    return await supabase('GET', 'promotions', {
+    const data = await supabase('GET', 'promotions', {
       select: '*',
       order: 'created_at.desc'
     });
+    adminPromotionsCache = {
+      data,
+      expiresAt: now + ADMIN_LIST_CACHE_MS
+    };
+    return data;
   } catch (error) {
     const detail = JSON.stringify(error.detail || '');
     if (error.status === 404 || detail.includes('promotions')) return [];
@@ -3108,7 +3651,7 @@ function defaultIntegrationSettings() {
     },
     pix: {
       enabled: false,
-      provider: 'mock',
+      provider: 'abacatepay',
       apiKey: '',
       webhookSecret: '',
       expirationMinutes: 15
@@ -3158,31 +3701,31 @@ function sanitizeIntegrationSettings(value) {
   return {
     whatsapp: {
       enabled: Boolean(whatsapp.enabled),
-      provider: ['official', 'webhook', 'mock'].includes(String(whatsapp.provider)) ? String(whatsapp.provider) : defaults.whatsapp.provider,
+      provider: ['official', 'webhook', 'whatsevolution', 'mock'].includes(String(whatsapp.provider)) ? String(whatsapp.provider) : defaults.whatsapp.provider,
       phoneNumberId: cleanText(whatsapp.phoneNumberId || '').slice(0, 120),
       accessToken: cleanText(whatsapp.accessToken || '').slice(0, 500),
       apiUrl: cleanText(whatsapp.apiUrl || '').slice(0, 500)
     },
     pix: {
       enabled: Boolean(pix.enabled),
-      provider: ['mock', 'mercadopago', 'efi', 'asaas'].includes(String(pix.provider)) ? String(pix.provider) : defaults.pix.provider,
+      provider: pix.enabled === false ? defaults.pix.provider : 'abacatepay',
       apiKey: cleanText(pix.apiKey || '').slice(0, 500),
       webhookSecret: cleanText(pix.webhookSecret || '').slice(0, 500),
       expirationMinutes: clampInteger(pix.expirationMinutes || defaults.pix.expirationMinutes, 5, 120)
     },
     card: {
-      enabled: Boolean(card.enabled),
-      provider: ['mock', 'mercadopago', 'asaas'].includes(String(card.provider)) ? String(card.provider) : defaults.card.provider,
-      apiKey: cleanText(card.apiKey || '').slice(0, 500),
-      returnUrl: cleanText(card.returnUrl || '').slice(0, 500)
+      enabled: false,
+      provider: defaults.card.provider,
+      apiKey: '',
+      returnUrl: ''
     },
     split: {
-      enabled: Boolean(split.enabled),
-      recipientId: cleanText(split.recipientId || '').slice(0, 200),
-      percentage: Math.max(0, Math.min(100, Number.parseFloat(split.percentage) || 0))
+      enabled: false,
+      recipientId: '',
+      percentage: 0
     },
     reconciliation: {
-      enabled: Boolean(reconciliation.enabled),
+      enabled: false,
       days: clampInteger(reconciliation.days || defaults.reconciliation.days, 1, 30)
     }
   };
@@ -3198,9 +3741,9 @@ function publicStore(store) {
       provider: integrations.pix.enabled ? integrations.pix.provider : 'mock',
       expirationMinutes: integrations.pix.expirationMinutes
     },
-    card: { enabled: integrations.card.enabled },
-    split: { enabled: integrations.split.enabled },
-    reconciliation: { enabled: integrations.reconciliation.enabled }
+    card: { enabled: false },
+    split: { enabled: false },
+    reconciliation: { enabled: false }
   };
   return copy;
 }
@@ -3303,7 +3846,18 @@ async function supabase(method, table, query = {}, payload, extraHeaders = []) {
   const data = await safeResponse(response);
 
   if (!response.ok) {
-    throw httpError(response.status, 'Erro retornado pelo Supabase.', data);
+    const message = supabaseErrorMessage(data);
+    console.error(JSON.stringify({
+      scope: 'supabase',
+      method,
+      table,
+      status: response.status,
+      message,
+      code: isPlainObject(data) ? data.code : undefined,
+      details: isPlainObject(data) ? data.details : undefined,
+      hint: isPlainObject(data) ? data.hint : undefined
+    }));
+    throw httpError(response.status, `Supabase: ${message}`, data);
   }
 
   return Array.isArray(data) || isPlainObject(data) ? data : [];
@@ -3891,6 +4445,37 @@ function httpError(status, message, detail) {
   error.status = status;
   error.detail = detail;
   return error;
+}
+
+function supabaseErrorMessage(data) {
+  if (typeof data === 'string' && data.trim()) return data.trim().slice(0, 500);
+  if (isPlainObject(data)) {
+    return String(data.message || data.error || data.details || data.hint || 'Erro retornado pelo Supabase.').slice(0, 500);
+  }
+  return 'Erro retornado pelo Supabase.';
+}
+
+function logServerError(error, req) {
+  const status = error.status || 500;
+  if (status < 500 && !String(error.message || '').startsWith('Supabase:')) return;
+  console.error(JSON.stringify({
+    scope: 'server',
+    method: req?.method,
+    url: req?.url,
+    status,
+    message: error.message,
+    detail: sanitizeErrorDetailForLog(error.detail)
+  }));
+}
+
+function sanitizeErrorDetailForLog(detail) {
+  if (!detail) return undefined;
+  if (typeof detail === 'string') return detail.slice(0, 500);
+  if (isPlainObject(detail)) {
+    const { message, code, details, hint, error } = detail;
+    return { message, code, details, hint, error };
+  }
+  return undefined;
 }
 
 function createPublicCode() {

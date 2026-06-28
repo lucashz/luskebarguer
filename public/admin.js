@@ -18,6 +18,7 @@
   orderOriginFilter: 'all',
   audioContext: null,
   storeFormDirty: false,
+  integrationsFormDirty: false,
   editingCategoryId: null,
   editingProductId: null,
   editingPromotionId: null,
@@ -32,9 +33,12 @@
   currentReport: null,
   draggedOrderId: null,
   updatingOrderIds: new Set(),
+  pendingOrderStatuses: new Map(),
   onboardingStep: 0,
   onboardingCategoryId: null,
-  activeAdminTab: 'operation'
+  activeAdminTab: 'operation',
+  loadedAdminTabs: new Set(),
+  loadingAdminTabs: new Set()
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v1';
@@ -201,8 +205,12 @@ const els = {
   integrationsForm: document.querySelector('#integrationsForm'),
   printSettingsForm: document.querySelector('#printSettingsForm'),
   testIntegrationsButton: document.querySelector('#testIntegrationsButton'),
-  reconcilePaymentsButton: document.querySelector('#reconcilePaymentsButton'),
   integrationStatusText: document.querySelector('#integrationStatusText'),
+  integrationHelpDialog: document.querySelector('#integrationHelpDialog'),
+  integrationHelpEyebrow: document.querySelector('#integrationHelpEyebrow'),
+  integrationHelpTitle: document.querySelector('#integrationHelpTitle'),
+  integrationHelpBody: document.querySelector('#integrationHelpBody'),
+  abacateWebhookUrl: document.querySelector('#abacateWebhookUrl'),
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
@@ -249,23 +257,21 @@ els.onboardingNextButton?.addEventListener('click', nextOnboardingStep);
 els.startOperationButton?.addEventListener('click', startOperation);
 els.stopOperationButton?.addEventListener('click', stopOperation);
 els.refreshAdminButton.addEventListener('click', () => loadSummary());
-els.adminOrders.addEventListener('dragover', handleOrderBoardDragOver);
-els.adminOrders.addEventListener('dragleave', handleOrderBoardDragLeave);
-els.adminOrders.addEventListener('drop', handleOrderBoardDrop);
+els.adminOrders.addEventListener('dragend', finishOrderDrag);
 els.orderOriginFilter?.addEventListener('change', () => {
   state.orderOriginFilter = els.orderOriginFilter.value || 'all';
   renderOrders();
 });
-els.refreshCategoriesButton.addEventListener('click', () => loadSummary());
-els.refreshProductsButton.addEventListener('click', () => loadSummary());
-els.refreshModifiersButton?.addEventListener('click', () => loadSummary());
+els.refreshCategoriesButton.addEventListener('click', () => loadMenuData({ force: true }));
+els.refreshProductsButton.addEventListener('click', () => loadMenuData({ force: true }));
+els.refreshModifiersButton?.addEventListener('click', () => loadMenuData({ force: true }));
 els.newCategoryButton.addEventListener('click', openNewCategoryDialog);
 els.clearQueueButton.addEventListener('click', clearOrderQueue);
 els.archiveClosedOrdersButton?.addEventListener('click', archiveClosedOrders);
 els.loadReportButton.addEventListener('click', loadDailyReport);
 els.exportReportCsvButton?.addEventListener('click', exportCurrentReportCsv);
 els.printReportButton?.addEventListener('click', printCurrentReport);
-els.refreshTablesButton?.addEventListener('click', () => loadSummary());
+els.refreshTablesButton?.addEventListener('click', () => loadTablesData({ force: true }));
 els.tableForm?.addEventListener('submit', submitTable);
 els.tabForm?.addEventListener('submit', submitTab);
 els.tableManagerCloseButton?.addEventListener('click', () => closeTableManager());
@@ -301,13 +307,23 @@ els.storeForm.addEventListener('change', () => {
   state.storeFormDirty = true;
   renderThemePreview();
 });
+els.integrationsForm?.addEventListener('input', () => {
+  state.integrationsFormDirty = true;
+});
+els.integrationsForm?.addEventListener('change', () => {
+  state.integrationsFormDirty = true;
+});
+els.integrationsForm?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-integration-help]');
+  if (!button) return;
+  openIntegrationHelp(button.dataset.integrationHelp);
+});
 els.storeForm.addEventListener('click', (event) => {
   const button = event.target.closest('[data-theme-preset]');
   if (!button) return;
   applyThemePreset(button.dataset.themePreset);
 });
 els.testIntegrationsButton?.addEventListener('click', testIntegrations);
-els.reconcilePaymentsButton?.addEventListener('click', reconcilePayments);
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
 els.adminUserForm?.addEventListener('submit', submitAdminUser);
@@ -391,7 +407,7 @@ async function logout() {
 async function loadAdminData() {
   try {
     await loadSummary();
-    if (hasPermission('reports')) await loadReportPreset('today');
+    await loadAdminTabData(state.activeAdminTab);
   } catch (error) {
     toast(error.message || 'Não foi possível atualizar os dados do painel.');
   }
@@ -399,20 +415,164 @@ async function loadAdminData() {
 
 async function loadSummary(options = {}) {
   const previousIds = new Set(state.knownOrderIds);
+  const startedAt = performance.now();
   const data = await request('/api/admin/summary');
   state.store = data.store || null;
-  state.categories = data.categories || [];
-  state.orders = data.orders || [];
-  state.customers = data.customers || [];
-  state.promotions = data.promotions || [];
-  state.adminUsers = data.admins || [];
-  state.diningTables = data.dining_tables || [];
-  state.customerTabs = data.customer_tabs || [];
+  if ('categories' in data) state.categories = data.categories || [];
+  if ('orders' in data) state.orders = data.orders || [];
+  if ('customers' in data) state.customers = data.customers || [];
+  if ('promotions' in data) state.promotions = data.promotions || [];
+  if ('admins' in data) state.adminUsers = data.admins || [];
+  if ('dining_tables' in data) state.diningTables = data.dining_tables || [];
+  if ('customer_tabs' in data) state.customerTabs = data.customer_tabs || [];
+  if (Array.isArray(data.permissions)) state.admin.permissions = data.permissions;
   saveAdminCache();
   detectNewOrders(previousIds, state.orders, options);
   state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
   state.initialOrdersLoaded = true;
+  state.loadedAdminTabs.add('operation');
+  state.loadedAdminTabs.add('orders');
+  logSlowClientLoad('summary', startedAt);
   render();
+}
+
+async function refreshOrdersOnly(options = {}) {
+  const previousIds = new Set(state.knownOrderIds);
+  const startedAt = performance.now();
+  const data = await request('/api/admin/orders');
+  state.orders = data.orders || [];
+  detectNewOrders(previousIds, state.orders, options);
+  state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
+  state.initialOrdersLoaded = true;
+  logSlowClientLoad('orders', startedAt);
+  renderOperation();
+  renderOrderMetrics();
+  renderOrders();
+  renderTables();
+  renderTableManager();
+}
+
+function logSlowClientLoad(scope, startedAt) {
+  const elapsed = Math.round(performance.now() - startedAt);
+  if (elapsed > 1200) console.warn(`Carregamento admin lento (${scope}): ${elapsed}ms`);
+}
+
+async function loadAdminTabData(tab, options = {}) {
+  if (!canAccessTab(tab)) return;
+  if (!options.force && state.loadedAdminTabs.has(tab)) return;
+  if (state.loadingAdminTabs.has(tab)) return;
+  state.loadingAdminTabs.add(tab);
+  try {
+    if (tab === 'orders' || tab === 'operation') {
+      await refreshOrdersOnly({ silent: true });
+      state.loadedAdminTabs.add(tab);
+      return;
+    }
+    if (tab === 'menu') {
+      await loadMenuData(options);
+      return;
+    }
+    if (tab === 'tables') {
+      await loadTablesData(options);
+      return;
+    }
+    if (tab === 'customers') {
+      await loadCustomersData(options);
+      return;
+    }
+    if (tab === 'promotions') {
+      await Promise.all([loadPromotionsData(options), loadMenuData(options), loadStoreData(options)]);
+      return;
+    }
+    if (tab === 'store' || tab === 'integrations') {
+      await loadStoreData(options);
+      return;
+    }
+    if (tab === 'account') {
+      await loadAdminUsersData(options);
+      return;
+    }
+    if (tab === 'reports') {
+      await loadReportPreset(activeReportPreset() || 'today');
+      state.loadedAdminTabs.add('reports');
+    }
+  } catch (error) {
+    toast(error.message || 'Não foi possível carregar esta área.');
+  } finally {
+    state.loadingAdminTabs.delete(tab);
+  }
+}
+
+async function loadMenuData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('menu')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/menu-data');
+  state.categories = data.categories || [];
+  state.loadedAdminTabs.add('menu');
+  logSlowClientLoad('menu', startedAt);
+  renderMenu();
+  renderCategoryOptions();
+  renderPromotionOptions();
+}
+
+async function loadCustomersData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('customers')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/customers');
+  state.customers = data.customers || [];
+  state.loadedAdminTabs.add('customers');
+  logSlowClientLoad('customers', startedAt);
+  renderCustomers();
+  renderOrderMetrics();
+}
+
+async function loadPromotionsData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('promotions')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/promotions');
+  state.promotions = data.promotions || [];
+  state.loadedAdminTabs.add('promotions');
+  logSlowClientLoad('promotions', startedAt);
+  renderPromotions();
+}
+
+async function loadTablesData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('tables')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/tables');
+  state.diningTables = data.tables || [];
+  state.customerTabs = data.tabs || [];
+  state.loadedAdminTabs.add('tables');
+  logSlowClientLoad('tables', startedAt);
+  renderTables();
+  renderTableManager();
+}
+
+async function loadStoreData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('store')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/store');
+  state.store = data.store || state.store;
+  state.loadedAdminTabs.add('store');
+  state.loadedAdminTabs.add('integrations');
+  logSlowClientLoad('store', startedAt);
+  fillStoreForm();
+  if (!state.integrationsFormDirty) fillIntegrationSettings(state.store?.integration_settings || {});
+  fillPrintSettingsForm();
+  fillLoyaltyForm();
+  renderOperation();
+  renderOnboarding();
+}
+
+async function loadAdminUsersData(options = {}) {
+  if (!hasPermission('admin_users')) return;
+  if (!options.force && state.loadedAdminTabs.has('account')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/users');
+  state.adminUsers = data.admins || [];
+  state.loadedAdminTabs.add('account');
+  logSlowClientLoad('admin-users', startedAt);
+  renderAdminUsers();
 }
 
 function render() {
@@ -430,7 +590,7 @@ function render() {
   renderPermissionedNavigation();
   renderAdminUsers();
   fillStoreForm();
-  fillIntegrationSettings(state.store?.integration_settings || {});
+  if (!state.integrationsFormDirty) fillIntegrationSettings(state.store?.integration_settings || {});
   fillPrintSettingsForm();
   fillLoyaltyForm();
   fillAccountForm();
@@ -1006,7 +1166,7 @@ async function saveOnboardingStep(step, data) {
       is_active: true
     });
     state.onboardingCategoryId = category?.id || state.onboardingCategoryId;
-    await loadSummary();
+    await loadMenuData({ force: true });
     updateOnboardingProductCategories();
   }
   if (step === 5) {
@@ -1026,7 +1186,7 @@ async function saveOnboardingStep(step, data) {
         tags: []
       })
     });
-    await loadSummary();
+    await loadMenuData({ force: true });
   }
 }
 
@@ -1054,7 +1214,7 @@ async function completeOnboarding() {
   localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
   if (els.onboardingPanel) els.onboardingPanel.hidden = true;
   await updateOnboardingStore({ onboarding_completed: true });
-  await loadSummary();
+  await loadStoreData({ force: true });
   toast('Sistema pronto para receber pedidos.');
 }
 
@@ -1088,7 +1248,7 @@ async function startOperation() {
     state.store = result.store || state.store;
     saveAdminCache();
     toast(`Operação iniciada. ${result.queue?.archived || 0} pedido(s) arquivado(s).`);
-    await loadSummary({ skipNotifications: true });
+    await refreshOrdersOnly({ skipNotifications: true, silent: true });
     await loadReportPreset(activeReportPreset() || 'today');
   } catch (error) {
     toast(error.message || 'Não foi possível iniciar a operação.');
@@ -1106,7 +1266,7 @@ async function stopOperation() {
     state.store = result.store || state.store;
     saveAdminCache();
     toast('Operação parada. Loja offline para novos pedidos.');
-    await loadSummary({ skipNotifications: true });
+    await loadStoreData({ force: true });
   } catch (error) {
     toast(error.message || 'Não foi possível parar a operação.');
   } finally {
@@ -1129,7 +1289,7 @@ async function clearOrderQueue() {
     body: JSON.stringify({ mode: 'close_open' })
   });
   toast(`${result.archived || 0} pedido(s) arquivado(s). ${result.closed || 0} aberto(s) foram concluídos.`);
-  await loadSummary({ skipNotifications: true });
+  await refreshOrdersOnly({ skipNotifications: true, silent: true });
   await loadReportPreset(activeReportPreset() || 'today');
 }
 
@@ -1147,7 +1307,7 @@ async function archiveClosedOrders() {
     body: JSON.stringify({ mode: 'archive_closed' })
   });
   toast(`${result.archived || 0} pedido(s) finalizado(s) removido(s) da fila.`);
-  await loadSummary({ skipNotifications: true });
+  await refreshOrdersOnly({ skipNotifications: true, silent: true });
   await loadReportPreset(activeReportPreset() || 'today');
 }
 
@@ -1429,8 +1589,16 @@ function renderOrders() {
     const orders = visible.filter((order) => order.status === status);
     column.innerHTML = `<h3><span>${statusLabel(status)}</span><strong>${orders.length}</strong></h3>`;
     column.append(...orders.map(orderCard));
+    wireOrderDropColumn(column);
     return column;
   }));
+}
+
+function wireOrderDropColumn(column) {
+  column.addEventListener('dragenter', handleOrderColumnDragEnter);
+  column.addEventListener('dragover', handleOrderColumnDragOver);
+  column.addEventListener('dragleave', handleOrderColumnDragLeave);
+  column.addEventListener('drop', handleOrderColumnDrop);
 }
 
 function orderCard(order) {
@@ -1458,9 +1626,9 @@ function orderCard(order) {
       <span>${itemCount || 0} ${itemCount === 1 ? 'item' : 'itens'}</span>
     </div>
     <div class="order-compact-tags">
-      <span>${fulfillment}</span>
+      ${orderOriginBadge(order, fulfillment)}
       <span>${payment}</span>
-      <span>${financialStatusLabel(order.financial_status)}</span>
+      <span class="financial-status-badge financial-status-${escapeAttribute(order.financial_status || 'pending')}">${financialStatusLabel(order.financial_status)}</span>
       ${customer.phone ? `<span>${escapeHtml(customer.phone)}</span>` : ''}
     </div>
     <details class="order-details" ${state.openOrderDetailIds.has(String(order.id)) ? 'open' : ''}>
@@ -1485,7 +1653,6 @@ function orderCard(order) {
         ${orderAddressHtml(order)}
         ${order.notes ? `<p class="order-note"><strong>Obs.</strong> ${escapeHtml(order.notes)}</p>` : ''}
         <div class="mini-items expanded">${(order.items || []).map(orderItemHtml).join('')}</div>
-        ${renderWhatsappLogs(order)}
         <div class="row-actions order-detail-actions">
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="kitchen">Imprimir cozinha</button>
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="customer">Imprimir cliente</button>
@@ -1524,13 +1691,10 @@ function orderCard(order) {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', order.id);
     event.dataTransfer.setData('application/json', JSON.stringify({ id: order.id, status: order.status }));
+    els.adminOrders.classList.add('is-dragging');
     card.classList.add('dragging');
   });
-  card.addEventListener('dragend', () => {
-    state.draggedOrderId = null;
-    card.classList.remove('dragging');
-    document.querySelectorAll('.order-column.drag-over').forEach((column) => column.classList.remove('drag-over'));
-  });
+  card.addEventListener('dragend', finishOrderDrag);
   const select = document.createElement('select');
   ['new', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'cancelled'].forEach((status) => {
     const option = document.createElement('option');
@@ -1560,22 +1724,6 @@ function orderItemHtml(item) {
   `;
 }
 
-function renderWhatsappLogs(order) {
-  const logs = order.whatsapp_logs || [];
-  if (!logs.length) return '<p class="order-note"><strong>WhatsApp</strong> Nenhuma mensagem registrada.</p>';
-  return `
-    <div class="order-message-history">
-      <strong>Histórico de WhatsApp</strong>
-      ${logs.slice(0, 4).map((log) => `
-        <span>
-          <small>${new Date(log.created_at).toLocaleString('pt-BR')} - ${escapeHtml(statusLabel(log.order_status))}</small>
-          <em>${escapeHtml(whatsappLogLabel(log))}${log.error_message ? `: ${escapeHtml(log.error_message)}` : ''}</em>
-        </span>
-      `).join('')}
-    </div>
-  `;
-}
-
 function whatsappLogLabel(log = {}) {
   return ({
     sent: 'enviado',
@@ -1594,6 +1742,16 @@ function financialStatusLabel(status) {
     cancelled: 'Pagamento cancelado',
     refunded: 'Estornado'
   })[status] || 'Pagamento pendente';
+}
+
+function financialStatusBadge(order) {
+  const status = order.financial_status || 'pending';
+  return `<span class="financial-status-badge financial-status-${escapeAttribute(status)}">${financialStatusLabel(status)}</span>`;
+}
+
+function orderOriginBadge(order, label = orderOriginLabel(order)) {
+  const method = order.fulfillment_method || 'delivery';
+  return `<span class="origin-badge origin-${escapeAttribute(method)}">${escapeHtml(label)}</span>`;
 }
 
 function orderAddressHtml(order) {
@@ -1730,7 +1888,7 @@ async function notifyOrderStatus(order) {
       body: JSON.stringify({ status: order.status })
     });
     toast(`WhatsApp: ${whatsappLogLabel(result.log)}.`);
-    await loadSummary({ skipNotifications: true, silent: true });
+    await refreshOrdersOnly({ skipNotifications: true, silent: true });
   } catch (error) {
     toast(error.message || 'Não foi possível reenviar a mensagem.');
   }
@@ -1745,7 +1903,7 @@ async function refundOrder(order) {
       body: JSON.stringify({ reason: 'Estorno pelo painel administrativo' })
     });
     toast('Pagamento estornado.');
-    await loadSummary({ skipNotifications: true, silent: true });
+    await refreshOrdersOnly({ skipNotifications: true, silent: true });
   } catch (error) {
     toast(error.message || 'Não foi possível estornar o pagamento.');
   }
@@ -2101,28 +2259,59 @@ function orderAddressLines(address = {}) {
   ].filter(Boolean);
 }
 
-function handleOrderBoardDragOver(event) {
+function handleOrderColumnDragEnter(event) {
+  if (!state.draggedOrderId) return;
   event.preventDefault();
-  const column = closestOrderColumnFromPoint(event.clientX, event.clientY);
-  markDragColumn(column);
+  markDragColumn(event.currentTarget);
+}
+
+function handleOrderColumnDragOver(event) {
+  if (!state.draggedOrderId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  markDragColumn(event.currentTarget);
   event.dataTransfer.dropEffect = 'move';
 }
 
-function handleOrderBoardDragLeave(event) {
-  if (!els.adminOrders.contains(event.relatedTarget)) clearDragColumns();
+function handleOrderColumnDragLeave(event) {
+  if (!state.draggedOrderId) return;
+  const rect = event.currentTarget.getBoundingClientRect();
+  const stillInside =
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom;
+  if (!stillInside) event.currentTarget.classList.remove('drag-over');
 }
 
-async function handleOrderBoardDrop(event) {
+async function handleOrderColumnDrop(event) {
+  if (!state.draggedOrderId) return;
   event.preventDefault();
-  const column = closestOrderColumnFromPoint(event.clientX, event.clientY);
+  event.stopPropagation();
+  const column = event.currentTarget?.classList?.contains('order-column')
+    ? event.currentTarget
+    : closestOrderColumnFromPoint(event.clientX, event.clientY);
   clearDragColumns();
   if (!column) return;
-  const orderId = event.dataTransfer.getData('text/plain') || state.draggedOrderId;
+  const orderId = draggedOrderIdFromEvent(event) || state.draggedOrderId;
+  state.draggedOrderId = null;
   const status = column.dataset.orderStatus;
   const order = state.orders.find((item) => String(item.id) === String(orderId));
   if (!order || !status || order.status === status) return;
   updateOrderStatus(order.id, status);
   toast(`Pedido #${order.public_code} movido para ${statusLabel(status)}.`);
+}
+
+function draggedOrderIdFromEvent(event) {
+  const raw = event.dataTransfer?.getData('text/plain');
+  if (raw) return raw;
+  const json = event.dataTransfer?.getData('application/json');
+  if (!json) return '';
+  try {
+    return JSON.parse(json).id || '';
+  } catch {
+    return '';
+  }
 }
 
 function closestOrderColumnFromPoint(x, y) {
@@ -2139,20 +2328,17 @@ function closestOrderColumnFromPoint(x, y) {
     y > boardRect.bottom + 24;
   if (outsideBoard) return null;
 
-  const containingColumn = columns.find((column) => {
+  const columnAtX = columns.find((column) => {
     const rect = column.getBoundingClientRect();
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    return x >= rect.left && x <= rect.right;
   });
-  if (containingColumn) return containingColumn;
+  if (columnAtX) return columnAtX;
 
   return columns
     .map((column) => {
       const rect = column.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      const horizontalDistance = Math.abs(x - centerX);
-      const verticalDistance = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
-      return { column, distance: horizontalDistance + verticalDistance * 1.5 };
+      return { column, distance: Math.abs(x - centerX) };
     })
     .sort((a, b) => a.distance - b.distance)[0]?.column || null;
 }
@@ -2167,13 +2353,25 @@ function clearDragColumns() {
   els.adminOrders.querySelectorAll('.order-column.drag-over').forEach((column) => column.classList.remove('drag-over'));
 }
 
-async function updateOrderStatus(orderId, status) {
-  if (state.updatingOrderIds.has(orderId)) return;
-  const order = state.orders.find((item) => String(item.id) === String(orderId));
+function finishOrderDrag() {
+  state.draggedOrderId = null;
+  els.adminOrders?.classList.remove('is-dragging');
+  clearDragColumns();
+  els.adminOrders?.querySelectorAll('.order-card.dragging').forEach((card) => card.classList.remove('dragging'));
+}
+
+async function updateOrderStatus(orderId, status, options = {}) {
+  const orderKey = String(orderId);
+  const order = state.orders.find((item) => String(item.id) === orderKey);
+  if (state.updatingOrderIds.has(orderKey)) {
+    state.pendingOrderStatuses.set(orderKey, status);
+    if (order && order.status !== status) applyOrderStatusLocally(order, status);
+    return;
+  }
   const previousStatus = order?.status;
 
-  if (previousStatus === status) return;
-  state.updatingOrderIds.add(orderId);
+  if (previousStatus === status && !options.force) return;
+  state.updatingOrderIds.add(orderKey);
 
   if (order && previousStatus !== status) {
     applyOrderStatusLocally(order, status);
@@ -2189,14 +2387,21 @@ async function updateOrderStatus(orderId, status) {
       markAutoPrintedKitchen(order.id);
       printOrder({ ...order, status }, { type: 'kitchen', reason: 'auto' });
     }
-    loadSummary({ skipNotifications: true, silent: true }).catch(() => {});
+    if (!state.pendingOrderStatuses.has(orderKey)) {
+      refreshOrdersOnly({ skipNotifications: true, silent: true }).catch(() => {});
+    }
   } catch (error) {
     if (order && previousStatus) {
       applyOrderStatusLocally(order, previousStatus);
     }
     toast(error.message || 'Não foi possível atualizar o pedido.');
   } finally {
-    state.updatingOrderIds.delete(orderId);
+    state.updatingOrderIds.delete(orderKey);
+    const pendingStatus = state.pendingOrderStatuses.get(orderKey);
+    state.pendingOrderStatuses.delete(orderKey);
+    if (pendingStatus && pendingStatus !== status) {
+      updateOrderStatus(orderId, pendingStatus, { force: true });
+    }
   }
 }
 
@@ -2695,6 +2900,7 @@ function customerOrderHistoryRow(order) {
       <div>
         <strong>#${escapeHtml(order.public_code)} - ${money(order.total)}</strong>
         <small>${createdAt} - ${statusLabel(order.status)}</small>
+        ${financialStatusBadge(order)}
       </div>
       <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar</button>
     </article>
@@ -3052,7 +3258,7 @@ async function saveCategoryOrder(categories) {
   await Promise.all(state.categories.map((category) =>
     updateCategory(category.id, { sort_order: category.sort_order }, { reload: false })
   ));
-  await loadSummary({ skipNotifications: true });
+  await loadMenuData({ force: true });
   toast('Ordem das categorias atualizada.');
 }
 
@@ -3218,7 +3424,7 @@ async function saveProductOrder(categoryId, products) {
   await Promise.all(updated.map((item) =>
     updateItem(item.id, { sort_order: item.sort_order }, { reload: false })
   ));
-  await loadSummary({ skipNotifications: true });
+  await loadMenuData({ force: true });
   toast('Ordem dos produtos atualizada.');
 }
 
@@ -3548,7 +3754,7 @@ async function submitModifierGroupFromDialog(event) {
 }
 
 async function refreshProductDialog(itemId = state.editingProductId) {
-  await loadSummary();
+  await loadMenuData({ force: true });
   const item = findProduct(itemId);
   if (!item) return;
   state.editingProductId = item.id;
@@ -3560,7 +3766,7 @@ async function refreshProductDialog(itemId = state.editingProductId) {
 }
 
 async function refreshProductOptions(itemId = state.selectedOptionsProductId) {
-  await loadSummary();
+  await loadMenuData({ force: true });
   if (itemId) state.selectedOptionsProductId = itemId;
   renderModifierProductPicker();
   renderProductOptions(findProduct(state.selectedOptionsProductId));
@@ -3710,7 +3916,7 @@ async function submitCategory(event) {
     });
     els.categoryForm.reset();
     els.categoryForm.elements.is_active.checked = true;
-    await loadSummary();
+    await loadMenuData({ force: true });
     toast('Categoria criada.');
   });
 }
@@ -3737,7 +3943,7 @@ async function submitItem(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    await loadSummary();
+    await loadMenuData({ force: true });
     const item = Array.isArray(created) ? created[0] : created?.[0];
     toast('Produto criado.');
     if (item?.id) openEditProductDialog(findProduct(item.id) || item);
@@ -3748,15 +3954,21 @@ async function submitTable(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.tableForm));
   data.is_active = els.tableForm.elements.is_active.checked;
-  await request('/api/admin/tables', {
+  const result = await request('/api/admin/tables', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
+  const table = result.table || result?.[0] || null;
+  if (table?.id && !state.diningTables.some((entry) => entry.id === table.id)) {
+    state.diningTables = [{ ...table, open_tabs: [], open_tab: null }, ...state.diningTables];
+    state.loadedAdminTabs.add('tables');
+    renderTables();
+  }
   els.tableForm.reset();
   els.tableForm.elements.is_active.checked = true;
-  await loadSummary();
   toast('Mesa cadastrada.');
+  loadTablesData({ force: true }).catch(() => {});
 }
 
 async function submitTab(event) {
@@ -3771,12 +3983,12 @@ async function updateDiningTable(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadTablesData({ force: true });
 }
 
 async function deleteDiningTable(id) {
   await request(`/api/admin/tables/${id}`, { method: 'DELETE' });
-  await loadSummary();
+  await loadTablesData({ force: true });
   toast('Mesa excluída.');
 }
 
@@ -3786,7 +3998,7 @@ async function createCustomerTab(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadTablesData({ force: true });
   toast('Comanda aberta.');
 }
 
@@ -3796,7 +4008,7 @@ async function closeCustomerTab(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadTablesData({ force: true });
   toast('Comanda fechada.');
 }
 
@@ -3806,7 +4018,7 @@ async function transferCustomerTab(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadTablesData({ force: true });
   toast('Comanda transferida.');
 }
 
@@ -3816,7 +4028,7 @@ async function addItemToCustomerTab(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadTablesData({ force: true });
   toast('Item adicionado à comanda.');
 }
 
@@ -3830,6 +4042,16 @@ async function submitStore(event) {
     return;
   }
   await withSaving(els.storeForm, async () => {
+    const logoFile = els.storeForm.elements.logo_file?.files?.[0];
+    const coverFile = els.storeForm.elements.cover_file?.files?.[0];
+    if (logoFile) {
+      const uploaded = await uploadImage(logoFile);
+      payload.logo_url = uploaded.url;
+    }
+    if (coverFile) {
+      const uploaded = await uploadImage(coverFile);
+      payload.cover_url = uploaded.url;
+    }
     const result = await request('/api/admin/store', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -3845,6 +4067,8 @@ async function submitStore(event) {
     saveAdminCache();
     renderOperation();
     fillStoreForm();
+    if (els.storeForm.elements.logo_file) els.storeForm.elements.logo_file.value = '';
+    if (els.storeForm.elements.cover_file) els.storeForm.elements.cover_file.value = '';
     toast(`Loja atualizada. WhatsApp salvo: ${payload.whatsapp_number}`);
   });
 }
@@ -3859,27 +4083,12 @@ async function submitIntegrations(event) {
       body: JSON.stringify(payload)
     });
     state.store = result.store || { ...(state.store || {}), integration_settings: payload.integration_settings };
-    state.storeFormDirty = false;
+    state.integrationsFormDirty = false;
     saveAdminCache();
     fillIntegrationSettings(state.store.integration_settings || payload.integration_settings);
     renderIntegrationStatus(state.store.integration_settings || payload.integration_settings);
     toast('Integrações salvas.');
   });
-}
-
-async function reconcilePayments() {
-  try {
-    const days = els.integrationsForm?.elements.integration_reconciliation_days?.value || 7;
-    const result = await request('/api/admin/payments/reconcile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days })
-    });
-    toast(`Conciliação: ${result.checked || 0} verificado(s), ${result.matched || 0} batido(s), ${result.divergent || 0} divergente(s).`);
-    await loadSummary({ skipNotifications: true, silent: true });
-  } catch (error) {
-    toast(error.message || 'Não foi possível conciliar os pagamentos.');
-  }
 }
 
 function printSettingsFromForm() {
@@ -3912,35 +4121,38 @@ function fillPrintSettingsForm() {
 
 function integrationSettingsFromForm(form) {
   const target = form || els.integrationsForm;
+  const current = state.store?.integration_settings || {};
+  const currentWhatsapp = current.whatsapp || {};
+  const currentPix = current.pix || {};
   return {
     whatsapp: {
       enabled: target?.elements.integration_whatsapp_enabled?.checked || false,
       provider: target?.elements.integration_whatsapp_provider?.value || 'official',
       phoneNumberId: target?.elements.integration_whatsapp_phoneNumberId?.value || '',
-      accessToken: target?.elements.integration_whatsapp_accessToken?.value || '',
+      accessToken: target?.elements.integration_whatsapp_accessToken?.value || currentWhatsapp.accessToken || '',
       apiUrl: target?.elements.integration_whatsapp_apiUrl?.value || ''
     },
     pix: {
       enabled: target?.elements.integration_pix_enabled?.checked || false,
-      provider: target?.elements.integration_pix_provider?.value || 'mock',
-      apiKey: target?.elements.integration_pix_apiKey?.value || '',
-      webhookSecret: target?.elements.integration_pix_webhookSecret?.value || '',
+      provider: 'abacatepay',
+      apiKey: target?.elements.integration_pix_apiKey?.value || currentPix.apiKey || '',
+      webhookSecret: target?.elements.integration_pix_webhookSecret?.value || currentPix.webhookSecret || '',
       expirationMinutes: target?.elements.integration_pix_expirationMinutes?.value || 15
     },
     card: {
-      enabled: target?.elements.integration_card_enabled?.checked || false,
-      provider: target?.elements.integration_card_provider?.value || 'mock',
-      apiKey: target?.elements.integration_card_apiKey?.value || '',
-      returnUrl: target?.elements.integration_card_returnUrl?.value || ''
+      enabled: false,
+      provider: 'mock',
+      apiKey: '',
+      returnUrl: ''
     },
     split: {
-      enabled: target?.elements.integration_split_enabled?.checked || false,
-      recipientId: target?.elements.integration_split_recipientId?.value || '',
-      percentage: target?.elements.integration_split_percentage?.value || 0
+      enabled: false,
+      recipientId: '',
+      percentage: 0
     },
     reconciliation: {
-      enabled: target?.elements.integration_reconciliation_enabled?.checked || false,
-      days: target?.elements.integration_reconciliation_days?.value || 7
+      enabled: false,
+      days: 7
     }
   };
 }
@@ -3948,44 +4160,47 @@ function integrationSettingsFromForm(form) {
 function fillIntegrationSettings(settings = {}) {
   const whatsapp = settings.whatsapp || {};
   const pix = settings.pix || {};
-  const card = settings.card || {};
-  const split = settings.split || {};
-  const reconciliation = settings.reconciliation || {};
   const form = els.integrationsForm;
   if (!form) return;
   if (form.elements.integration_whatsapp_enabled) form.elements.integration_whatsapp_enabled.checked = Boolean(whatsapp.enabled);
-  setValue(form.elements.integration_whatsapp_provider, whatsapp.provider || 'official');
+  setValue(form.elements.integration_whatsapp_provider, inferredWhatsappProvider(whatsapp));
   setValue(form.elements.integration_whatsapp_phoneNumberId, whatsapp.phoneNumberId || '');
   setValue(form.elements.integration_whatsapp_accessToken, whatsapp.accessToken || '');
   setValue(form.elements.integration_whatsapp_apiUrl, whatsapp.apiUrl || '');
   if (form.elements.integration_pix_enabled) form.elements.integration_pix_enabled.checked = Boolean(pix.enabled);
-  setValue(form.elements.integration_pix_provider, pix.provider || 'mock');
+  setValue(form.elements.integration_pix_provider, 'abacatepay');
   setValue(form.elements.integration_pix_apiKey, pix.apiKey || '');
   setValue(form.elements.integration_pix_webhookSecret, pix.webhookSecret || '');
   setValue(form.elements.integration_pix_expirationMinutes, pix.expirationMinutes || 15);
-  if (form.elements.integration_card_enabled) form.elements.integration_card_enabled.checked = Boolean(card.enabled);
-  setValue(form.elements.integration_card_provider, card.provider || 'mock');
-  setValue(form.elements.integration_card_apiKey, card.apiKey || '');
-  setValue(form.elements.integration_card_returnUrl, card.returnUrl || '');
-  if (form.elements.integration_split_enabled) form.elements.integration_split_enabled.checked = Boolean(split.enabled);
-  setValue(form.elements.integration_split_recipientId, split.recipientId || '');
-  setValue(form.elements.integration_split_percentage, split.percentage || 0);
-  if (form.elements.integration_reconciliation_enabled) form.elements.integration_reconciliation_enabled.checked = Boolean(reconciliation.enabled);
-  setValue(form.elements.integration_reconciliation_days, reconciliation.days || 7);
+  renderAbacateWebhookUrl();
   renderIntegrationStatus(settings);
+}
+
+function inferredWhatsappProvider(whatsapp = {}) {
+  const provider = whatsapp.provider || 'official';
+  const apiUrl = String(whatsapp.apiUrl || '').toLowerCase();
+  if (provider === 'webhook' && (apiUrl.includes('relaxsolucoes') || apiUrl.includes('whatsevolution'))) return 'whatsevolution';
+  return provider;
 }
 
 function renderIntegrationStatus(settings = state.store?.integration_settings || {}) {
   if (!els.integrationStatusText) return;
   const whatsapp = settings.whatsapp || {};
   const pix = settings.pix || {};
-  const card = settings.card || {};
-  const reconciliation = settings.reconciliation || {};
-  els.integrationStatusText.textContent = `WhatsApp: ${whatsapp.enabled ? 'ativo' : 'desativado'} - Pix: ${pix.enabled ? 'ativo' : 'desativado'} - Cartão: ${card.enabled ? 'ativo' : 'desativado'} - Conciliação: ${reconciliation.enabled ? 'ativa' : 'desativada'}.`;
+  els.integrationStatusText.textContent = `WhatsApp: ${whatsapp.enabled ? 'ativo' : 'desativado'} - Abacate Pay/Pix: ${pix.enabled ? 'ativo' : 'desativado'}.`;
 }
 
 async function testIntegrations() {
+  const button = els.testIntegrationsButton;
+  const previousText = button?.textContent || 'Testar integrações';
   try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Testando...';
+    }
+    if (els.integrationStatusText) {
+      els.integrationStatusText.textContent = 'Testando WhatsApp e Abacate Pay...';
+    }
     const result = await request('/api/admin/integrations/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3993,20 +4208,78 @@ async function testIntegrations() {
     });
     const whatsapp = result.result?.whatsapp;
     const pix = result.result?.pix;
-    const card = result.result?.card;
-    const reconciliation = result.result?.reconciliation;
+    const hasFailure = [whatsapp, pix].some((item) => item && item.ok === false);
     if (els.integrationStatusText) {
       els.integrationStatusText.textContent = [
-        whatsapp?.message || 'WhatsApp verificado.',
-        pix?.message || 'Pix verificado.',
-        card?.message || 'Cartão verificado.',
-        reconciliation?.message || 'Conciliação verificada.'
+        integrationTestMessage('WhatsApp', whatsapp),
+        integrationTestMessage('Abacate Pay', pix)
       ].join(' ');
     }
-    toast('Teste de integrações concluído.');
+    toast(hasFailure ? 'Teste concluído com pendências.' : 'Integrações testadas com sucesso.');
   } catch (error) {
+    if (els.integrationStatusText) {
+      els.integrationStatusText.textContent = error.message || 'Não foi possível testar as integrações.';
+    }
     toast(error.message || 'Não foi possível testar as integrações.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
   }
+}
+
+function integrationTestMessage(label, result) {
+  if (!result) return `${label}: não testado.`;
+  const prefix = result.ok === false ? `${label}: atenção -` : `${label}: ok -`;
+  return `${prefix} ${result.message || 'verificado.'}`;
+}
+
+function renderAbacateWebhookUrl() {
+  if (!els.abacateWebhookUrl) return;
+  const origin = window.location.origin || '';
+  els.abacateWebhookUrl.textContent = `${origin}/api/payments/webhook?provider=abacatepay&webhookSecret=SEU_SEGREDO`;
+}
+
+function openIntegrationHelp(type) {
+  const origin = window.location.origin || 'https://sua-loja.com';
+  const webhookUrl = `${origin}/api/payments/webhook?provider=abacatepay&webhookSecret=SEU_SEGREDO`;
+  const content = {
+    'abacate-key': {
+      eyebrow: 'Abacate Pay',
+      title: 'Onde pegar a API key',
+      body: `
+        <ol>
+          <li>Entre no painel da Abacate Pay.</li>
+          <li>Acesse <strong>Integrar</strong> e depois <strong>API Keys</strong>.</li>
+          <li>Copie a chave de produção quando a loja já estiver pronta para vender.</li>
+          <li>Cole no campo <strong>API key da Abacate Pay</strong> e salve.</li>
+        </ol>
+        <p>Por segurança, depois de salva a chave fica protegida no servidor e aparece como campo de senha.</p>
+      `
+    },
+    'abacate-webhook': {
+      eyebrow: 'Webhook',
+      title: 'Como receber confirmação do Pix',
+      body: `
+        <ol>
+          <li>No painel da Abacate Pay, abra a área de webhooks.</li>
+          <li>Cadastre a URL abaixo como endpoint HTTPS:</li>
+        </ol>
+        <code>${escapeHtml(webhookUrl)}</code>
+        <ol start="3">
+          <li>Troque <strong>SEU_SEGREDO</strong> pelo mesmo texto cadastrado no campo <strong>Segredo do webhook</strong>.</li>
+          <li>Salve as integrações antes de testar a confirmação do Pix.</li>
+          <li>Faça um pedido teste com Pix online e confira se o status muda para pago após a confirmação.</li>
+        </ol>
+      `
+    }
+  }[type];
+  if (!content || !els.integrationHelpDialog) return;
+  els.integrationHelpEyebrow.textContent = content.eyebrow;
+  els.integrationHelpTitle.textContent = content.title;
+  els.integrationHelpBody.innerHTML = content.body;
+  els.integrationHelpDialog.showModal();
 }
 
 async function updateCategory(id, payload, options = {}) {
@@ -4015,7 +4288,7 @@ async function updateCategory(id, payload, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  if (options.reload !== false) await loadSummary();
+  if (options.reload !== false) await loadMenuData({ force: true });
 }
 
 async function updateItem(id, payload, options = {}) {
@@ -4024,7 +4297,7 @@ async function updateItem(id, payload, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  if (options.reload !== false) await loadSummary();
+  if (options.reload !== false) await loadMenuData({ force: true });
 }
 
 async function updateAdminCustomer(id, payload) {
@@ -4033,7 +4306,7 @@ async function updateAdminCustomer(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadCustomersData({ force: true });
 }
 
 async function createAdminCustomerAddress(customerId, payload) {
@@ -4042,7 +4315,7 @@ async function createAdminCustomerAddress(customerId, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadCustomersData({ force: true });
 }
 
 async function updateAdminCustomerAddress(customerId, addressId, payload) {
@@ -4051,28 +4324,28 @@ async function updateAdminCustomerAddress(customerId, addressId, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadCustomersData({ force: true });
 }
 
 async function deleteAdminCustomerAddress(customerId, addressId) {
   await request(`/api/admin/customers/${customerId}/addresses/${addressId}`, { method: 'DELETE' });
-  await loadSummary();
+  await loadCustomersData({ force: true });
 }
 
 async function removeAdminCustomer(id) {
   await request(`/api/admin/customers/${id}`, { method: 'DELETE' });
   state.openCustomerIds.delete(String(id));
-  await loadSummary();
+  await loadCustomersData({ force: true });
 }
 
 async function removeCategory(id) {
   await request(`/api/categories/${id}`, { method: 'DELETE' });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function removeItem(id) {
   await request(`/api/items/${id}`, { method: 'DELETE' });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function createModifierGroup(itemId, payload) {
@@ -4090,12 +4363,12 @@ async function updateModifierGroup(groupId, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function deleteModifierGroup(groupId) {
   await request(`/api/modifier-groups/${groupId}`, { method: 'DELETE' });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function createModifier(groupId, payload) {
@@ -4104,7 +4377,7 @@ async function createModifier(groupId, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function createPresetModifiers(groupId, options) {
@@ -4128,12 +4401,12 @@ async function updateModifier(modifierId, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function deleteModifier(modifierId) {
   await request(`/api/modifiers/${modifierId}`, { method: 'DELETE' });
-  await loadSummary();
+  await loadMenuData({ force: true });
 }
 
 async function uploadImage(file) {
@@ -4180,7 +4453,7 @@ function showPanel() {
 function startOrderPolling() {
   if (state.orderPollTimer) return;
   state.orderPollTimer = setInterval(() => {
-    loadSummary({ silent: true }).catch(() => {});
+    refreshOrdersOnly({ silent: true }).catch(() => {});
   }, 12000);
 }
 
@@ -4218,6 +4491,7 @@ function activateAdminTab(tab) {
   document.querySelectorAll('[data-admin-section]').forEach((section) => {
     section.classList.toggle('active', section.dataset.adminSection === tab);
   });
+  loadAdminTabData(tab).catch(() => {});
 }
 
 function renderPermissionedNavigation() {
@@ -4310,7 +4584,6 @@ function fillStoreForm() {
   fillBusinessHours(store.business_hours || {});
   fillThemeSettings(store.theme_settings || {});
   fillPrintSettingsForm();
-  fillIntegrationSettings(store.integration_settings || {});
   renderThemePreview();
 }
 

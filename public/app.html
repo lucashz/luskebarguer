@@ -8,10 +8,11 @@
   </head>
   <body class="menu-page">
     <header class="public-topbar">
-      <a class="brand-mark" href="/">Cardápio</a>
+      <a class="brand-mark" href="/">Início</a>
       <div class="public-actions">
         <a class="link-button" id="customerOrdersLink" href="/pedidos">Meus pedidos</a>
         <a class="link-button" id="customerAccountLink" href="/conta">Minha conta</a>
+        <a class="link-button" id="customerLoginLink" href="/conta">Entrar</a>
         <a class="link-button" id="customerCreateAccountLink" href="/conta">Criar conta</a>
         <button class="text-button" id="customerLogoutButton" type="button" hidden>Sair</button>
       </div>
@@ -126,9 +127,9 @@
           <input name="phone" required inputmode="tel" autocomplete="tel" maxlength="15" placeholder="Telefone com DDD">
         </fieldset>
 
-        <fieldset>
-          <legend>Entrega</legend>
-          <div class="segmented">
+        <fieldset id="checkoutFulfillmentFieldset">
+          <legend id="checkoutFulfillmentLegend">Entrega</legend>
+          <div class="segmented" id="fulfillmentMethodSelector">
             <label><input type="radio" name="fulfillment_method" value="delivery" checked> Entrega</label>
             <label><input type="radio" name="fulfillment_method" value="pickup"> Retirada</label>
             <label><input type="radio" name="fulfillment_method" value="counter"> Balcão</label>
@@ -136,16 +137,16 @@
             <label><input type="radio" name="fulfillment_method" value="tab"> Comanda</label>
           </div>
           <section class="table-context" id="tableContext" hidden></section>
-          <input name="label" list="checkoutAddressLabelSuggestions" placeholder="Apelido do endereço: Casa, Trabalho">
-          <input name="postal_code" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="CEP">
-          <input name="street" required autocomplete="address-line1" placeholder="Rua / Avenida">
-          <div class="two-cols">
+          <input class="delivery-address-field" name="label" list="checkoutAddressLabelSuggestions" placeholder="Apelido do endereço: Casa, Trabalho">
+          <input class="delivery-address-field" name="postal_code" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="CEP">
+          <input class="delivery-address-field" name="street" required autocomplete="address-line1" placeholder="Rua / Avenida">
+          <div class="two-cols delivery-address-field">
             <input name="number" required autocomplete="address-line2" placeholder="Número">
             <input name="complement" placeholder="Complemento">
           </div>
-          <input name="neighborhood" required placeholder="Bairro">
-          <input name="city" required autocomplete="address-level2" placeholder="Cidade">
-          <input name="reference" placeholder="Referência">
+          <input class="delivery-address-field" name="neighborhood" required placeholder="Bairro">
+          <input class="delivery-address-field" name="city" required autocomplete="address-level2" placeholder="Cidade">
+          <input class="delivery-address-field" name="reference" placeholder="Referência">
           <p class="delivery-fee-hint" id="deliveryFeeHint">A taxa de entrega será calculada pelo bairro.</p>
           <datalist id="checkoutAddressLabelSuggestions">
             <option value="Casa"></option>
