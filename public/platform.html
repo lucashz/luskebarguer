@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Plataforma - Cardapio</title>
+    <link rel="stylesheet" href="/styles.css?v=20260630-multitenant-fix">
+  </head>
+  <body class="admin-page platform-page">
+    <main class="platform-shell">
+      <header class="admin-header">
+        <div>
+          <p class="eyebrow" id="platformUser">Plataforma</p>
+          <h1>Painel interno</h1>
+          <p class="muted">Empresas, lojas, planos e auditoria do ambiente multiempresa.</p>
+        </div>
+        <div class="admin-header-actions">
+          <a class="ghost-button compact" href="/admin">Voltar ao admin</a>
+          <button class="ghost-button compact" id="platformLogoutButton" type="button">Sair</button>
+        </div>
+      </header>
+
+      <section class="panel" id="platformBlocked" hidden>
+        <p class="eyebrow">Acesso restrito</p>
+        <h2>Conta sem permissao de plataforma</h2>
+        <p class="muted">Entre com uma conta superadmin para administrar empresas e planos.</p>
+      </section>
+
+      <section id="platformContent" hidden>
+        <div class="management-grid platform-management-grid">
+          <form class="panel stack-form" id="companyForm">
+            <p class="eyebrow">Nova empresa</p>
+            <h2>Criar empresa</h2>
+            <input name="name" required placeholder="Nome da empresa">
+            <input name="billing_email" type="email" placeholder="E-mail financeiro">
+            <input name="phone" inputmode="tel" placeholder="Telefone">
+            <select name="plan_code" id="companyPlanSelect"></select>
+            <button class="primary-button">Criar empresa</button>
+          </form>
+
+          <form class="panel stack-form" id="storeForm">
+            <p class="eyebrow">Nova loja</p>
+            <h2>Criar loja</h2>
+            <select name="company_id" id="storeCompanySelect" required></select>
+            <input name="name" required placeholder="Nome da loja">
+            <input name="slug" placeholder="Slug publico. Ex: lsk-burguer">
+            <input name="whatsapp_number" inputmode="tel" placeholder="WhatsApp">
+            <button class="primary-button">Criar loja</button>
+          </form>
+        </div>
+
+        <section class="panel">
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Empresas</p>
+              <h2>Gestao comercial</h2>
+            </div>
+            <button class="ghost-button compact" id="refreshPlatformButton" type="button">Atualizar</button>
+          </div>
+          <div class="platform-company-list" id="companyList"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Auditoria</p>
+              <h2>Eventos recentes</h2>
+            </div>
+          </div>
+          <form class="platform-audit-filters" id="auditFilterForm">
+            <select name="company_id" id="auditCompanySelect">
+              <option value="">Todas empresas</option>
+            </select>
+            <select name="store_id" id="auditStoreSelect">
+              <option value="">Todas lojas</option>
+            </select>
+            <input name="action" placeholder="Acao. Ex: order.status.update">
+            <input name="from" type="date">
+            <input name="to" type="date">
+            <button class="ghost-button compact">Filtrar</button>
+          </form>
+          <div class="audit-list" id="auditList"></div>
+        </section>
+      </section>
+    </main>
+    <div class="toast" id="toast"></div>
+    <script src="/platform.js?v=20260630-multitenant-fix"></script>
+  </body>
+</html>

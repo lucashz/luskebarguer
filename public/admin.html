@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin - Cardápio</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css?v=20260630-charset-fix">
   </head>
   <body class="admin-page">
     <main class="admin-layout auth-only" id="adminLayout">
@@ -20,6 +20,7 @@
           <button data-admin-tab="customers" type="button">Clientes</button>
           <button data-admin-tab="store" type="button">Loja</button>
           <button data-admin-tab="integrations" type="button">Integrações</button>
+          <button data-admin-tab="plan" type="button">Meu plano</button>
           <button data-admin-tab="account" type="button">Conta</button>
         </nav>
       </aside>
@@ -62,7 +63,13 @@
               <p class="eyebrow" id="adminUser">Painel</p>
               <h1 id="adminTitle">Operação</h1>
             </div>
-            <button class="ghost-button compact" id="adminHeaderLogoutButton" type="button">Sair</button>
+            <div class="admin-header-actions">
+              <label class="store-switcher" id="storeSwitcherWrap" hidden>
+                <span>Loja</span>
+                <select id="storeSwitcher"></select>
+              </label>
+              <button class="ghost-button compact" id="adminHeaderLogoutButton" type="button">Sair</button>
+            </div>
           </header>
 
           <section class="onboarding-panel panel" id="onboardingPanel" hidden>
@@ -231,26 +238,26 @@
               <div>
                 <p class="eyebrow">Salão</p>
                 <h2>Mesas e comandas</h2>
+                <p class="muted">Cadastre mesas e use Gerenciar mesa para QR Code, impressão, comandas, itens pedidos, transferência e fechamento.</p>
               </div>
               <button class="ghost-button compact" id="refreshTablesButton" type="button">Atualizar</button>
             </div>
             <div class="management-grid tables-control-grid">
-              <form id="tableForm" class="panel stack-form">
+              <form id="tableForm" class="panel stack-form table-control-form">
                 <div>
                   <p class="eyebrow">Passo 1</p>
                   <h2>Cadastrar mesa</h2>
-                  <p class="muted">Crie a mesa, gere o QR Code e deixe ativa para receber pedidos.</p>
+                  <p class="muted">Crie a mesa e deixe ativa. O QR Code, impressão e controle da mesa ficam no Gerenciar mesa.</p>
                 </div>
                 <input name="name" required placeholder="Ex: Mesa 1, Área externa 3">
-                <input name="code" placeholder="Código para QR. Ex: mesa-1">
                 <label class="check"><input name="is_active" type="checkbox" checked> Mesa ativa</label>
                 <button class="primary-button">Salvar mesa</button>
               </form>
-              <form id="tabForm" class="panel stack-form">
+              <form id="tabForm" class="panel stack-form table-control-form">
                 <div>
                   <p class="eyebrow">Passo 2</p>
                   <h2>Abrir comanda</h2>
-                  <p class="muted">Vincule uma comanda à mesa e lance itens pelo próprio painel.</p>
+                  <p class="muted">Vincule uma comanda à mesa. Depois, gerencie itens pedidos, transferência e fechamento no Gerenciar mesa.</p>
                 </div>
                 <input name="name" required placeholder="Ex: Comanda Lucas">
                 <input name="customer_name" placeholder="Nome do cliente opcional">
@@ -509,10 +516,30 @@
                 <div class="store-settings-fields">
                   <div class="two-cols">
                     <label>Nome da loja<input name="name" required placeholder="Ex: Pizzaria Bella"></label>
-                    <label>Slug<input name="slug" placeholder="Ex: pizzaria-bella"></label>
+                    <label>Caminho da loja<input name="slug" placeholder="Ex: pizzaria-bella"></label>
+                  </div>
+                  <div class="store-path-preview" id="storePathPreview">
+                    <span>Endereco publico</span>
+                    <a href="/cardapio" target="_blank" rel="noopener">Carregando...</a>
                   </div>
                   <label>Descrição<textarea name="description" placeholder="Ex: Pizza artesanal, esfihas e bebidas geladas."></textarea></label>
                   <label>Endereço da loja<input name="address" placeholder="Rua, número, bairro"></label>
+                </div>
+              </section>
+
+              <section class="store-settings-section">
+                <div class="store-settings-copy">
+                  <strong>Dominio personalizado</strong>
+                  <p>Cadastre um dominio proprio para abrir o cardapio sem depender do slug. Configure o DNS apontando para esta hospedagem e depois clique em verificar.</p>
+                </div>
+                <div class="store-settings-fields">
+                  <div class="inline-form-row">
+                    <input id="customDomainInput" type="text" placeholder="Ex: cardapio.sualoja.com.br">
+                    <button class="ghost-button compact" id="addDomainButton" type="button">Adicionar dominio</button>
+                  </div>
+                  <div class="domain-list" id="customDomainList">
+                    <p class="empty-state">Nenhum dominio cadastrado.</p>
+                  </div>
                 </div>
               </section>
 
@@ -591,14 +618,23 @@
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Imagens da loja</strong>
-                  <p>Envie o logo e a imagem de fundo que aparecem no topo do cardápio do cliente.</p>
+                  <p>Envie o logo, favicon e imagem de fundo usados no cardápio e na aba do navegador.</p>
                 </div>
                 <div class="store-settings-fields">
+                  <div class="two-cols">
+                    <label>Nome na aba do navegador<input name="page_title" placeholder="Ex: LSK Burguer"></label>
+                    <label>URL do favicon<input name="favicon_url" placeholder="https://.../favicon.png"></label>
+                  </div>
                   <div class="media-upload-grid">
                     <label class="media-upload-card">
                       Logo da loja
                       <input name="logo_file" type="file" accept="image/jpeg,image/png,image/webp">
                       <small>JPG, PNG ou WebP até 5 MB.</small>
+                    </label>
+                    <label class="media-upload-card">
+                      Favicon da aba
+                      <input name="favicon_file" type="file" accept="image/jpeg,image/png,image/webp">
+                      <small>Imagem quadrada, ideal 128x128 ou 256x256.</small>
                     </label>
                     <label class="media-upload-card">
                       Imagem de fundo do cardápio
@@ -766,17 +802,87 @@
             </form>
           </section>
 
+          <section class="admin-section" data-admin-section="plan">
+            <div class="section-actions">
+              <div>
+                <p class="eyebrow">Assinatura</p>
+                <h2>Meu plano</h2>
+                <p class="muted">Acompanhe recursos liberados, status comercial e uso da loja atual.</p>
+              </div>
+              <button class="ghost-button compact" id="refreshPlanButton" type="button">Atualizar</button>
+            </div>
+
+            <div class="plan-alerts" id="planAlerts"></div>
+
+            <div class="plan-top-grid">
+              <section class="panel" id="planSummary">
+                <p class="empty-state">Carregando plano...</p>
+              </section>
+              <section class="panel" id="planBilling">
+                <p class="empty-state">Carregando cobrança...</p>
+              </section>
+              <section class="panel" id="planRenewal">
+                <p class="empty-state">Carregando renovação...</p>
+              </section>
+            </div>
+
+            <section class="panel" id="planUsage">
+              <p class="empty-state">Carregando uso...</p>
+            </section>
+
+            <section class="panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Recursos</p>
+                  <h2>O que está incluso</h2>
+                </div>
+              </div>
+              <div class="feature-list compact" id="planFeatures">
+                <p class="empty-state">Nenhum recurso carregado.</p>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Comparar</p>
+                  <h2>Comparar planos</h2>
+                </div>
+              </div>
+              <div class="plan-compare-grid" id="planCompare">
+                <p class="empty-state">Carregando planos...</p>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h2>Histórico de cobrança</h2>
+                </div>
+              </div>
+              <div class="plan-history" id="planHistory">
+                <p class="empty-state">Nenhum evento carregado.</p>
+              </div>
+            </section>
+
+          </section>
+
           <section class="admin-section" data-admin-section="account">
-            <div class="management-grid">
-              <form id="accountForm" class="panel stack-form">
-                <h2>Dados do admin</h2>
+            <div class="account-layout account-layout-original" hidden>
+              <form id="accountFormOld" class="panel stack-form account-card">
+                <p class="eyebrow">Perfil</p>
+                <h2>Dados da conta</h2>
+                <p class="muted">Nome e e-mail usados para acessar o painel administrativo.</p>
                 <input name="name" required placeholder="Nome">
                 <input name="email" required type="email" placeholder="E-mail">
                 <button class="primary-button">Salvar conta</button>
               </form>
 
-              <form id="passwordForm" class="panel stack-form">
+              <form id="passwordFormOld" class="panel stack-form account-card">
+                <p class="eyebrow">Segurança</p>
                 <h2>Trocar senha</h2>
+                <p class="muted">Use uma senha forte para proteger pedidos, clientes e configurações.</p>
                 <input name="current_password" required type="password" placeholder="Senha atual">
                 <input name="new_password" required type="password" minlength="8" placeholder="Nova senha">
                 <button class="primary-button">Atualizar senha</button>
@@ -788,23 +894,94 @@
                 <div>
                   <p class="eyebrow">Equipe</p>
                   <h2>Contas e permissões</h2>
-                  <p class="muted">Crie acessos separados para administrador, garçom e cozinha.</p>
+                  <p class="muted">Crie acessos separados para administrador, atendimento, garçom, entrega e cozinha.</p>
                 </div>
               </div>
+
+              <div class="team-role-overview" id="adminRoleOverview"></div>
 
               <form id="adminUserForm" class="admin-user-create-form">
                 <input name="name" required placeholder="Nome da pessoa">
                 <input name="email" required type="email" placeholder="E-mail de acesso">
-                <input name="password" required type="password" minlength="8" placeholder="Senha inicial">
-                <select name="role">
+                <input name="phone" inputmode="tel" placeholder="WhatsApp para convite">
+                <input name="password" type="password" minlength="8" placeholder="Senha inicial para criar direto">
+                <select name="role" id="adminUserRoleSelect">
                   <option value="admin">Administrador</option>
-                  <option value="waiter">Garçom</option>
+                  <option value="waiter">Garcom</option>
+                  <option value="attendant">Atendimento</option>
+                  <option value="delivery">Entrega</option>
                   <option value="kitchen">Cozinha</option>
                 </select>
                 <button class="primary-button compact">Criar conta</button>
+                <button class="ghost-button compact" id="inviteAdminButton" type="button">Gerar convite</button>
               </form>
+              <div class="team-role-preview" id="adminRolePreview"></div>
+
+              <div class="team-toolbar">
+                <input id="adminUserSearch" type="search" placeholder="Buscar por nome ou e-mail">
+                <select id="adminUserRoleFilter">
+                  <option value="all">Todas as funcoes</option>
+                  <option value="admin">Administrador</option>
+                  <option value="attendant">Atendimento</option>
+                  <option value="waiter">Garcom</option>
+                  <option value="delivery">Entrega</option>
+                  <option value="kitchen">Cozinha</option>
+                  <option value="inactive">Inativas</option>
+                </select>
+              </div>
 
               <div class="admin-users-list" id="adminUsersList"></div>
+            </section>
+
+            <section class="panel account-access-panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Acesso</p>
+                  <h2>Sua conta</h2>
+                  <p class="muted">Atualize os dados usados para entrar no painel e mantenha a senha protegida.</p>
+                </div>
+              </div>
+
+              <div class="account-layout account-layout-compact">
+                <form id="accountForm" class="account-card account-mini-form">
+                  <div>
+                    <p class="eyebrow">Perfil</p>
+                    <h3>Dados de acesso</h3>
+                  </div>
+                  <input name="name" required placeholder="Nome">
+                  <input name="email" required type="email" placeholder="E-mail">
+                  <button class="primary-button compact">Salvar conta</button>
+                </form>
+
+                <form id="passwordForm" class="account-card account-mini-form">
+                  <div>
+                    <p class="eyebrow">Seguranca</p>
+                    <h3>Trocar senha</h3>
+                  </div>
+                  <input name="current_password" required type="password" placeholder="Senha atual">
+                  <input name="new_password" required type="password" minlength="8" placeholder="Nova senha">
+                  <button class="primary-button compact">Atualizar senha</button>
+                </form>
+              </div>
+            </section>
+
+            <section class="panel danger-zone-panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Zona de risco</p>
+                  <h2>Excluir conta e dados</h2>
+                  <p class="muted">Esta acao apaga a empresa, loja, pedidos, clientes, cardapio, mesas, comandas, promocoes, sessoes e configuracoes. Nao pode ser desfeita.</p>
+                </div>
+              </div>
+              <form id="deleteAccountForm" class="danger-delete-form">
+                <label>Digite EXCLUIR CONTA para confirmar
+                  <input name="confirmation" autocomplete="off" placeholder="EXCLUIR CONTA">
+                </label>
+                <label>Sua senha atual
+                  <input name="password" type="password" autocomplete="current-password" placeholder="Senha atual">
+                </label>
+                <button class="danger-button" type="submit">Excluir definitivamente</button>
+              </form>
             </section>
           </section>
         </section>
@@ -933,7 +1110,7 @@
       </section>
     </main>
 
-    <script src="/admin.js" type="module"></script>
+    <script src="/admin.js?v=20260630-charset-fix" type="module"></script>
   </body>
 </html>
 

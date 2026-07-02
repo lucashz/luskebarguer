@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   store: null,
   customer: null,
   categories: [],
@@ -164,6 +164,7 @@ els.closedStoreRefreshButton?.addEventListener('click', () => {
   els.closedStoreDialog.close();
   loadBootstrap();
 });
+configureStoreLinks();
 els.savedAddressSelect.addEventListener('change', () => {
   const address = selectedSavedAddress();
   applySavedCustomerAddress(address, { force: true });
@@ -209,9 +210,10 @@ async function loadBootstrap() {
     state.store = data.store || null;
     state.categories = data.categories || [];
     applyStoreTheme(state.store?.theme_settings);
+    applyStoreIdentity(state.store);
     saveCachedBootstrap(data);
     render();
-    setStatus(isStoreClosed() ? 'Loja fechada no momento. Pedidos pausados.' : `${countItems(state.categories)} produtos disponiveis`);
+    setStatus(isStoreClosed() ? closedStoreMessage() : `${countItems(state.categories)} produtos disponiveis`);
     loadLoggedCustomer().catch(() => {});
   } catch (error) {
     setStatus(state.categories.length ? `${countItems(state.categories)} produtos disponiveis` : error.message);
@@ -225,8 +227,9 @@ function renderCachedBootstrap() {
   state.store = cached.store || null;
   state.categories = cached.categories || [];
   applyStoreTheme(state.store?.theme_settings);
+  applyStoreIdentity(state.store);
   render();
-  setStatus(isStoreClosed() ? 'Loja fechada no momento. Pedidos pausados.' : `${countItems(state.categories)} produtos disponiveis`);
+  setStatus(isStoreClosed() ? closedStoreMessage() : `${countItems(state.categories)} produtos disponiveis`);
 }
 
 function renderCachedCustomer() {
@@ -258,8 +261,8 @@ function renderStore() {
   els.storeLogo.style.backgroundImage = '';
   els.storeCover.style.backgroundImage = '';
   els.storeDescription.textContent = store.description || 'Escolha seus itens e envie o pedido pelo WhatsApp da loja.';
-  els.storeStatus.textContent = store.is_open === false ? 'Fechado agora' : 'Aberto agora';
-  els.storeStatus.classList.toggle('closed', store.is_open === false);
+  els.storeStatus.textContent = !isStorePublished() ? 'Em configuração' : store.is_open === false ? 'Fechado agora' : 'Aberto agora';
+  els.storeStatus.classList.toggle('closed', isStoreClosed());
   els.deliveryMeta.textContent = store.accepts_delivery === false ? 'Somente retirada' : `Entrega ${money(store.delivery_fee || 0)}`;
   els.minimumMeta.textContent = `Mínimo ${money(store.minimum_order || 0)}`;
   if (state.diningTable) {
@@ -371,6 +374,24 @@ function applyStoreTheme(theme = {}) {
   });
 }
 
+function applyStoreIdentity(store = {}) {
+  const title = String(store.page_title || store.name || 'Cardápio Digital').trim();
+  document.title = title;
+  applyFavicon(store.favicon_url);
+}
+
+function applyFavicon(url) {
+  const safeUrl = safeImageUrl(url);
+  if (!safeUrl) return;
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = safeUrl;
+}
+
 function validThemeColor(value) {
   return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim());
 }
@@ -455,7 +476,17 @@ function scrollFeaturedWithWheel(event) {
 }
 
 function isStoreClosed() {
-  return state.store?.is_open === false;
+  return !isStorePublished() || state.store?.is_open === false;
+}
+
+function isStorePublished() {
+  return state.store?.onboarding_completed === true;
+}
+
+function closedStoreMessage() {
+  return isStorePublished()
+    ? 'Loja fechada no momento. Pedidos pausados.'
+    : 'Cardápio em configuração. Pedidos ainda não liberados.';
 }
 
 function handleStoreClosedState() {
@@ -474,6 +505,12 @@ function showClosedStoreDialog(force = false) {
   const noticeKey = store.updated_at || store.id || 'closed';
   if (!force && state.closedStoreNoticeKey === noticeKey) return;
   state.closedStoreNoticeKey = noticeKey;
+  if (!isStorePublished()) {
+    els.closedStoreTitle.textContent = `${store.name || 'Este cardápio'} ainda está em configuração.`;
+    els.closedStoreText.textContent = 'A loja ainda não publicou o cardápio. Você pode visualizar os produtos, mas pedidos não estão liberados.';
+    if (!els.closedStoreDialog.open) els.closedStoreDialog.showModal();
+    return;
+  }
   els.closedStoreTitle.textContent = `${store.name || 'A loja'} está fechada agora.`;
   const nextOpen = nextOpenText(store.business_hours);
   els.closedStoreText.textContent = nextOpen
@@ -1061,7 +1098,7 @@ async function submitOrder(event) {
     setStatus(`Pedido ${result.order.public_code} criado.`);
 
     if (result.payment?.pix || result.payment?.card) {
-      window.location.href = `/pagamento?pedido=${encodeURIComponent(result.order.public_code)}`;
+      window.location.href = storePageUrl('pagamento', `pedido=${encodeURIComponent(result.order.public_code)}`);
       return;
     }
 
@@ -1564,13 +1601,43 @@ function onlyDigits(value) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(storeApiUrl(url), options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof data.detail === 'string' ? data.detail : '';
     throw new Error(detail || data.error || 'Falha na requisicao.');
   }
   return data;
+}
+
+function storeApiUrl(url) {
+  if (!String(url || '').startsWith('/api/')) return url;
+  const slug = currentStoreSlug();
+  if (!slug) return url;
+  const parsed = new URL(url, window.location.origin);
+  if (!parsed.searchParams.has('store')) parsed.searchParams.set('store', slug);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+function storePageUrl(page, query = '') {
+  const slug = currentStoreSlug();
+  const base = slug ? `/${slug}/${page}` : `/${page}`;
+  return query ? `${base}?${query}` : base;
+}
+
+function configureStoreLinks() {
+  const slug = currentStoreSlug();
+  if (!slug) return;
+  if (els.customerOrdersLink) els.customerOrdersLink.href = `/${slug}/pedidos`;
+  if (els.customerAccountLink) els.customerAccountLink.href = `/${slug}/conta`;
+  if (els.customerLoginLink) els.customerLoginLink.href = `/${slug}/conta`;
+  if (els.customerCreateAccountLink) els.customerCreateAccountLink.href = `/${slug}/conta`;
+}
+
+function currentStoreSlug() {
+  const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
+  if (!firstSegment || ['admin', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
+  return firstSegment;
 }
 
 function loadCachedBootstrap() {
@@ -1721,7 +1788,7 @@ function persistFavorites() {
 
 function renderEmptyState() {
   els.featured.replaceChildren();
-  els.menu.innerHTML = '<section class="empty-state"><h2>Configure o Supabase</h2><p>Rode o schema atualizado em supabase/schema.sql e confira o arquivo .env.</p></section>';
+  els.menu.innerHTML = '<section class="empty-state"><h2>Configure o banco local</h2><p>Confira o DATABASE_URL, rode as migrations do Prisma e reinicie o servidor.</p></section>';
 }
 
 function countItems(categories) {
@@ -1767,4 +1834,3 @@ function safeImageUrl(value) {
   }
   return '';
 }
-

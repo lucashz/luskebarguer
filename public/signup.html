@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Criar conta - Cardápio Digital</title>
+    <link rel="stylesheet" href="/styles.css?v=20260630-portal">
+  </head>
+  <body class="portal-page signup-page">
+    <header class="portal-topbar">
+      <a class="portal-brand" href="/">Cardápio Digital</a>
+      <nav>
+        <a href="/planos">Planos</a>
+        <a href="/entrar">Entrar</a>
+      </nav>
+    </header>
+
+    <main class="signup-shell">
+      <section class="signup-intro">
+        <p class="eyebrow">Teste grátis</p>
+        <h1>Vamos criar sua loja digital.</h1>
+        <p>Você cadastra a conta, informa os dados do estabelecimento e escolhe o endereço público do cardápio.</p>
+        <div class="signup-progress">
+          <span class="active">Plano</span>
+          <span>Responsável</span>
+          <span>Loja</span>
+          <span>Publicar</span>
+        </div>
+      </section>
+
+      <form class="signup-card" id="signupForm">
+        <section class="signup-step">
+          <p class="eyebrow">Etapa 1</p>
+          <h2>Escolha o plano</h2>
+          <div class="signup-plan-options" id="signupPlanOptions">
+            <p>Carregando planos...</p>
+          </div>
+        </section>
+
+        <section class="signup-step">
+          <p class="eyebrow">Etapa 2</p>
+          <h2>Responsável pela conta</h2>
+          <div class="two-cols">
+            <label>Nome completo<input name="owner_name" required autocomplete="name"></label>
+            <label>WhatsApp<input name="owner_phone" required inputmode="tel" placeholder="(55) 99999-9999"></label>
+          </div>
+          <div class="two-cols">
+            <label>E-mail<input name="owner_email" required type="email" autocomplete="email"></label>
+            <label>Senha<input name="password" required type="password" minlength="8" autocomplete="new-password"></label>
+          </div>
+          <label>Confirmar senha<input name="confirm_password" required type="password" minlength="8" autocomplete="new-password"></label>
+        </section>
+
+        <section class="signup-step">
+          <p class="eyebrow">Etapa 3</p>
+          <h2>Dados do estabelecimento</h2>
+          <div class="two-cols">
+            <label>Nome do estabelecimento<input name="business_name" required placeholder="Ex: LSK Burger"></label>
+            <label>Tipo de negócio
+              <select name="business_type">
+                <option value="hamburgueria">Hamburgueria</option>
+                <option value="pizzaria">Pizzaria</option>
+                <option value="restaurante">Restaurante</option>
+                <option value="lancheria">Lancheria</option>
+                <option value="cafeteria">Cafeteria</option>
+                <option value="marmitaria">Marmitaria</option>
+                <option value="acai">Açaí</option>
+                <option value="confeitaria">Confeitaria</option>
+                <option value="outro">Outro</option>
+              </select>
+            </label>
+          </div>
+          <div class="two-cols">
+            <label>Cidade<input name="city" placeholder="Ex: Santa Maria"></label>
+            <label>Estado<input name="state" maxlength="2" placeholder="RS"></label>
+          </div>
+          <label>Endereço<input name="address" placeholder="Rua, número, bairro"></label>
+          <div class="two-cols">
+            <label>CNPJ ou CPF<input name="document" placeholder="Opcional"></label>
+            <label>Telefone comercial<input name="business_phone" inputmode="tel" placeholder="Opcional"></label>
+          </div>
+        </section>
+
+        <section class="signup-step">
+          <p class="eyebrow">Etapa 4</p>
+          <h2>Endereço do cardápio</h2>
+          <label>Identificador público
+            <div class="slug-field">
+              <span>/</span>
+              <input name="slug" id="signupSlug" required placeholder="lsk-burger">
+            </div>
+          </label>
+          <p class="muted" id="slugStatus">Escolha um endereço fácil de lembrar.</p>
+          <label class="check"><input name="accept_terms" required type="checkbox"> Aceito os Termos de Uso e a Política de Privacidade.</label>
+          <label class="check"><input name="marketing_opt_in" type="checkbox"> Aceito receber dicas e comunicações sobre o sistema.</label>
+        </section>
+
+        <div class="signup-submit-row">
+          <p id="signupMessage"></p>
+          <button class="portal-button" id="signupSubmitButton">Criar loja e entrar</button>
+        </div>
+      </form>
+    </main>
+
+    <script src="/portal.js?v=20260630-portal" type="module"></script>
+  </body>
+</html>

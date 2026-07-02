@@ -1,22 +1,35 @@
 {
-  "name": "cardapio-supabase",
+  "name": "cardapio-local",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "db:schema": "node scripts/apply-schema.mjs",
-    "db:backup": "node scripts/backup-supabase.mjs",
+    "db:local:up": "docker compose up -d postgres",
+    "db:local:down": "docker compose down",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "db:seed": "node prisma/seed.mjs",
+    "db:reset:local": "prisma migrate reset --force",
+    "db:schema": "prisma migrate deploy",
+    "db:backup": "node scripts/backup-postgres.mjs",
     "admin:create": "node scripts/create-admin.mjs",
-    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js",
-    "test:local": "node scripts/local-audit.mjs",
+    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js",
+    "test:local": "node scripts/local-db-smoke.mjs",
     "test:security": "node scripts/sql-injection-tests.mjs"
   },
   "dependencies": {
-    "pg": "^8.16.3"
+    "@prisma/client": "6.19.3",
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.16.3",
+    "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "prisma": "6.19.3"
   }
 }

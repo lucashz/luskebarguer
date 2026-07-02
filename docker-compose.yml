@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cardapio-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cardapio}
+      POSTGRES_USER: ${POSTGRES_USER:-cardapio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cardapio_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - cardapio_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cardapio} -d ${POSTGRES_DB:-cardapio}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cardapio_postgres_data:
+

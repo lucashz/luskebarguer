@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Convite de equipe - Cardápio Digital</title>
+    <link rel="stylesheet" href="/styles.css?v=20260630-portal2">
+  </head>
+  <body class="portal-page login-page">
+    <header class="portal-topbar">
+      <a class="portal-brand" href="/">Cardápio Digital</a>
+      <nav><a href="/entrar">Entrar</a></nav>
+    </header>
+    <main class="login-shell">
+      <section class="login-copy">
+        <p class="eyebrow">Convite de equipe</p>
+        <h1>Crie sua senha para acessar o painel da loja.</h1>
+        <p id="inviteIntro">Carregando convite...</p>
+      </section>
+      <section class="signup-card login-card">
+        <form id="inviteAcceptForm" class="stack-form">
+          <h2>Aceitar convite</h2>
+          <label>Nome<input name="name" id="inviteName"></label>
+          <label>E-mail<input name="email" id="inviteEmail" disabled></label>
+          <label>Senha<input name="password" required type="password" minlength="8" autocomplete="new-password"></label>
+          <label>Confirmar senha<input name="confirm_password" required type="password" minlength="8" autocomplete="new-password"></label>
+          <button class="portal-button" id="inviteAcceptButton">Criar acesso</button>
+          <p id="inviteMessage" class="form-message"></p>
+        </form>
+      </section>
+    </main>
+    <script src="/portal.js?v=20260630-portal2" type="module"></script>
+  </body>
+</html>

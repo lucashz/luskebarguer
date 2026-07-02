@@ -3,6 +3,7 @@ const state = {
   orders: [],
   ordersFromCache: false,
   cacheSavedAt: null,
+  store: null,
   view: window.location.pathname === '/pedidos' ? 'orders' : 'dashboard'
 };
 
@@ -299,7 +300,8 @@ function showAddresses() {
 
 function applyPageMode() {
   const isOrders = state.view === 'orders';
-  document.title = isOrders ? 'Meus Pedidos - Cardápio' : 'Minha Conta - Cardápio';
+  const storeTitle = state.store?.page_title || state.store?.name || 'Cardápio';
+  document.title = `${isOrders ? 'Meus Pedidos' : 'Minha Conta'} - ${storeTitle}`;
   if (els.loadingEyebrow) els.loadingEyebrow.textContent = isOrders ? 'Meus pedidos' : 'Minha conta';
   if (els.pageEyebrow) els.pageEyebrow.textContent = isOrders ? 'Meus pedidos' : 'Minha conta';
   if (els.accountOrdersLink) els.accountOrdersLink.hidden = isOrders;
@@ -497,7 +499,10 @@ function renderLoyaltyProgress() {
 
 async function loadStoreTheme() {
   const data = await request('/api/store');
+  state.store = data.store || null;
   applyStoreTheme(data.store?.theme_settings);
+  applyPageMode();
+  applyFavicon(data.store?.favicon_url);
 }
 
 function applyStoreTheme(theme = {}) {
@@ -518,6 +523,30 @@ function applyStoreTheme(theme = {}) {
 
 function validThemeColor(value) {
   return /^#[0-9a-fA-F]{6}$/.test(String(value || '').trim());
+}
+
+function applyFavicon(url) {
+  const safeUrl = safeImageUrl(url);
+  if (!safeUrl) return;
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = safeUrl;
+}
+
+function safeImageUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(text)) return text;
+  try {
+    const url = new URL(text, window.location.origin);
+    return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
 }
 
 function loyaltyProgressText() {
@@ -757,13 +786,28 @@ function addressPayloadFromForm(form) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(storeApiUrl(url), options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof data.detail === 'string' ? data.detail : '';
     throw new Error(detail || data.error || 'Falha na requisicao.');
   }
   return data;
+}
+
+function storeApiUrl(url) {
+  if (!String(url || '').startsWith('/api/')) return url;
+  const slug = currentStoreSlug();
+  if (!slug) return url;
+  const parsed = new URL(url, window.location.origin);
+  if (!parsed.searchParams.has('store')) parsed.searchParams.set('store', slug);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+function currentStoreSlug() {
+  const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
+  if (!firstSegment || ['admin', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
+  return firstSegment;
 }
 
 function setValue(field, value) {
@@ -831,8 +875,6 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
-
-
 
 
 

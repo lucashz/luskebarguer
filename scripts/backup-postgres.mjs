@@ -5,10 +5,10 @@ import path from 'node:path';
 
 loadEnv(new URL('../.env', import.meta.url));
 
-const connectionString = process.env.DATABASE_URL || buildConnectionString();
+const connectionString = process.env.DATABASE_URL || '';
 
 if (!connectionString) {
-  console.error('DATABASE_URL ausente e nao foi possivel montar a conexao pelo SUPABASE_URL/DATABASE_PW.');
+  console.error('DATABASE_URL ausente.');
   process.exit(1);
 }
 
@@ -16,7 +16,7 @@ const backupsDir = path.resolve('backups');
 await mkdir(backupsDir, { recursive: true });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const output = path.join(backupsDir, `supabase-${stamp}.dump`);
+const output = path.join(backupsDir, `postgres-${stamp}.dump`);
 
 const child = spawn('pg_dump', [
   '--format=custom',
@@ -38,15 +38,6 @@ child.on('exit', (code) => {
   console.error('Falha ao executar pg_dump. Verifique se o PostgreSQL client esta instalado.');
   process.exit(code || 1);
 });
-
-function buildConnectionString() {
-  const url = process.env.SUPABASE_URL || '';
-  const password = process.env.DATABASE_PW || '';
-  const match = url.match(/^https:\/\/([^.]+)\.supabase\.co/);
-  if (!match || !password) return '';
-  const ref = match[1];
-  return `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres`;
-}
 
 function loadEnv(url) {
   if (!existsSync(url)) return;

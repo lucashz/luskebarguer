@@ -3,6 +3,7 @@ node_modules/
 server.out.log
 server.err.log
 backups/
+uploads/
 npm-debug.log*
 .DS_Store
 Thumbs.db

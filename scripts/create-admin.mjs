@@ -8,16 +8,15 @@ const name = process.env.ADMIN_SEED_NAME || 'Administrador';
 const email = (process.env.ADMIN_SEED_EMAIL || 'admin@cardapio.local').trim().toLowerCase();
 const generatedPassword = !process.env.ADMIN_SEED_PASSWORD;
 const password = process.env.ADMIN_SEED_PASSWORD || generatePassword();
-const connectionString = process.env.DATABASE_URL || buildConnectionString();
+const connectionString = process.env.DATABASE_URL || '';
 
 if (!connectionString) {
-  console.error('DATABASE_URL ausente e nao foi possivel montar a conexao pelo SUPABASE_URL/DATABASE_PW.');
+  console.error('DATABASE_URL ausente.');
   process.exit(1);
 }
 
 const client = new pg.Client({
-  connectionString,
-  ssl: { rejectUnauthorized: false }
+  connectionString
 });
 
 try {
@@ -53,15 +52,6 @@ function generatePassword() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
   const bytes = randomBytes(18);
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
-}
-
-function buildConnectionString() {
-  const url = process.env.SUPABASE_URL || '';
-  const password = process.env.DATABASE_PW || '';
-  const match = url.match(/^https:\/\/([^.]+)\.supabase\.co/);
-  if (!match || !password) return '';
-  const ref = match[1];
-  return `postgresql://postgres:${encodeURIComponent(password)}@db.${ref}.supabase.co:5432/postgres`;
 }
 
 function loadEnv(url) {

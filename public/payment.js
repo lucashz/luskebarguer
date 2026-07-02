@@ -21,6 +21,7 @@ els.refresh.addEventListener('click', () => loadPayment());
 els.newPix.addEventListener('click', () => regeneratePix());
 
 loadPayment();
+loadStoreIdentity().catch(() => {});
 
 async function loadPayment() {
   if (!code) {
@@ -33,6 +34,14 @@ async function loadPayment() {
   } catch (error) {
     setStatus(error.message || 'Nao foi possivel carregar o pagamento.');
   }
+}
+
+async function loadStoreIdentity() {
+  const data = await request('/api/store');
+  const store = data.store || {};
+  const title = String(store.page_title || store.name || 'Cardápio').trim();
+  document.title = `Pagamento - ${title}`;
+  applyFavicon(store.favicon_url);
 }
 
 async function regeneratePix() {
@@ -81,10 +90,25 @@ function setStatus(message) {
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(storeApiUrl(url), options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Erro na requisicao.');
   return data;
+}
+
+function storeApiUrl(url) {
+  if (!String(url || '').startsWith('/api/')) return url;
+  const slug = currentStoreSlug();
+  if (!slug) return url;
+  const parsed = new URL(url, window.location.origin);
+  if (!parsed.searchParams.has('store')) parsed.searchParams.set('store', slug);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+function currentStoreSlug() {
+  const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
+  if (!firstSegment || ['admin', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
+  return firstSegment;
 }
 
 function financialStatusLabel(status) {
@@ -133,4 +157,16 @@ function safeImageUrl(value) {
   } catch {
     return '';
   }
+}
+
+function applyFavicon(url) {
+  const safeUrl = safeImageUrl(url);
+  if (!safeUrl) return;
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = safeUrl;
 }

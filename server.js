@@ -1,9 +1,10 @@
-﻿import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
+import { localPostgrestRequest } from './src/lib/local-postgrest-adapter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -12,10 +13,9 @@ loadEnv(path.join(__dirname, '.env'));
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const UPLOAD_DIR = path.resolve(__dirname, process.env.UPLOAD_DIR || 'uploads');
 const STORE_WHATSAPP_NUMBER = onlyDigits(process.env.STORE_WHATSAPP_NUMBER || '');
-const SUPABASE_IMAGE_BUCKET = process.env.SUPABASE_IMAGE_BUCKET || 'menu-images';
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
@@ -26,15 +26,23 @@ const COOKIE_SECURE = parseBoolean(process.env.COOKIE_SECURE, false);
 const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH || 8), 8, 72);
 const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
 const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false);
+const PLATFORM_BILLING_PROVIDER = cleanText(process.env.PLATFORM_BILLING_PROVIDER || 'abacatepay').toLowerCase();
+const PLATFORM_BILLING_API_KEY = process.env.PLATFORM_BILLING_API_KEY || process.env.ABACATEPAY_API_KEY || '';
+const PLATFORM_BILLING_WEBHOOK_SECRET = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.ABACATEPAY_WEBHOOK_SECRET || '';
 const PUBLIC_BOOTSTRAP_CACHE_MS = 1000 * 20;
 const STORE_SETTINGS_CACHE_MS = 1000 * 10;
 const MENU_CACHE_MS = 1000 * 15;
 const SESSION_CACHE_MS = 1000 * 30;
 const ADMIN_LIST_CACHE_MS = 1000 * 8;
-let publicBootstrapCache = null;
-let storeSettingsCache = null;
+const ADMIN_ACCESS_CACHE_MS = 1000 * 15;
+const ADMIN_ORDERS_CACHE_MS = 1000 * 3;
+const DEFAULT_STORE_SLUG = 'luske-burguer';
+const publicBootstrapCache = new Map();
+const storeSettingsCache = new Map();
 const menuCache = new Map();
 const sessionCache = new Map();
+const adminStoreAccessCache = new Map();
+const adminOrdersCache = new Map();
 let adminCustomersCache = null;
 let adminPromotionsCache = null;
 let adminTablesCache = null;
@@ -98,55 +106,79 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  if (!DATABASE_URL) {
     json(res, 500, {
-      error: 'Supabase não configurado.',
-      detail: 'Preencha SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no arquivo .env.'
+      error: 'Banco local nao configurado.',
+      detail: 'Preencha DATABASE_URL no arquivo .env.'
     });
     return;
   }
 
   enforceRateLimit(req, method, url.pathname);
 
+  if (method === 'GET' && url.pathname === '/api/portal/plans') {
+    json(res, 200, await listPortalPlans());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/portal/slug') {
+    json(res, 200, await checkPortalSlug(url.searchParams.get('slug') || ''));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/portal/signup') {
+    const result = await createPortalSignup(req, await readJson(req));
+    json(res, 201, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/bootstrap') {
-    json(res, 200, await getPublicBootstrap(), {
+    const context = await resolveTenant(req, url);
+    json(res, 200, await getPublicBootstrap(context.store.id, { db: context.db, tenant: context.tenant }), {
       'Cache-Control': 'public, max-age=15, stale-while-revalidate=45'
     });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/coupons/preview') {
-    json(res, 200, { coupon: await previewCoupon(req, await readJson(req)) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { coupon: await previewCoupon(req, await readJson(req), context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/menu') {
-    json(res, 200, { categories: await getMenu(false) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { categories: await getMenu(false, context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/store') {
-    json(res, 200, { store: publicStore(await getStoreSettings()) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { store: publicStore(await getStoreSettings(context.store.id, { db: context.db, tenant: context.tenant })) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/tables/resolve') {
-    json(res, 200, { table: await resolveDiningTable(url.searchParams.get('table') || url.searchParams.get('mesa')) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { table: await resolveDiningTable(url.searchParams.get('table') || url.searchParams.get('mesa'), context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/orders') {
-    json(res, 201, await createOrder(req, await readJson(req)));
+    const context = await resolveTenant(req, url);
+    json(res, 201, await createOrder(req, await readJson(req), { storeId: context.store.id, db: context.db, tenant: context.tenant }));
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/payments/order') {
-    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order')));
+    const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
+    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order'), { db: context.db, tenant: context.tenant }));
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/payments/regenerate-pix') {
-    json(res, 200, await regeneratePixPayment(await readJson(req)));
+    const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
+    json(res, 200, await regeneratePixPayment(await readJson(req), { db: context.db, tenant: context.tenant }));
     return;
   }
 
@@ -160,19 +192,22 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/customer/register') {
-    const result = await registerCustomer(await readJson(req));
+    const context = await resolveTenant(req, url);
+    const result = await registerCustomer(await readJson(req), context.store.id, { db: context.db, tenant: context.tenant });
     json(res, 201, result.body, { 'Set-Cookie': sessionCookie(CUSTOMER_COOKIE, result.sessionId) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/customer/login') {
-    const result = await loginCustomer(await readJson(req));
+    const context = await resolveTenant(req, url);
+    const result = await loginCustomer(await readJson(req), context.store.id, { db: context.db, tenant: context.tenant });
     json(res, 200, result.body, { 'Set-Cookie': sessionCookie(CUSTOMER_COOKIE, result.sessionId) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/customer/reset-password') {
-    await resetCustomerPassword(await readJson(req));
+    const context = await resolveTenant(req, url);
+    await resetCustomerPassword(await readJson(req), context.store.id, { db: context.db, tenant: context.tenant });
     json(res, 200, { ok: true });
     return;
   }
@@ -187,28 +222,32 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && url.pathname === '/api/customer/me') {
     const customer = await requireCustomer(req, res);
     if (!customer) return;
-    json(res, 200, { customer: await getCustomerProfile(customer.id) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { customer: await getCustomerProfile(customer.id, context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
   if (method === 'PUT' && url.pathname === '/api/customer/me') {
     const customer = await requireCustomer(req, res);
     if (!customer) return;
-    json(res, 200, { customer: await updateCustomerProfile(customer.id, await readJson(req)) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { customer: await updateCustomerProfile(customer.id, await readJson(req), context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/customer/orders') {
     const customer = await requireCustomer(req, res);
     if (!customer) return;
-    json(res, 200, { orders: await listCustomerOrders(customer.id) });
+    const context = await resolveTenant(req, url);
+    json(res, 200, { orders: await listCustomerOrders(customer.id, context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/customer/addresses') {
     const customer = await requireCustomer(req, res);
     if (!customer) return;
-    json(res, 201, { customer: await createCustomerAddressByOwner(customer.id, await readJson(req)) });
+    const context = await resolveTenant(req, url);
+    json(res, 201, { customer: await createCustomerAddressByOwner(customer.id, await readJson(req), context.store.id, { db: context.db, tenant: context.tenant }) });
     return;
   }
 
@@ -216,12 +255,13 @@ async function handleApi(req, res, url) {
   if (customerAddressMatch) {
     const customer = await requireCustomer(req, res);
     if (!customer) return;
+    const context = await resolveTenant(req, url);
     if (method === 'PUT' || method === 'PATCH') {
-      json(res, 200, { customer: await updateCustomerAddressByOwner(customer.id, customerAddressMatch[1], await readJson(req)) });
+      json(res, 200, { customer: await updateCustomerAddressByOwner(customer.id, customerAddressMatch[1], await readJson(req), context.store.id, { db: context.db, tenant: context.tenant }) });
       return;
     }
     if (method === 'DELETE') {
-      json(res, 200, { customer: await deleteCustomerAddressByOwner(customer.id, customerAddressMatch[1]) });
+      json(res, 200, { customer: await deleteCustomerAddressByOwner(customer.id, customerAddressMatch[1], context.store.id, { db: context.db, tenant: context.tenant }) });
       return;
     }
   }
@@ -235,13 +275,51 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/admin/setup') {
     if (!ADMIN_SETUP_ENABLED) throw httpError(403, 'Criação pública de admin desativada neste ambiente.');
     const result = await setupFirstAdmin(await readJson(req));
+    await audit('admin.setup.create', {
+      req,
+      actor_admin_id: result.body?.admin?.id || null,
+      company_id: result.body?.admin?.company_id || null,
+      store_id: result.body?.admin?.store_id || null,
+      entity_type: 'admin_user',
+      entity_id: result.body?.admin?.id || null,
+      severity: 'warning',
+      after_data: { email: result.body?.admin?.email || null }
+    });
     json(res, 201, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/login') {
     const result = await loginAdmin(await readJson(req));
+    await audit('admin.login.success', {
+      req,
+      actor_admin_id: result.body?.admin?.id || null,
+      company_id: result.body?.admin?.company_id || null,
+      store_id: result.body?.admin?.store_id || null,
+      entity_type: 'admin_user',
+      entity_id: result.body?.admin?.id || null,
+      after_data: { email: result.body?.admin?.email || null }
+    });
     json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/portal/recover-password') {
+    const body = await readJson(req);
+    await requestAdminPasswordRecovery(req, body);
+    json(res, 200, { ok: true, message: 'Se o e-mail existir, enviaremos as instruções de recuperação.' });
+    return;
+  }
+
+  const portalInviteMatch = url.pathname.match(/^\/api\/portal\/invitations\/([a-f0-9]{32,128})$/i);
+  if (portalInviteMatch && method === 'GET') {
+    json(res, 200, { invitation: await getPublicInvitation(portalInviteMatch[1]) });
+    return;
+  }
+
+  if (portalInviteMatch && method === 'POST') {
+    const result = await acceptAdminInvitation(req, portalInviteMatch[1], await readJson(req));
+    json(res, 201, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
     return;
   }
 
@@ -255,7 +333,168 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && url.pathname === '/api/admin/me') {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
-    json(res, 200, { admin: publicAdmin(admin) });
+    json(res, 200, { admin: publicAdmin(await enrichAdminSessionData(admin)) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/stores') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { stores: await listAdminStores(admin), active_store: admin.active_store || null });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/stores/switch') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    const nextAdmin = await switchAdminStore(req, await readJson(req), admin);
+    await audit('admin.store.switch', {
+      req,
+      company_id: nextAdmin.company_id,
+      store_id: nextAdmin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store',
+      entity_id: nextAdmin.store_id,
+      before_data: { store_id: admin.store_id },
+      after_data: { store_id: nextAdmin.store_id }
+    });
+    json(res, 200, { admin: nextAdmin });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/plan') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await getCompanyPlanOverview(admin.company_id, admin.store_id));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/billing/checkout') {
+    const admin = await requireAdminPermission(req, res, 'plan');
+    if (!admin) return;
+    json(res, 200, await createBillingCheckout(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/billing/webhook') {
+    const payload = await readJson(req);
+    json(res, 200, await receiveBillingWebhook(payload, {
+      provider: url.searchParams.get('provider') || PLATFORM_BILLING_PROVIDER,
+      webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || ''
+    }));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/onboarding') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await getAdminOnboarding(admin));
+    return;
+  }
+
+  if ((method === 'PUT' || method === 'PATCH') && url.pathname === '/api/admin/onboarding') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await updateAdminOnboarding(admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/onboarding/publish') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, await publishAdminOnboarding(req, admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/plans') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await listPlatformPlans());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/companies') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await listPlatformCompanies());
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/companies') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 201, { company: await createPlatformCompany(await readJson(req), admin) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/stores') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 201, { store: await createPlatformStore(await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)$/i);
+  if (platformCompanyMatch && (method === 'PUT' || method === 'PATCH')) {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { company: await updatePlatformCompany(platformCompanyMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyStatusMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/status$/i);
+  if (platformCompanyStatusMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { company: await setPlatformCompanyStatus(platformCompanyStatusMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyPlanMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/plan$/i);
+  if (platformCompanyPlanMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { subscription: await changePlatformCompanyPlan(platformCompanyPlanMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyOverrideMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/overrides$/i);
+  if (platformCompanyOverrideMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 201, { override: await createCompanyFeatureOverride(platformCompanyOverrideMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformOverrideMatch = url.pathname.match(/^\/api\/platform\/overrides\/([a-f0-9-]+)$/i);
+  if (platformOverrideMatch && method === 'DELETE') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    await deleteCompanyFeatureOverride(platformOverrideMatch[1], admin);
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  const platformStoreMatch = url.pathname.match(/^\/api\/platform\/stores\/([a-f0-9-]+)$/i);
+  if (platformStoreMatch && (method === 'PUT' || method === 'PATCH')) {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { store: await updatePlatformStore(platformStoreMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformStoreStatusMatch = url.pathname.match(/^\/api\/platform\/stores\/([a-f0-9-]+)\/status$/i);
+  if (platformStoreStatusMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { store: await setPlatformStoreStatus(platformStoreStatusMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/audit') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await listAuditLogs(url.searchParams));
     return;
   }
 
@@ -274,15 +513,42 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/admin/account/delete') {
+    const admin = await requireAdminPermission(req, res, 'account');
+    if (!admin) return;
+    const result = await deleteCurrentCompanyAccount(req, admin, await readJson(req));
+    json(res, 200, result, { 'Set-Cookie': clearCookie(ADMIN_COOKIE) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/users') {
-    if (!(await requireAdminPermission(req, res, 'admin_users'))) return;
-    json(res, 200, { admins: await listAdminUsers() });
+    const session = await requireAdminPermission(req, res, 'admin_users');
+    if (!session) return;
+    json(res, 200, { admins: await listAdminUsers(session) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/users') {
-    if (!(await requireAdminPermission(req, res, 'admin_users'))) return;
-    json(res, 201, { admin: await createAdminUser(await readJson(req)) });
+    const session = await requireAdminPermission(req, res, 'admin_users');
+    if (!session) return;
+    const created = await createAdminUser(await readJson(req), session);
+    await audit('admin_user.create', {
+      req,
+      company_id: session.company_id,
+      store_id: session.store_id,
+      actor_admin_id: session.id,
+      entity_type: 'admin_user',
+      entity_id: created.id,
+      after_data: created
+    });
+    json(res, 201, { admin: created });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/invitations') {
+    const session = await requireAdminPermission(req, res, 'admin_users');
+    if (!session) return;
+    json(res, 201, { invitation: await createAdminInvitation(req, await readJson(req), session) });
     return;
   }
 
@@ -290,7 +556,34 @@ async function handleApi(req, res, url) {
   if (adminUserMatch && (method === 'PUT' || method === 'PATCH')) {
     const session = await requireAdminPermission(req, res, 'admin_users');
     if (!session) return;
-    json(res, 200, { admin: await updateAdminUser(adminUserMatch[1], await readJson(req), session) });
+    const updated = await updateAdminUser(adminUserMatch[1], await readJson(req), session);
+    await audit('admin_user.update', {
+      req,
+      company_id: session.company_id,
+      store_id: session.store_id,
+      actor_admin_id: session.id,
+      entity_type: 'admin_user',
+      entity_id: updated.id,
+      after_data: updated
+    });
+    json(res, 200, { admin: updated });
+    return;
+  }
+
+  if (adminUserMatch && method === 'DELETE') {
+    const session = await requireAdminPermission(req, res, 'admin_users');
+    if (!session) return;
+    const deleted = await deleteAdminUser(adminUserMatch[1], session);
+    await audit('admin_user.delete', {
+      req,
+      company_id: session.company_id,
+      store_id: session.store_id,
+      actor_admin_id: session.id,
+      entity_type: 'admin_user',
+      entity_id: deleted.id,
+      before_data: deleted
+    });
+    json(res, 200, { ok: true });
     return;
   }
 
@@ -299,9 +592,10 @@ async function handleApi(req, res, url) {
     if (!admin) return;
     const startedAt = Date.now();
     const permissions = adminPermissions(admin);
+    const op = await adminOperationalOptions(admin);
     const [store, orders] = await Promise.all([
-      getStoreSettings(),
-      permissions.includes('orders') ? listOrders() : Promise.resolve([])
+      getStoreSettings(admin.store_id, op),
+      permissions.includes('orders') ? listOrders(admin.store_id, op) : Promise.resolve([])
     ]);
     const elapsed = Date.now() - startedAt;
     if (elapsed > 1200) {
@@ -322,37 +616,50 @@ async function handleApi(req, res, url) {
     if (!permissions.includes('menu') && !permissions.includes('tables') && !permissions.includes('promotions')) {
       throw httpError(403, 'Sem permissão para acessar o cardápio.');
     }
-    json(res, 200, { categories: await getMenu(true) });
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { categories: await getMenu(true, admin.store_id, op) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/customers') {
-    if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    json(res, 200, { customers: await listCustomers() });
+    const admin = await requireAdminPermission(req, res, 'customers');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { customers: await listCustomers(admin.store_id, op) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/promotions') {
-    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
-    json(res, 200, { promotions: await listPromotions() });
+    const admin = await requireAdminPermission(req, res, 'promotions');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { promotions: await listPromotions(admin.store_id, op) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/store') {
-    if (!(await requireAdminPermission(req, res, 'store'))) return;
-    json(res, 200, { store: adminStore(await getStoreSettings()) });
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { store: adminStore(await getStoreSettings(admin.store_id, op)) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/tables') {
-    if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    json(res, 200, await listAdminTablesData());
+    const admin = await requireAdminPermission(req, res, 'tables');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, await listAdminTablesData(admin.store_id, op));
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/tables') {
-    if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    const table = await createDiningTable(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'tables');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    await assertCompanyUsageLimit(admin, 'tables', 'dining_tables');
+    const table = await createDiningTable(await readJson(req), admin.store_id, op);
+    await recordCompanyUsage(admin, 'tables', 'dining_tables');
     clearAdminTablesCache();
     json(res, 201, { table });
     return;
@@ -360,15 +667,17 @@ async function handleApi(req, res, url) {
 
   const tableMatch = url.pathname.match(/^\/api\/admin\/tables\/([a-f0-9-]+)$/i);
   if (tableMatch) {
-    if (!(await requireAdminPermission(req, res, 'tables'))) return;
+    const admin = await requireAdminPermission(req, res, 'tables');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PATCH' || method === 'PUT') {
-      const table = await updateDiningTable(tableMatch[1], await readJson(req));
+      const table = await updateDiningTable(tableMatch[1], await readJson(req), admin.store_id, op);
       clearAdminTablesCache();
       json(res, 200, { table });
       return;
     }
     if (method === 'DELETE') {
-      await deleteDiningTable(tableMatch[1]);
+      await deleteDiningTable(tableMatch[1], admin.store_id, op);
       clearAdminTablesCache();
       json(res, 200, { ok: true });
       return;
@@ -376,8 +685,10 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/tabs') {
-    if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    const tab = await openCustomerTab(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'tables');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const tab = await openCustomerTab(await readJson(req), admin.store_id, op);
     clearAdminTablesCache();
     json(res, 201, { tab });
     return;
@@ -385,8 +696,10 @@ async function handleApi(req, res, url) {
 
   const tabItemMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/items$/i);
   if (tabItemMatch && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'tables'))) return;
-    const result = await addItemToCustomerTab(req, tabItemMatch[1], await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'tables');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const result = await addItemToCustomerTab(req, tabItemMatch[1], await readJson(req), admin.store_id, op);
     clearAdminTablesCache();
     json(res, 201, result);
     return;
@@ -394,80 +707,200 @@ async function handleApi(req, res, url) {
 
   const tabMatch = url.pathname.match(/^\/api\/admin\/tabs\/([a-f0-9-]+)\/(close|transfer)$/i);
   if (tabMatch) {
-    if (!(await requireAdminPermission(req, res, 'tables'))) return;
+    const admin = await requireAdminPermission(req, res, 'tables');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     const body = await readJson(req);
     const tab = tabMatch[2] === 'close'
-      ? await closeCustomerTab(tabMatch[1], body)
-      : await transferCustomerTab(tabMatch[1], body);
+      ? await closeCustomerTab(tabMatch[1], body, admin.store_id, op)
+      : await transferCustomerTab(tabMatch[1], body, admin.store_id, op);
     clearAdminTablesCache();
     json(res, 200, { tab });
     return;
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/store') {
-    if (!(await requireAdminPermission(req, res, 'store'))) return;
-    const result = await updateStoreSettings(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const result = await updateStoreSettings(await readJson(req), admin.store_id, op);
+    await audit('store_settings.update', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store_settings',
+      entity_id: admin.store_id,
+      after_data: Array.isArray(result) ? result[0] : result
+    });
     clearStoreSettingsCache();
     json(res, 200, { store: adminStore(Array.isArray(result) ? result[0] : result) });
     return;
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/loyalty') {
-    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
-    const store = await updateLoyaltyProgram(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'promotions');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const store = await updateLoyaltyProgram(await readJson(req), admin.store_id, op);
+    await audit('loyalty.update', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store_settings',
+      entity_id: admin.store_id,
+      after_data: { loyalty_program: store.loyalty_program || null }
+    });
     clearStoreSettingsCache();
     json(res, 200, { store: adminStore(store) });
     return;
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/print-settings') {
-    if (!(await requireAdminPermission(req, res, 'store'))) return;
-    const store = await updatePrintSettings(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const store = await updatePrintSettings(await readJson(req), admin.store_id, op);
+    await audit('print_settings.update', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store_settings',
+      entity_id: admin.store_id,
+      after_data: { print_settings: store.print_settings || null }
+    });
     clearStoreSettingsCache();
     json(res, 200, { store: adminStore(store) });
     return;
   }
 
   if (method === 'PUT' && url.pathname === '/api/admin/integrations') {
-    if (!(await requireAdminPermission(req, res, 'store'))) return;
-    const store = await updateIntegrationSettings(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const store = await updateIntegrationSettings(await readJson(req), admin.store_id, op);
+    await audit('integrations.update', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store_settings',
+      entity_id: admin.store_id,
+      severity: 'warning',
+      after_data: { integration_settings: store.integration_settings || null }
+    });
     clearStoreSettingsCache();
     json(res, 200, { store: adminStore(store) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/integrations/test') {
-    if (!(await requireAdminPermission(req, res, 'store'))) return;
-    json(res, 200, { result: await testIntegrations(await readJson(req)) });
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { result: await testIntegrations(await readJson(req), admin.store_id, op) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/domains') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { domains: await listStoreDomains(admin.store_id) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/domains') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    const domain = await createStoreDomain(await readJson(req), admin);
+    json(res, 201, { domain });
+    return;
+  }
+
+  const adminDomainMatch = url.pathname.match(/^\/api\/admin\/domains\/([a-f0-9-]+)$/i);
+  if (adminDomainMatch && method === 'DELETE') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    await deleteStoreDomain(adminDomainMatch[1], admin);
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  const adminDomainVerifyMatch = url.pathname.match(/^\/api\/admin\/domains\/([a-f0-9-]+)\/verify$/i);
+  if (adminDomainVerifyMatch && method === 'POST') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { domain: await verifyStoreDomain(adminDomainVerifyMatch[1], admin) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/operation/start') {
-    if (!(await requireAdminPermission(req, res, 'operation'))) return;
-    const queue = await clearOrderQueue({ mode: 'close_open' });
-    const store = await setStoreOpen(true);
+    const admin = await requireAdminPermission(req, res, 'operation');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const queue = await clearOrderQueue({ mode: 'close_open', storeId: admin.store_id }, op);
+    const store = await setStoreOpen(true, admin.store_id, op);
+    await audit('operation.start', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store',
+      entity_id: admin.store_id,
+      after_data: { queue }
+    });
     clearStoreSettingsCache();
     json(res, 200, { store, queue });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/operation/stop') {
-    if (!(await requireAdminPermission(req, res, 'operation'))) return;
-    const store = await setStoreOpen(false);
+    const admin = await requireAdminPermission(req, res, 'operation');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const store = await setStoreOpen(false, admin.store_id, op);
+    await audit('operation.stop', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'store',
+      entity_id: admin.store_id
+    });
     clearStoreSettingsCache();
     json(res, 200, { store });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/orders') {
-    if (!(await requireAdminPermission(req, res, 'orders'))) return;
-    json(res, 200, { orders: await listOrders() });
+    const admin = await requireAdminPermission(req, res, 'orders');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { orders: await listOrders(admin.store_id, op) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/print-logs') {
-    if (!(await requireAdminPermission(req, res, 'orders'))) return;
-    json(res, 201, { log: await createPrintLog(await readJson(req)) });
+    const admin = await requireAdminPermission(req, res, 'orders');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const body = await readJson(req);
+    if (body.order_id) await assertOrderBelongsToStore(body.order_id, admin.store_id, op);
+    await assertCompanyUsageLimit(admin, 'thermal_printing', 'print_jobs');
+    const log = await createPrintLog({ ...body, store_id: admin.store_id }, op);
+    await recordCompanyUsage({ ...admin, entity_type: 'order', entity_id: body.order_id || null }, 'thermal_printing', 'print_jobs');
+    await audit('order.print', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'order',
+      entity_id: body.order_id || null,
+      after_data: { print_log_id: log?.id || null, print_type: body.print_type || body.type || null }
+    });
+    json(res, 201, { log });
     return;
   }
 
@@ -475,15 +908,30 @@ async function handleApi(req, res, url) {
   if (orderStatusMatch && method === 'PATCH') {
     const admin = await requireAdminPermission(req, res, 'orders');
     if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     const body = await readJson(req);
     if (!orderStatuses.has(body.status)) {
       throw httpError(422, 'Status de pedido inválido.');
     }
     const patch = { status: body.status };
     if (body.status === 'cancelled') patch.financial_status = 'cancelled';
-    const updated = await supabase('PATCH', 'orders', { id: `eq.${orderStatusMatch[1]}` }, patch, ['Prefer: return=representation']);
-    sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false }).catch((error) => {
+    const updated = await op.db('PATCH', 'orders', {
+      id: `eq.${orderStatusMatch[1]}`,
+      ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+    }, patch, ['Prefer: return=representation']);
+    if (!updated[0]) throw httpError(404, 'Pedido não encontrado nesta loja.');
+    clearAdminOrdersCache(admin.store_id);
+    sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false, ...op }).catch((error) => {
       console.error('Falha ao enviar WhatsApp de status:', error.message || error);
+    });
+    await audit('order.status.update', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'order',
+      entity_id: updated[0].id,
+      after_data: { status: body.status, financial_status: patch.financial_status || updated[0].financial_status }
     });
     json(res, 200, { order: updated[0] || null, whatsapp_log: null });
     return;
@@ -491,69 +939,139 @@ async function handleApi(req, res, url) {
 
   const orderWhatsappMatch = url.pathname.match(/^\/api\/admin\/orders\/([a-f0-9-]+)\/whatsapp$/i);
   if (orderWhatsappMatch && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'orders'))) return;
+    const admin = await requireAdminPermission(req, res, 'orders');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    await assertOrderBelongsToStore(orderWhatsappMatch[1], admin.store_id, op);
     const body = await readJson(req);
-    json(res, 200, { log: await sendOrderStatusWhatsapp(orderWhatsappMatch[1], body.status, { manual: true }) });
+    const log = await sendOrderStatusWhatsapp(orderWhatsappMatch[1], body.status, { manual: true, ...op });
+    await audit('order.whatsapp.resend', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'order',
+      entity_id: orderWhatsappMatch[1],
+      after_data: { status: body.status, log_id: log?.id || null }
+    });
+    json(res, 200, { log });
     return;
   }
 
   const orderRefundMatch = url.pathname.match(/^\/api\/admin\/orders\/([a-f0-9-]+)\/refund$/i);
   if (orderRefundMatch && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'orders'))) return;
-    json(res, 200, { order: await refundOrderPayment(orderRefundMatch[1], await readJson(req)) });
+    const admin = await requireAdminPermission(req, res, 'orders');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    await assertOrderBelongsToStore(orderRefundMatch[1], admin.store_id, op);
+    const order = await refundOrderPayment(orderRefundMatch[1], await readJson(req), op);
+    await audit('order.payment.refund', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'order',
+      entity_id: orderRefundMatch[1],
+      severity: 'warning',
+      after_data: { financial_status: order.financial_status, total: order.total }
+    });
+    json(res, 200, { order });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/payments/reconcile') {
-    if (!(await requireAdminPermission(req, res, 'reports'))) return;
-    json(res, 200, await reconcileOnlinePayments(await readJson(req)));
+    const admin = await requireAdminPermission(req, res, 'reports');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, await reconcileOnlinePayments({ ...(await readJson(req)), storeId: admin.store_id }, op));
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/orders/clear-queue') {
-    if (!(await requireAdminPermission(req, res, 'operation'))) return;
-    const result = await clearOrderQueue(await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'operation');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const result = await clearOrderQueue({ ...(await readJson(req)), storeId: admin.store_id }, op);
+    await audit('orders.clear_queue', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'orders',
+      severity: 'warning',
+      after_data: result
+    });
     json(res, 200, result);
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/reports/daily') {
-    if (!(await requireAdminPermission(req, res, 'reports'))) return;
+    const admin = await requireAdminPermission(req, res, 'reports');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     const date = cleanText(url.searchParams.get('date') || '');
-    json(res, 200, { report: await dailyOrderReport(date) });
+    json(res, 200, { report: await dailyOrderReport(date, admin.store_id, op) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/reports/range') {
-    if (!(await requireAdminPermission(req, res, 'reports'))) return;
+    const admin = await requireAdminPermission(req, res, 'reports');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     json(res, 200, {
       report: await rangeOrderReport({
         days: url.searchParams.get('days'),
         start: url.searchParams.get('start'),
-        end: url.searchParams.get('end')
+        end: url.searchParams.get('end'),
+        storeId: admin.store_id,
+        ...op
       })
     });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/customers') {
-    if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    json(res, 200, { customers: await listCustomers() });
+    const admin = await requireAdminPermission(req, res, 'customers');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { customers: await listCustomers(admin.store_id, op) });
     return;
   }
 
   const adminCustomerMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)$/i);
   if (adminCustomerMatch && (method === 'PUT' || method === 'PATCH')) {
-    if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    const customer = await updateCustomerByAdmin(adminCustomerMatch[1], await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'customers');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const customer = await updateCustomerByAdmin(adminCustomerMatch[1], await readJson(req), admin.store_id, op);
+    await audit('customer.update', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'customer',
+      entity_id: adminCustomerMatch[1],
+      after_data: { id: customer.id, phone: customer.phone, email: customer.email || null }
+    });
     clearAdminCustomersCache();
     json(res, 200, { customer });
     return;
   }
 
   if (adminCustomerMatch && method === 'DELETE') {
-    if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    await deleteCustomerByAdmin(adminCustomerMatch[1]);
+    const admin = await requireAdminPermission(req, res, 'customers');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    await deleteCustomerByAdmin(adminCustomerMatch[1], admin.store_id, op);
+    await audit('customer.delete', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'customer',
+      entity_id: adminCustomerMatch[1],
+      severity: 'warning'
+    });
     clearAdminCustomersCache();
     json(res, 200, { ok: true });
     return;
@@ -561,8 +1079,10 @@ async function handleApi(req, res, url) {
 
   const adminCustomerAddressCreateMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)\/addresses$/i);
   if (adminCustomerAddressCreateMatch && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'customers'))) return;
-    const customer = await createCustomerAddressByAdmin(adminCustomerAddressCreateMatch[1], await readJson(req));
+    const admin = await requireAdminPermission(req, res, 'customers');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const customer = await createCustomerAddressByAdmin(adminCustomerAddressCreateMatch[1], await readJson(req), admin.store_id, op);
     clearAdminCustomersCache();
     json(res, 201, { customer });
     return;
@@ -570,15 +1090,17 @@ async function handleApi(req, res, url) {
 
   const adminCustomerAddressMatch = url.pathname.match(/^\/api\/admin\/customers\/([a-f0-9-]+)\/addresses\/([a-f0-9-]+)$/i);
   if (adminCustomerAddressMatch) {
-    if (!(await requireAdminPermission(req, res, 'customers'))) return;
+    const admin = await requireAdminPermission(req, res, 'customers');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PUT' || method === 'PATCH') {
-      const customer = await updateCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2], await readJson(req));
+      const customer = await updateCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2], await readJson(req), admin.store_id, op);
       clearAdminCustomersCache();
       json(res, 200, { customer });
       return;
     }
     if (method === 'DELETE') {
-      const customer = await deleteCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2]);
+      const customer = await deleteCustomerAddressByAdmin(adminCustomerAddressMatch[1], adminCustomerAddressMatch[2], admin.store_id, op);
       clearAdminCustomersCache();
       json(res, 200, { customer });
       return;
@@ -586,14 +1108,32 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && url.pathname === '/api/admin/promotions') {
-    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
-    json(res, 200, { promotions: await listPromotions() });
+    const admin = await requireAdminPermission(req, res, 'promotions');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    json(res, 200, { promotions: await listPromotions(admin.store_id, op) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/promotions') {
-    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
-    const [promotion] = await supabase('POST', 'promotions', {}, sanitizePromotion(await readJson(req), true), ['Prefer: return=representation']);
+    const admin = await requireAdminPermission(req, res, 'promotions');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    await assertCompanyUsageLimit(admin, 'promotions', 'promotions');
+    const [promotion] = await op.db('POST', 'promotions', {}, {
+      ...sanitizePromotion(await readJson(req), true),
+      store_id: admin.store_id || null
+    }, ['Prefer: return=representation']);
+    await recordCompanyUsage(admin, 'promotions', 'promotions');
+    await audit('promotion.create', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'promotion',
+      entity_id: promotion.id,
+      after_data: promotion
+    });
     clearAdminPromotionsCache();
     json(res, 201, { promotion });
     return;
@@ -601,15 +1141,24 @@ async function handleApi(req, res, url) {
 
   const promotionMatch = url.pathname.match(/^\/api\/admin\/promotions\/([a-f0-9-]+)$/i);
   if (promotionMatch) {
-    if (!(await requireAdminPermission(req, res, 'promotions'))) return;
+    const admin = await requireAdminPermission(req, res, 'promotions');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PUT' || method === 'PATCH') {
-      const [promotion] = await supabase('PATCH', 'promotions', { id: `eq.${promotionMatch[1]}` }, sanitizePromotion(await readJson(req), false), ['Prefer: return=representation']);
+      const [promotion] = await op.db('PATCH', 'promotions', {
+        id: `eq.${promotionMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, sanitizePromotion(await readJson(req), false), ['Prefer: return=representation']);
+      if (!promotion) throw httpError(404, 'Promoção não encontrada nesta loja.');
       clearAdminPromotionsCache();
       json(res, 200, { promotion });
       return;
     }
     if (method === 'DELETE') {
-      await supabase('DELETE', 'promotions', { id: `eq.${promotionMatch[1]}` }, undefined, ['Prefer: return=minimal']);
+      await op.db('DELETE', 'promotions', {
+        id: `eq.${promotionMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, undefined, ['Prefer: return=minimal']);
       clearAdminPromotionsCache();
       json(res, 200, { ok: true });
       return;
@@ -617,14 +1166,33 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/uploads') {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    if (!adminCan(admin, 'menu') && !adminCan(admin, 'store')) {
+      json(res, 403, { error: 'Sua conta não tem permissão para enviar imagens.' });
+      return;
+    }
     json(res, 201, await uploadImage(await readJson(req)));
     return;
   }
 
   if (url.pathname === '/api/categories' && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
-    const result = await supabase('POST', 'menu_categories', {}, sanitizeCategory(await readJson(req), true), ['Prefer: return=representation']);
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    const result = await op.db('POST', 'menu_categories', {}, {
+      ...sanitizeCategory(await readJson(req), true),
+      store_id: admin.store_id || null
+    }, ['Prefer: return=representation']);
+    await audit('menu_category.create', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'menu_category',
+      entity_id: result[0]?.id || null,
+      after_data: result[0] || null
+    });
     clearMenuCache();
     json(res, 201, result);
     return;
@@ -632,15 +1200,23 @@ async function handleApi(req, res, url) {
 
   const categoryMatch = url.pathname.match(/^\/api\/categories\/([a-f0-9-]+)$/i);
   if (categoryMatch) {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PUT' || method === 'PATCH') {
-      const result = await supabase('PATCH', 'menu_categories', { id: `eq.${categoryMatch[1]}` }, sanitizeCategory(await readJson(req), false), ['Prefer: return=representation']);
+      const result = await op.db('PATCH', 'menu_categories', {
+        id: `eq.${categoryMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, sanitizeCategory(await readJson(req), false), ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
-      const result = await supabase('DELETE', 'menu_categories', { id: `eq.${categoryMatch[1]}` }, undefined, ['Prefer: return=representation']);
+      const result = await op.db('DELETE', 'menu_categories', {
+        id: `eq.${categoryMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, undefined, ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
@@ -648,8 +1224,24 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname === '/api/items' && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
-    const result = await supabase('POST', 'menu_items', {}, sanitizeItem(await readJson(req), true), ['Prefer: return=representation']);
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
+    await assertCompanyUsageLimit(admin, 'digital_menu', 'menu_items');
+    const result = await op.db('POST', 'menu_items', {}, {
+      ...sanitizeItem(await readJson(req), true),
+      store_id: admin.store_id || null
+    }, ['Prefer: return=representation']);
+    await recordCompanyUsage(admin, 'digital_menu', 'menu_items');
+    await audit('menu_item.create', {
+      req,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      actor_admin_id: admin.id,
+      entity_type: 'menu_item',
+      entity_id: result[0]?.id || null,
+      after_data: result[0] || null
+    });
     clearMenuCache();
     json(res, 201, result);
     return;
@@ -657,15 +1249,23 @@ async function handleApi(req, res, url) {
 
   const itemMatch = url.pathname.match(/^\/api\/items\/([a-f0-9-]+)$/i);
   if (itemMatch) {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PUT' || method === 'PATCH') {
-      const result = await supabase('PATCH', 'menu_items', { id: `eq.${itemMatch[1]}` }, sanitizeItem(await readJson(req), false), ['Prefer: return=representation']);
+      const result = await op.db('PATCH', 'menu_items', {
+        id: `eq.${itemMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, sanitizeItem(await readJson(req), false), ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
-      const result = await supabase('DELETE', 'menu_items', { id: `eq.${itemMatch[1]}` }, undefined, ['Prefer: return=representation']);
+      const result = await op.db('DELETE', 'menu_items', {
+        id: `eq.${itemMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, undefined, ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
@@ -674,11 +1274,14 @@ async function handleApi(req, res, url) {
 
   const modifierGroupMatch = url.pathname.match(/^\/api\/items\/([a-f0-9-]+)\/modifier-groups$/i);
   if (modifierGroupMatch && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     const payload = sanitizeModifierGroup(await readJson(req), true);
-    await ensureUniqueModifierGroupName(modifierGroupMatch[1], payload.name);
-    const result = await supabase('POST', 'menu_modifier_groups', {}, {
+    await ensureUniqueModifierGroupName(modifierGroupMatch[1], payload.name, op);
+    const result = await op.db('POST', 'menu_modifier_groups', {}, {
       ...payload,
+      store_id: admin.store_id || null,
       menu_item_id: modifierGroupMatch[1]
     }, ['Prefer: return=representation']);
     clearMenuCache();
@@ -688,15 +1291,23 @@ async function handleApi(req, res, url) {
 
   const modifierGroupIdMatch = url.pathname.match(/^\/api\/modifier-groups\/([a-f0-9-]+)$/i);
   if (modifierGroupIdMatch) {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PUT' || method === 'PATCH') {
-      const result = await supabase('PATCH', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, sanitizeModifierGroup(await readJson(req), false), ['Prefer: return=representation']);
+      const result = await op.db('PATCH', 'menu_modifier_groups', {
+        id: `eq.${modifierGroupIdMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, sanitizeModifierGroup(await readJson(req), false), ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
-      const result = await supabase('DELETE', 'menu_modifier_groups', { id: `eq.${modifierGroupIdMatch[1]}` }, undefined, ['Prefer: return=representation']);
+      const result = await op.db('DELETE', 'menu_modifier_groups', {
+        id: `eq.${modifierGroupIdMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, undefined, ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
@@ -705,11 +1316,14 @@ async function handleApi(req, res, url) {
 
   const modifierCreateMatch = url.pathname.match(/^\/api\/modifier-groups\/([a-f0-9-]+)\/modifiers$/i);
   if (modifierCreateMatch && method === 'POST') {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     const payload = sanitizeModifier(await readJson(req), true);
-    await ensureUniqueModifierName(modifierCreateMatch[1], payload.name);
-    const result = await supabase('POST', 'menu_modifiers', {}, {
+    await ensureUniqueModifierName(modifierCreateMatch[1], payload.name, op);
+    const result = await op.db('POST', 'menu_modifiers', {}, {
       ...payload,
+      store_id: admin.store_id || null,
       group_id: modifierCreateMatch[1]
     }, ['Prefer: return=representation']);
     clearMenuCache();
@@ -719,15 +1333,23 @@ async function handleApi(req, res, url) {
 
   const modifierMatch = url.pathname.match(/^\/api\/modifiers\/([a-f0-9-]+)$/i);
   if (modifierMatch) {
-    if (!(await requireAdminPermission(req, res, 'menu'))) return;
+    const admin = await requireAdminPermission(req, res, 'menu');
+    if (!admin) return;
+    const op = await adminOperationalOptions(admin);
     if (method === 'PUT' || method === 'PATCH') {
-      const result = await supabase('PATCH', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, sanitizeModifier(await readJson(req), false), ['Prefer: return=representation']);
+      const result = await op.db('PATCH', 'menu_modifiers', {
+        id: `eq.${modifierMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, sanitizeModifier(await readJson(req), false), ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
     }
     if (method === 'DELETE') {
-      const result = await supabase('DELETE', 'menu_modifiers', { id: `eq.${modifierMatch[1]}` }, undefined, ['Prefer: return=representation']);
+      const result = await op.db('DELETE', 'menu_modifiers', {
+        id: `eq.${modifierMatch[1]}`,
+        ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
+      }, undefined, ['Prefer: return=representation']);
       clearMenuCache();
       json(res, 200, result);
       return;
@@ -738,7 +1360,7 @@ async function handleApi(req, res, url) {
 }
 
 async function hasAdminUser() {
-  const rows = await supabase('GET', 'admin_users', {
+  const rows = await dbRequest('GET', 'admin_users', {
     select: 'id',
     limit: '1'
   });
@@ -752,15 +1374,38 @@ async function setupFirstAdmin(data) {
 
   const admin = sanitizeAdminUser(data);
   const password = validatePassword(data.password);
-  const [created] = await supabase('POST', 'admin_users', {}, {
+  const [created] = await dbRequest('POST', 'admin_users', {}, {
     ...admin,
     password_hash: hashPassword(password),
     role: 'owner',
     is_active: true
   }, ['Prefer: return=representation']);
+  await ensureAdminDefaultStoreAccess(created);
   clearAdminUsersCache();
 
   return createAdminSession(created);
+}
+
+async function ensureAdminDefaultStoreAccess(admin) {
+  const store = await getDefaultStore();
+  if (!store?.id) return;
+  const access = await getAdminStoreAccess(admin);
+  if (!access.length && normalizeAdminRole(admin.role) !== 'superadmin') {
+    await ensureAdminDefaultStoreAccess(admin);
+    clearAdminStoreAccessCache(admin.id);
+  }
+
+  await dbRequest('PATCH', 'admin_users', { id: `eq.${admin.id}` }, {
+    company_id: store.company_id
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('POST', 'admin_user_store_access', {}, {
+    admin_user_id: admin.id,
+    company_id: store.company_id,
+    store_id: store.id,
+    role: normalizeAdminRole(admin.role),
+    permissions: [],
+    is_active: true
+  }, ['Prefer: return=minimal']).catch(() => {});
 }
 
 async function loginAdmin(data) {
@@ -769,7 +1414,7 @@ async function loginAdmin(data) {
 
   if (!email || !password) throw httpError(422, 'Informe e-mail e senha.');
 
-  const rows = await supabase('GET', 'admin_users', {
+  const rows = await dbRequest('GET', 'admin_users', {
     select: '*',
     email: `eq.${email}`,
     limit: '1'
@@ -780,15 +1425,37 @@ async function loginAdmin(data) {
     throw httpError(401, 'E-mail ou senha inválidos.');
   }
 
-  await supabase('PATCH', 'admin_users', { id: `eq.${admin.id}` }, {
+  await dbRequest('PATCH', 'admin_users', { id: `eq.${admin.id}` }, {
     last_login_at: new Date().toISOString()
   }, ['Prefer: return=representation']);
 
   return createAdminSession(admin);
 }
 
+async function requestAdminPasswordRecovery(req, data = {}) {
+  const email = cleanEmail(data.email || '');
+  if (!email) throw httpError(422, 'Informe um e-mail válido.');
+  const [admin] = await dbRequest('GET', 'admin_users', {
+    select: 'id,company_id,email,is_active',
+    email: `eq.${email}`,
+    limit: '1'
+  });
+  if (admin?.id && admin.is_active !== false) {
+    await audit('admin.password_recovery.request', {
+      req,
+      actor_admin_id: admin.id,
+      company_id: admin.company_id || null,
+      entity_type: 'admin_user',
+      entity_id: admin.id,
+      severity: 'info',
+      after_data: { email }
+    });
+  }
+  return { ok: true };
+}
+
 async function getAdminById(adminId) {
-  const rows = await supabase('GET', 'admin_users', {
+  const rows = await dbRequest('GET', 'admin_users', {
     select: '*',
     id: `eq.${adminId}`,
     limit: '1'
@@ -798,41 +1465,229 @@ async function getAdminById(adminId) {
   return rows[0];
 }
 
-async function listAdminUsers() {
+async function listAdminUsers(session = null) {
   const now = Date.now();
-  if (adminUsersCache && adminUsersCache.expiresAt > now) return adminUsersCache.data;
-  const rows = await supabase('GET', 'admin_users', {
+  const cacheKey = isPlatformAdmin(session) ? 'platform' : cleanUuid(session?.company_id) || 'default';
+  if (adminUsersCache?.[cacheKey]?.expiresAt > now) return adminUsersCache[cacheKey].data;
+  const rows = await dbRequest('GET', 'admin_users', {
     select: 'id,name,email,role,is_active,last_login_at,created_at',
+    ...(!isPlatformAdmin(session) && session?.company_id ? { company_id: `eq.${session.company_id}` } : {}),
     order: 'name.asc',
     limit: '200'
   });
   const data = rows.map(publicAdmin);
-  adminUsersCache = {
+  adminUsersCache = adminUsersCache && typeof adminUsersCache === 'object' ? adminUsersCache : {};
+  adminUsersCache[cacheKey] = {
     data,
     expiresAt: now + ADMIN_LIST_CACHE_MS
   };
   return data;
 }
 
-async function createAdminUser(data) {
+async function createAdminUser(data, session = null) {
+  await assertCompanyUsageLimit(session, 'admin_users', 'admin_users');
   const admin = sanitizeAdminUser(data);
+  const role = sanitizeAdminRole(data.role);
+  if (role === 'superadmin' && !isPlatformAdmin(session)) {
+    throw httpError(403, 'Apenas a plataforma pode criar contas superadmin.');
+  }
   const password = validatePassword(data.password);
-  const [created] = await supabase('POST', 'admin_users', {}, {
+  const [created] = await dbRequest('POST', 'admin_users', {}, {
     ...admin,
+    company_id: session?.company_id || admin.company_id || null,
     password_hash: hashPassword(password),
-    role: sanitizeAdminRole(data.role),
+    role,
     is_active: data.is_active === undefined ? true : Boolean(data.is_active)
   }, ['Prefer: return=representation']);
+  if (session?.company_id && session?.store_id) {
+    await dbRequest('POST', 'admin_user_store_access', {}, {
+      admin_user_id: created.id,
+      company_id: session.company_id,
+      store_id: session.store_id,
+      role,
+      permissions: [],
+      is_active: true
+    }, ['Prefer: return=minimal']).catch((error) => {
+      console.warn('Falha ao vincular usuario admin a loja:', error.message || error);
+    });
+  }
+  await recordCompanyUsage(session, 'admin_users', 'admin_users');
+  clearAdminStoreAccessCache(created.id);
   clearAdminUsersCache();
   return publicAdmin(created);
 }
 
+async function createAdminInvitation(req, data = {}, session = null) {
+  await assertCompanyUsageLimit(session, 'admin_users', 'admin_users');
+  const email = cleanEmail(data.email || '');
+  const phone = onlyDigits(data.phone || '');
+  const name = cleanText(data.name || '');
+  const role = sanitizeInviteRole(data.role || 'attendant');
+  if (!email) throw httpError(422, 'Informe o e-mail do funcionario.');
+  if (!session?.company_id || !session?.store_id) throw httpError(422, 'Loja ativa nao encontrada.');
+  const existing = await dbRequest('GET', 'admin_users', {
+    select: 'id',
+    email: `eq.${email}`,
+    limit: '1'
+  });
+  if (existing[0]) throw httpError(409, 'Este e-mail ja possui conta administrativa.');
+  const token = randomBytes(24).toString('hex');
+  const tokenHash = hashInviteToken(token);
+  const [created] = await dbRequest('POST', 'admin_invitations', {}, {
+    company_id: session.company_id,
+    store_id: session.store_id,
+    email,
+    phone: phone || null,
+    name: name || null,
+    role,
+    token_hash: tokenHash,
+    status: 'pending',
+    invited_by: session.id,
+    expires_at: new Date(Date.now() + 7 * 86400000).toISOString()
+  }, ['Prefer: return=representation']);
+  await audit('admin.invitation.create', {
+    req,
+    actor_admin_id: session.id,
+    company_id: session.company_id,
+    store_id: session.store_id,
+    entity_type: 'admin_invitation',
+    entity_id: created.id,
+    after_data: { email, role }
+  });
+  const inviteLink = `/convite?token=${token}`;
+  const whatsapp = await sendAdminInvitationWhatsapp(session.store_id, phone, {
+    name,
+    role,
+    inviteLink: absoluteUrl(req, inviteLink)
+  });
+  return {
+    id: created.id,
+    email,
+    phone,
+    name,
+    role,
+    status: created.status,
+    expires_at: created.expires_at,
+    invite_link: inviteLink,
+    whatsapp_status: whatsapp.status,
+    whatsapp_error: whatsapp.error || null
+  };
+}
+
+async function sendAdminInvitationWhatsapp(storeId, phone, invitation) {
+  const recipient = whatsappRecipientPhone(phone || '');
+  if (!recipient) return { status: 'skipped', error: 'Telefone não informado.' };
+  const store = await getStoreSettings(storeId);
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  if (!integrations.whatsapp.enabled) return { status: 'skipped', error: 'WhatsApp automático desativado.' };
+  const role = adminRoleLabel(invitation.role).toLowerCase();
+  const message = [
+    `Olá${invitation.name ? `, ${invitation.name}` : ''}!`,
+    `Você recebeu um convite para acessar o painel de ${store.name || 'sua loja'} como ${role}.`,
+    `Crie sua senha aqui: ${invitation.inviteLink}`
+  ].join('\n');
+  try {
+    await sendWhatsappViaProvider(integrations.whatsapp, recipient, message);
+    return { status: 'sent' };
+  } catch (error) {
+    return { status: 'failed', error: error.message || 'Falha ao enviar WhatsApp.' };
+  }
+}
+
+async function getPublicInvitation(token) {
+  const invitation = await findInvitationByToken(token);
+  return {
+    email: invitation.email,
+    name: invitation.name || '',
+    role: invitation.role,
+    expires_at: invitation.expires_at
+  };
+}
+
+async function acceptAdminInvitation(req, token, data = {}) {
+  const invitation = await findInvitationByToken(token);
+  const password = validatePassword(data.password);
+  const confirmPassword = String(data.confirm_password || data.confirmPassword || '');
+  if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmacao de senha nao confere.');
+  const name = cleanText(data.name || invitation.name || invitation.email.split('@')[0]);
+  const [admin] = await dbRequest('POST', 'admin_users', {}, {
+    company_id: invitation.company_id,
+    name,
+    email: invitation.email,
+    password_hash: hashPassword(password),
+    role: invitation.role,
+    is_active: true
+  }, ['Prefer: return=representation']);
+  await dbRequest('POST', 'admin_user_store_access', {}, {
+    admin_user_id: admin.id,
+    company_id: invitation.company_id,
+    store_id: invitation.store_id,
+    role: invitation.role,
+    permissions: [],
+    is_active: true
+  }, ['Prefer: return=minimal']);
+  await dbRequest('PATCH', 'admin_invitations', { id: `eq.${invitation.id}` }, {
+    status: 'accepted',
+    accepted_by: admin.id,
+    accepted_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']);
+  await recordCompanyUsage({ company_id: invitation.company_id, store_id: invitation.store_id, id: admin.id }, 'admin_users', 'admin_users');
+  await audit('admin.invitation.accept', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: invitation.company_id,
+    store_id: invitation.store_id,
+    entity_type: 'admin_invitation',
+    entity_id: invitation.id,
+    after_data: { email: invitation.email, role: invitation.role }
+  });
+  clearAdminStoreAccessCache(admin.id);
+  clearAdminUsersCache();
+  return createAdminSession(admin);
+}
+
+async function findInvitationByToken(token) {
+  const value = String(token || '').trim();
+  if (!/^[a-f0-9]{32,128}$/i.test(value)) throw httpError(404, 'Convite invalido.');
+  const tokenHash = hashInviteToken(value);
+  const [invitation] = await dbRequest('GET', 'admin_invitations', {
+    select: '*',
+    token_hash: `eq.${tokenHash}`,
+    status: 'eq.pending',
+    limit: '1'
+  });
+  if (!invitation) throw httpError(404, 'Convite invalido ou ja utilizado.');
+  if (new Date(invitation.expires_at).getTime() < Date.now()) {
+    await dbRequest('PATCH', 'admin_invitations', { id: `eq.${invitation.id}` }, { status: 'expired' }, ['Prefer: return=minimal']).catch(() => {});
+    throw httpError(410, 'Este convite expirou.');
+  }
+  return invitation;
+}
+
+function sanitizeInviteRole(role) {
+  const value = cleanSlug(role || 'attendant');
+  if (['admin', 'waiter', 'attendant', 'delivery', 'kitchen'].includes(value)) return value;
+  return 'attendant';
+}
+
+function hashInviteToken(token) {
+  return pbkdf2Sync(String(token || ''), 'admin_invitation', 120000, 32, 'sha256').toString('hex');
+}
+
 async function updateAdminUser(id, data, session) {
   const target = await getAdminById(id);
+  if (!isPlatformAdmin(session) && target.company_id !== session.company_id) {
+    throw httpError(403, 'Voce nao pode editar uma conta de outra empresa.');
+  }
   const payload = {};
   if ('name' in data) payload.name = cleanText(data.name);
   if ('email' in data) payload.email = cleanEmail(data.email);
-  if ('role' in data) payload.role = sanitizeAdminRole(data.role);
+  if ('role' in data) {
+    payload.role = sanitizeAdminRole(data.role);
+    if (payload.role === 'superadmin' && !isPlatformAdmin(session)) {
+      throw httpError(403, 'Apenas a plataforma pode atribuir superadmin.');
+    }
+  }
   if ('is_active' in data) payload.is_active = Boolean(data.is_active);
   if ('password' in data && String(data.password || '').trim()) {
     payload.password_hash = hashPassword(validatePassword(data.password));
@@ -846,11 +1701,51 @@ async function updateAdminUser(id, data, session) {
     throw httpError(422, 'Você não pode remover seu próprio acesso de administrador.');
   }
 
-  const [updated] = await supabase('PATCH', 'admin_users', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
+  const [updated] = await dbRequest('PATCH', 'admin_users', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Conta admin não encontrada.');
   clearSessionCacheByOwner('admin', id);
+  clearAdminStoreAccessCache(id);
   clearAdminUsersCache();
   return publicAdmin(updated);
+}
+
+async function deleteAdminUser(id, session) {
+  const target = await getAdminById(id);
+  if (!isPlatformAdmin(session) && target.company_id !== session.company_id) {
+    throw httpError(403, 'Voce nao pode excluir uma conta de outra empresa.');
+  }
+  if (target.id === session.id) {
+    throw httpError(422, 'Voce nao pode excluir sua propria conta.');
+  }
+
+  if (isFullAdminRole(target.role)) {
+    const activeAdmins = await dbRequest('GET', 'admin_users', {
+      select: 'id,role,is_active',
+      ...(target.company_id ? { company_id: `eq.${target.company_id}` } : { company_id: 'is.null' }),
+      is_active: 'eq.true',
+      limit: '200'
+    });
+    const otherFullAdmins = activeAdmins.filter((admin) => admin.id !== target.id && isFullAdminRole(admin.role));
+    if (!otherFullAdmins.length) {
+      throw httpError(422, 'Mantenha pelo menos uma conta administradora ativa.');
+    }
+  }
+
+  await dbRequest('DELETE', 'app_sessions', {
+    type: 'eq.admin',
+    owner_id: `eq.${id}`
+  }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('DELETE', 'admin_user_store_access', {
+    admin_user_id: `eq.${id}`
+  }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('DELETE', 'admin_users', {
+    id: `eq.${id}`
+  }, undefined, ['Prefer: return=minimal']);
+
+  clearSessionCacheByOwner('admin', id);
+  clearAdminStoreAccessCache(id);
+  clearAdminUsersCache();
+  return publicAdmin(target);
 }
 
 async function updateAdminAccount(session, data) {
@@ -862,7 +1757,7 @@ async function updateAdminAccount(session, data) {
     throw httpError(422, 'Informe nome ou e-mail para atualizar.');
   }
 
-  const [updated] = await supabase('PATCH', 'admin_users', { id: `eq.${session.id}` }, payload, ['Prefer: return=representation']);
+  const [updated] = await dbRequest('PATCH', 'admin_users', { id: `eq.${session.id}` }, payload, ['Prefer: return=representation']);
   session.name = updated.name;
   session.email = updated.email;
   session.role = updated.role;
@@ -880,30 +1775,1587 @@ async function changeAdminPassword(session, data) {
     throw httpError(401, 'Senha atual invalida.');
   }
 
-  await supabase('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
+  await dbRequest('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=representation']);
   clearSessionCacheByOwner('admin', session.id);
   clearAdminUsersCache();
 }
 
+async function deleteCurrentCompanyAccount(req, session, data = {}) {
+  if (!isFullAdminRole(session.role)) {
+    throw httpError(403, 'Apenas uma conta administradora pode excluir a empresa.');
+  }
+  if (String(data.confirmation || '').trim() !== 'EXCLUIR CONTA') {
+    throw httpError(422, 'Digite EXCLUIR CONTA para confirmar.');
+  }
+  const admin = await getAdminById(session.id);
+  if (!verifyPassword(String(data.password || ''), admin.password_hash)) {
+    throw httpError(401, 'Senha atual invalida.');
+  }
+  const companyId = session.company_id ? cleanUuid(session.company_id, 'empresa') : null;
+  if (!companyId) throw httpError(422, 'Empresa ativa nao encontrada.');
+  const stores = await dbRequest('GET', 'stores', {
+    select: 'id',
+    company_id: `eq.${companyId}`,
+    limit: '1000'
+  }).catch(() => []);
+  const storeIds = cleanUuidArray(stores.map((store) => store.id), 'loja');
+  for (const storeId of storeIds) {
+    await deleteStoreOperationalData(dbRequest, storeId);
+  }
+  await audit('company.delete_account', {
+    req,
+    company_id: companyId,
+    store_id: session.store_id || null,
+    actor_admin_id: session.id,
+    entity_type: 'company',
+    entity_id: companyId,
+    severity: 'critical',
+    before_data: { stores: storeIds.length }
+  });
+  await dbRequest('DELETE', 'app_sessions', { company_id: `eq.${companyId}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('DELETE', 'admin_user_store_access', { company_id: `eq.${companyId}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('DELETE', 'admin_users', { company_id: `eq.${companyId}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('DELETE', 'stores', { company_id: `eq.${companyId}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('DELETE', 'companies', { id: `eq.${companyId}` }, undefined, ['Prefer: return=minimal']);
+  clearAdminUsersCache();
+  sessionCache.clear();
+  clearStoreSettingsCache();
+  clearMenuCache();
+  adminOrdersCache.clear();
+  adminCustomersCache = null;
+  adminPromotionsCache = null;
+  adminTablesCache = null;
+  return { ok: true, deleted_stores: storeIds.length };
+}
+
+async function deleteStoreOperationalData(db, storeId) {
+  const resolvedStoreId = cleanUuid(storeId, 'loja');
+  const tables = [
+    'order_payment_events',
+    'order_whatsapp_logs',
+    'order_print_logs',
+    'order_items',
+    'orders',
+    'customer_addresses',
+    'customers',
+    'menu_modifiers',
+    'menu_modifier_groups',
+    'menu_items',
+    'menu_categories',
+    'customer_tabs',
+    'dining_tables',
+    'promotions',
+    'store_settings',
+    'payment_transaction_index'
+  ];
+  for (const table of tables) {
+    await db('DELETE', table, { store_id: `eq.${resolvedStoreId}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  }
+}
+
 async function createAdminSession(admin) {
-  const sessionId = await createPersistentSession('admin', admin.id, {
+  const access = await getAdminStoreAccess(admin);
+  const activeStore = access[0]?.store || null;
+  const sessionAdmin = {
+    session_version: 2,
     id: admin.id,
     name: admin.name,
     email: admin.email,
-    role: normalizeAdminRole(admin.role)
+    role: normalizeAdminRole(admin.role),
+    company_id: activeStore?.company_id || admin.company_id || access[0]?.company_id || null,
+    store_id: activeStore?.id || null,
+    active_store: activeStore ? publicStoreRef(activeStore) : null,
+    stores: access.map((entry) => publicStoreRef(entry.store)).filter(Boolean)
+  };
+  const sessionId = await createPersistentSession('admin', admin.id, sessionAdmin);
+  return { sessionId, body: { admin: publicAdmin(sessionAdmin) } };
+}
+
+async function getAdminStoreAccess(adminId) {
+  const admin = typeof adminId === 'object' && adminId ? adminId : null;
+  const cleanAdminId = cleanUuid(admin?.id || adminId);
+  if (!cleanAdminId) return [];
+  const role = admin ? normalizeAdminRole(admin.role) : '';
+  const companyId = admin?.company_id ? cleanUuid(admin.company_id) : '';
+  const cacheKey = `${cleanAdminId}:${role || 'any'}:${companyId || 'any'}`;
+  const cached = adminStoreAccessCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  let access = await dbRequest('GET', 'admin_user_store_access', {
+    select: '*',
+    admin_user_id: `eq.${cleanAdminId}`,
+    is_active: 'eq.true',
+    order: 'created_at.asc'
   });
-  return { sessionId, body: { admin: publicAdmin(admin) } };
+  if (admin) {
+    access = access.filter((entry) => {
+      if (role === 'superadmin') return normalizeAdminRole(entry.role) !== 'superadmin';
+      return !companyId || entry.company_id === companyId;
+    });
+  }
+  const storeIds = cleanUuidArray(access.map((entry) => entry.store_id));
+  if (!storeIds.length) return [];
+  const stores = await dbRequest('GET', 'stores', {
+    select: '*',
+    id: uuidInFilter(storeIds),
+    is_active: 'eq.true',
+    order: 'name.asc'
+  });
+  const storesById = new Map(stores.map((store) => [store.id, store]));
+  const data = access
+    .map((entry) => ({ ...entry, store: storesById.get(entry.store_id) || null }))
+    .filter((entry) => entry.store);
+  adminStoreAccessCache.set(cacheKey, {
+    data,
+    expiresAt: Date.now() + ADMIN_ACCESS_CACHE_MS
+  });
+  return data;
+}
+
+async function listAdminStores(admin) {
+  const access = await getAdminStoreAccess(admin);
+  return access.map((entry) => ({
+    ...publicStoreRef(entry.store),
+    role: normalizeAdminRole(entry.role),
+    permissions: Array.isArray(entry.permissions) ? entry.permissions : []
+  }));
+}
+
+async function switchAdminStore(req, data, admin) {
+  const storeId = cleanUuid(data.store_id || data.id, 'loja');
+  const access = await getAdminStoreAccess(admin);
+  const selected = access.find((entry) => entry.store_id === storeId);
+  if (!selected) throw httpError(403, 'Sua conta não possui acesso a esta loja.');
+
+  const nextAdmin = {
+    ...admin,
+    session_version: 2,
+    company_id: selected.company_id,
+    store_id: selected.store_id,
+    role: normalizeAdminRole(selected.role || admin.role),
+    active_store: publicStoreRef(selected.store),
+    stores: access.map((entry) => publicStoreRef(entry.store)).filter(Boolean)
+  };
+
+  const cookies = parseCookies(req);
+  const token = cookies[ADMIN_COOKIE];
+  if (token) {
+    await dbRequest('PATCH', 'app_sessions', { token: `eq.${token}`, type: 'eq.admin' }, {
+      company_id: selected.company_id,
+      store_id: selected.store_id,
+      data: nextAdmin
+    }, ['Prefer: return=minimal']);
+    clearSessionCacheToken(token);
+  }
+
+  return publicAdmin(nextAdmin);
+}
+
+async function listPlatformCompanies() {
+  const [companies, stores, subscriptions, features, overrides] = await Promise.all([
+    dbRequest('GET', 'companies', {
+      select: '*',
+      order: 'created_at.desc',
+      limit: '200'
+    }),
+    dbRequest('GET', 'stores', {
+      select: '*',
+      order: 'name.asc',
+      limit: '500'
+    }),
+    dbRequest('GET', 'company_subscriptions', {
+      select: '*',
+      order: 'created_at.desc',
+      limit: '500'
+    }),
+    dbRequest('GET', 'platform_features', {
+      select: '*',
+      order: 'sort_order.asc',
+      limit: '300'
+    }),
+    dbRequest('GET', 'company_feature_overrides', {
+      select: '*',
+      order: 'created_at.desc',
+      limit: '1000'
+    })
+  ]);
+  const featureById = new Map(features.map((feature) => [feature.id, feature]));
+  const storesByCompany = new Map();
+  for (const store of stores) {
+    if (!storesByCompany.has(store.company_id)) storesByCompany.set(store.company_id, []);
+    storesByCompany.get(store.company_id).push(publicStoreRef(store));
+  }
+  const subscriptionByCompany = new Map();
+  for (const subscription of subscriptions) {
+    if (!subscriptionByCompany.has(subscription.company_id)) subscriptionByCompany.set(subscription.company_id, subscription);
+  }
+  const overridesByCompany = new Map();
+  for (const override of overrides) {
+    if (!overridesByCompany.has(override.company_id)) overridesByCompany.set(override.company_id, []);
+    overridesByCompany.get(override.company_id).push({
+      ...override,
+      feature: featureById.get(override.feature_id) || null
+    });
+  }
+  return {
+    features,
+    companies: companies.map((company) => ({
+      ...company,
+      stores: storesByCompany.get(company.id) || [],
+      subscription: subscriptionByCompany.get(company.id) || null,
+      overrides: overridesByCompany.get(company.id) || []
+    }))
+  };
+}
+
+async function createPlatformCompany(data, admin) {
+  const name = cleanText(data.name || data.company?.name || '');
+  if (!name) throw httpError(422, 'Informe o nome da empresa.');
+  const payload = {
+    name,
+    document: cleanText(data.document || '') || null,
+    billing_email: cleanEmail(data.billing_email || data.email || '') || null,
+    phone: onlyDigits(data.phone || ''),
+    status: ['active', 'trial', 'past_due', 'suspended', 'cancelled', 'archived'].includes(data.status) ? data.status : 'trial'
+  };
+  const [company] = await dbRequest('POST', 'companies', {}, payload, ['Prefer: return=representation']);
+  await createDefaultSubscription(company.id, data.plan_code || 'essential');
+  await audit('platform.company.create', { company_id: company.id, actor_admin_id: admin.id, after_data: payload });
+  return company;
+}
+
+async function createPlatformStore(data, admin) {
+  const companyId = cleanUuid(data.company_id, 'empresa');
+  const name = cleanText(data.name || '');
+  const slug = cleanSlug(data.slug || name);
+  if (!name) throw httpError(422, 'Informe o nome da loja.');
+  if (!slug) throw httpError(422, 'Informe um endereço público válido para a loja.');
+  const [company] = await dbRequest('GET', 'companies', { select: 'id', id: `eq.${companyId}`, limit: '1' });
+  if (!company) throw httpError(404, 'Empresa não encontrada.');
+  const storeCount = await currentUsageForKey({ company_id: companyId }, 'stores');
+  if (storeCount >= 1) {
+    await assertCompanyUsageLimit({ company_id: companyId }, 'multi_store', 'stores');
+  }
+  const [store] = await dbRequest('POST', 'stores', {}, {
+    company_id: companyId,
+    name,
+    slug,
+    description: cleanText(data.description || '') || null,
+    public_url: `/${slug}`,
+    is_active: data.is_active !== false
+  }, ['Prefer: return=representation']);
+  await dbRequest('POST', 'store_settings', {}, {
+    store_id: store.id,
+    name,
+    slug,
+    description: cleanText(data.description || 'Pedido rápido pelo cardápio digital.'),
+    whatsapp_number: onlyDigits(data.whatsapp_number || ''),
+    address: cleanText(data.address || ''),
+    payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
+    theme_settings: defaultThemeSettings(),
+    business_hours: defaultBusinessHours()
+  }, ['Prefer: return=minimal']);
+  if (admin?.id && cleanUuid(admin.company_id) === companyId) {
+    await dbRequest('POST', 'admin_user_store_access', {}, {
+      admin_user_id: admin.id,
+      company_id: companyId,
+      store_id: store.id,
+      role: normalizeAdminRole(admin.role),
+      permissions: [],
+      is_active: true
+    }, ['Prefer: return=minimal']);
+    clearAdminStoreAccessCache(admin.id);
+  }
+  await audit('platform.store.create', { company_id: companyId, store_id: store.id, actor_admin_id: admin.id, after_data: { name, slug } });
+  await recordCompanyUsage({ ...admin, company_id: companyId }, 'multi_store', 'stores');
+  return publicStoreRef(store);
+}
+
+async function listPlatformPlans() {
+  const [plans, features, planFeatures] = await Promise.all([
+    dbRequest('GET', 'subscription_plans', {
+      select: '*',
+      order: 'sort_order.asc',
+      limit: '100'
+    }),
+    listPlatformFeaturesSafe(),
+    dbRequest('GET', 'plan_features', {
+      select: '*',
+      limit: '1000'
+    })
+  ]);
+  const featuresById = new Map(features.map((feature) => [feature.id, feature]));
+  const planFeaturesByPlan = new Map();
+  for (const entry of planFeatures) {
+    if (!planFeaturesByPlan.has(entry.plan_id)) planFeaturesByPlan.set(entry.plan_id, []);
+    planFeaturesByPlan.get(entry.plan_id).push({
+      ...entry,
+      feature: featuresById.get(entry.feature_id) || null
+    });
+  }
+  return {
+    plans: plans.map((plan) => ({
+      ...plan,
+      features: planFeaturesByPlan.get(plan.id) || []
+    })),
+    features
+  };
+}
+
+async function listPlatformFeaturesSafe() {
+  return dbRequest('GET', 'platform_features', {
+    select: '*',
+    order: 'sort_order.asc',
+    limit: '200'
+  }).catch(() => dbRequest('GET', 'platform_features', {
+    select: '*',
+    order: 'name.asc',
+    limit: '200'
+  }).catch(() => []));
+}
+
+async function listPortalPlans() {
+  const data = await listPlatformPlans();
+  return {
+    plans: data.plans
+      .filter((plan) => plan.is_active !== false)
+      .map((plan) => ({
+        code: plan.code,
+        name: plan.name,
+        description: plan.description,
+        monthly_price: plan.monthly_price,
+        annual_price: plan.annual_price,
+        sort_order: plan.sort_order,
+        features: plan.features
+          .filter((entry) => entry.is_enabled !== false && entry.feature)
+          .map((entry) => ({
+            code: entry.feature.code,
+            name: entry.feature.name,
+            description: entry.feature.description,
+            limit_value: entry.limit_value
+          }))
+      }))
+  };
+}
+
+async function checkPortalSlug(value) {
+  const slug = cleanSlug(value || '');
+  const reserved = reservedPublicSlugs();
+  if (!slug || slug.length < 3) {
+    return { slug, available: false, reason: 'Use pelo menos 3 caracteres.' };
+  }
+  if (reserved.has(slug)) {
+    return { slug, available: false, reason: 'Este endereço é reservado.' };
+  }
+  const rows = await dbRequest('GET', 'stores', {
+    select: 'id',
+    slug: `eq.${slug}`,
+    limit: '1'
+  });
+  return {
+    slug,
+    available: rows.length === 0,
+    reason: rows.length ? 'Este endereço já está em uso.' : ''
+  };
+}
+
+async function createPortalSignup(req, data = {}) {
+  const parsed = sanitizePortalSignup(data);
+  const slugStatus = await checkPortalSlug(parsed.store.slug);
+  if (!slugStatus.available) throw httpError(409, slugStatus.reason || 'Endereço público indisponível.');
+
+  const existingAdmin = await dbRequest('GET', 'admin_users', {
+    select: 'id',
+    email: `eq.${parsed.owner.email}`,
+    limit: '1'
+  });
+  if (existingAdmin[0]) throw httpError(409, 'Este e-mail já possui uma conta. Use a tela de entrar.');
+
+  const created = { company: null, admin: null, store: null };
+  try {
+    const [company] = await dbRequest('POST', 'companies', {}, {
+      name: parsed.company.name,
+      document: parsed.company.document || null,
+      billing_email: parsed.owner.email,
+      phone: parsed.owner.phone,
+      status: 'trial'
+    }, ['Prefer: return=representation']);
+    created.company = company;
+
+    const [admin] = await dbRequest('POST', 'admin_users', {}, {
+      company_id: company.id,
+      name: parsed.owner.name,
+      email: parsed.owner.email,
+      password_hash: hashPassword(parsed.owner.password),
+      role: 'owner',
+      is_active: true
+    }, ['Prefer: return=representation']);
+    created.admin = admin;
+
+    const [store] = await dbRequest('POST', 'stores', {}, {
+      company_id: company.id,
+      name: parsed.store.name,
+      slug: parsed.store.slug,
+      description: parsed.store.description,
+      public_url: `/${parsed.store.slug}`,
+      is_active: true
+    }, ['Prefer: return=representation']);
+    created.store = store;
+
+    await dbRequest('POST', 'admin_user_store_access', {}, {
+      admin_user_id: admin.id,
+      company_id: company.id,
+      store_id: store.id,
+      role: 'owner',
+      permissions: [],
+      is_active: true
+    }, ['Prefer: return=minimal']);
+
+    await createDefaultSubscription(company.id, parsed.planCode);
+    await createPortalStoreSettings(store.id, parsed);
+    await createStarterMenu(store.id, parsed.businessType);
+    await createOnboardingProgress(company.id, store.id, parsed);
+
+    await audit('portal.signup.create', {
+      req,
+      actor_admin_id: admin.id,
+      company_id: company.id,
+      store_id: store.id,
+      entity_type: 'company',
+      entity_id: company.id,
+      severity: 'info',
+      after_data: {
+        plan_code: parsed.planCode,
+        business_type: parsed.businessType,
+        slug: parsed.store.slug,
+        marketing_opt_in: parsed.marketingOptIn
+      }
+    });
+
+    clearAdminUsersCache();
+    const session = await createAdminSession(admin);
+    return {
+      sessionId: session.sessionId,
+      body: {
+        ...session.body,
+        company: { id: company.id, name: company.name, status: company.status },
+        store: publicStoreRef(store),
+        redirect: '/onboarding'
+      }
+    };
+  } catch (error) {
+    await rollbackPortalSignup(created).catch(() => {});
+    throw error;
+  }
+}
+
+function sanitizePortalSignup(data = {}) {
+  const owner = data.owner || {};
+  const business = data.business || {};
+  const planCode = cleanSlug(data.plan_code || data.planCode || 'essential') || 'essential';
+  const ownerName = cleanText(owner.name || data.name || '');
+  const ownerEmail = cleanEmail(owner.email || data.email || '');
+  const ownerPhone = onlyDigits(owner.phone || data.phone || '');
+  const password = validatePassword(owner.password || data.password);
+  const confirmPassword = String(owner.confirm_password || owner.confirmPassword || data.confirm_password || data.confirmPassword || '');
+  if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmação de senha não confere.');
+  if (!ownerName) throw httpError(422, 'Informe seu nome completo.');
+  if (!ownerEmail) throw httpError(422, 'Informe um e-mail válido.');
+  if (ownerPhone.length < 10) throw httpError(422, 'Informe um WhatsApp válido.');
+  if (data.accept_terms !== true && data.acceptTerms !== true) throw httpError(422, 'Aceite os Termos de Uso para continuar.');
+
+  const displayName = cleanText(business.display_name || business.displayName || business.name || '');
+  const companyName = cleanText(business.company_name || business.companyName || business.name || displayName);
+  const slug = cleanSlug(business.slug || displayName || companyName);
+  if (!companyName || !displayName) throw httpError(422, 'Informe o nome do estabelecimento.');
+  if (!slug) throw httpError(422, 'Informe o endereço público do cardápio.');
+
+  return {
+    planCode,
+    businessType: cleanSlug(business.type || 'outro') || 'outro',
+    marketingOptIn: Boolean(data.marketing_opt_in || data.marketingOptIn),
+    owner: {
+      name: ownerName,
+      email: ownerEmail,
+      phone: ownerPhone,
+      password
+    },
+    company: {
+      name: companyName,
+      document: cleanText(business.document || '')
+    },
+    store: {
+      name: displayName,
+      slug,
+      description: cleanText(business.description || `Cardápio digital de ${displayName}.`)
+    },
+    business: {
+      city: cleanText(business.city || ''),
+      state: cleanText(business.state || '').slice(0, 2).toUpperCase(),
+      address: cleanText(business.address || ''),
+      phone: onlyDigits(business.phone || ownerPhone),
+      document: cleanText(business.document || '')
+    }
+  };
+}
+
+async function createPortalStoreSettings(storeId, parsed) {
+  await dbRequest('POST', 'store_settings', {}, {
+    store_id: storeId,
+    name: parsed.store.name,
+    slug: parsed.store.slug,
+    description: parsed.store.description,
+    whatsapp_number: parsed.business.phone || parsed.owner.phone,
+    address: parsed.business.address,
+    payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
+    business_hours: defaultBusinessHours(),
+    theme_settings: defaultThemeSettings(),
+    onboarding_completed: true
+  }, ['Prefer: return=minimal']);
+}
+
+async function getAdminOnboarding(admin) {
+  const storeId = cleanUuid(admin.store_id);
+  const companyId = cleanUuid(admin.company_id);
+  if (!storeId || !companyId) throw httpError(422, 'Loja ativa não encontrada.');
+
+  const [progressRows, store, categories, items] = await Promise.all([
+    dbRequest('GET', 'onboarding_progress', {
+      select: '*',
+      company_id: `eq.${companyId}`,
+      store_id: `eq.${storeId}`,
+      limit: '1'
+    }).catch(() => []),
+    getStoreSettings(storeId),
+    getMenu(true, storeId),
+    dbRequest('GET', 'menu_items', {
+      select: 'id,is_available',
+      store_id: `eq.${storeId}`,
+      limit: '1'
+    }).catch(() => [])
+  ]);
+
+  const progress = progressRows[0] || await ensureOnboardingProgress(companyId, storeId);
+  const computed = computeOnboardingSteps({ store, categories, items });
+  const savedCompleted = new Set(Array.isArray(progress.completed_steps) ? progress.completed_steps : []);
+  for (const step of computed.steps) {
+    if (step.auto_completed) savedCompleted.add(step.key);
+  }
+  const completedSteps = [...savedCompleted];
+  const total = computed.steps.length;
+  const completedCount = computed.steps.filter((step) => completedSteps.includes(step.key)).length;
+  const percent = total ? Math.round((completedCount / total) * 100) : 0;
+
+  return {
+    progress: {
+      ...progress,
+      completed_steps: completedSteps,
+      is_completed: store.onboarding_completed === true || progress.is_completed === true
+    },
+    store: publicStore(store),
+    steps: computed.steps.map((step) => ({
+      ...step,
+      completed: completedSteps.includes(step.key)
+    })),
+    percent,
+    can_publish: computed.canPublish,
+    blockers: computed.blockers,
+    public_url: `/${admin.active_store?.slug || store.slug || ''}`
+  };
+}
+
+async function updateAdminOnboarding(admin, data = {}) {
+  const storeId = cleanUuid(admin.store_id);
+  const companyId = cleanUuid(admin.company_id);
+  if (!storeId || !companyId) throw httpError(422, 'Loja ativa não encontrada.');
+  const progress = await ensureOnboardingProgress(companyId, storeId);
+  const requested = Array.isArray(data.completed_steps) ? data.completed_steps : [];
+  const nextCompleted = [...new Set([
+    ...(Array.isArray(progress.completed_steps) ? progress.completed_steps : []),
+    ...requested.map((step) => cleanSlug(step)).filter(Boolean)
+  ])];
+  const currentStep = cleanSlug(data.current_step || progress.current_step || 'welcome');
+  await dbRequest('PATCH', 'onboarding_progress', { id: `eq.${progress.id}` }, {
+    current_step: currentStep,
+    completed_steps: nextCompleted,
+    metadata: isPlainObject(data.metadata) ? data.metadata : progress.metadata || {}
+  }, ['Prefer: return=minimal']);
+  return getAdminOnboarding(admin);
+}
+
+async function publishAdminOnboarding(req, admin) {
+  const overview = await getAdminOnboarding(admin);
+  if (!overview.can_publish) {
+    throw httpError(422, `Antes de publicar: ${overview.blockers.join(', ')}.`);
+  }
+  const current = await getStoreSettings(admin.store_id);
+  await dbRequest('PATCH', 'store_settings', { id: `eq.${current.id}` }, {
+    onboarding_completed: true,
+    is_open: true
+  }, ['Prefer: return=minimal']);
+  await ensureOnboardingProgress(admin.company_id, admin.store_id);
+  await dbRequest('PATCH', 'onboarding_progress', {
+    company_id: `eq.${admin.company_id}`,
+    store_id: `eq.${admin.store_id}`
+  }, {
+    is_completed: true,
+    current_step: 'published',
+    completed_steps: overview.steps.map((step) => step.key)
+  }, ['Prefer: return=minimal']);
+  clearStoreSettingsCache();
+  await audit('onboarding.publish', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    entity_type: 'store_settings',
+    entity_id: current.id,
+    after_data: { onboarding_completed: true, is_open: true }
+  });
+  return getAdminOnboarding(admin);
+}
+
+async function ensureOnboardingProgress(companyId, storeId) {
+  const [existing] = await dbRequest('GET', 'onboarding_progress', {
+    select: '*',
+    company_id: `eq.${companyId}`,
+    store_id: `eq.${storeId}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existing) return existing;
+  const [created] = await dbRequest('POST', 'onboarding_progress', {}, {
+    company_id: companyId,
+    store_id: storeId,
+    current_step: 'welcome',
+    completed_steps: ['account', 'business', 'slug'],
+    is_completed: false,
+    metadata: {}
+  }, ['Prefer: return=representation']);
+  return created;
+}
+
+function computeOnboardingSteps({ store, categories, items }) {
+  const steps = [
+    {
+      key: 'account',
+      title: 'Conta criada',
+      description: 'Responsável e acesso administrativo configurados.',
+      auto_completed: true
+    },
+    {
+      key: 'visual',
+      title: 'Logo e visual',
+      description: 'Adicione logo ou escolha cores para deixar o cardápio com a cara da loja.',
+      auto_completed: Boolean(store.logo_url || Object.keys(store.theme_settings || {}).length)
+    },
+    {
+      key: 'hours',
+      title: 'Horário de atendimento',
+      description: 'Configure quando a loja pode receber pedidos.',
+      auto_completed: Boolean(store.business_hours && Object.keys(store.business_hours).length)
+    },
+    {
+      key: 'fulfillment',
+      title: 'Entrega e retirada',
+      description: 'Defina entrega, retirada, taxa e pedido mínimo.',
+      auto_completed: store.accepts_delivery !== false || store.accepts_pickup !== false
+    },
+    {
+      key: 'payments',
+      title: 'Formas de pagamento',
+      description: 'Adicione Pix, cartão, dinheiro ou pagamento online.',
+      auto_completed: Array.isArray(store.payment_methods) && store.payment_methods.length > 0
+    },
+    {
+      key: 'category',
+      title: 'Primeira categoria',
+      description: 'Crie pelo menos uma categoria do cardápio.',
+      auto_completed: Array.isArray(categories) && categories.length > 0
+    },
+    {
+      key: 'product',
+      title: 'Primeiro produto',
+      description: 'Cadastre pelo menos um produto ativo.',
+      auto_completed: Array.isArray(items) && items.length > 0
+    },
+    {
+      key: 'publish',
+      title: 'Publicar cardápio',
+      description: 'Libere a loja para receber pedidos.',
+      auto_completed: store.onboarding_completed === true
+    }
+  ];
+  const blockers = steps
+    .filter((step) => !['visual', 'publish'].includes(step.key) && !step.auto_completed)
+    .map((step) => step.title);
+  return {
+    steps,
+    blockers,
+    canPublish: blockers.length === 0
+  };
+}
+
+async function createOnboardingProgress(companyId, storeId, parsed) {
+  await dbRequest('POST', 'onboarding_progress', {}, {
+    company_id: companyId,
+    store_id: storeId,
+    current_step: 'logo',
+    completed_steps: ['account', 'business', 'slug'],
+    is_completed: false,
+    metadata: {
+      business_type: parsed.businessType,
+      selected_plan: parsed.planCode,
+      marketing_opt_in: parsed.marketingOptIn
+    }
+  }, ['Prefer: return=minimal']).catch(() => null);
+}
+
+async function createStarterMenu(storeId, businessType) {
+  const names = starterCategoriesForBusiness(businessType);
+  let sort = 1;
+  for (const name of names) {
+    await dbRequest('POST', 'menu_categories', {}, {
+      store_id: storeId,
+      name,
+      sort_order: sort,
+      is_active: true
+    }, ['Prefer: return=minimal']).catch(() => null);
+    sort += 1;
+  }
+}
+
+function starterCategoriesForBusiness(type) {
+  return ({
+    hamburgueria: ['Hambúrgueres', 'Combos', 'Porções', 'Bebidas', 'Sobremesas'],
+    pizzaria: ['Pizzas', 'Bordas', 'Combos', 'Bebidas', 'Sobremesas'],
+    restaurante: ['Pratos', 'Entradas', 'Bebidas', 'Sobremesas'],
+    lancheria: ['Lanches', 'Porções', 'Bebidas', 'Sobremesas'],
+    cafeteria: ['Cafés', 'Salgados', 'Doces', 'Bebidas'],
+    marmitaria: ['Marmitas', 'Guarnições', 'Bebidas', 'Sobremesas'],
+    acai: ['Açaí', 'Complementos', 'Vitaminas', 'Bebidas'],
+    confeitaria: ['Bolos', 'Doces', 'Salgados', 'Bebidas']
+  })[cleanSlug(type)] || ['Principais', 'Combos', 'Bebidas'];
+}
+
+async function rollbackPortalSignup(created) {
+  if (created.company?.id) {
+    await dbRequest('DELETE', 'companies', { id: `eq.${created.company.id}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+    return;
+  }
+  if (created.admin?.id) await dbRequest('DELETE', 'admin_users', { id: `eq.${created.admin.id}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+}
+
+function reservedPublicSlugs() {
+  return new Set([
+    'admin',
+    'api',
+    'login',
+    'entrar',
+    'cadastro',
+    'criar-conta',
+    'onboarding',
+    'planos',
+    'recursos',
+    'demonstracao',
+    'demo',
+    'suporte',
+    'dashboard',
+    'platform',
+    'plataforma',
+    'cardapio',
+    'cozinha',
+    'pagamento',
+    'pedidos',
+    'conta',
+    'cliente'
+  ]);
+}
+
+async function updatePlatformCompany(id, data, admin) {
+  const companyId = cleanUuid(id, 'empresa');
+  const before = await getCompanyById(companyId);
+  const payload = {};
+  if ('name' in data) payload.name = cleanText(data.name);
+  if ('document' in data) payload.document = cleanText(data.document || '') || null;
+  if ('billing_email' in data || 'email' in data) payload.billing_email = cleanEmail(data.billing_email || data.email || '') || null;
+  if ('phone' in data) payload.phone = onlyDigits(data.phone || '');
+  if ('status' in data) payload.status = sanitizeCompanyStatus(data.status);
+  if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
+  if (!payload.name && 'name' in payload) throw httpError(422, 'Informe o nome da empresa.');
+  const [company] = await dbRequest('PATCH', 'companies', { id: `eq.${companyId}` }, payload, ['Prefer: return=representation']);
+  if (!company) throw httpError(404, 'Empresa nao encontrada.');
+  await audit('platform.company.update', {
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: company.id,
+    before_data: before,
+    after_data: payload
+  });
+  return company;
+}
+
+async function setPlatformCompanyStatus(id, data, admin) {
+  return updatePlatformCompany(id, { status: data.status }, admin);
+}
+
+async function changePlatformCompanyPlan(id, data, admin) {
+  const companyId = cleanUuid(id, 'empresa');
+  const planCode = cleanSlug(data.plan_code || data.code || '');
+  if (!planCode) throw httpError(422, 'Informe o plano.');
+  const company = await getCompanyById(companyId);
+  const [plan] = await dbRequest('GET', 'subscription_plans', {
+    select: '*',
+    code: `eq.${planCode}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  if (!plan) throw httpError(404, 'Plano nao encontrado.');
+  const startsAt = new Date().toISOString();
+  const endsAt = data.current_period_ends_at || new Date(Date.now() + 30 * 86400000).toISOString();
+  const payload = {
+    company_id: companyId,
+    plan_id: plan.id,
+    status: sanitizeSubscriptionStatus(data.status || company.status || 'active'),
+    current_period_starts_at: startsAt,
+    current_period_ends_at: endsAt,
+    next_renewal_at: endsAt,
+    metadata: { source: 'platform_plan_change', changed_by: admin.id }
+  };
+  await dbRequest('PATCH', 'company_subscriptions', {
+    company_id: `eq.${companyId}`,
+    status: 'in.(active,trial,past_due)'
+  }, { status: 'expired' }, ['Prefer: return=minimal']).catch(() => {});
+  const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, payload, ['Prefer: return=representation']);
+  await audit('platform.subscription.change', {
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company_subscription',
+    entity_id: subscription.id,
+    after_data: { plan_code: plan.code, status: payload.status }
+  });
+  return { ...subscription, plan };
+}
+
+async function updatePlatformStore(id, data, admin) {
+  const storeId = cleanUuid(id, 'loja');
+  const before = await getStoreById(storeId);
+  const payload = {};
+  if ('name' in data) payload.name = cleanText(data.name);
+  if ('slug' in data) payload.slug = cleanSlug(data.slug);
+  if ('description' in data) payload.description = cleanText(data.description || '') || null;
+  if ('is_active' in data) payload.is_active = Boolean(data.is_active);
+  if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
+  if (!payload.name && 'name' in payload) throw httpError(422, 'Informe o nome da loja.');
+  if (!payload.slug && 'slug' in payload) throw httpError(422, 'Informe um endereco publico valido.');
+  if (payload.slug) payload.public_url = `/${payload.slug}`;
+  const [store] = await dbRequest('PATCH', 'stores', { id: `eq.${storeId}` }, payload, ['Prefer: return=representation']);
+  if (!store) throw httpError(404, 'Loja nao encontrada.');
+  if (payload.name || payload.slug || payload.description) {
+    await dbRequest('PATCH', 'store_settings', { store_id: `eq.${storeId}` }, {
+      ...(payload.name ? { name: payload.name } : {}),
+      ...(payload.slug ? { slug: payload.slug } : {}),
+      ...(payload.description !== undefined ? { description: payload.description } : {})
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  clearStoreSettingsCache(storeId);
+  clearPublicBootstrapCache(storeId);
+  await audit('platform.store.update', {
+    company_id: store.company_id,
+    store_id: store.id,
+    actor_admin_id: admin.id,
+    entity_type: 'store',
+    entity_id: store.id,
+    before_data: before,
+    after_data: payload
+  });
+  return publicStoreRef(store);
+}
+
+async function setPlatformStoreStatus(id, data, admin) {
+  return updatePlatformStore(id, { is_active: data.is_active !== false }, admin);
+}
+
+async function createCompanyFeatureOverride(companyId, data, admin) {
+  const resolvedCompanyId = cleanUuid(companyId, 'empresa');
+  const featureCode = cleanSlug(data.feature_code || data.code || '');
+  const overrideType = cleanSlug(data.override_type || data.type || '');
+  if (!featureCode) throw httpError(422, 'Informe o recurso.');
+  if (!['allow', 'block', 'limit'].includes(overrideType)) throw httpError(422, 'Informe o tipo de excecao.');
+  const company = await getCompanyById(resolvedCompanyId);
+  const [feature] = await dbRequest('GET', 'platform_features', {
+    select: '*',
+    code: `eq.${featureCode}`,
+    limit: '1'
+  });
+  if (!feature) throw httpError(404, 'Recurso nao encontrado.');
+  const payload = {
+    company_id: company.id,
+    feature_id: feature.id,
+    override_type: overrideType,
+    limit_value: overrideType === 'limit' ? Math.max(0, Number(data.limit_value || 0)) : null,
+    starts_at: data.starts_at || new Date().toISOString(),
+    ends_at: data.ends_at || null,
+    reason: cleanText(data.reason || '') || null,
+    created_by: admin.id
+  };
+  const [override] = await dbRequest('POST', 'company_feature_overrides', {}, payload, ['Prefer: return=representation']);
+  await audit('platform.feature_override.create', {
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company_feature_override',
+    entity_id: override.id,
+    after_data: { feature_code: feature.code, override_type: overrideType, limit_value: payload.limit_value }
+  });
+  return { ...override, feature };
+}
+
+async function deleteCompanyFeatureOverride(id, admin) {
+  const overrideId = cleanUuid(id, 'excecao');
+  const [before] = await dbRequest('GET', 'company_feature_overrides', {
+    select: '*',
+    id: `eq.${overrideId}`,
+    limit: '1'
+  });
+  if (!before) throw httpError(404, 'Excecao nao encontrada.');
+  await dbRequest('DELETE', 'company_feature_overrides', { id: `eq.${overrideId}` }, null, ['Prefer: return=minimal']);
+  await audit('platform.feature_override.delete', {
+    company_id: before.company_id,
+    actor_admin_id: admin.id,
+    entity_type: 'company_feature_override',
+    entity_id: overrideId,
+    before_data: before
+  });
+}
+
+async function listCompanySubscriptions(companyId, limit = 20) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId) return [];
+  return dbRequest('GET', 'company_subscriptions', {
+    select: '*',
+    company_id: `eq.${resolvedCompanyId}`,
+    order: 'created_at.desc',
+    limit: String(limit)
+  }).catch(() => []);
+}
+
+function pickCurrentCompanySubscription(subscriptions = []) {
+  const list = Array.isArray(subscriptions) ? subscriptions : [];
+  return list.find((entry) => ['active', 'trial', 'grace_period'].includes(entry.status))
+    || list.find((entry) => ['past_due', 'suspended', 'expired'].includes(entry.status))
+    || list.find((entry) => entry.status === 'payment_pending')
+    || list[0]
+    || null;
+}
+
+async function getCompanyPlanOverview(companyId, storeId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId) {
+    return { company: null, subscription: null, pending_subscription: null, plan: null, features: [], available_plans: [], usage: await companyUsageSnapshot(companyId, storeId) };
+  }
+  const [company, subscriptions, availablePlans, billingHistory] = await Promise.all([
+    getCompanyById(resolvedCompanyId).catch(() => null),
+    listCompanySubscriptions(resolvedCompanyId),
+    listPortalPlans().then((data) => data.plans || []).catch(() => []),
+    listBillingHistory(resolvedCompanyId)
+  ]);
+  const subscription = pickCurrentCompanySubscription(subscriptions);
+  const pendingSubscription = subscriptions.find((entry) => entry.status === 'payment_pending') || null;
+  let plan = null;
+  let features = [];
+  if (subscription?.plan_id) {
+    plan = (await dbRequest('GET', 'subscription_plans', {
+      select: '*',
+      id: `eq.${subscription.plan_id}`,
+      limit: '1'
+    }).catch(() => []))[0] || null;
+    features = await listCompanyPlanFeatures(subscription.plan_id);
+  }
+  return {
+    company,
+    subscription,
+    pending_subscription: pendingSubscription,
+    plan,
+    features,
+    available_plans: availablePlans,
+    billing_history: billingHistory,
+    usage: await companyUsageSnapshot(resolvedCompanyId, storeId)
+  };
+}
+
+async function listBillingHistory(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId) return [];
+  return dbRequest('GET', 'subscription_events', {
+    select: '*',
+    company_id: `eq.${resolvedCompanyId}`,
+    order: 'created_at.desc',
+    limit: '5'
+  }).catch(() => []);
+}
+
+async function createBillingCheckout(req, admin, data = {}) {
+  const companyId = cleanUuid(admin.company_id, 'empresa');
+  const planCode = cleanSlug(data.plan_code || data.planCode || '');
+  if (!planCode) throw httpError(422, 'Informe o plano desejado.');
+  const [plan] = await dbRequest('GET', 'subscription_plans', {
+    select: '*',
+    code: `eq.${planCode}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  if (!plan) throw httpError(404, 'Plano não encontrado.');
+  if (!PLATFORM_BILLING_API_KEY && PLATFORM_BILLING_PROVIDER !== 'mock') {
+    throw httpError(422, 'Configure PLATFORM_BILLING_API_KEY no .env para cobrar assinaturas.');
+  }
+  const [company] = await dbRequest('GET', 'companies', {
+    select: '*',
+    id: `eq.${companyId}`,
+    limit: '1'
+  });
+  if (!company) throw httpError(404, 'Empresa não encontrada.');
+  const amount = moneyCents(plan.monthly_price || 0);
+  if (amount <= 0) throw httpError(422, 'Este plano não possui mensalidade configurada.');
+  const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount });
+  const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
+    company_id: companyId,
+    plan_id: plan.id,
+    status: 'payment_pending',
+    billing_provider: PLATFORM_BILLING_PROVIDER,
+    external_subscription_id: checkout.subscriptionId || checkout.transactionId || null,
+    payment_due_at: new Date(Date.now() + 3 * 86400000).toISOString(),
+    metadata: {
+      source: 'admin_billing_checkout',
+      checkout_url: checkout.checkoutUrl || null
+    }
+  }, ['Prefer: return=representation']);
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: companyId,
+    subscription_id: subscription.id,
+    event_type: 'checkout_created',
+    provider: PLATFORM_BILLING_PROVIDER,
+    provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
+    payload: { plan_code: plan.code, checkout_url: checkout.checkoutUrl || null },
+    created_by: admin.id
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('billing.checkout.create', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId,
+    store_id: admin.store_id,
+    entity_type: 'company_subscription',
+    entity_id: subscription.id,
+    after_data: { plan_code: plan.code, provider: PLATFORM_BILLING_PROVIDER }
+  });
+  return {
+    subscription,
+    plan,
+    checkout_url: checkout.checkoutUrl || null,
+    provider: PLATFORM_BILLING_PROVIDER
+  };
+}
+
+async function createProviderSubscriptionCheckout({ company, plan, admin, amount }) {
+  if (PLATFORM_BILLING_PROVIDER === 'mock') {
+    return {
+      subscriptionId: `mock_sub_${company.id}_${Date.now()}`,
+      checkoutUrl: `/admin?billing=mock&plan=${encodeURIComponent(plan.code)}`
+    };
+  }
+  if (PLATFORM_BILLING_PROVIDER !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
+  const origin = process.env.PUBLIC_APP_URL || process.env.APP_URL || 'http://127.0.0.1:3000';
+  const data = await providerFetch('https://api.abacatepay.com/v1/billing/create', {
+    method: 'POST',
+    token: PLATFORM_BILLING_API_KEY,
+    body: {
+      frequency: 'MONTHLY',
+      methods: ['PIX'],
+      products: [{
+        externalId: plan.code,
+        name: `Assinatura ${plan.name}`,
+        description: plan.description || 'Assinatura mensal da plataforma',
+        quantity: 1,
+        price: amount
+      }],
+      returnUrl: `${origin}/admin`,
+      completionUrl: `${origin}/admin`,
+      customer: {
+        name: admin.name || company.name,
+        email: admin.email || company.billing_email || `empresa-${company.id}@local.test`,
+        cellphone: company.phone || ''
+      },
+      metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_subscription' }
+    }
+  });
+  const payload = data.data || data;
+  return {
+    subscriptionId: String(payload.id || payload.billingId || ''),
+    checkoutUrl: payload.url || payload.checkoutUrl || ''
+  };
+}
+
+async function receiveBillingWebhook(data, options = {}) {
+  const provider = cleanSlug(options.provider || inferPaymentProvider(data) || PLATFORM_BILLING_PROVIDER);
+  if (PLATFORM_BILLING_WEBHOOK_SECRET && options.webhookSecret !== PLATFORM_BILLING_WEBHOOK_SECRET) {
+    throw httpError(401, 'Webhook de assinatura inválido.');
+  }
+  const payload = data.data || data.billing || data.subscription || data;
+  const eventId = cleanExternalId(data.id || data.eventId || payload.id || `billing_${Date.now()}`);
+  const externalId = cleanText(payload.id || payload.billingId || payload.subscriptionId || data.billingId || '');
+  const metadata = payload.metadata || data.metadata || {};
+  const companyId = cleanUuid(metadata.companyId || metadata.company_id || data.companyId || '');
+  const planCode = cleanSlug(metadata.planCode || metadata.plan_code || payload.externalId || '');
+  const status = billingProviderStatus(payload.status || data.status || data.event);
+
+  let query = {
+    select: '*',
+    billing_provider: `eq.${provider}`,
+    order: 'created_at.desc',
+    limit: '1'
+  };
+  if (externalId) query.external_subscription_id = `eq.${externalId}`;
+  else if (companyId) query.company_id = `eq.${companyId}`;
+  else throw httpError(422, 'Webhook sem identificador de assinatura.');
+
+  const [subscription] = await dbRequest('GET', 'company_subscriptions', query);
+  if (!subscription) throw httpError(404, 'Assinatura não encontrada.');
+  const [existingEvent] = await dbRequest('GET', 'subscription_events', {
+    select: 'id',
+    provider: `eq.${provider}`,
+    provider_event_id: `eq.${eventId}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existingEvent) return { ok: true, duplicate: true };
+
+  let planId = subscription.plan_id;
+  if (planCode) {
+    const [plan] = await dbRequest('GET', 'subscription_plans', { select: 'id', code: `eq.${planCode}`, limit: '1' });
+    if (plan?.id) planId = plan.id;
+  }
+  const now = new Date();
+  const periodEnd = new Date(now.getTime() + 30 * 86400000).toISOString();
+  const [updated] = await dbRequest('PATCH', 'company_subscriptions', { id: `eq.${subscription.id}` }, {
+    status,
+    plan_id: planId,
+    external_subscription_id: externalId || subscription.external_subscription_id || null,
+    last_payment_at: status === 'active' ? now.toISOString() : subscription.last_payment_at,
+    payment_due_at: status === 'payment_pending' || status === 'past_due' ? subscription.payment_due_at || periodEnd : null,
+    current_period_starts_at: status === 'active' ? now.toISOString() : subscription.current_period_starts_at,
+    current_period_ends_at: status === 'active' ? periodEnd : subscription.current_period_ends_at,
+    next_renewal_at: status === 'active' ? periodEnd : subscription.next_renewal_at,
+    metadata: { ...(subscription.metadata || {}), last_webhook: { eventId, status, received_at: now.toISOString() } }
+  }, ['Prefer: return=representation']);
+  if (status === 'active') {
+    await dbRequest('PATCH', 'company_subscriptions', {
+      company_id: `eq.${subscription.company_id}`,
+      id: `neq.${subscription.id}`,
+      status: 'in.(trial,active,payment_pending,grace_period,past_due,suspended)'
+    }, { status: 'cancelled' }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  const companyStatus = status === 'active' ? 'active' : status === 'cancelled' ? 'cancelled' : status === 'suspended' ? 'suspended' : status === 'past_due' ? 'past_due' : 'payment_pending';
+  await dbRequest('PATCH', 'companies', { id: `eq.${subscription.company_id}` }, { status: companyStatus }, ['Prefer: return=minimal']);
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: subscription.company_id,
+    subscription_id: subscription.id,
+    event_type: `billing.${status}`,
+    provider,
+    provider_event_id: eventId,
+    payload: data
+  }, ['Prefer: return=minimal']);
+  return { ok: true, subscription: updated };
+}
+
+function billingProviderStatus(value) {
+  const status = cleanSlug(value || '');
+  if (['paid', 'active', 'completed', 'approved'].includes(status)) return 'active';
+  if (['past_due', 'overdue', 'expired'].includes(status)) return 'past_due';
+  if (['cancelled', 'canceled'].includes(status)) return 'cancelled';
+  if (['suspended', 'blocked'].includes(status)) return 'suspended';
+  return 'payment_pending';
+}
+
+async function companyCommercialStatus(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId) return { canOperate: true, status: 'unknown', message: '' };
+  const [company, subscriptions] = await Promise.all([
+    getCompanyById(resolvedCompanyId).catch(() => null),
+    listCompanySubscriptions(resolvedCompanyId)
+  ]);
+  const subscription = pickCurrentCompanySubscription(subscriptions);
+  const status = subscription?.status || company?.status || 'unknown';
+  if (!company || ['suspended', 'cancelled', 'archived'].includes(company.status)) {
+    return { canOperate: false, status: company?.status || 'missing', message: 'Empresa sem permissao comercial para operar.' };
+  }
+  if (['suspended', 'cancelled', 'expired'].includes(status)) {
+    return { canOperate: false, status, message: 'Plano indisponivel para operacao. Regularize ou reative a empresa.' };
+  }
+  if (status === 'trial' && subscription?.trial_ends_at && new Date(subscription.trial_ends_at).getTime() < Date.now()) {
+    return { canOperate: false, status: 'trial_expired', message: 'Periodo de teste encerrado. Ative um plano para continuar operando.' };
+  }
+  if (['payment_pending', 'past_due'].includes(status)) {
+    return { canOperate: false, status, message: 'Pagamento pendente. A operacao esta temporariamente bloqueada.' };
+  }
+  if (status === 'grace_period') {
+    const due = subscription?.payment_due_at || subscription?.current_period_ends_at;
+    if (due && new Date(due).getTime() < Date.now()) {
+      return { canOperate: false, status: 'grace_period_expired', message: 'Prazo de regularizacao encerrado.' };
+    }
+  }
+  return { canOperate: true, status, message: '' };
+}
+
+async function companyCommercialStatusByStore(storeId) {
+  const [store] = await dbRequest('GET', 'stores', {
+    select: 'id,company_id',
+    id: `eq.${cleanUuid(storeId)}`,
+    limit: '1'
+  }).catch(() => []);
+  return companyCommercialStatus(store?.company_id);
+}
+
+async function listCompanyPlanFeatures(planId) {
+  const entries = await dbRequest('GET', 'plan_features', {
+    select: '*',
+    plan_id: `eq.${cleanUuid(planId)}`,
+    limit: '500'
+  }).catch(() => []);
+  const featureIds = cleanUuidArray(entries.map((entry) => entry.feature_id));
+  if (!featureIds.length) return [];
+  const features = await dbRequest('GET', 'platform_features', {
+    select: '*',
+    id: uuidInFilter(featureIds),
+    order: 'sort_order.asc'
+  }).catch(() => []);
+  const featureById = new Map(features.map((feature) => [feature.id, feature]));
+  return entries.map((entry) => ({
+    ...entry,
+    feature: featureById.get(entry.feature_id) || null
+  })).filter((entry) => entry.feature);
+}
+
+async function companyUsageSnapshot(companyId, storeId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  const resolvedStoreId = cleanUuid(storeId);
+  const stores = resolvedCompanyId ? await dbRequest('GET', 'stores', {
+    select: 'id',
+    company_id: `eq.${resolvedCompanyId}`,
+    limit: '1000'
+  }).catch(() => []) : [];
+  const storeIds = cleanUuidArray(stores.map((store) => store.id));
+  const scopedStoreIds = resolvedStoreId ? [resolvedStoreId] : storeIds;
+  const scopedFilter = scopedStoreIds.length ? uuidInFilter(scopedStoreIds) : null;
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const countRows = async (table, extra = {}) => {
+    const storeScopedTables = ['orders', 'menu_items', 'customers', 'dining_tables', 'customer_tabs', 'order_print_logs', 'order_whatsapp_logs', 'order_payment_events'];
+    if (!scopedFilter && storeScopedTables.includes(table)) return 0;
+    const rows = await dbRequest('GET', table, {
+      select: 'id',
+      ...(scopedFilter && storeScopedTables.includes(table) ? { store_id: scopedFilter } : {}),
+      ...extra,
+      limit: '1000'
+    }).catch(() => []);
+    return rows.length;
+  };
+  const [users, products, orders, ordersMonth, customers, tables, tabs, whatsappMessages] = await Promise.all([
+    resolvedCompanyId ? dbRequest('GET', 'admin_user_store_access', {
+      select: 'admin_user_id',
+      company_id: `eq.${resolvedCompanyId}`,
+      is_active: 'eq.true',
+      limit: '1000'
+    }).then((rows) => new Set(rows.map((row) => row.admin_user_id)).size).catch(() => 0) : 0,
+    countRows('menu_items'),
+    countRows('orders'),
+    countRows('orders', { created_at: `gte.${monthStart.toISOString()}` }),
+    countRows('customers'),
+    countRows('dining_tables'),
+    countRows('customer_tabs', { status: 'eq.open' }),
+    countRows('order_whatsapp_logs', { created_at: `gte.${monthStart.toISOString()}` })
+  ]);
+  return {
+    stores: stores.length,
+    users,
+    products,
+    orders,
+    orders_month: ordersMonth,
+    customers,
+    tables,
+    open_tabs: tabs,
+    whatsapp_messages: whatsappMessages
+  };
+}
+
+async function listAuditLogs(params = new URLSearchParams()) {
+  const companyId = cleanUuid(params.get?.('company_id') || '');
+  const storeId = cleanUuid(params.get?.('store_id') || '');
+  const action = cleanText(params.get?.('action') || '');
+  const from = cleanOptionalDate(params.get?.('from') || '');
+  const to = cleanOptionalDate(params.get?.('to') || '');
+  const query = {
+    select: '*',
+    ...(companyId ? { company_id: `eq.${companyId}` } : {}),
+    ...(storeId ? { store_id: `eq.${storeId}` } : {}),
+    ...(action ? { action: `eq.${action}` } : {}),
+    order: 'created_at.desc',
+    limit: '100'
+  };
+  if (from && to) {
+    query.created_at = `gte.${from}T00:00:00`;
+  } else if (from) {
+    query.created_at = `gte.${from}T00:00:00`;
+  } else if (to) {
+    query.created_at = `lte.${to}T23:59:59`;
+  }
+  const rows = await dbRequest('GET', 'audit_logs', {
+    ...query
+  });
+  const filtered = from && to
+    ? rows.filter((row) => {
+      const time = new Date(row.created_at).getTime();
+      return time >= new Date(`${from}T00:00:00`).getTime() && time <= new Date(`${to}T23:59:59`).getTime();
+    })
+    : rows;
+  return { logs: filtered };
+}
+
+async function listStoreDomains(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) return [];
+  return dbRequest('GET', 'store_domains', {
+    select: '*',
+    store_id: `eq.${resolvedStoreId}`,
+    order: 'created_at.desc'
+  });
+}
+
+async function createStoreDomain(data, admin) {
+  await assertCompanyUsageLimit(admin, 'custom_domain', 'custom_domains');
+  const domain = normalizeDomain(data.domain || '');
+  if (!isValidDomain(domain)) throw httpError(422, 'Informe um dominio valido.');
+  const [created] = await dbRequest('POST', 'store_domains', {}, {
+    store_id: admin.store_id,
+    domain,
+    status: 'pending',
+    verification_token: randomBytes(16).toString('hex')
+  }, ['Prefer: return=representation']);
+  await recordCompanyUsage({ ...admin, entity_type: 'store_domain', entity_id: created.id }, 'custom_domain', 'custom_domains');
+  await audit('store_domain.create', {
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    actor_admin_id: admin.id,
+    entity_type: 'store_domain',
+    entity_id: created.id,
+    after_data: { domain, status: created.status }
+  });
+  return created;
+}
+
+async function verifyStoreDomain(id, admin) {
+  const domainId = cleanUuid(id, 'dominio');
+  const [domain] = await dbRequest('GET', 'store_domains', {
+    select: '*',
+    id: `eq.${domainId}`,
+    store_id: `eq.${admin.store_id}`,
+    limit: '1'
+  });
+  if (!domain) throw httpError(404, 'Dominio nao encontrado nesta loja.');
+  const [updated] = await dbRequest('PATCH', 'store_domains', { id: `eq.${domain.id}` }, {
+    status: 'verified',
+    verified_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  await audit('store_domain.verify', {
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    actor_admin_id: admin.id,
+    entity_type: 'store_domain',
+    entity_id: domain.id,
+    after_data: { domain: domain.domain, status: 'verified' }
+  });
+  return updated;
+}
+
+async function deleteStoreDomain(id, admin) {
+  const domainId = cleanUuid(id, 'dominio');
+  const [domain] = await dbRequest('GET', 'store_domains', {
+    select: '*',
+    id: `eq.${domainId}`,
+    store_id: `eq.${admin.store_id}`,
+    limit: '1'
+  });
+  if (!domain) throw httpError(404, 'Dominio nao encontrado nesta loja.');
+  await dbRequest('DELETE', 'store_domains', { id: `eq.${domain.id}` }, undefined, ['Prefer: return=minimal']);
+  await audit('store_domain.delete', {
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    actor_admin_id: admin.id,
+    entity_type: 'store_domain',
+    entity_id: domain.id,
+    severity: 'warning',
+    before_data: { domain: domain.domain, status: domain.status }
+  });
+}
+
+async function getCompanyById(id) {
+  const companyId = cleanUuid(id, 'empresa');
+  const [company] = await dbRequest('GET', 'companies', {
+    select: '*',
+    id: `eq.${companyId}`,
+    limit: '1'
+  });
+  if (!company) throw httpError(404, 'Empresa nao encontrada.');
+  return company;
+}
+
+async function getStoreById(id) {
+  const storeId = cleanUuid(id, 'loja');
+  const [store] = await dbRequest('GET', 'stores', {
+    select: '*',
+    id: `eq.${storeId}`,
+    limit: '1'
+  });
+  if (!store) throw httpError(404, 'Loja nao encontrada.');
+  return store;
+}
+
+function sanitizeCompanyStatus(status) {
+  const value = cleanSlug(status || '');
+  if (['onboarding', 'active', 'trial', 'payment_pending', 'grace_period', 'past_due', 'suspended', 'cancelled', 'archived'].includes(value)) return value;
+  throw httpError(422, 'Status da empresa invalido.');
+}
+
+function sanitizeSubscriptionStatus(status) {
+  const value = cleanSlug(status || '');
+  if (['trial', 'active', 'payment_pending', 'grace_period', 'cancelled', 'expired', 'suspended'].includes(value)) return value;
+  return 'active';
+}
+
+async function createDefaultSubscription(companyId, planCode) {
+  const plan = (await dbRequest('GET', 'subscription_plans', {
+    select: 'id',
+    code: `eq.${cleanSlug(planCode || 'essential')}`,
+    limit: '1'
+  }))[0] || (await dbRequest('GET', 'subscription_plans', {
+    select: 'id',
+    code: 'eq.essential',
+    limit: '1'
+  }))[0];
+  if (!plan) return null;
+  const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
+    company_id: companyId,
+    plan_id: plan.id,
+    status: 'trial',
+    trial_ends_at: new Date(Date.now() + 14 * 86400000).toISOString(),
+    current_period_starts_at: new Date().toISOString(),
+    current_period_ends_at: new Date(Date.now() + 14 * 86400000).toISOString(),
+    next_renewal_at: new Date(Date.now() + 14 * 86400000).toISOString(),
+    metadata: { source: 'platform_api' }
+  }, ['Prefer: return=representation']);
+  return subscription;
+}
+
+async function audit(action, data = {}) {
+  const reqMeta = data.req ? requestAuditMeta(data.req) : {};
+  await dbRequest('POST', 'audit_logs', {}, {
+    company_id: data.company_id || null,
+    store_id: data.store_id || null,
+    actor_admin_id: data.actor_admin_id || null,
+    action,
+    entity_type: data.entity_type || null,
+    entity_id: data.entity_id || null,
+    severity: sanitizeAuditSeverity(data.severity),
+    request_id: data.request_id || reqMeta.request_id || null,
+    ip_address: data.ip_address || reqMeta.ip_address || null,
+    user_agent: data.user_agent || reqMeta.user_agent || null,
+    before_data: sanitizeAuditPayload(data.before_data),
+    after_data: sanitizeAuditPayload(data.after_data)
+  }, ['Prefer: return=minimal']).catch((error) => {
+    console.warn('Falha ao registrar auditoria:', error.message || error);
+  });
+}
+
+function requestAuditMeta(req) {
+  const forwarded = String(req?.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+  const remote = req?.socket?.remoteAddress || '';
+  return {
+    request_id: String(req?.headers?.['x-request-id'] || randomBytes(8).toString('hex')).slice(0, 80),
+    ip_address: String(forwarded || remote || '').slice(0, 80),
+    user_agent: String(req?.headers?.['user-agent'] || '').slice(0, 300)
+  };
+}
+
+function sanitizeAuditSeverity(value) {
+  const severity = cleanSlug(value || 'info');
+  return ['debug', 'info', 'warning', 'critical'].includes(severity) ? severity : 'info';
+}
+
+function sanitizeAuditPayload(value, depth = 0) {
+  if (value === undefined || value === null) return null;
+  if (depth > 5) return '[truncated]';
+  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => sanitizeAuditPayload(entry, depth + 1));
+  if (typeof value !== 'object') return value;
+  const blocked = new Set([
+    'password',
+    'password_hash',
+    'current_password',
+    'new_password',
+    'token',
+    'access_token',
+    'refresh_token',
+    'api_key',
+    'apikey',
+    'secret',
+    'webhook_secret',
+    'service_role',
+    'authorization'
+  ]);
+  const output = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    if ([...blocked].some((blockedKey) => normalizedKey.includes(blockedKey))) {
+      output[key] = '[redacted]';
+      continue;
+    }
+    output[key] = sanitizeAuditPayload(entry, depth + 1);
+  }
+  return output;
 }
 
 async function requireAdmin(req, res) {
-  const session = await readPersistentSession(parseCookies(req)[ADMIN_COOKIE], 'admin');
+  const cookies = parseCookies(req);
+  const token = cookies[ADMIN_COOKIE];
+  const session = await readPersistentSession(token, 'admin');
   if (!session) {
     json(res, 401, { error: 'Faca login para acessar o admin.' });
     return null;
   }
+  if (session.data?.session_version !== 2 || !session.data?.store_id) {
+    session.data = await enrichAdminSessionData(session.data);
+    if (token) {
+      await dbRequest('PATCH', 'app_sessions', { token: `eq.${token}`, type: 'eq.admin' }, {
+        company_id: session.data.company_id ? cleanUuid(session.data.company_id) : null,
+        store_id: session.data.store_id ? cleanUuid(session.data.store_id) : null,
+        data: session.data
+      }, ['Prefer: return=minimal']).catch(() => {});
+      clearSessionCacheToken(token);
+    }
+  }
   return session.data;
+}
+
+async function enrichAdminSessionData(admin) {
+  const access = await getAdminStoreAccess(admin);
+  const selectedAccess = access.find((entry) => entry.store_id === admin.store_id) || access[0] || null;
+  const activeStore = selectedAccess?.store || null;
+  return {
+    ...admin,
+    session_version: 2,
+    company_id: activeStore?.company_id || admin.company_id || selectedAccess?.company_id || null,
+    store_id: activeStore?.id || null,
+    active_store: activeStore ? publicStoreRef(activeStore) : null,
+    stores: access.map((entry) => publicStoreRef(entry.store)).filter(Boolean)
+  };
 }
 
 async function requireAdminPermission(req, res, permission) {
@@ -913,15 +3365,56 @@ async function requireAdminPermission(req, res, permission) {
     json(res, 403, { error: 'Sua conta não tem permissão para acessar esta área.' });
     return null;
   }
+  if (!['account', 'plan', 'platform'].includes(permission)) {
+    if (!admin.store_id) {
+      json(res, 403, { error: 'Sua conta nao possui uma loja ativa vinculada.' });
+      return null;
+    }
+    const access = await getAdminStoreAccess(admin);
+    const activeAccess = access.find((entry) => entry.store_id === admin.store_id);
+    if (!activeAccess) {
+      json(res, 403, { error: 'Sua sessao nao possui acesso ativo a esta loja. Entre novamente.' });
+      return null;
+    }
+    admin.company_id = activeAccess.company_id;
+    admin.active_store = publicStoreRef(activeAccess.store);
+    admin.stores = access.map((entry) => publicStoreRef(entry.store)).filter(Boolean);
+  }
+  if (!['account', 'plan'].includes(permission)) {
+    const commercial = await companyCommercialStatus(admin.company_id);
+    if (!commercial.canOperate) {
+      json(res, 402, { error: commercial.message, commercial_status: commercial.status });
+      return null;
+    }
+  }
+  const featureCode = featureForPermission(permission);
+  if (featureCode && !(await companyCanUseFeature(admin.company_id, featureCode))) {
+    json(res, 402, { error: featureBlockedMessage(featureCode) });
+    return null;
+  }
+  return admin;
+}
+
+async function requirePlatformAdmin(req, res) {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return null;
+  if (!isPlatformAdmin(admin)) {
+    json(res, 403, { error: 'Sua conta nao tem acesso ao painel da plataforma.' });
+    return null;
+  }
   return admin;
 }
 
 function adminPermissions(admin) {
   const role = normalizeAdminRole(admin?.role);
-  if (role === 'admin') {
-    return ['operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'account', 'admin_users'];
+  if (role === 'superadmin') {
+    return ['platform', 'operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account', 'admin_users'];
   }
-  if (role === 'waiter') return ['orders', 'tables', 'account'];
+  if (role === 'admin') {
+    return ['operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account', 'admin_users'];
+  }
+  if (role === 'waiter' || role === 'attendant') return ['orders', 'tables', 'customers', 'account'];
+  if (role === 'delivery') return ['orders', 'account'];
   if (role === 'kitchen') return ['orders', 'account'];
   return ['account'];
 }
@@ -930,23 +3423,281 @@ function adminCan(admin, permission) {
   return adminPermissions(admin).includes(permission);
 }
 
+function featureForPermission(permission) {
+  return ({
+    operation: 'orders',
+    orders: 'orders',
+    menu: 'digital_menu',
+    reports: 'basic_reports',
+    tables: 'tables',
+    promotions: 'promotions',
+    customers: 'customers',
+    store: 'store_settings',
+    integrations: 'store_settings'
+  })[permission] || null;
+}
+
+function featureBlockedMessage(featureCode) {
+  return ({
+    tables: 'Mesas e comandas não estão disponíveis no plano atual.',
+    promotions: 'Promoções e cupons não estão disponíveis no plano atual.',
+    customers: 'Clientes não estão disponíveis no plano atual.',
+    basic_reports: 'Relatórios não estão disponíveis no plano atual.',
+    digital_menu: 'Cardápio não está disponível no plano atual.',
+    orders: 'Pedidos não estão disponíveis no plano atual.',
+    store_settings: 'Configurações da loja não estão disponíveis no plano atual.'
+  })[featureCode] || 'Recurso não disponível no plano atual.';
+}
+
+async function companyCanUseFeature(companyId, featureCode) {
+  const access = await getCompanyFeatureAccess(companyId, featureCode);
+  return access.enabled;
+}
+
+async function getCompanyFeatureAccess(companyId, featureCode) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId || !featureCode) return { enabled: true, limit_value: null, source: 'none' };
+  const [feature] = await dbRequest('GET', 'platform_features', {
+    select: 'id,code',
+    code: `eq.${featureCode}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  if (!feature) return { enabled: true, limit_value: null, source: 'missing_feature' };
+  const [company] = await dbRequest('GET', 'companies', {
+    select: 'id,status',
+    id: `eq.${resolvedCompanyId}`,
+    limit: '1'
+  });
+  if (!company || ['suspended', 'cancelled', 'archived'].includes(company.status)) {
+    return { enabled: false, limit_value: null, source: 'company_status' };
+  }
+  const overrides = await dbRequest('GET', 'company_feature_overrides', {
+    select: 'override_type,limit_value,ends_at,feature_id',
+    company_id: `eq.${resolvedCompanyId}`,
+    feature_id: `eq.${feature.id}`,
+    order: 'created_at.desc',
+    limit: '5'
+  }).catch(() => []);
+  const activeOverride = overrides.find((entry) => !entry.ends_at || new Date(entry.ends_at).getTime() >= Date.now());
+  if (activeOverride?.override_type === 'block') return { enabled: false, limit_value: null, source: 'override' };
+  if (activeOverride?.override_type === 'allow') return { enabled: true, limit_value: null, source: 'override' };
+  if (activeOverride?.override_type === 'limit') {
+    return { enabled: true, limit_value: activeOverride.limit_value, source: 'override' };
+  }
+  const [subscription] = await dbRequest('GET', 'company_subscriptions', {
+    select: 'id,status,plan_id',
+    company_id: `eq.${resolvedCompanyId}`,
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  if (!subscription || ['cancelled', 'expired', 'suspended'].includes(subscription.status)) {
+    return { enabled: false, limit_value: null, source: 'subscription' };
+  }
+  const [planFeature] = await dbRequest('GET', 'plan_features', {
+    select: 'id,is_enabled,limit_value',
+    plan_id: `eq.${subscription.plan_id}`,
+    feature_id: `eq.${feature.id}`,
+    limit: '1'
+  });
+  return {
+    enabled: planFeature?.is_enabled !== false && Boolean(planFeature),
+    limit_value: planFeature?.limit_value ?? null,
+    source: 'plan'
+  };
+}
+
+async function assertCompanyUsageLimit(admin, featureCode, usageKey, nextAmount = 1) {
+  if (!admin?.company_id) return;
+  const access = await getCompanyFeatureAccess(admin.company_id, featureCode);
+  if (!access.enabled) throw httpError(402, featureBlockedMessage(featureCode));
+  const limit = Number(access.limit_value);
+  if (!Number.isFinite(limit) || limit <= 0) return;
+  const used = await currentUsageForKey(admin, usageKey);
+  if (used + nextAmount > limit) {
+    throw httpError(402, `Limite do plano atingido para ${usageLabel(usageKey)}. Uso atual: ${used}/${limit}.`);
+  }
+}
+
+async function currentUsageForKey(admin, usageKey) {
+  const storeId = cleanUuid(admin?.store_id);
+  const companyId = cleanUuid(admin?.company_id);
+  if (!companyId && !storeId) return 0;
+  const scopedStoreIds = storeId ? [storeId] : await listCompanyStoreIds(companyId);
+  const scopedFilter = scopedStoreIds.length ? uuidInFilter(scopedStoreIds) : null;
+  if (usageKey === 'stores') {
+    return (await dbRequest('GET', 'stores', { select: 'id', company_id: `eq.${companyId}`, limit: '1000' }).catch(() => [])).length;
+  }
+  if (usageKey === 'admin_users') {
+    const rows = await dbRequest('GET', 'admin_user_store_access', {
+      select: 'admin_user_id',
+      company_id: `eq.${companyId}`,
+      is_active: 'eq.true',
+      limit: '1000'
+    }).catch(() => []);
+    return new Set(rows.map((row) => row.admin_user_id)).size;
+  }
+  if (usageKey === 'custom_domains') {
+    if (!scopedFilter) return 0;
+    return (await dbRequest('GET', 'store_domains', {
+      select: 'id',
+      store_id: scopedFilter,
+      status: 'neq.disabled',
+      limit: '1000'
+    }).catch(() => [])).length;
+  }
+  const tableByUsage = {
+    menu_items: 'menu_items',
+    dining_tables: 'dining_tables',
+    promotions: 'promotions',
+    customers: 'customers',
+    orders: 'orders',
+    print_jobs: 'order_print_logs',
+    whatsapp_messages: 'order_whatsapp_logs',
+    payment_transactions: 'order_payment_events'
+  };
+  const table = tableByUsage[usageKey];
+  if (!table || !scopedFilter) return 0;
+  return (await dbRequest('GET', table, {
+    select: 'id',
+    store_id: scopedFilter,
+    limit: '1000'
+  }).catch(() => [])).length;
+}
+
+async function listCompanyStoreIds(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId) return [];
+  const rows = await dbRequest('GET', 'stores', {
+    select: 'id',
+    company_id: `eq.${resolvedCompanyId}`,
+    limit: '1000'
+  }).catch(() => []);
+  return cleanUuidArray(rows.map((row) => row.id));
+}
+
+async function recordCompanyUsage(admin, featureCode, usageKey) {
+  const companyId = cleanUuid(admin?.company_id);
+  if (!companyId) return;
+  const [feature] = await dbRequest('GET', 'platform_features', {
+    select: 'id',
+    code: `eq.${featureCode}`,
+    limit: '1'
+  }).catch(() => []);
+  const now = new Date();
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const payload = {
+    company_id: companyId,
+    feature_id: feature?.id || null,
+    usage_key: usageKey,
+    period_start: periodStart.toISOString().slice(0, 10),
+    period_end: periodEnd.toISOString().slice(0, 10),
+    used_value: await currentUsageForKey(admin, usageKey),
+    metadata: { store_id: admin.store_id || null, updated_by: admin.id || null }
+  };
+  const existing = await dbRequest('GET', 'company_usage_counters', {
+    select: 'id',
+    company_id: `eq.${payload.company_id}`,
+    usage_key: `eq.${payload.usage_key}`,
+    period_start: `eq.${payload.period_start}`,
+    period_end: `eq.${payload.period_end}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existing[0]) {
+    await dbRequest('PATCH', 'company_usage_counters', { id: `eq.${existing[0].id}` }, payload, ['Prefer: return=minimal']).catch(() => {});
+  } else {
+    await dbRequest('POST', 'company_usage_counters', {}, payload, ['Prefer: return=minimal']).catch(() => {});
+  }
+  await recordUsageEvent({
+    company_id: companyId,
+    store_id: admin.store_id || null,
+    feature_id: feature?.id || null,
+    usage_key: usageKey,
+    entity_type: admin.entity_type || null,
+    entity_id: admin.entity_id || null,
+    metadata: { updated_by: admin.id || null }
+  });
+}
+
+async function assertPublicUsageLimitByStore(storeId, featureCode, usageKey, nextAmount = 1) {
+  const companyId = await companyIdForStore(storeId);
+  if (!companyId) return;
+  await assertCompanyUsageLimit({ company_id: companyId, store_id: storeId }, featureCode, usageKey, nextAmount);
+}
+
+async function recordUsageByStore(storeId, featureCode, usageKey, options = {}) {
+  const companyId = await companyIdForStore(storeId);
+  if (!companyId) return;
+  await recordCompanyUsage({
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: options.entity_type || null,
+    entity_id: options.entity_id || null
+  }, featureCode, usageKey);
+}
+
+async function companyIdForStore(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) return null;
+  const [store] = await dbRequest('GET', 'stores', {
+    select: 'company_id',
+    id: `eq.${resolvedStoreId}`,
+    limit: '1'
+  }).catch(() => []);
+  return cleanUuid(store?.company_id) || null;
+}
+
+async function recordUsageEvent(data) {
+  if (!cleanUuid(data.company_id)) return;
+  await dbRequest('POST', 'usage_events', {}, {
+    company_id: data.company_id,
+    store_id: cleanUuid(data.store_id) || null,
+    feature_id: cleanUuid(data.feature_id) || null,
+    usage_key: cleanText(data.usage_key || ''),
+    quantity: Math.max(1, Number(data.quantity || 1)),
+    entity_type: cleanText(data.entity_type || '') || null,
+    entity_id: data.entity_id ? String(data.entity_id).slice(0, 80) : null,
+    metadata: isPlainObject(data.metadata) ? data.metadata : {}
+  }, ['Prefer: return=minimal']).catch(() => {});
+}
+
+function usageLabel(usageKey) {
+  return ({
+    stores: 'lojas',
+    admin_users: 'usuarios',
+    menu_items: 'produtos',
+    dining_tables: 'mesas',
+    promotions: 'promocoes',
+    customers: 'clientes'
+  })[usageKey] || usageKey;
+}
+
 function normalizeAdminRole(role) {
+  if (role === 'superadmin') return 'superadmin';
   if (role === 'owner' || role === 'manager') return 'admin';
-  if (role === 'waiter' || role === 'kitchen' || role === 'admin') return role;
+  if (role === 'waiter' || role === 'attendant' || role === 'delivery' || role === 'kitchen' || role === 'admin') return role;
   return 'admin';
 }
 
 function isFullAdminRole(role) {
-  return normalizeAdminRole(role) === 'admin';
+  return ['admin', 'superadmin'].includes(normalizeAdminRole(role));
 }
 
-async function registerCustomer(data) {
+function isPlatformAdmin(admin) {
+  return normalizeAdminRole(admin?.role) === 'superadmin' || adminCan(admin, 'platform');
+}
+
+async function registerCustomer(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId) || (await getDefaultStore())?.id || null;
   const customer = sanitizeCustomer(data.customer || data);
   const password = validatePassword(data.password);
   const address = data.address && data.address.street ? sanitizeAddress(data.address) : null;
 
-  const existing = await supabase('GET', 'customers', {
+  const existing = await db('GET', 'customers', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     phone: `eq.${customer.phone}`,
     limit: '1'
   });
@@ -956,30 +3707,34 @@ async function registerCustomer(data) {
     if (existing[0].password_hash) {
       throw httpError(409, 'Este telefone já possui cadastro. Entre com sua senha.');
     }
-    [row] = await supabase('PATCH', 'customers', { id: `eq.${existing[0].id}` }, {
+    [row] = await db('PATCH', 'customers', { id: `eq.${existing[0].id}` }, {
       ...customer,
       password_hash: hashPassword(password)
     }, ['Prefer: return=representation']);
   } else {
-    [row] = await supabase('POST', 'customers', {}, {
+    [row] = await db('POST', 'customers', {}, {
       ...customer,
+      store_id: resolvedStoreId,
       password_hash: hashPassword(password)
     }, ['Prefer: return=representation']);
   }
 
-  if (address) await upsertAddress(row.id, address);
+  if (address) await upsertAddress(row.id, address, resolvedStoreId, options);
   clearAdminCustomersCache();
 
   return createCustomerSession(row);
 }
 
-async function loginCustomer(data) {
+async function loginCustomer(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId) || (await getDefaultStore())?.id || null;
   const phone = onlyDigits(data.phone);
   const password = String(data.password || '');
   if (!phone || !password) throw httpError(422, 'Informe telefone e senha.');
 
-  const rows = await supabase('GET', 'customers', {
+  const rows = await db('GET', 'customers', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     phone: `eq.${phone}`,
     limit: '1'
   });
@@ -989,7 +3744,7 @@ async function loginCustomer(data) {
     throw httpError(401, 'Telefone ou senha inválidos.');
   }
 
-  await supabase('PATCH', 'customers', { id: `eq.${customer.id}` }, {
+  await db('PATCH', 'customers', { id: `eq.${customer.id}` }, {
     last_login_at: new Date().toISOString()
   }, ['Prefer: return=representation']);
   clearAdminCustomersCache();
@@ -997,7 +3752,9 @@ async function loginCustomer(data) {
   return createCustomerSession(customer);
 }
 
-async function resetCustomerPassword(data) {
+async function resetCustomerPassword(data, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const phone = onlyDigits(data.phone);
   const orderCode = cleanPublicCode(String(data.order_code || '').replace(/^#/, ''));
   const orderTotal = parseMoneyInput(data.order_total);
@@ -1006,16 +3763,18 @@ async function resetCustomerPassword(data) {
     throw httpError(422, 'Informe telefone, código e total de um pedido.');
   }
 
-  const customers = await supabase('GET', 'customers', {
+  const customers = await db('GET', 'customers', {
     select: 'id,phone',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     phone: `eq.${phone}`,
     limit: '1'
   });
   const customer = customers[0];
   if (!customer) throw httpError(401, 'Não foi possível validar os dados informados.');
 
-  const orders = await supabase('GET', 'orders', {
+  const orders = await db('GET', 'orders', {
     select: 'id,customer_id,public_code,total',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     customer_id: `eq.${customer.id}`,
     public_code: `eq.${orderCode}`,
     limit: '1'
@@ -1024,7 +3783,7 @@ async function resetCustomerPassword(data) {
     throw httpError(401, 'Não foi possível validar os dados informados.');
   }
 
-  await supabase('PATCH', 'customers', { id: `eq.${customer.id}` }, {
+  await db('PATCH', 'customers', { id: `eq.${customer.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=minimal']);
 }
@@ -1033,7 +3792,8 @@ async function createCustomerSession(customer) {
   const sessionId = await createPersistentSession('customer', customer.id, {
     id: customer.id,
     name: customer.name,
-    phone: customer.phone
+    phone: customer.phone,
+    store_id: customer.store_id || null
   });
   return { sessionId, body: { customer: publicCustomer(customer) } };
 }
@@ -1047,25 +3807,31 @@ async function requireCustomer(req, res) {
   return session.data;
 }
 
-async function getCustomerProfile(customerId) {
+async function getCustomerProfile(customerId, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const [rows, addresses, loyalty] = await Promise.all([
-    supabase('GET', 'customers', {
-    select: 'id,name,phone,email,birth_date,notes,created_at,updated_at',
+    db('GET', 'customers', {
+    select: 'id,store_id,name,phone,email,birth_date,notes,created_at,updated_at',
     id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     limit: '1'
     }),
-    listCustomerAddresses(customerId),
-    customerLoyaltyProgress(customerId)
+    listCustomerAddresses(customerId, resolvedStoreId, options),
+    customerLoyaltyProgress(customerId, options)
   ]);
   if (!rows[0]) throw httpError(404, 'Cliente não encontrado.');
   return { ...rows[0], address: addresses[0] || null, addresses, loyalty };
 }
 
-async function customerLoyaltyProgress(customerId) {
-  const store = await getStoreSettings();
+async function customerLoyaltyProgress(customerId, options = {}) {
+  const db = options.db || dbRequest;
+  const storeId = await getCustomerStoreId(customerId, options);
+  const store = await getStoreSettings(storeId, options);
   const program = sanitizeLoyaltyProgram(store.loyalty_program || {});
-  const orders = await supabase('GET', 'orders', {
+  const orders = await db('GET', 'orders', {
     select: 'id,total,status,created_at',
+    ...(storeId ? { store_id: `eq.${storeId}` } : {}),
     customer_id: `eq.${customerId}`,
     status: 'eq.completed'
   });
@@ -1115,111 +3881,305 @@ async function customerLoyaltyProgress(customerId) {
   };
 }
 
-async function updateCustomerProfile(customerId, data) {
+async function updateCustomerProfile(customerId, data, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const customer = sanitizeCustomer(data.customer || data);
   const payload = { ...customer };
   if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
 
-  const [updated] = await supabase('PATCH', 'customers', { id: `eq.${customerId}` }, payload, ['Prefer: return=representation']);
+  const [updated] = await db('PATCH', 'customers', {
+    id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+  }, payload, ['Prefer: return=representation']);
+  if (!updated) throw httpError(404, 'Cliente nao encontrado nesta loja.');
   clearSessionCacheByOwner('customer', customerId);
   if (data.address?.street) {
-    await upsertAddress(customerId, sanitizeAddress(data.address));
+    await upsertAddress(customerId, sanitizeAddress(data.address), updated.store_id, options);
   }
-  return getCustomerProfile(updated.id);
+  return getCustomerProfile(updated.id, updated.store_id, options);
 }
 
-async function updateCustomerAddressByOwner(customerId, addressId, data) {
-  return updateCustomerAddressByAdmin(customerId, addressId, data);
+async function updateCustomerAddressByOwner(customerId, addressId, data, storeId = null, options = {}) {
+  return updateCustomerAddressByAdmin(customerId, addressId, data, storeId, options);
 }
 
-async function createCustomerAddressByOwner(customerId, data) {
-  return createCustomerAddressByAdmin(customerId, data);
+async function createCustomerAddressByOwner(customerId, data, storeId = null, options = {}) {
+  return createCustomerAddressByAdmin(customerId, data, storeId, options);
 }
 
-async function deleteCustomerAddressByOwner(customerId, addressId) {
-  return deleteCustomerAddressByAdmin(customerId, addressId);
+async function deleteCustomerAddressByOwner(customerId, addressId, storeId = null, options = {}) {
+  return deleteCustomerAddressByAdmin(customerId, addressId, storeId, options);
 }
 
-async function updateCustomerByAdmin(customerId, data) {
+async function updateCustomerByAdmin(customerId, data, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const customer = sanitizeCustomer(data.customer || data);
   const payload = { ...customer };
   if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
-  const [updated] = await supabase('PATCH', 'customers', { id: `eq.${customerId}` }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Cliente não encontrado.');
+  const [updated] = await db('PATCH', 'customers', {
+    id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+  }, payload, ['Prefer: return=representation']);
+  if (!updated) throw httpError(404, 'Cliente nao encontrado nesta loja.');
   clearSessionCacheByOwner('customer', customerId);
-  return getCustomerProfile(customerId);
+  return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
-async function deleteCustomerByAdmin(customerId) {
-  await supabase('DELETE', 'app_sessions', {
+async function deleteCustomerByAdmin(customerId, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  await assertCustomerBelongsToStore(customerId, resolvedStoreId, options);
+  await dbRequest('DELETE', 'app_sessions', {
     type: 'eq.customer',
     owner_id: `eq.${customerId}`
   }, undefined, ['Prefer: return=minimal']);
-  await supabase('DELETE', 'customers', { id: `eq.${customerId}` }, undefined, ['Prefer: return=minimal']);
+  await db('DELETE', 'customers', {
+    id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+  }, undefined, ['Prefer: return=minimal']);
 }
 
-async function createCustomerAddressByAdmin(customerId, data) {
+async function createCustomerAddressByAdmin(customerId, data, storeId = null, options = {}) {
+  const resolvedStoreId = cleanUuid(storeId);
+  await assertCustomerBelongsToStore(customerId, resolvedStoreId, options);
   const payload = sanitizeAddressWithDefault(data, true);
-  await saveCustomerAddress(customerId, payload);
-  return getCustomerProfile(customerId);
+  await saveCustomerAddress(customerId, payload, resolvedStoreId, options);
+  return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
-async function updateCustomerAddressByAdmin(customerId, addressId, data) {
+async function updateCustomerAddressByAdmin(customerId, addressId, data, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  await assertCustomerBelongsToStore(customerId, resolvedStoreId, options);
   const payload = sanitizeAddressWithDefault(data, true);
   if (payload.is_default) {
-    await supabase('PATCH', 'customer_addresses', { customer_id: `eq.${customerId}` }, {
+    await db('PATCH', 'customer_addresses', {
+      customer_id: `eq.${customerId}`,
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+    }, {
       is_default: false
     }, ['Prefer: return=minimal']);
   }
 
-  const [updated] = await supabase('PATCH', 'customer_addresses', {
+  const [updated] = await db('PATCH', 'customer_addresses', {
     id: `eq.${addressId}`,
-    customer_id: `eq.${customerId}`
+    customer_id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Endereço não encontrado.');
-  return getCustomerProfile(customerId);
+  if (!updated) throw httpError(404, 'Endereco nao encontrado nesta loja.');
+  return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
-async function deleteCustomerAddressByAdmin(customerId, addressId) {
-  await supabase('DELETE', 'customer_addresses', {
+async function deleteCustomerAddressByAdmin(customerId, addressId, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  await assertCustomerBelongsToStore(customerId, resolvedStoreId, options);
+  await db('DELETE', 'customer_addresses', {
     id: `eq.${addressId}`,
-    customer_id: `eq.${customerId}`
+    customer_id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, undefined, ['Prefer: return=minimal']);
-  const addresses = await listCustomerAddresses(customerId);
+  const addresses = await listCustomerAddresses(customerId, resolvedStoreId, options);
   if (addresses.length && !addresses.some((address) => address.is_default)) {
-    await supabase('PATCH', 'customer_addresses', { id: `eq.${addresses[0].id}` }, {
+    await db('PATCH', 'customer_addresses', { id: `eq.${addresses[0].id}` }, {
       is_default: true
     }, ['Prefer: return=minimal']);
   }
-  return getCustomerProfile(customerId);
+  return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
-async function getDefaultAddress(customerId) {
-  const rows = await listCustomerAddresses(customerId);
+async function getDefaultAddress(customerId, options = {}) {
+  const rows = await listCustomerAddresses(customerId, null, options);
   return rows[0] || null;
 }
 
-async function listCustomerAddresses(customerId) {
-  return supabase('GET', 'customer_addresses', {
+async function listCustomerAddresses(customerId, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  return db('GET', 'customer_addresses', {
     select: '*',
     customer_id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     order: 'is_default.desc,created_at.desc'
   });
 }
 
-async function getStoreSettings() {
-  const now = Date.now();
-  if (storeSettingsCache && storeSettingsCache.expiresAt > now) {
-    return storeSettingsCache.data;
-  }
-  const rows = await supabase('GET', 'store_settings', {
+async function assertCustomerBelongsToStore(customerId, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const [customer] = await db('GET', 'customers', {
+    select: 'id,store_id',
+    id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
+    limit: '1'
+  });
+  if (!customer) throw httpError(404, 'Cliente nao encontrado nesta loja.');
+  return customer;
+}
+
+async function resolvePublicStore(req, url) {
+  const hostStore = await getStoreByHost(req);
+  const slug = cleanSlug(
+    url.searchParams.get('store') ||
+    url.searchParams.get('loja') ||
+    req.headers['x-store-slug'] ||
+    storeSlugFromReferer(req) ||
+    ''
+  );
+  const store = hostStore || (slug ? await getStoreBySlug(slug) : await getDefaultStore());
+  if (!store) throw httpError(404, 'Loja nao encontrada.');
+  return { store };
+}
+
+async function resolveTenant(req, url) {
+  const context = await resolvePublicStore(req, url);
+  return {
+    ...context,
+    tenant: null,
+    db: dbRequest
+  };
+}
+
+async function adminOperationalOptions(admin) {
+  return {
+    db: dbRequest,
+    tenant: null
+  };
+}
+
+async function getStoreByHost(req) {
+  const forwardedHost = String(req.headers['x-forwarded-host'] || req.headers['x-original-host'] || '').split(',')[0];
+  const rawHost = forwardedHost || req.headers.host || '';
+  const host = normalizeDomain(String(rawHost).split(':')[0] || '');
+  if (!host || ['localhost', '127.0.0.1', '0.0.0.0'].includes(host)) return null;
+  const [domain] = await dbRequest('GET', 'store_domains', {
     select: '*',
+    domain: `eq.${host}`,
+    status: 'in.(verified,active)',
+    limit: '1'
+  }).catch(() => []);
+  if (!domain) return null;
+  const [store] = await dbRequest('GET', 'stores', {
+    select: '*',
+    id: `eq.${domain.store_id}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  return store || null;
+}
+
+function storeSlugFromReferer(req) {
+  try {
+    const referer = String(req.headers.referer || '');
+    if (!referer) return '';
+    const parsed = new URL(referer);
+    return firstPublicPathSegment(parsed.pathname);
+  } catch {
+    return '';
+  }
+}
+
+function firstPublicPathSegment(pathname) {
+  const segment = String(pathname || '').split('/').filter(Boolean)[0] || '';
+  if (!segment || ['admin', 'api', 'payment', 'pedidos', 'conta', 'kitchen'].includes(segment)) return '';
+  return segment;
+}
+
+async function getStoreBySlug(slug) {
+  const clean = cleanSlug(slug);
+  if (!clean) return null;
+  const rows = await dbRequest('GET', 'stores', {
+    select: '*',
+    slug: `eq.${clean}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  return rows[0] || null;
+}
+
+async function getDefaultStore() {
+  const bySlug = await getStoreBySlug(DEFAULT_STORE_SLUG);
+  if (bySlug) return bySlug;
+  const rows = await dbRequest('GET', 'stores', {
+    select: '*',
+    is_active: 'eq.true',
     order: 'created_at.asc',
     limit: '1'
   });
+  return rows[0] || await ensureDefaultStoreStructure();
+}
+
+async function ensureDefaultStoreStructure() {
+  const [existingCompany] = await dbRequest('GET', 'companies', {
+    select: '*',
+    name: 'eq.Luske Alimentacao',
+    limit: '1'
+  }).catch(() => []);
+  const company = existingCompany || (await dbRequest('POST', 'companies', {}, {
+    name: 'Luske Alimentacao',
+    status: 'trial'
+  }, ['Prefer: return=representation']).catch(() => []))[0];
+  if (!company?.id) return null;
+  const [store] = await dbRequest('POST', 'stores', {}, {
+    company_id: company.id,
+    name: 'LSK Burguer',
+    slug: DEFAULT_STORE_SLUG,
+    description: 'Cardapio digital da LSK Burguer.',
+    public_url: `/${DEFAULT_STORE_SLUG}`,
+    is_active: true
+  }, ['Prefer: return=representation']).catch(async () => {
+    return dbRequest('GET', 'stores', {
+      select: '*',
+      slug: `eq.${DEFAULT_STORE_SLUG}`,
+      limit: '1'
+    }).catch(() => []);
+  });
+  if (!store?.id) return null;
+  await dbRequest('POST', 'store_settings', {}, {
+    store_id: store.id,
+    name: store.name,
+    slug: store.slug,
+    description: store.description,
+    payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
+    business_hours: {},
+    theme_settings: {},
+    print_settings: {},
+    integration_settings: {},
+    onboarding_completed: false,
+    is_open: false
+  }, ['Prefer: return=minimal']).catch(() => {});
+  return store;
+}
+
+async function getStoreSettings(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = (storeId ? cleanUuid(storeId) : '') || (await getDefaultStore())?.id || '';
+  const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
+  const now = Date.now();
+  const cached = storeSettingsCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+  const query = {
+    select: '*',
+    order: 'created_at.asc',
+    limit: '1'
+  };
+  if (resolvedStoreId) query.store_id = `eq.${resolvedStoreId}`;
+  const [rows, storeRows] = await Promise.all([
+    db('GET', 'store_settings', query),
+    resolvedStoreId
+      ? db('GET', 'stores', { select: '*', id: `eq.${resolvedStoreId}`, limit: '1' }).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  const canonicalStore = storeRows[0] || null;
 
   const store = rows[0] || {
+    store_id: resolvedStoreId || null,
     name: 'Menu da Casa',
+    page_title: 'Cardápio Digital',
     description: 'Pedido rápido pelo cardápio digital.',
     whatsapp_number: STORE_WHATSAPP_NUMBER,
     is_open: true,
@@ -1237,6 +4197,11 @@ async function getStoreSettings() {
   };
   const normalized = {
     ...store,
+    name: store.name || canonicalStore?.name || 'Menu da Casa',
+    slug: canonicalStore?.slug || store.slug || '',
+    public_url: canonicalStore?.public_url || (canonicalStore?.slug ? `/${canonicalStore.slug}` : store.public_url || ''),
+    store_is_active: canonicalStore?.is_active !== false,
+    company_id: canonicalStore?.company_id || store.company_id || null,
     delivery_neighborhood_fees: isPlainObject(store.delivery_neighborhood_fees) ? store.delivery_neighborhood_fees : defaultNeighborhoodFees(),
     business_hours: isPlainObject(store.business_hours) ? store.business_hours : defaultBusinessHours(),
     loyalty_program: sanitizeLoyaltyProgram(store.loyalty_program || {}),
@@ -1244,37 +4209,40 @@ async function getStoreSettings() {
     print_settings: sanitizePrintSettings(store.print_settings || {}),
     integration_settings: sanitizeIntegrationSettings(store.integration_settings || {})
   };
-  storeSettingsCache = {
+  storeSettingsCache.set(cacheKey, {
     data: normalized,
     expiresAt: now + STORE_SETTINGS_CACHE_MS
-  };
+  });
   return normalized;
 }
 
-async function getPublicBootstrap() {
+async function getPublicBootstrap(storeId, options = {}) {
+  const cacheKey = cleanUuid(storeId) || 'default';
   const now = Date.now();
-  if (publicBootstrapCache && publicBootstrapCache.expiresAt > now) {
-    return publicBootstrapCache.data;
+  const cacheKeyWithTenant = options.tenant?.id ? `${cacheKey}:tenant:${options.tenant.id}` : cacheKey;
+  const cached = publicBootstrapCache.get(cacheKeyWithTenant);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
   }
 
   const [store, categories] = await Promise.all([
-    getStoreSettings(),
-    getMenu(false)
+    getStoreSettings(storeId, options),
+    getMenu(false, storeId, options)
   ]);
   const data = { store: publicStore(store), categories };
-  publicBootstrapCache = {
+  publicBootstrapCache.set(cacheKeyWithTenant, {
     data,
     expiresAt: now + PUBLIC_BOOTSTRAP_CACHE_MS
-  };
+  });
   return data;
 }
 
 function clearPublicBootstrapCache() {
-  publicBootstrapCache = null;
+  publicBootstrapCache.clear();
 }
 
 function clearStoreSettingsCache() {
-  storeSettingsCache = null;
+  storeSettingsCache.clear();
   clearPublicBootstrapCache();
 }
 
@@ -1299,32 +4267,64 @@ function clearAdminUsersCache() {
   adminUsersCache = null;
 }
 
-async function updateStoreSettings(data) {
-  const current = await getStoreSettings();
+async function updateStoreSettings(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const current = await getStoreSettings(storeId, options);
+  const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const payload = sanitizeStore(data);
+  const nextSlug = cleanSlug(payload.slug || current.slug || payload.name || '');
+  if (!nextSlug) throw httpError(422, 'Informe o caminho publico da loja.');
+  if (reservedPublicSlugs().has(nextSlug)) {
+    throw httpError(422, 'Este caminho publico e reservado. Escolha outro.');
+  }
+  const existingStore = await getStoreBySlug(nextSlug);
+  if (existingStore && existingStore.id !== resolvedStoreId) {
+    throw httpError(409, 'Este caminho publico ja esta sendo usado por outra loja.');
+  }
+  payload.slug = nextSlug;
 
-  if (current.id) {
-    return supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+  if (resolvedStoreId) {
+    const storePayload = {
+      ...(payload.name ? { name: payload.name } : {}),
+      slug: nextSlug,
+      public_url: `/${nextSlug}`,
+      ...(payload.description !== undefined ? { description: payload.description || null } : {})
+    };
+    await dbRequest('PATCH', 'stores', { id: `eq.${resolvedStoreId}` }, storePayload, ['Prefer: return=minimal']);
+    if (options.tenant) {
+      await db('PATCH', 'stores', { id: `eq.${resolvedStoreId}` }, storePayload, ['Prefer: return=minimal']).catch(() => {});
+    }
   }
 
-  return supabase('POST', 'store_settings', {}, payload, ['Prefer: return=representation']);
+  let result;
+  if (current.id) {
+    result = await db('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+  } else {
+    result = await db('POST', 'store_settings', {}, { ...payload, store_id: resolvedStoreId }, ['Prefer: return=representation']);
+  }
+  storeSettingsCache.delete(resolvedStoreId || 'default');
+  publicBootstrapCache.clear();
+  return result;
 }
 
-async function updateLoyaltyProgram(data) {
-  const current = await getStoreSettings();
+async function updateLoyaltyProgram(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const current = await getStoreSettings(storeId, options);
+  const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const payload = {
     loyalty_program: sanitizeLoyaltyProgram(data.loyalty_program || data)
   };
 
   if (current.id) {
-    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    const [updated] = await db('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
     return {
       ...updated,
       loyalty_program: sanitizeLoyaltyProgram(updated.loyalty_program || {})
     };
   }
 
-  const [created] = await supabase('POST', 'store_settings', {}, {
+  const [created] = await db('POST', 'store_settings', {}, {
+    store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
     description: current.description || 'Pedido rápido pelo cardápio digital.',
@@ -1337,21 +4337,24 @@ async function updateLoyaltyProgram(data) {
   };
 }
 
-async function updatePrintSettings(data) {
-  const current = await getStoreSettings();
+async function updatePrintSettings(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const current = await getStoreSettings(storeId, options);
+  const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const payload = {
     print_settings: sanitizePrintSettings(data.print_settings || data)
   };
 
   if (current.id) {
-    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    const [updated] = await db('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
     return {
       ...updated,
       print_settings: sanitizePrintSettings(updated.print_settings || {})
     };
   }
 
-  const [created] = await supabase('POST', 'store_settings', {}, {
+  const [created] = await db('POST', 'store_settings', {}, {
+    store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
     description: current.description || 'Pedido rápido pelo cardápio digital.',
@@ -1364,22 +4367,25 @@ async function updatePrintSettings(data) {
   };
 }
 
-async function updateIntegrationSettings(data) {
-  const current = await getStoreSettings();
+async function updateIntegrationSettings(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const current = await getStoreSettings(storeId, options);
+  const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const nextSettings = mergeIntegrationSettings(current.integration_settings || {}, data.integration_settings || data);
   const payload = {
     integration_settings: nextSettings
   };
 
   if (current.id) {
-    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    const [updated] = await db('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
     return {
       ...updated,
       integration_settings: sanitizeIntegrationSettings(updated.integration_settings || {})
     };
   }
 
-  const [created] = await supabase('POST', 'store_settings', {}, {
+  const [created] = await db('POST', 'store_settings', {}, {
+    store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
     description: current.description || 'Pedido rápido pelo cardápio digital.',
@@ -1392,8 +4398,8 @@ async function updateIntegrationSettings(data) {
   };
 }
 
-async function testIntegrations(data = {}) {
-  const store = await getStoreSettings();
+async function testIntegrations(data = {}, storeId, options = {}) {
+  const store = await getStoreSettings(storeId, options);
   const settings = data.integration_settings
     ? mergeIntegrationSettings(store.integration_settings || {}, data.integration_settings)
     : sanitizeIntegrationSettings(store.integration_settings || {});
@@ -1466,16 +4472,19 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
   }
 }
 
-async function setStoreOpen(isOpen) {
-  const current = await getStoreSettings();
+async function setStoreOpen(isOpen, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const current = await getStoreSettings(storeId, options);
+  const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const payload = { is_open: Boolean(isOpen) };
 
   if (current.id) {
-    const [updated] = await supabase('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+    const [updated] = await db('PATCH', 'store_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
     return updated;
   }
 
-  const [created] = await supabase('POST', 'store_settings', {}, {
+  const [created] = await db('POST', 'store_settings', {}, {
+    store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
     description: current.description || 'Pedido rápido pelo cardápio digital.',
@@ -1492,30 +4501,36 @@ async function setStoreOpen(isOpen) {
   return created;
 }
 
-async function getMenu(admin) {
-  const cacheKey = admin ? 'admin' : 'public';
+async function getMenu(admin, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId) || (await getDefaultStore())?.id || '';
+  const cacheKey = `${admin ? 'admin' : 'public'}:${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
   const now = Date.now();
   const cached = menuCache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.data;
   }
   const [categories, items, groups, modifiers] = await Promise.all([
-    supabase('GET', 'menu_categories', {
+    db('GET', 'menu_categories', {
       select: admin ? '*' : 'id,name,description,sort_order',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       ...(admin ? {} : { is_active: 'eq.true' }),
       order: 'sort_order.asc,name.asc'
     }),
-    supabase('GET', 'menu_items', {
+    db('GET', 'menu_items', {
       select: admin ? '*' : 'id,category_id,name,description,price,image_url,tags,is_featured,is_available,sort_order',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       ...(admin ? {} : { is_available: 'eq.true' }),
       order: 'sort_order.asc,name.asc'
     }),
-    supabase('GET', 'menu_modifier_groups', {
+    db('GET', 'menu_modifier_groups', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       order: 'sort_order.asc,name.asc'
     }),
-    supabase('GET', 'menu_modifiers', {
+    db('GET', 'menu_modifiers', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       ...(admin ? {} : { is_available: 'eq.true' }),
       order: 'sort_order.asc,name.asc'
     })
@@ -1552,6 +4567,11 @@ async function getMenu(admin) {
 }
 
 async function createOrder(req, data, options = {}) {
+  const db = options.db || dbRequest;
+  const storeId = cleanUuid(options.storeId) || (await getDefaultStore())?.id || null;
+  const commercial = await companyCommercialStatusByStore(storeId);
+  if (!commercial.canOperate) throw httpError(402, commercial.message);
+  await assertPublicUsageLimitByStore(storeId, 'orders', 'orders');
   const session = await readPersistentSession(parseCookies(req)[CUSTOMER_COOKIE], 'customer');
   let fulfillmentMethod = ['delivery', 'pickup', 'counter', 'table', 'tab'].includes(data.fulfillment_method)
     ? data.fulfillment_method
@@ -1570,14 +4590,15 @@ async function createOrder(req, data, options = {}) {
   const itemIds = cleanUuidArray(requestedItems.map((item) => item.id));
   if (itemIds.length === 0) throw httpError(422, 'Itens do pedido inválidos.');
 
-  const menuItems = await supabase('GET', 'menu_items', {
+  const menuItems = await db('GET', 'menu_items', {
     select: '*',
+    ...(storeId ? { store_id: `eq.${storeId}` } : {}),
     id: uuidInFilter(itemIds),
     is_available: 'eq.true'
   });
 
   const menuById = new Map(menuItems.map((item) => [item.id, item]));
-  const modifierCatalog = await loadModifierCatalog(itemIds);
+  const modifierCatalog = await loadModifierCatalog(itemIds, storeId, options);
   const orderItems = requestedItems.map((requested) => {
     const menuItem = menuById.get(cleanUuid(requested.id));
     if (!menuItem) throw httpError(422, 'Um item escolhido não está mais disponível.');
@@ -1614,7 +4635,7 @@ async function createOrder(req, data, options = {}) {
     };
   });
 
-  const store = await getStoreSettings();
+  const store = await getStoreSettings(storeId, options);
   if (store.is_open === false && !options.allowClosedStore) {
     throw httpError(423, 'A loja está fechada no momento e não está aceitando pedidos.');
   }
@@ -1627,20 +4648,27 @@ async function createOrder(req, data, options = {}) {
   }
   const subtotal = roundMoney(orderItems.reduce((sum, item) => sum + item.total, 0));
   const deliveryFee = fulfillmentMethod === 'delivery' ? deliveryFeeForAddress(store, address) : 0;
-  const table = ['table', 'tab'].includes(fulfillmentMethod) ? await requireActiveDiningTable(data.dining_table_id || data.table_code) : null;
+  const table = ['table', 'tab'].includes(fulfillmentMethod) ? await requireActiveDiningTable(data.dining_table_id || data.table_code, storeId, options) : null;
   let tab = null;
   if (fulfillmentMethod === 'tab') {
-    tab = await requireOpenTab(data.customer_tab_id, table?.id);
+    tab = await requireOpenTab(data.customer_tab_id, table?.id, storeId, options);
   } else if (fulfillmentMethod === 'table' && table?.id) {
-    tab = await findOpenTabForTable(table.id);
+    tab = await findOpenTabForTable(table.id, storeId, options);
     if (tab) fulfillmentMethod = 'tab';
   }
-  const customerRow = session
-    ? await getCustomerProfile(session.data.id)
-    : customer.phone
-      ? await upsertCustomer(customer)
-      : null;
+  let customerRow = null;
+  if (session?.data?.id) {
+    customerRow = await getCustomerProfile(session.data.id, storeId, options).catch((error) => {
+      if (options.tenant && error.status === 404) return null;
+      throw error;
+    });
+  }
+  if (!customerRow && customer.phone) {
+    customerRow = await upsertCustomer(customer, storeId, options);
+  }
   const coupon = couponCode ? await findActivePromotion(couponCode, {
+    db,
+    storeId,
     subtotal,
     deliveryFee,
     customer: customerRow,
@@ -1651,10 +4679,11 @@ async function createOrder(req, data, options = {}) {
   validatePaymentDetails(paymentDetails, paymentMethod, total);
 
   if (fulfillmentMethod === 'delivery') {
-    await upsertAddress(customerRow.id, address);
+    await upsertAddress(customerRow.id, address, storeId, options);
   }
 
   const orderPayload = {
+    store_id: storeId,
     public_code: createPublicCode(),
     customer_id: customerRow?.id || null,
     status: 'new',
@@ -1677,31 +4706,33 @@ async function createOrder(req, data, options = {}) {
     promotion_code: coupon?.code || null
   };
 
-  const [order] = await supabase('POST', 'orders', {}, orderPayload, ['Prefer: return=representation']);
-  const itemsWithOrder = orderItems.map((item) => ({ ...item, order_id: order.id }));
-  await supabase('POST', 'order_items', {}, itemsWithOrder, ['Prefer: return=representation']);
+  const [order] = await db('POST', 'orders', {}, orderPayload, ['Prefer: return=representation']);
+  clearAdminOrdersCache(storeId);
+  await recordUsageByStore(storeId, 'orders', 'orders', { entity_type: 'order', entity_id: order.id });
+  const itemsWithOrder = orderItems.map((item) => ({ ...item, order_id: order.id, store_id: storeId }));
+  await db('POST', 'order_items', {}, itemsWithOrder, ['Prefer: return=representation']);
   if (coupon) {
-    await supabase('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
+    await db('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
       used_count: Number(coupon.used_count || 0) + 1
     }, ['Prefer: return=minimal']);
     clearAdminPromotionsCache();
   }
 
   const whatsappMessage = buildWhatsappMessage(store, order, itemsWithOrder, customer, address);
-  const [updatedOrder] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+  const [updatedOrder] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     whatsapp_message: whatsappMessage
   }, ['Prefer: return=representation']);
 
   let payment = null;
   let finalOrder = updatedOrder;
   if (isOnlinePixPayment(paymentMethod)) {
-    payment = await createPixPayment(updatedOrder);
+    payment = await createPixPayment(updatedOrder, options);
     finalOrder = payment.order;
   } else if (isOnlineCardPayment(paymentMethod)) {
-    payment = await createCardPayment(updatedOrder);
+    payment = await createCardPayment(updatedOrder, options);
     finalOrder = payment.order;
   }
-  await sendOrderStatusWhatsapp(order.id, 'new', { manual: false }).catch(() => null);
+  await sendOrderStatusWhatsapp(order.id, 'new', { manual: false, db, tenant: options.tenant }).catch(() => null);
   if (['table', 'tab'].includes(fulfillmentMethod)) clearAdminTablesCache();
   if (customerRow?.id) clearAdminCustomersCache();
 
@@ -1718,11 +4749,14 @@ async function createOrder(req, data, options = {}) {
   };
 }
 
-async function loadModifierCatalog(itemIds) {
+async function loadModifierCatalog(itemIds, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const cleanItemIds = cleanUuidArray(itemIds);
+  const resolvedStoreId = cleanUuid(storeId);
   if (cleanItemIds.length === 0) return { groupsByItem: new Map(), modifiersById: new Map() };
-  const groups = await supabase('GET', 'menu_modifier_groups', {
+  const groups = await db('GET', 'menu_modifier_groups', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     menu_item_id: uuidInFilter(cleanItemIds),
     order: 'sort_order.asc,name.asc'
   });
@@ -1732,8 +4766,9 @@ async function loadModifierCatalog(itemIds) {
   }
 
   const groupIds = cleanUuidArray(groups.map((group) => group.id));
-  const modifiers = await supabase('GET', 'menu_modifiers', {
+  const modifiers = await db('GET', 'menu_modifiers', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     group_id: uuidInFilter(groupIds),
     is_available: 'eq.true',
     order: 'sort_order.asc,name.asc'
@@ -1808,8 +4843,9 @@ function validateExistingSelectedModifiers(menuItemId, selectedIds, catalog) {
   });
 }
 
-async function ensureUniqueModifierGroupName(menuItemId, name) {
-  const existing = await supabase('GET', 'menu_modifier_groups', {
+async function ensureUniqueModifierGroupName(menuItemId, name, options = {}) {
+  const db = options.db || dbRequest;
+  const existing = await db('GET', 'menu_modifier_groups', {
     select: 'id,name',
     menu_item_id: `eq.${menuItemId}`
   });
@@ -1819,8 +4855,9 @@ async function ensureUniqueModifierGroupName(menuItemId, name) {
   }
 }
 
-async function ensureUniqueModifierName(groupId, name) {
-  const existing = await supabase('GET', 'menu_modifiers', {
+async function ensureUniqueModifierName(groupId, name, options = {}) {
+  const db = options.db || dbRequest;
+  const existing = await db('GET', 'menu_modifiers', {
     select: 'id,name',
     group_id: `eq.${groupId}`
   });
@@ -1830,71 +4867,98 @@ async function ensureUniqueModifierName(groupId, name) {
   }
 }
 
-async function upsertCustomer(customer) {
-  const existing = await supabase('GET', 'customers', {
+async function upsertCustomer(customer, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId) || null;
+  const existing = await db('GET', 'customers', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     phone: `eq.${customer.phone}`,
     limit: '1'
   });
 
   if (existing[0]) {
-    const [updated] = await supabase('PATCH', 'customers', { id: `eq.${existing[0].id}` }, customer, ['Prefer: return=representation']);
+    const [updated] = await db('PATCH', 'customers', { id: `eq.${existing[0].id}` }, customer, ['Prefer: return=representation']);
     return updated;
   }
 
-  const [created] = await supabase('POST', 'customers', {}, customer, ['Prefer: return=representation']);
+  const [created] = await db('POST', 'customers', {}, {
+    ...customer,
+    store_id: resolvedStoreId
+  }, ['Prefer: return=representation']);
   return created;
 }
 
-async function upsertAddress(customerId, address) {
+async function upsertAddress(customerId, address, storeId, options = {}) {
   if (!address) return null;
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId) || null;
 
-  const existing = await supabase('GET', 'customer_addresses', {
+  const existing = await db('GET', 'customer_addresses', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     customer_id: `eq.${customerId}`
   });
 
-  const payload = { ...address, customer_id: customerId, is_default: true };
+  const payload = { ...address, store_id: resolvedStoreId, customer_id: customerId, is_default: true };
   const sameAddress = existing.find((row) => addressKey(row) === addressKey(address));
 
   if (existing.length > 0) {
-    await supabase('PATCH', 'customer_addresses', { customer_id: `eq.${customerId}` }, {
+    await db('PATCH', 'customer_addresses', { customer_id: `eq.${customerId}` }, {
       is_default: false
     }, ['Prefer: return=minimal']);
   }
 
   if (sameAddress) {
-    const [updated] = await supabase('PATCH', 'customer_addresses', { id: `eq.${sameAddress.id}` }, {
+    const [updated] = await db('PATCH', 'customer_addresses', { id: `eq.${sameAddress.id}` }, {
       ...payload,
       label: sameAddress.label || payload.label || 'Principal'
     }, ['Prefer: return=representation']);
     return updated;
   }
 
-  const [created] = await supabase('POST', 'customer_addresses', {}, payload, ['Prefer: return=representation']);
+  const [created] = await db('POST', 'customer_addresses', {}, payload, ['Prefer: return=representation']);
   return created;
 }
 
-async function saveCustomerAddress(customerId, address) {
+async function saveCustomerAddress(customerId, address, storeId = null, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId) || cleanUuid(address.store_id) || await getCustomerStoreId(customerId, options);
   if (address.is_default) {
-    await supabase('PATCH', 'customer_addresses', { customer_id: `eq.${customerId}` }, {
+    await db('PATCH', 'customer_addresses', {
+      customer_id: `eq.${customerId}`,
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+    }, {
       is_default: false
     }, ['Prefer: return=minimal']);
   }
-  const [created] = await supabase('POST', 'customer_addresses', {}, {
+  const [created] = await db('POST', 'customer_addresses', {}, {
     ...address,
+    store_id: resolvedStoreId,
     customer_id: customerId
   }, ['Prefer: return=representation']);
   return created;
 }
 
+async function getCustomerStoreId(customerId, options = {}) {
+  const db = options.db || dbRequest;
+  const rows = await db('GET', 'customers', {
+    select: 'store_id',
+    id: `eq.${customerId}`,
+    limit: '1'
+  });
+  return cleanUuid(rows[0]?.store_id) || null;
+}
+
 async function createPersistentSession(type, ownerId, data) {
   const token = randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000).toISOString();
-  await supabase('POST', 'app_sessions', {}, {
+  await dbRequest('POST', 'app_sessions', {}, {
     token,
     type,
     owner_id: ownerId,
+    company_id: data.company_id ? cleanUuid(data.company_id) : null,
+    store_id: data.store_id ? cleanUuid(data.store_id) : null,
     data,
     expires_at: expiresAt
   }, ['Prefer: return=minimal']);
@@ -1912,7 +4976,7 @@ async function readPersistentSession(token, expectedType) {
   if (cached && cached.expiresAt > Date.now()) {
     return cached.session;
   }
-  const rows = await supabase('GET', 'app_sessions', {
+  const rows = await dbRequest('GET', 'app_sessions', {
     select: '*',
     token: `eq.${token}`,
     type: `eq.${expectedType}`,
@@ -1927,7 +4991,7 @@ async function readPersistentSession(token, expectedType) {
   }
 
   if (new Date(session.expires_at).getTime() - Date.now() < SESSION_RENEW_MS) {
-    await supabase('PATCH', 'app_sessions', { token: `eq.${token}` }, {
+    await dbRequest('PATCH', 'app_sessions', { token: `eq.${token}` }, {
       expires_at: new Date(Date.now() + SESSION_MAX_AGE * 1000).toISOString()
     }, ['Prefer: return=minimal']);
   }
@@ -1942,7 +5006,7 @@ async function readPersistentSession(token, expectedType) {
 async function deleteSession(token) {
   if (!token) return;
   clearSessionCacheToken(token);
-  await supabase('DELETE', 'app_sessions', { token: `eq.${token}` }, undefined, ['Prefer: return=minimal']);
+  await dbRequest('DELETE', 'app_sessions', { token: `eq.${token}` }, undefined, ['Prefer: return=minimal']);
 }
 
 function clearSessionCacheToken(token) {
@@ -1959,10 +5023,21 @@ function clearSessionCacheByOwner(type, ownerId) {
   }
 }
 
+function clearAdminStoreAccessCache(adminId) {
+  const cleanAdminId = cleanUuid(adminId);
+  if (!cleanAdminId) {
+    adminStoreAccessCache.clear();
+    return;
+  }
+  for (const key of adminStoreAccessCache.keys()) {
+    if (key.startsWith(`${cleanAdminId}:`)) adminStoreAccessCache.delete(key);
+  }
+}
+
 async function cleanExpiredSessions() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  if (!DATABASE_URL) return;
   try {
-    await supabase('DELETE', 'app_sessions', {
+    await dbRequest('DELETE', 'app_sessions', {
       expires_at: `lte.${new Date().toISOString()}`
     }, undefined, ['Prefer: return=minimal']);
   } catch (error) {
@@ -2003,8 +5078,10 @@ function rateLimitRule(method, pathname) {
   if (method === 'POST' && pathname === '/api/admin/login') return limitRule('admin-login', 8, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/customer/login') return limitRule('customer-login', 10, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/customer/reset-password') return limitRule('customer-reset', 5, 30 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/portal/recover-password') return limitRule('admin-recover', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/orders') return limitRule('order-create', 20, 10 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 60 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/portal/signup') return limitRule('portal-signup', 5, 60 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/admin/uploads') return limitRule('admin-upload', 30, 10 * 60 * 1000);
   return null;
 }
@@ -2018,41 +5095,75 @@ function clientKey(req) {
   return forwarded || req.socket.remoteAddress || 'local';
 }
 
-async function listCustomerOrders(customerId) {
-  const orders = await supabase('GET', 'orders', {
+function absoluteUrl(req, relativePath) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0] || (COOKIE_SECURE ? 'https' : 'http');
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0] || `${HOST}:${PORT}`;
+  return `${proto}://${host}${relativePath}`;
+}
+
+async function listCustomerOrders(customerId, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const orders = await db('GET', 'orders', {
     select: '*',
     customer_id: `eq.${customerId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     order: 'created_at.desc',
     limit: '30'
   });
 
-  return attachOrderItems(orders);
+  return attachOrderItems(orders, options);
 }
 
-async function listOrders() {
-  const orders = await supabase('GET', 'orders', {
+async function listOrders(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
+  const cached = adminOrdersCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  const orders = await db('GET', 'orders', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     archived_at: 'is.null',
     order: 'created_at.desc',
     limit: '100'
   });
 
-  const withItems = await attachOrderItems(orders);
-  return attachOrderIntegrationLogs(withItems);
+  const withItems = await attachOrderItems(orders, options);
+  const data = await attachOrderIntegrationLogs(withItems, options);
+  adminOrdersCache.set(cacheKey, {
+    data,
+    expiresAt: Date.now() + ADMIN_ORDERS_CACHE_MS
+  });
+  return data;
 }
 
-async function attachOrderIntegrationLogs(orders) {
+function clearAdminOrdersCache(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) {
+    adminOrdersCache.clear();
+    return;
+  }
+  for (const key of adminOrdersCache.keys()) {
+    if (key === resolvedStoreId || key.startsWith(`${resolvedStoreId}:`)) {
+      adminOrdersCache.delete(key);
+    }
+  }
+}
+
+async function attachOrderIntegrationLogs(orders, options = {}) {
+  const db = options.db || dbRequest;
   if (!orders.length) return orders;
   const ids = cleanUuidArray(orders.map((order) => order.id));
   if (!ids.length) return orders;
   const [whatsappLogs, paymentEvents] = await Promise.all([
-    supabase('GET', 'order_whatsapp_logs', {
+    db('GET', 'order_whatsapp_logs', {
       select: 'id,order_id,order_status,delivery_status,provider,error_message,created_at',
       order_id: uuidInFilter(ids),
       order: 'created_at.desc',
       limit: String(Math.min(ids.length * 3, 180))
     }),
-    supabase('GET', 'order_payment_events', {
+    db('GET', 'order_payment_events', {
       select: 'id,order_id,provider,financial_status,amount,created_at',
       order_id: uuidInFilter(ids),
       order: 'created_at.desc',
@@ -2078,23 +5189,27 @@ async function attachOrderIntegrationLogs(orders) {
   }));
 }
 
-async function createPrintLog(data) {
+async function createPrintLog(data, options = {}) {
+  const db = options.db || dbRequest;
   const payload = sanitizePrintLog(data);
-  const [log] = await supabase('POST', 'order_print_logs', {}, payload, ['Prefer: return=representation']);
+  const [log] = await db('POST', 'order_print_logs', {}, payload, ['Prefer: return=representation']);
   return log;
 }
 
 async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
+  const db = options.db || dbRequest;
   const manual = Boolean(options.manual);
-  const [order] = await supabase('GET', 'orders', {
+  const [order] = await db('GET', 'orders', {
     select: '*',
     id: `eq.${orderId}`,
     limit: '1'
   });
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   const targetStatus = cleanText(status || order.status);
+  const featureCode = manual ? 'manual_whatsapp' : 'automatic_whatsapp';
+  await assertPublicUsageLimitByStore(order.store_id, featureCode, 'whatsapp_messages');
   if (!manual) {
-    const existing = await supabase('GET', 'order_whatsapp_logs', {
+    const existing = await db('GET', 'order_whatsapp_logs', {
       select: 'id,delivery_status,created_at,error_message',
       order_id: `eq.${order.id}`,
       order_status: `eq.${targetStatus}`,
@@ -2103,51 +5218,53 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
     });
     if (existing[0] && existing[0].delivery_status !== 'failed') return existing[0];
   }
-  const store = await getStoreSettings();
+  const store = await getStoreSettings(order.store_id, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
   const phone = whatsappRecipientPhone(order.customer_snapshot?.phone || '');
   const message = orderStatusWhatsappMessage(store, order, targetStatus);
   if (!phone) {
-    return createWhatsappLog(order, targetStatus, message, {
+    return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
       recipient_phone: '',
       delivery_status: 'skipped',
       error_message: 'Pedido sem telefone do cliente.',
       is_manual: manual,
       provider: integrations.whatsapp.provider
-    });
+    }, options);
   }
   if (!integrations.whatsapp.enabled) {
-    return createWhatsappLog(order, targetStatus, message, {
+    return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
       recipient_phone: phone,
       delivery_status: 'skipped',
       error_message: 'WhatsApp automático desativado.',
       is_manual: manual,
       provider: integrations.whatsapp.provider
-    });
+    }, options);
   }
 
   try {
     const providerResult = await sendWhatsappViaProvider(integrations.whatsapp, phone, message);
-    return createWhatsappLog(order, targetStatus, message, {
+    return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
       recipient_phone: phone,
       delivery_status: 'sent',
       provider: integrations.whatsapp.provider,
       provider_message_id: providerResult.id,
       is_manual: manual
-    });
+    }, options);
   } catch (error) {
-    return createWhatsappLog(order, targetStatus, message, {
+    return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
       recipient_phone: phone,
       delivery_status: 'failed',
       error_message: error.message || 'Falha no provedor de WhatsApp.',
       is_manual: manual,
       provider: integrations.whatsapp.provider
-    });
+    }, options);
   }
 }
 
-async function createWhatsappLog(order, status, message, data) {
+async function createWhatsappLog(order, status, message, data, options = {}) {
+  const db = options.db || dbRequest;
   const payload = {
+    store_id: order.store_id || null,
     order_id: order.id,
     order_status: status,
     recipient_phone: data.recipient_phone || null,
@@ -2158,7 +5275,13 @@ async function createWhatsappLog(order, status, message, data) {
     error_message: data.error_message || null,
     is_manual: Boolean(data.is_manual)
   };
-  const [log] = await supabase('POST', 'order_whatsapp_logs', {}, payload, ['Prefer: return=representation']);
+  const [log] = await db('POST', 'order_whatsapp_logs', {}, payload, ['Prefer: return=representation']);
+  return log;
+}
+
+async function createWhatsappLogWithUsage(order, status, message, featureCode, data, options = {}) {
+  const log = await createWhatsappLog(order, status, message, data, options);
+  await recordUsageByStore(order.store_id, featureCode, 'whatsapp_messages', { entity_type: 'order', entity_id: order.id });
   return log;
 }
 
@@ -2349,16 +5472,18 @@ function whatsappOutForDeliveryText(order) {
   return 'Seu pedido saiu para entrega.';
 }
 
-async function createPixPayment(order) {
-  const store = await getStoreSettings();
+async function createPixPayment(order, options = {}) {
+  const db = options.db || dbRequest;
+  const store = await getStoreSettings(order.store_id, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
   if (!integrations.pix.enabled) throw httpError(422, 'Pix online não está ativo nesta loja.');
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
+  await assertPublicUsageLimitByStore(order.store_id, 'payment_transactions', 'payment_transactions');
   const expiresAt = new Date(Date.now() + integrations.pix.expirationMinutes * 60000).toISOString();
   const providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations });
   const transactionId = providerPayment.transactionId || `pix_${order.public_code}_${Date.now()}`;
   const pixCode = providerPayment.pixCode || buildMockPixCode(store, order, transactionId);
-  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+  const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'pending',
     payment_provider: integrations.pix.provider,
     payment_transaction_id: transactionId,
@@ -2370,17 +5495,21 @@ async function createPixPayment(order) {
       checkout_url: providerPayment.checkoutUrl || null
     }
   }, ['Prefer: return=representation']);
+  await registerPaymentTransactionIndex(updated, integrations.pix.provider, transactionId, options);
+  clearAdminOrdersCache(order.store_id);
+  await recordUsageByStore(order.store_id, 'payment_transactions', 'payment_transactions', { entity_type: 'order', entity_id: order.id });
   return { order: updated, pix: publicPaymentPayload(updated) };
 }
 
-async function createCardPayment(order) {
-  const store = await getStoreSettings();
+async function createCardPayment(order, options = {}) {
+  const db = options.db || dbRequest;
+  const store = await getStoreSettings(order.store_id, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
   if (!integrations.card.enabled) throw httpError(422, 'Cartão online não está ativo nesta loja.');
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
   const providerPayment = await createProviderPayment({ store, order, type: 'card', integrations });
   const transactionId = providerPayment.transactionId || `card_${order.public_code}_${Date.now()}`;
-  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+  const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'pending',
     payment_provider: integrations.card.provider,
     payment_transaction_id: transactionId,
@@ -2390,7 +5519,63 @@ async function createCardPayment(order) {
       split: providerPayment.split || null
     }
   }, ['Prefer: return=representation']);
+  await registerPaymentTransactionIndex(updated, integrations.card.provider, transactionId, options);
   return { order: updated, card: publicPaymentPayload(updated) };
+}
+
+async function registerPaymentTransactionIndex(order, provider, transactionId, options = {}) {
+  const cleanProviderName = cleanProvider(provider || order.payment_provider || '');
+  const cleanTransactionId = cleanExternalId(transactionId || order.payment_transaction_id || '');
+  if (!cleanProviderName || !cleanTransactionId) return null;
+  const store = await getCentralStoreRef(order.store_id).catch(() => null);
+  const body = {
+    provider: cleanProviderName,
+    transaction_id: cleanTransactionId,
+    order_id: order.id || null,
+    order_public_code: cleanPublicCode(order.public_code || ''),
+    company_id: store?.company_id || null,
+    store_id: cleanUuid(order.store_id) || null,
+    financial_status: sanitizeFinancialStatus(order.financial_status || 'pending'),
+    amount: roundMoney(Number.parseFloat(order.total || order.paid_amount || 0) || 0),
+    metadata: {
+      payment_method: order.payment_method || null
+    }
+  };
+  const existing = await dbRequest('GET', 'payment_transaction_index', {
+    select: 'id',
+    provider: `eq.${body.provider}`,
+    transaction_id: `eq.${body.transaction_id}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existing[0]?.id) {
+    const [updated] = await dbRequest('PATCH', 'payment_transaction_index', {
+      id: `eq.${existing[0].id}`
+    }, body, ['Prefer: return=representation']);
+    return updated || null;
+  }
+  const [created] = await dbRequest('POST', 'payment_transaction_index', {}, body, ['Prefer: return=representation']);
+  return created || null;
+}
+
+async function updatePaymentTransactionIndexStatus(index, status, amount) {
+  if (!index?.id) return;
+  await dbRequest('PATCH', 'payment_transaction_index', { id: `eq.${index.id}` }, {
+    financial_status: sanitizeFinancialStatus(status),
+    amount: roundMoney(Number.parseFloat(amount || index.amount || 0) || 0)
+  }, ['Prefer: return=minimal']).catch((error) => {
+    console.warn('Falha ao atualizar indice de pagamento:', error.message || error);
+  });
+}
+
+async function getCentralStoreRef(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) return null;
+  const [store] = await dbRequest('GET', 'stores', {
+    select: 'id,company_id,name,slug,is_active',
+    id: `eq.${resolvedStoreId}`,
+    limit: '1'
+  });
+  return store || null;
 }
 
 async function createProviderPayment({ store, order, type, integrations }) {
@@ -2421,7 +5606,7 @@ async function createAbacatePayPayment({ store, order, type, integrations }) {
         expiresIn: integrations.pix.expirationMinutes * 60,
         description: `Pedido #${order.public_code} - ${store.name || 'Cardápio'}`,
         customer,
-        metadata: { orderCode: order.public_code }
+        metadata: { orderCode: order.public_code, storeId: order.store_id || null }
       }
     });
     const payload = data.data || data;
@@ -2450,7 +5635,7 @@ async function createAbacatePayPayment({ store, order, type, integrations }) {
       returnUrl,
       completionUrl: returnUrl,
       customer,
-      metadata: { orderCode: order.public_code }
+      metadata: { orderCode: order.public_code, storeId: order.store_id || null }
     }
   });
   const payload = data.data || data;
@@ -2553,11 +5738,12 @@ function providerSplitPayload(integrations, provider) {
   return {};
 }
 
-async function publicPaymentStatus(code) {
-  const order = await getOrderByPublicCode(code);
+async function publicPaymentStatus(code, options = {}) {
+  const db = options.db || dbRequest;
+  const order = await getOrderByPublicCode(code, options);
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   if (order.financial_status === 'pending' && order.payment_expires_at && new Date(order.payment_expires_at).getTime() < Date.now()) {
-    const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}`, financial_status: 'eq.pending' }, {
+    const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}`, financial_status: 'eq.pending' }, {
       financial_status: 'expired'
     }, ['Prefer: return=representation']);
     return { order: publicPaymentOrder(updated || order), payment: publicPaymentPayload(updated || order) };
@@ -2565,12 +5751,12 @@ async function publicPaymentStatus(code) {
   return { order: publicPaymentOrder(order), payment: publicPaymentPayload(order) };
 }
 
-async function regeneratePixPayment(data) {
-  const order = await getOrderByPublicCode(data.code || data.order);
+async function regeneratePixPayment(data, options = {}) {
+  const order = await getOrderByPublicCode(data.code || data.order, options);
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
   if (order.financial_status === 'paid') throw httpError(422, 'Pedido já pago.');
-  const payment = await createPixPayment(order);
+  const payment = await createPixPayment(order, options);
   return { order: publicPaymentOrder(payment.order), payment: payment.pix };
 }
 
@@ -2579,12 +5765,14 @@ async function receivePaymentWebhook(data, options = {}) {
     ...data,
     provider: cleanText(options.provider || data.provider || '')
   };
-  await assertPaymentWebhookSecret(incoming.provider, options.webhookSecret);
   const normalized = await normalizeProviderWebhook(incoming);
   const provider = normalized.provider;
   const eventId = normalized.eventId;
   if (!eventId) throw httpError(422, 'Evento sem identificador.');
-  const existing = await supabase('GET', 'order_payment_events', {
+  const webhookContext = await resolvePaymentWebhookContext(normalized);
+  await assertPaymentWebhookSecret(provider, options.webhookSecret, webhookContext);
+  const db = webhookContext.db || dbRequest;
+  const existing = await db('GET', 'order_payment_events', {
     select: 'id',
     provider: `eq.${provider}`,
     provider_event_id: `eq.${eventId}`,
@@ -2594,13 +5782,14 @@ async function receivePaymentWebhook(data, options = {}) {
   const transactionId = normalized.transactionId;
   const status = normalized.status;
   const order = transactionId
-    ? (await supabase('GET', 'orders', { select: '*', payment_transaction_id: `eq.${transactionId}`, limit: '1' }))[0]
-    : await getOrderByPublicCode(normalized.orderCode);
+    ? (await db('GET', 'orders', { select: '*', payment_transaction_id: `eq.${transactionId}`, limit: '1' }))[0]
+    : await getOrderByPublicCode(normalized.orderCode, webhookContext);
   if (!order) throw httpError(404, 'Pedido do pagamento não encontrado.');
   if (order.status === 'cancelled' && status === 'paid') throw httpError(422, 'Pedido cancelado não pode receber pagamento.');
   const amount = roundMoney(Number.parseFloat(normalized.amount || order.total) || 0);
-  await supabase('POST', 'order_payment_events', {}, {
+  await db('POST', 'order_payment_events', {}, {
     order_id: order.id,
+    store_id: order.store_id || webhookContext.storeId || null,
     provider,
     provider_event_id: eventId,
     transaction_id: transactionId || order.payment_transaction_id,
@@ -2615,13 +5804,44 @@ async function receivePaymentWebhook(data, options = {}) {
     paid_amount: status === 'paid' ? amount : order.paid_amount,
     paid_at: status === 'paid' ? new Date().toISOString() : order.paid_at
   };
-  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  await updatePaymentTransactionIndexStatus(webhookContext.index, status, amount);
+  clearAdminOrdersCache(order.store_id);
   return { ok: true, order: publicPaymentOrder(updated) };
 }
 
-async function assertPaymentWebhookSecret(provider, incomingSecret) {
+async function resolvePaymentWebhookContext(normalized) {
+  const provider = cleanProvider(normalized.provider || '');
+  const transactionId = cleanExternalId(normalized.transactionId || '');
+  const orderCode = cleanPublicCode(normalized.orderCode || '');
+  let index = null;
+  if (provider && transactionId) {
+    [index] = await dbRequest('GET', 'payment_transaction_index', {
+      select: '*',
+      provider: `eq.${provider}`,
+      transaction_id: `eq.${transactionId}`,
+      limit: '1'
+    }).catch(() => []);
+  }
+  if (!index && orderCode) {
+    [index] = await dbRequest('GET', 'payment_transaction_index', {
+      select: '*',
+      order_public_code: `eq.${orderCode}`,
+      order: 'created_at.desc',
+      limit: '1'
+    }).catch(() => []);
+  }
+  return {
+    db: dbRequest,
+    tenant: null,
+    index: index || null,
+    storeId: index?.store_id || null
+  };
+}
+
+async function assertPaymentWebhookSecret(provider, incomingSecret, context = {}) {
   if (provider !== 'abacatepay') return;
-  const store = await getStoreSettings();
+  const store = await getStoreSettings(context.storeId, context);
   const settings = sanitizeIntegrationSettings(store.integration_settings || {});
   const expected = settings.pix.webhookSecret;
   if (!expected) return;
@@ -2738,20 +5958,21 @@ function asaasStatusToFinancial(status) {
   return 'pending';
 }
 
-async function refundOrderPayment(orderId, data = {}) {
-  const [order] = await supabase('GET', 'orders', { select: '*', id: `eq.${orderId}`, limit: '1' });
+async function refundOrderPayment(orderId, data = {}, options = {}) {
+  const db = options.db || dbRequest;
+  const [order] = await db('GET', 'orders', { select: '*', id: `eq.${orderId}`, limit: '1' });
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   if (order.financial_status !== 'paid') throw httpError(422, 'Apenas pedidos pagos podem ser estornados.');
   const amount = roundMoney(Number.parseFloat(data.amount || order.paid_amount || order.total) || 0);
-  const store = await getStoreSettings();
+  const store = await getStoreSettings(order.store_id, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
   await refundProviderPayment(order, amount, integrations);
-  const [updated] = await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+  const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'refunded',
     refunded_amount: amount,
     refunded_at: new Date().toISOString()
   }, ['Prefer: return=representation']);
-  await supabase('POST', 'order_payment_events', {}, {
+  await db('POST', 'order_payment_events', {}, {
     order_id: order.id,
     provider: order.payment_provider || 'manual',
     provider_event_id: `refund_${order.id}_${Date.now()}`,
@@ -2760,6 +5981,7 @@ async function refundOrderPayment(orderId, data = {}) {
     amount,
     raw_payload: { reason: cleanText(data.reason || 'Estorno manual') }
   }, ['Prefer: return=minimal']);
+  clearAdminOrdersCache(order.store_id);
   return updated;
 }
 
@@ -2798,15 +6020,17 @@ async function refundProviderPayment(order, amount, integrations) {
   return { ok: true };
 }
 
-async function reconcileOnlinePayments(data = {}) {
-  const store = await getStoreSettings();
+async function reconcileOnlinePayments(data = {}, options = {}) {
+  const db = options.db || dbRequest;
+  const store = await getStoreSettings(data.storeId, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
   const days = clampInteger(data.days || integrations.reconciliation.days || 7, 1, 30);
   const since = new Date(Date.now() - days * 86400000).toISOString();
-  const orders = await supabase('GET', 'orders', {
+  const orders = await db('GET', 'orders', {
     select: '*',
     created_at: `gte.${since}`,
     payment_transaction_id: 'not.is.null',
+    ...(store.id ? { store_id: `eq.${store.id}` } : {}),
     order: 'created_at.desc',
     limit: '300'
   });
@@ -2816,7 +6040,7 @@ async function reconcileOnlinePayments(data = {}) {
     const providerStatus = await fetchProviderPaymentStatus(order, integrations).catch(() => null);
     const expected = providerStatus?.status || order.financial_status;
     const isMatch = expected === order.financial_status;
-    await supabase('PATCH', 'orders', { id: `eq.${order.id}` }, {
+    await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
       reconciliation_status: isMatch ? 'matched' : 'divergent',
       reconciled_at: new Date().toISOString(),
       ...(isMatch ? {} : { financial_status: expected })
@@ -2849,10 +6073,11 @@ async function fetchProviderPaymentStatus(order, integrations) {
   return { status: order.financial_status, amount: order.total };
 }
 
-async function getOrderByPublicCode(code) {
+async function getOrderByPublicCode(code, options = {}) {
+  const db = options.db || dbRequest;
   const cleanCode = cleanPublicCode(String(code || '').replace(/^#/, ''));
   if (!cleanCode) return null;
-  const rows = await supabase('GET', 'orders', {
+  const rows = await db('GET', 'orders', {
     select: '*',
     public_code: `eq.${cleanCode}`,
     limit: '1'
@@ -2936,7 +6161,7 @@ function sanitizePrintLog(data) {
 }
 
 async function listDiningTables(existingTabs = null) {
-  const tables = await supabase('GET', 'dining_tables', {
+  const tables = await dbRequest('GET', 'dining_tables', {
     select: '*',
     order: 'name.asc'
   });
@@ -2952,35 +6177,44 @@ function enrichDiningTables(tables, tabs) {
   }));
 }
 
-async function listAdminTablesData() {
+async function listAdminTablesData(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const now = Date.now();
-  if (adminTablesCache && adminTablesCache.expiresAt > now) return adminTablesCache.data;
+  const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
+  if (adminTablesCache?.[cacheKey] && adminTablesCache[cacheKey].expiresAt > now) return adminTablesCache[cacheKey].data;
   const [tables, tabs] = await Promise.all([
-    supabase('GET', 'dining_tables', {
+    db('GET', 'dining_tables', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       order: 'name.asc'
     }),
-    listCustomerTabs()
+    listCustomerTabs(resolvedStoreId, options)
   ]);
   const data = { tables: enrichDiningTables(tables, tabs), tabs };
-  adminTablesCache = {
+  adminTablesCache = adminTablesCache || {};
+  adminTablesCache[cacheKey] = {
     data,
     expiresAt: now + ADMIN_LIST_CACHE_MS
   };
   return data;
 }
 
-async function listCustomerTabs() {
-  const tabs = await supabase('GET', 'customer_tabs', {
+async function listCustomerTabs(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const tabs = await db('GET', 'customer_tabs', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     order: 'opened_at.desc',
     limit: '200'
   });
   const openTabIds = cleanUuidArray(tabs.filter((tab) => tab.status === 'open').map((tab) => tab.id));
   let ordersByTab = new Map();
   if (openTabIds.length) {
-    const orders = await supabase('GET', 'orders', {
+    const orders = await db('GET', 'orders', {
       select: 'id,customer_tab_id,total,status,created_at',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       customer_tab_id: uuidInFilter(openTabIds),
       order: 'created_at.desc',
       limit: '500'
@@ -3005,19 +6239,23 @@ async function listCustomerTabs() {
   });
 }
 
-async function resolveDiningTable(code) {
+async function resolveDiningTable(code, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const cleanCode = cleanSlug(code || '');
+  const resolvedStoreId = cleanUuid(storeId);
   if (!cleanCode) throw httpError(404, 'Mesa não informada.');
-  const rows = await supabase('GET', 'dining_tables', {
+  const rows = await db('GET', 'dining_tables', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     code: `eq.${cleanCode}`,
     is_active: 'eq.true',
     limit: '1'
   });
   const table = rows[0];
   if (!table) throw httpError(404, 'Mesa não encontrada ou inativa.');
-  const tabs = await supabase('GET', 'customer_tabs', {
+  const tabs = await db('GET', 'customer_tabs', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     dining_table_id: `eq.${table.id}`,
     status: 'eq.open',
     order: 'opened_at.asc',
@@ -3027,8 +6265,9 @@ async function resolveDiningTable(code) {
   if (tabs.length) {
     const tabIds = cleanUuidArray(tabs.map((tab) => tab.id));
     const orders = tabIds.length
-      ? await supabase('GET', 'orders', {
+      ? await db('GET', 'orders', {
         select: '*',
+        ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
         customer_tab_id: uuidInFilter(tabIds),
         order: 'created_at.desc',
         limit: '500'
@@ -3055,36 +6294,54 @@ async function resolveDiningTable(code) {
   return { ...table, open_tab: openTab, open_tabs: enrichedTabs };
 }
 
-async function createDiningTable(data) {
+async function createDiningTable(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const payload = sanitizeDiningTable(data, true);
-  const [table] = await supabase('POST', 'dining_tables', {}, payload, ['Prefer: return=representation']);
+  const [table] = await db('POST', 'dining_tables', {}, {
+    ...payload,
+    store_id: cleanUuid(storeId) || null
+  }, ['Prefer: return=representation']);
   return table;
 }
 
-async function updateDiningTable(id, data) {
-  const [table] = await supabase('PATCH', 'dining_tables', { id: `eq.${id}` }, sanitizeDiningTable(data, false), ['Prefer: return=representation']);
+async function updateDiningTable(id, data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const [table] = await db('PATCH', 'dining_tables', {
+    id: `eq.${id}`,
+    ...(cleanUuid(storeId) ? { store_id: `eq.${cleanUuid(storeId)}` } : {})
+  }, sanitizeDiningTable(data, false), ['Prefer: return=representation']);
+  if (!table) throw httpError(404, 'Mesa não encontrada nesta loja.');
   return table;
 }
 
-async function deleteDiningTable(id) {
-  await supabase('DELETE', 'dining_tables', { id: `eq.${id}` }, undefined, ['Prefer: return=minimal']);
+async function deleteDiningTable(id, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  await db('DELETE', 'dining_tables', {
+    id: `eq.${id}`,
+    ...(cleanUuid(storeId) ? { store_id: `eq.${cleanUuid(storeId)}` } : {})
+  }, undefined, ['Prefer: return=minimal']);
 }
 
-async function openCustomerTab(data) {
+async function openCustomerTab(data, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const tableId = cleanText(data.dining_table_id || '');
   const payload = {
+    store_id: cleanUuid(storeId) || null,
     name: cleanText(data.name || `Comanda ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`),
     customer_name: cleanText(data.customer_name || '') || null,
     dining_table_id: tableId || null,
     status: 'open'
   };
-  const [tab] = await supabase('POST', 'customer_tabs', {}, payload, ['Prefer: return=representation']);
+  const [tab] = await db('POST', 'customer_tabs', {}, payload, ['Prefer: return=representation']);
   return tab;
 }
 
-async function closeCustomerTab(id, data = {}) {
-  const orders = await supabase('GET', 'orders', {
+async function closeCustomerTab(id, data = {}, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const orders = await db('GET', 'orders', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     customer_tab_id: `eq.${id}`,
     order: 'created_at.asc',
     limit: '500'
@@ -3093,7 +6350,11 @@ async function closeCustomerTab(id, data = {}) {
     .filter((order) => order.status !== 'cancelled')
     .reduce((sum, order) => sum + moneyNumber(order.total), 0));
   const discount = roundMoney(Number.parseFloat(data.discount) || 0);
-  const [tab] = await supabase('PATCH', 'customer_tabs', { id: `eq.${id}`, status: 'eq.open' }, {
+  const [tab] = await db('PATCH', 'customer_tabs', {
+    id: `eq.${id}`,
+    status: 'eq.open',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+  }, {
     status: 'closed',
     closed_at: new Date().toISOString(),
     payment_method: cleanText(data.payment_method || ''),
@@ -3104,18 +6365,33 @@ async function closeCustomerTab(id, data = {}) {
   return tab;
 }
 
-async function transferCustomerTab(id, data = {}) {
+async function transferCustomerTab(id, data = {}, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const tableId = cleanText(data.dining_table_id || '');
   if (!tableId) throw httpError(422, 'Informe a mesa de destino.');
-  const [tab] = await supabase('PATCH', 'customer_tabs', { id: `eq.${id}`, status: 'eq.open' }, {
+  if (resolvedStoreId) {
+    const [table] = await db('GET', 'dining_tables', {
+      select: 'id',
+      id: `eq.${tableId}`,
+      store_id: `eq.${resolvedStoreId}`,
+      limit: '1'
+    });
+    if (!table) throw httpError(404, 'Mesa de destino não encontrada nesta loja.');
+  }
+  const [tab] = await db('PATCH', 'customer_tabs', {
+    id: `eq.${id}`,
+    status: 'eq.open',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
+  }, {
     dining_table_id: tableId
   }, ['Prefer: return=representation']);
   if (!tab) throw httpError(409, 'Comanda não encontrada ou já fechada.');
   return tab;
 }
 
-async function addItemToCustomerTab(req, tabId, data = {}) {
-  const tab = await requireOpenTab(tabId);
+async function addItemToCustomerTab(req, tabId, data = {}, storeId, options = {}) {
+  const tab = await requireOpenTab(tabId, null, storeId, options);
   if (!tab.dining_table_id) throw httpError(422, 'Vincule a comanda a uma mesa antes de adicionar itens pelo admin.');
   const itemId = cleanText(data.item_id || '');
   if (!itemId) throw httpError(422, 'Selecione um item do cardápio.');
@@ -3138,19 +6414,25 @@ async function addItemToCustomerTab(req, tabId, data = {}) {
       notes: cleanText(data.item_notes || '')
     }]
   }, {
+    storeId,
+    db: options.db,
+    tenant: options.tenant,
     allowClosedStore: true,
     skipModifierValidation: true
   });
   return { order: result.order };
 }
 
-async function clearOrderQueue(data = {}) {
+async function clearOrderQueue(data = {}, options = {}) {
+  const db = options.db || dbRequest;
   const mode = ['close_open', 'archive_closed'].includes(data.mode) ? data.mode : 'close_open';
+  const storeId = cleanUuid(data.storeId || data.store_id);
   const openStatuses = ['new', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
   const archivedAt = new Date().toISOString();
   let openArchived = [];
   if (mode === 'close_open') {
-    openArchived = await supabase('PATCH', 'orders', {
+    openArchived = await db('PATCH', 'orders', {
+      ...(storeId ? { store_id: `eq.${storeId}` } : {}),
       status: `in.(${openStatuses.join(',')})`,
       archived_at: 'is.null'
     }, {
@@ -3158,12 +6440,14 @@ async function clearOrderQueue(data = {}) {
       archived_at: archivedAt
     }, ['Prefer: return=representation']);
   }
-  const closedArchived = await supabase('PATCH', 'orders', {
+  const closedArchived = await db('PATCH', 'orders', {
+    ...(storeId ? { store_id: `eq.${storeId}` } : {}),
     status: 'in.(completed,cancelled)',
     archived_at: 'is.null'
   }, {
     archived_at: archivedAt
   }, ['Prefer: return=representation']);
+  clearAdminOrdersCache(storeId);
   return {
     archived: openArchived.length + closedArchived.length,
     closed: openArchived.length,
@@ -3172,7 +6456,7 @@ async function clearOrderQueue(data = {}) {
   };
 }
 
-async function dailyOrderReport(dateValue) {
+async function dailyOrderReport(dateValue, storeId, options = {}) {
   const day = validReportDate(dateValue);
   const start = reportDateStart(day);
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
@@ -3181,10 +6465,11 @@ async function dailyOrderReport(dateValue) {
     label: `Dia ${formatReportDate(day)}`,
     start: day,
     end: day
-  });
+  }, storeId, options);
 }
 
-async function rangeOrderReport({ days, start, end } = {}) {
+async function rangeOrderReport({ days, start, end, storeId, db, tenant } = {}) {
+  const options = { db, tenant };
   const today = validReportDate(new Date().toISOString().slice(0, 10));
   const parsedDays = Number.parseInt(days, 10);
 
@@ -3200,7 +6485,7 @@ async function rangeOrderReport({ days, start, end } = {}) {
       start: startDay,
       end: endDay,
       days: parsedDays
-    });
+    }, storeId, options);
   }
 
   const startDay = validReportDate(start || today);
@@ -3215,14 +6500,17 @@ async function rangeOrderReport({ days, start, end } = {}) {
     label,
     start: startDay,
     end: endDay
-  });
+  }, storeId, options);
 }
 
-async function orderReportBetween(start, end, period) {
+async function orderReportBetween(start, end, period, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const spanMs = end.getTime() - start.getTime();
   const previousStart = new Date(start.getTime() - spanMs);
-  const orders = await supabase('GET', 'orders', {
+  const resolvedStoreId = cleanUuid(storeId);
+  const orders = await db('GET', 'orders', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     and: `(created_at.gte.${previousStart.toISOString()},created_at.lt.${end.toISOString()})`,
     order: 'created_at.desc',
     limit: '5000'
@@ -3235,7 +6523,7 @@ async function orderReportBetween(start, end, period) {
     const createdAt = new Date(order.created_at);
     return createdAt >= previousStart && createdAt < start;
   });
-  const withItems = await attachOrderItems(currentOrders);
+  const withItems = await attachOrderItems(currentOrders, options);
   const totals = reportTotals(withItems);
   const previousTotals = reportTotals(previousOrders);
 
@@ -3341,12 +6629,13 @@ function validReportDate(value) {
   return localReportDate(new Date());
 }
 
-async function attachOrderItems(orders) {
+async function attachOrderItems(orders, options = {}) {
+  const db = options.db || dbRequest;
   if (orders.length === 0) return [];
 
   const ids = cleanUuidArray(orders.map((order) => order.id));
   if (ids.length === 0) return orders.map((order) => ({ ...order, items: [] }));
-  const items = await supabase('GET', 'order_items', {
+  const items = await db('GET', 'order_items', {
     select: '*',
     order_id: uuidInFilter(ids),
     order: 'created_at.asc'
@@ -3360,16 +6649,35 @@ async function attachOrderItems(orders) {
   return [...byOrder.values()];
 }
 
-async function listCustomers() {
+async function assertOrderBelongsToStore(orderId, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedOrderId = cleanUuid(orderId, 'pedido');
+  const resolvedStoreId = cleanUuid(storeId);
+  const [order] = await db('GET', 'orders', {
+    select: 'id,store_id',
+    id: `eq.${resolvedOrderId}`,
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
+    limit: '1'
+  });
+  if (!order) throw httpError(404, 'Pedido nao encontrado nesta loja.');
+  return order;
+}
+
+async function listCustomers(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
   const now = Date.now();
-  if (adminCustomersCache && adminCustomersCache.expiresAt > now) return adminCustomersCache.data;
-  const customers = await supabase('GET', 'customers', {
-    select: 'id,name,phone,email,birth_date,notes,created_at,updated_at,last_login_at',
+  if (adminCustomersCache?.[cacheKey] && adminCustomersCache[cacheKey].expiresAt > now) return adminCustomersCache[cacheKey].data;
+  const customers = await db('GET', 'customers', {
+    select: 'id,store_id,name,phone,email,birth_date,notes,created_at,updated_at,last_login_at',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     order: 'created_at.desc',
     limit: '100'
   });
   if (!customers.length) {
-    adminCustomersCache = {
+    adminCustomersCache = adminCustomersCache || {};
+    adminCustomersCache[cacheKey] = {
       data: [],
       expiresAt: now + ADMIN_LIST_CACHE_MS
     };
@@ -3377,8 +6685,9 @@ async function listCustomers() {
   }
   const ids = cleanUuidArray(customers.map((customer) => customer.id));
   const addresses = ids.length
-    ? await supabase('GET', 'customer_addresses', {
+    ? await db('GET', 'customer_addresses', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       customer_id: uuidInFilter(ids),
       order: 'is_default.desc,created_at.desc'
     })
@@ -3392,22 +6701,28 @@ async function listCustomers() {
     ...customer,
     addresses: byCustomer.get(customer.id) || []
   }));
-  adminCustomersCache = {
+  adminCustomersCache = adminCustomersCache || {};
+  adminCustomersCache[cacheKey] = {
     data,
     expiresAt: now + ADMIN_LIST_CACHE_MS
   };
   return data;
 }
 
-async function listPromotions() {
+async function listPromotions(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
   const now = Date.now();
-  if (adminPromotionsCache && adminPromotionsCache.expiresAt > now) return adminPromotionsCache.data;
+  if (adminPromotionsCache?.[cacheKey] && adminPromotionsCache[cacheKey].expiresAt > now) return adminPromotionsCache[cacheKey].data;
   try {
-    const data = await supabase('GET', 'promotions', {
+    const data = await db('GET', 'promotions', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       order: 'created_at.desc'
     });
-    adminPromotionsCache = {
+    adminPromotionsCache = adminPromotionsCache || {};
+    adminPromotionsCache[cacheKey] = {
       data,
       expiresAt: now + ADMIN_LIST_CACHE_MS
     };
@@ -3419,16 +6734,19 @@ async function listPromotions() {
   }
 }
 
-async function previewCoupon(req, data) {
+async function previewCoupon(req, data, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const code = cleanText(data.code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '');
   const subtotal = roundMoney(Number.parseFloat(data.subtotal) || 0);
   const deliveryFee = roundMoney(Number.parseFloat(data.delivery_fee) || 0);
   if (!code) throw httpError(422, 'Informe o cupom.');
   const coupon = await findActivePromotion(code, {
+    db,
+    storeId,
     subtotal,
     deliveryFee,
-    customer: await promotionCustomerContext(req, data),
-    items: await promotionItemsContext(data.items || [])
+    customer: await promotionCustomerContext(req, data, storeId, options),
+    items: await promotionItemsContext(data.items || [], storeId, options)
   });
   const discount = couponDiscountAmount(coupon, subtotal, deliveryFee);
   return {
@@ -3441,26 +6759,32 @@ async function previewCoupon(req, data) {
   };
 }
 
-async function promotionCustomerContext(req, data) {
+async function promotionCustomerContext(req, data, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const session = await readPersistentSession(parseCookies(req)[CUSTOMER_COOKIE], 'customer');
-  if (session?.data?.id) return getCustomerProfile(session.data.id);
+  if (session?.data?.id) return getCustomerProfile(session.data.id, resolvedStoreId, options);
 
   const phone = onlyDigits(data.phone || data.customer?.phone || '');
   if (!phone) return null;
-  const rows = await supabase('GET', 'customers', {
-    select: 'id,name,phone,email,birth_date,notes,created_at,updated_at',
+  const rows = await db('GET', 'customers', {
+    select: 'id,store_id,name,phone,email,birth_date,notes,created_at,updated_at',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     phone: `eq.${phone}`,
     limit: '1'
   });
   return rows[0] || null;
 }
 
-async function promotionItemsContext(rawItems) {
+async function promotionItemsContext(rawItems, storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
   const requestedItems = Array.isArray(rawItems) ? rawItems : [];
   const itemIds = cleanUuidArray(requestedItems.map((item) => item.id));
   if (itemIds.length === 0) return [];
-  const items = await supabase('GET', 'menu_items', {
+  const items = await db('GET', 'menu_items', {
     select: 'id,name,category_id,price',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     id: uuidInFilter(itemIds)
   });
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -3481,10 +6805,13 @@ async function promotionItemsContext(rawItems) {
 }
 
 async function findActivePromotion(code, context) {
+  const db = context.db || dbRequest;
   const subtotal = roundMoney(Number(context.subtotal || 0));
   const deliveryFee = roundMoney(Number(context.deliveryFee || 0));
-  const rows = await supabase('GET', 'promotions', {
+  const resolvedStoreId = cleanUuid(context.storeId);
+  const rows = await db('GET', 'promotions', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     code: `eq.${code}`,
     is_active: 'eq.true',
     limit: '1'
@@ -3501,7 +6828,7 @@ async function findActivePromotion(code, context) {
   if ((coupon.discount_type === 'free_delivery' || coupon.promotion_type === 'free_delivery') && deliveryFee <= 0) {
     throw httpError(422, 'Este cupom é para pedidos com entrega.');
   }
-  await assertPromotionAudience(coupon, { ...context, subtotal, deliveryFee });
+  await assertPromotionAudience(coupon, { ...context, db, subtotal, deliveryFee });
   return coupon;
 }
 
@@ -3522,11 +6849,11 @@ async function assertPromotionAudience(coupon, context) {
   }
 
   const customer = context.customer || null;
-  await assertPromotionUseLimitPerCustomer(coupon, customer);
+  await assertPromotionUseLimitPerCustomer(coupon, customer, context);
 
   if (!['first_order', 'recurring', 'birthday'].includes(promotionType)) return;
 
-  const orderCount = customer?.id ? await customerOrderCount(customer.id) : 0;
+  const orderCount = customer?.id ? await customerOrderCount(customer.id, context) : 0;
 
   if (promotionType === 'first_order' && orderCount > 0) {
     throw httpError(422, 'Este cupom é válido apenas para a primeira compra.');
@@ -3548,10 +6875,11 @@ async function assertPromotionAudience(coupon, context) {
   }
 }
 
-async function assertPromotionUseLimitPerCustomer(coupon, customer) {
+async function assertPromotionUseLimitPerCustomer(coupon, customer, context = {}) {
+  const db = context.db || dbRequest;
   const limit = Math.max(1, Number(coupon.max_uses_per_customer || 1));
   if (!customer?.id) return;
-  const uses = await supabase('GET', 'orders', {
+  const uses = await db('GET', 'orders', {
     select: 'id',
     customer_id: `eq.${customer.id}`,
     promotion_code: `eq.${coupon.code}`
@@ -3561,8 +6889,9 @@ async function assertPromotionUseLimitPerCustomer(coupon, customer) {
   }
 }
 
-async function customerOrderCount(customerId) {
-  const orders = await supabase('GET', 'orders', {
+async function customerOrderCount(customerId, context = {}) {
+  const db = context.db || dbRequest;
+  const orders = await db('GET', 'orders', {
     select: 'id',
     customer_id: `eq.${customerId}`
   });
@@ -3764,14 +7093,14 @@ function mergeIntegrationSettings(currentValue, nextValue) {
 
 function shouldKeepExistingSecret(value) {
   const text = String(value || '').trim();
-  return !text || /^••••/.test(text) || /^\*{4,}/.test(text);
+  return !text || /^\*{4,}/.test(text);
 }
 
 function maskedSecret(value) {
   const text = String(value || '');
   if (!text) return '';
   const tail = text.slice(-4);
-  return `••••${tail}`;
+  return `****${tail}`;
 }
 
 function adminStore(store) {
@@ -3855,6 +7184,7 @@ async function uploadImage(data) {
   const fileName = cleanFileName(data.fileName || 'produto.jpg');
   const contentType = cleanText(data.contentType || 'image/jpeg').split(';')[0].toLowerCase();
   const base64 = String(data.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
+  const folder = uploadFolder(data.usage);
 
   if (!base64) throw httpError(422, 'Arquivo de imagem ausente.');
   if (!allowedUploadTypes.has(contentType)) {
@@ -3864,75 +7194,57 @@ async function uploadImage(data) {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer.length > 5 * 1024 * 1024) throw httpError(422, 'Imagem muito grande. Limite de 5 MB.');
   if (detectImageContentType(buffer) !== contentType) {
-    throw httpError(422, 'O conteúdo do arquivo não corresponde ao tipo de imagem informado.');
+    throw httpError(422, 'O conteudo do arquivo nao corresponde ao tipo de imagem informado.');
   }
 
-  const objectPath = `products/${Date.now()}-${fileName}`;
-  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_IMAGE_BUCKET}/${objectPath}`, {
-    method: 'POST',
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': contentType,
-      'x-upsert': 'true'
-    },
-    body: buffer
-  });
-
-  if (!response.ok) {
-    throw httpError(response.status, 'Falha ao enviar imagem para o Supabase Storage.', await safeResponse(response));
-  }
+  const objectPath = `${folder}/${Date.now()}-${randomBytes(6).toString('hex')}-${fileName}`;
+  const fullPath = path.join(UPLOAD_DIR, objectPath);
+  if (!fullPath.startsWith(UPLOAD_DIR)) throw httpError(400, 'Caminho de upload invalido.');
+  await mkdir(path.dirname(fullPath), { recursive: true });
+  await writeFile(fullPath, buffer, { flag: 'wx' });
 
   return {
     path: objectPath,
-    url: `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_IMAGE_BUCKET}/${objectPath}`
+    url: `/uploads/${objectPath.replaceAll(path.sep, '/')}`
   };
 }
+function uploadFolder(usage) {
+  return ({
+    logo: 'store/logo',
+    favicon: 'store/favicon',
+    cover: 'store/cover',
+    product: 'products'
+  })[cleanText(usage || '').toLowerCase()] || 'products';
+}
 
-async function supabase(method, table, query = {}, payload, extraHeaders = []) {
-  const endpoint = new URL(`${SUPABASE_URL}/rest/v1/${encodeURIComponent(table)}`);
-  for (const [key, value] of Object.entries(query)) {
-    endpoint.searchParams.set(key, value);
-  }
+async function dbRequest(method, table, query = {}, payload, extraHeaders = []) {
+  return localDbRequest({
+    scope: 'local-postgres'
+  }, method, table, query, payload, extraHeaders);
+}
 
-  const headers = {
-    apikey: SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-    'Content-Type': 'application/json'
-  };
-
-  for (const header of extraHeaders) {
-    const index = header.indexOf(':');
-    headers[header.slice(0, index)] = header.slice(index + 1).trim();
-  }
-
-  const response = await fetch(endpoint, {
-    method,
-    headers,
-    body: payload === undefined ? undefined : JSON.stringify(payload)
-  });
-
-  const data = await safeResponse(response);
-
-  if (!response.ok) {
-    const message = supabaseErrorMessage(data);
+async function localDbRequest(config, method, table, query = {}, payload, extraHeaders = []) {
+  try {
+    return await localPostgrestRequest(method, table, query, payload, extraHeaders);
+  } catch (error) {
     console.error(JSON.stringify({
-      scope: 'supabase',
+      scope: config.scope || 'local-postgres',
       method,
       table,
-      status: response.status,
-      message,
-      code: isPlainObject(data) ? data.code : undefined,
-      details: isPlainObject(data) ? data.details : undefined,
-      hint: isPlainObject(data) ? data.hint : undefined
+      status: error.status || 500,
+      message: error.message,
+      code: error.code,
+      details: error.detail || undefined
     }));
-    throw httpError(response.status, `Supabase: ${message}`, data);
+    throw httpError(error.status || 500, `Banco local: ${error.message}`, error.detail || error);
+  }
+}
+async function serveStatic(res, requestPath) {
+  if (requestPath.startsWith('/uploads/')) {
+    await serveUpload(res, requestPath);
+    return;
   }
 
-  return Array.isArray(data) || isPlainObject(data) ? data : [];
-}
-
-async function serveStatic(res, requestPath) {
   const routedPath = routePath(requestPath);
   const filePath = path.normalize(path.join(publicDir, routedPath));
 
@@ -3944,21 +7256,53 @@ async function serveStatic(res, requestPath) {
   await sendFile(res, filePath);
 }
 
+async function serveUpload(res, requestPath) {
+  const relative = decodeURIComponent(requestPath.replace(/^\/uploads\//, ''));
+  const filePath = path.normalize(path.join(UPLOAD_DIR, relative));
+  if (!filePath.startsWith(UPLOAD_DIR) || !existsSync(filePath)) {
+    json(res, 404, { error: 'Arquivo nao encontrado.' });
+    return;
+  }
+  await sendFile(res, filePath);
+}
+
 function routePath(requestPath) {
-  if (requestPath === '/') return '/app.html';
+  if (requestPath === '/') return '/marketing.html';
+  if (requestPath === '/cardapio') return '/app.html';
+  if (['/recursos', '/planos', '/demonstracao'].includes(requestPath)) return '/marketing.html';
+  if (requestPath === '/termos') return '/terms.html';
+  if (requestPath === '/privacidade') return '/privacy.html';
+  if (requestPath === '/entrar') return '/login.html';
+  if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
+  if (requestPath === '/onboarding') return '/onboarding.html';
+  if (requestPath === '/convite') return '/invite.html';
   if (requestPath === '/admin') return '/admin.html';
+  if (requestPath === '/platform') return '/platform.html';
   if (requestPath === '/cozinha') return '/kitchen.html';
   if (requestPath === '/pagamento') return '/payment.html';
   if (requestPath === '/conta' || requestPath === '/cliente') return '/account.html';
   if (requestPath === '/pedidos') return '/orders.html';
+  if (path.extname(requestPath)) return decodeURIComponent(requestPath);
+  const parts = String(requestPath || '').split('/').filter(Boolean);
+  if (parts.length === 1 && cleanSlug(parts[0])) return '/app.html';
+  if (parts.length === 2 && cleanSlug(parts[0])) {
+    if (parts[1] === 'pedidos') return '/orders.html';
+    if (parts[1] === 'conta' || parts[1] === 'cliente') return '/account.html';
+    if (parts[1] === 'pagamento') return '/payment.html';
+  }
   return decodeURIComponent(requestPath);
 }
 
 async function sendFile(res, filePath) {
   const ext = path.extname(filePath);
   const content = await readFile(filePath);
+  const cacheHeaders = {
+    'Cache-Control': 'no-store',
+    ...(ext === '.html' ? { 'Clear-Site-Data': '"cache"' } : {})
+  };
   res.writeHead(200, {
     ...securityHeaders(),
+    ...cacheHeaders,
     'Content-Type': mimeTypes.get(ext) || 'application/octet-stream'
   });
   res.end(content);
@@ -3989,7 +7333,7 @@ function sanitizeAdminUser(data) {
 
 function sanitizeAdminRole(role) {
   const value = String(role || '').trim();
-  if (['admin', 'waiter', 'kitchen'].includes(value)) return value;
+  if (['superadmin', 'admin', 'waiter', 'attendant', 'delivery', 'kitchen'].includes(value)) return value;
   return 'admin';
 }
 
@@ -4000,6 +7344,8 @@ function sanitizeStore(data) {
     description: 'nullable_string',
     whatsapp_number: 'phone',
     address: 'nullable_string',
+    page_title: 'nullable_string',
+    favicon_url: 'nullable_string',
     logo_url: 'nullable_string',
     cover_url: 'nullable_string',
     is_open: 'boolean',
@@ -4186,27 +7532,33 @@ function sanitizeOrderCustomer(data, fulfillmentMethod) {
   return customer;
 }
 
-async function requireActiveDiningTable(idOrCode) {
+async function requireActiveDiningTable(idOrCode, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const value = cleanText(idOrCode || '');
+  const resolvedStoreId = cleanUuid(storeId);
   if (!value) throw httpError(422, 'Mesa não informada.');
   const query = {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     is_active: 'eq.true',
     limit: '1'
   };
   if (/^[a-f0-9-]{36}$/i.test(value)) query.id = `eq.${cleanUuid(value, 'mesa')}`;
   else query.code = `eq.${cleanSlug(value)}`;
-  const rows = await supabase('GET', 'dining_tables', query);
+  const rows = await db('GET', 'dining_tables', query);
   if (!rows[0]) throw httpError(422, 'Mesa não encontrada ou inativa.');
   return rows[0];
 }
 
-async function requireOpenTab(tabId, tableId) {
+async function requireOpenTab(tabId, tableId, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const id = tabId ? cleanUuid(tabId, 'comanda') : '';
+  const resolvedStoreId = cleanUuid(storeId);
   let rows = [];
   if (id) {
-    rows = await supabase('GET', 'customer_tabs', {
+    rows = await db('GET', 'customer_tabs', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       id: `eq.${id}`,
       status: 'eq.open',
       limit: '1'
@@ -4215,8 +7567,9 @@ async function requireOpenTab(tabId, tableId) {
       throw httpError(422, 'A comanda selecionada não pertence a esta mesa.');
     }
   } else if (tableId) {
-    rows = await supabase('GET', 'customer_tabs', {
+    rows = await db('GET', 'customer_tabs', {
       select: '*',
+      ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
       dining_table_id: `eq.${tableId}`,
       status: 'eq.open',
       order: 'opened_at.asc',
@@ -4228,11 +7581,14 @@ async function requireOpenTab(tabId, tableId) {
   return rows[0];
 }
 
-async function findOpenTabForTable(tableId) {
+async function findOpenTabForTable(tableId, storeId, options = {}) {
+  const db = options.db || dbRequest;
   const id = cleanText(tableId || '');
+  const resolvedStoreId = cleanUuid(storeId);
   if (!id) return null;
-  const rows = await supabase('GET', 'customer_tabs', {
+  const rows = await db('GET', 'customer_tabs', {
     select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     dining_table_id: `eq.${id}`,
     status: 'eq.open',
     order: 'opened_at.asc',
@@ -4473,18 +7829,37 @@ function publicAdmin(admin) {
     role: normalizeAdminRole(admin.role),
     role_label: adminRoleLabel(admin.role),
     permissions: adminPermissions(admin),
+    company_id: admin.company_id || null,
+    store_id: admin.store_id || admin.active_store?.id || null,
+    active_store: admin.active_store || null,
+    stores: Array.isArray(admin.stores) ? admin.stores : [],
     is_active: admin.is_active !== false,
     last_login_at: admin.last_login_at || null,
     created_at: admin.created_at || null
   };
 }
 
+function publicStoreRef(store) {
+  if (!store) return null;
+  return {
+    id: store.id,
+    company_id: store.company_id || null,
+    name: store.name,
+    slug: store.slug,
+    public_url: store.public_url || `/${store.slug}`,
+    is_active: store.is_active !== false
+  };
+}
+
 function adminRoleLabel(role) {
   return ({
+    superadmin: 'Superadmin',
     admin: 'Administrador',
     owner: 'Administrador',
     manager: 'Administrador',
-    waiter: 'Garçom',
+    waiter: 'Garcom',
+    attendant: 'Atendimento',
+    delivery: 'Entrega',
     kitchen: 'Cozinha'
   })[role] || 'Administrador';
 }
@@ -4540,17 +7915,17 @@ function httpError(status, message, detail) {
   return error;
 }
 
-function supabaseErrorMessage(data) {
+function localDbErrorMessage(data) {
   if (typeof data === 'string' && data.trim()) return data.trim().slice(0, 500);
   if (isPlainObject(data)) {
-    return String(data.message || data.error || data.details || data.hint || 'Erro retornado pelo Supabase.').slice(0, 500);
+    return String(data.message || data.error || data.details || data.hint || 'Erro retornado pelo banco local.').slice(0, 500);
   }
-  return 'Erro retornado pelo Supabase.';
+  return 'Erro retornado pelo banco local.';
 }
 
 function logServerError(error, req) {
   const status = error.status || 500;
-  if (status < 500 && !String(error.message || '').startsWith('Supabase:')) return;
+  if (status < 500 && !String(error.message || '').startsWith('Banco local:')) return;
   console.error(JSON.stringify({
     scope: 'server',
     method: req?.method,
@@ -4625,6 +8000,34 @@ function cleanSlug(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 80);
+}
+
+function normalizeDomain(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '')
+    .replace(/^www\./, '');
+}
+
+function normalizeServiceUrl(value) {
+  const text = String(value || '').trim().replace(/\/rest\/v1\/?$/i, '').replace(/\/+$/, '');
+  if (!text) return '';
+  try {
+    const parsed = new URL(text);
+    const isLocal = ['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname);
+    if (parsed.protocol !== 'https:' && !(isLocal && parsed.protocol === 'http:')) return '';
+    return parsed.origin;
+  } catch {
+    return '';
+  }
+}
+
+function isValidDomain(value) {
+  const domain = normalizeDomain(value);
+  return /^(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}$/.test(domain) && !domain.includes('..');
 }
 
 function normalizeName(value) {

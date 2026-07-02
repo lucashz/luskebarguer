@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Onboarding - Cardápio Digital</title>
+    <link rel="stylesheet" href="/styles.css?v=20260630-portal">
+  </head>
+  <body class="portal-page onboarding-page">
+    <header class="portal-topbar">
+      <a class="portal-brand" href="/">Cardápio Digital</a>
+      <nav>
+        <a href="/admin">Ir para o admin</a>
+      </nav>
+    </header>
+
+    <main class="onboarding-shell">
+      <section class="portal-hero onboarding-hero">
+        <div>
+          <p class="eyebrow">Bem-vindo</p>
+          <h1>Vamos preparar seu cardápio.</h1>
+          <p>Você pode concluir agora ou continuar depois. O checklist abaixo ajuda a deixar a loja pronta para receber pedidos.</p>
+          <div class="portal-actions">
+            <button class="portal-button" id="onboardingPublishButton" type="button">Publicar cardápio</button>
+            <a class="portal-button ghost" href="/cardapio">Ver cardápio</a>
+            <a class="portal-button ghost" href="/admin">Abrir admin</a>
+          </div>
+          <p class="form-message" id="onboardingMessage">Carregando checklist...</p>
+        </div>
+        <aside class="portal-demo-card">
+          <span>Progresso inicial</span>
+          <strong id="onboardingProgress">37%</strong>
+          <p>Conta, loja e endereço público já foram criados.</p>
+        </aside>
+      </section>
+
+      <section class="portal-section">
+        <p class="eyebrow">Checklist</p>
+        <h2>Próximos passos recomendados</h2>
+        <div class="onboarding-checklist" id="onboardingChecklist">
+          <article class="onboarding-empty">
+            <strong>Carregando passos...</strong>
+            <span>Aguarde um instante.</span>
+          </article>
+        </div>
+      </section>
+    </main>
+    <script src="/portal.js?v=20260630-portal2" type="module"></script>
+  </body>
+</html>

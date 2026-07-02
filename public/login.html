@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Entrar - Cardápio Digital</title>
+    <link rel="stylesheet" href="/styles.css?v=20260630-portal2">
+  </head>
+  <body class="portal-page login-page">
+    <header class="portal-topbar">
+      <a class="portal-brand" href="/">Cardápio Digital</a>
+      <nav>
+        <a href="/planos">Planos</a>
+        <a class="portal-button small" href="/cadastro">Criar conta</a>
+      </nav>
+    </header>
+
+    <main class="login-shell">
+      <section class="login-copy">
+        <p class="eyebrow">Painel da loja</p>
+        <h1>Entre para gerenciar seus pedidos, cardápio e operação.</h1>
+        <p>Use o e-mail e senha cadastrados na criação da loja ou no convite recebido pela equipe.</p>
+      </section>
+
+      <section class="signup-card login-card">
+        <form id="portalLoginForm" class="stack-form">
+          <h2>Entrar</h2>
+          <label>E-mail<input name="email" required type="email" autocomplete="email"></label>
+          <label>Senha<input name="password" required type="password" autocomplete="current-password"></label>
+          <button class="portal-button" id="portalLoginButton">Entrar no painel</button>
+          <p id="portalLoginMessage" class="form-message"></p>
+        </form>
+
+        <form id="portalRecoverForm" class="stack-form recover-form">
+          <h3>Esqueceu a senha?</h3>
+          <p class="muted">Informe seu e-mail. A recuperação automática será enviada quando o e-mail transacional estiver configurado.</p>
+          <label>E-mail<input name="email" required type="email"></label>
+          <button class="portal-button ghost" id="portalRecoverButton">Solicitar recuperação</button>
+          <p id="portalRecoverMessage" class="form-message"></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="/portal.js?v=20260630-portal2" type="module"></script>
+  </body>
+</html>

@@ -1,10 +1,12 @@
-﻿const state = {
+const state = {
   admin: null,
   store: null,
   categories: [],
   orders: [],
   customers: [],
   promotions: [],
+  plan: null,
+  storeDomains: [],
   adminUsers: [],
   diningTables: [],
   customerTabs: [],
@@ -41,7 +43,7 @@
   loadingAdminTabs: new Set()
 };
 
-const ADMIN_CACHE_KEY = 'admin_profile_cache_v1';
+const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
 const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
 const THEME_DEFAULTS = {
   primaryColor: '#f97316',
@@ -99,6 +101,45 @@ const THEME_PRESETS = {
     selectionTextColor: '#ffffff'
   }
 };
+
+const ADMIN_ROLE_DEFINITIONS = {
+  admin: {
+    label: 'Administrador',
+    short: 'Tudo da loja',
+    description: 'Acesso completo ao painel da loja, equipe, cardapio, pedidos, relatorios e configuracoes.',
+    permissions: ['Operacao', 'Pedidos', 'Cardapio', 'Relatorios', 'Clientes', 'Loja', 'Equipe']
+  },
+  attendant: {
+    label: 'Atendimento',
+    short: 'Pedidos e clientes',
+    description: 'Ideal para quem atende pedidos, acompanha clientes, mesas e comandas.',
+    permissions: ['Pedidos', 'Mesas', 'Clientes']
+  },
+  waiter: {
+    label: 'Garcom',
+    short: 'Salao e comandas',
+    description: 'Acesso focado em pedidos de mesa, comandas e atendimento no salao.',
+    permissions: ['Pedidos', 'Mesas', 'Comandas']
+  },
+  kitchen: {
+    label: 'Cozinha',
+    short: 'Producao',
+    description: 'Acesso simples para ver pedidos e movimentar preparo na cozinha.',
+    permissions: ['Pedidos', 'Modo cozinha']
+  },
+  delivery: {
+    label: 'Entrega',
+    short: 'Entrega',
+    description: 'Acesso para acompanhar pedidos e fluxo de entrega.',
+    permissions: ['Pedidos', 'Entrega']
+  },
+  superadmin: {
+    label: 'Superadmin',
+    short: 'Plataforma',
+    description: 'Acesso reservado para gestao da plataforma SaaS.',
+    permissions: ['Plataforma', 'Todas as lojas', 'Planos']
+  }
+};
 const businessDayLabels = [
   ['monday', '18:00', '23:00'],
   ['tuesday', '18:00', '23:00'],
@@ -119,6 +160,8 @@ const els = {
   adminShell: document.querySelector('#adminShell'),
   adminUser: document.querySelector('#adminUser'),
   adminTitle: document.querySelector('#adminTitle'),
+  storeSwitcherWrap: document.querySelector('#storeSwitcherWrap'),
+  storeSwitcher: document.querySelector('#storeSwitcher'),
   setupForm: document.querySelector('#setupForm'),
   loginForm: document.querySelector('#loginForm'),
   logoutButton: document.querySelector('#logoutButton'),
@@ -202,6 +245,10 @@ const els = {
   refreshModifiersButton: document.querySelector('#refreshModifiersButton'),
   modifierGroupForm: document.querySelector('#modifierGroupForm'),
   storeForm: document.querySelector('#storeForm'),
+  storePathPreview: document.querySelector('#storePathPreview'),
+  customDomainInput: document.querySelector('#customDomainInput'),
+  addDomainButton: document.querySelector('#addDomainButton'),
+  customDomainList: document.querySelector('#customDomainList'),
   integrationsForm: document.querySelector('#integrationsForm'),
   printSettingsForm: document.querySelector('#printSettingsForm'),
   testIntegrationsButton: document.querySelector('#testIntegrationsButton'),
@@ -214,9 +261,25 @@ const els = {
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
+  deleteAccountForm: document.querySelector('#deleteAccountForm'),
   adminUserForm: document.querySelector('#adminUserForm'),
+  adminUserRoleSelect: document.querySelector('#adminUserRoleSelect'),
+  adminUserSearch: document.querySelector('#adminUserSearch'),
+  adminUserRoleFilter: document.querySelector('#adminUserRoleFilter'),
+  adminRoleOverview: document.querySelector('#adminRoleOverview'),
+  adminRolePreview: document.querySelector('#adminRolePreview'),
+  inviteAdminButton: document.querySelector('#inviteAdminButton'),
   adminUsersList: document.querySelector('#adminUsersList'),
   adminUsersPanel: document.querySelector('#adminUsersPanel'),
+  refreshPlanButton: document.querySelector('#refreshPlanButton'),
+  planAlerts: document.querySelector('#planAlerts'),
+  planSummary: document.querySelector('#planSummary'),
+  planBilling: document.querySelector('#planBilling'),
+  planRenewal: document.querySelector('#planRenewal'),
+  planUsage: document.querySelector('#planUsage'),
+  planFeatures: document.querySelector('#planFeatures'),
+  planCompare: document.querySelector('#planCompare'),
+  planHistory: document.querySelector('#planHistory'),
   promotionForm: document.querySelector('#promotionForm'),
   promotionList: document.querySelector('#promotionList'),
   promotionFormTitle: document.querySelector('#promotionFormTitle'),
@@ -252,6 +315,8 @@ els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
 els.logoutButton?.addEventListener('click', logout);
 els.adminHeaderLogoutButton.addEventListener('click', logout);
+els.storeSwitcher?.addEventListener('change', switchStore);
+els.refreshPlanButton?.addEventListener('click', () => loadPlanData({ force: true }));
 els.onboardingBackButton?.addEventListener('click', previousOnboardingStep);
 els.onboardingNextButton?.addEventListener('click', nextOnboardingStep);
 els.startOperationButton?.addEventListener('click', startOperation);
@@ -298,13 +363,16 @@ els.modifierProductSelect?.addEventListener('change', () => {
 });
 els.modifierGroupForm?.addEventListener('submit', submitModifierGroupFromDialog);
 els.storeForm.addEventListener('submit', submitStore);
+els.addDomainButton?.addEventListener('click', addCustomDomain);
 els.integrationsForm?.addEventListener('submit', submitIntegrations);
 els.storeForm.addEventListener('input', () => {
   state.storeFormDirty = true;
+  renderStorePathPreview();
   renderThemePreview();
 });
 els.storeForm.addEventListener('change', () => {
   state.storeFormDirty = true;
+  renderStorePathPreview();
   renderThemePreview();
 });
 els.integrationsForm?.addEventListener('input', () => {
@@ -326,7 +394,12 @@ els.storeForm.addEventListener('click', (event) => {
 els.testIntegrationsButton?.addEventListener('click', testIntegrations);
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
+els.deleteAccountForm?.addEventListener('submit', submitDeleteAccount);
 els.adminUserForm?.addEventListener('submit', submitAdminUser);
+els.adminUserRoleSelect?.addEventListener('change', renderAdminRolePreview);
+els.adminUserSearch?.addEventListener('input', renderAdminUsers);
+els.adminUserRoleFilter?.addEventListener('change', renderAdminUsers);
+els.inviteAdminButton?.addEventListener('click', submitAdminInvitation);
 els.promotionForm?.addEventListener('submit', submitPromotion);
 els.cancelPromotionEditButton?.addEventListener('click', resetPromotionForm);
 els.openPromotionFormButton?.addEventListener('click', () => {
@@ -337,9 +410,53 @@ els.openLoyaltyFormButton?.addEventListener('click', showLoyaltyForm);
 els.closeLoyaltyFormButton?.addEventListener('click', hideLoyaltyForm);
 els.loyaltyForm?.addEventListener('submit', submitLoyalty);
 
+initStoreAccordions();
 renderKitchenModeButton();
 renderAutoPrintButton();
 init();
+
+function initStoreAccordions() {
+  const sections = [...document.querySelectorAll('#storeForm .store-settings-section')];
+  sections.forEach((section, index) => {
+    if (section.dataset.accordionReady) return;
+    section.dataset.accordionReady = 'true';
+    section.classList.add('store-settings-dropdown');
+
+    const copy = section.querySelector('.store-settings-copy');
+    const fields = section.querySelector('.store-settings-fields');
+    if (!copy || !fields) return;
+
+    const title = copy.querySelector('strong')?.textContent?.trim() || `Configuração ${index + 1}`;
+    const description = copy.querySelector('p')?.textContent?.trim() || '';
+    const panelId = `storeSettingsPanel-${index}`;
+    const isOpen = index === 0;
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'store-settings-toggle';
+    toggle.setAttribute('aria-controls', panelId);
+    toggle.setAttribute('aria-expanded', String(isOpen));
+    toggle.innerHTML = `
+      <span>
+        <strong>${escapeHtml(title)}</strong>
+        ${description ? `<small>${escapeHtml(description)}</small>` : ''}
+      </span>
+    `;
+
+    fields.id = panelId;
+    fields.hidden = !isOpen;
+    section.classList.toggle('is-open', isOpen);
+    copy.hidden = true;
+    section.insertBefore(toggle, copy);
+
+    toggle.addEventListener('click', () => {
+      const nextOpen = fields.hidden;
+      fields.hidden = !nextOpen;
+      section.classList.toggle('is-open', nextOpen);
+      toggle.setAttribute('aria-expanded', String(nextOpen));
+    });
+  });
+}
 
 async function init() {
   els.reportDate.value = localDateInputValue();
@@ -402,6 +519,44 @@ async function logout() {
   clearAdminCache();
   stopOrderPolling();
   showAuth();
+}
+
+async function switchStore(event) {
+  const storeId = event.target.value;
+  if (!storeId || storeId === state.admin?.store_id) return;
+  try {
+    const result = await request('/api/admin/stores/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store_id: storeId })
+    });
+    state.admin = result.admin;
+    resetLoadedStoreState();
+    saveAdminCache();
+    await loadAdminData();
+    toast(`Loja ativa: ${state.admin.active_store?.name || 'selecionada'}.`);
+  } catch (error) {
+    toast(error.message || 'Não foi possível trocar a loja.');
+    renderStoreSwitcher();
+  }
+}
+
+function resetLoadedStoreState() {
+  state.store = null;
+  state.categories = [];
+  state.orders = [];
+  state.customers = [];
+  state.promotions = [];
+  state.diningTables = [];
+  state.customerTabs = [];
+  state.knownOrderIds = new Set();
+  state.initialOrdersLoaded = false;
+  state.loadedAdminTabs = new Set();
+  state.loadingAdminTabs = new Set();
+  state.editingCategoryId = null;
+  state.editingProductId = null;
+  state.editingPromotionId = null;
+  state.selectedTableId = null;
 }
 
 async function loadAdminData() {
@@ -488,6 +643,10 @@ async function loadAdminTabData(tab, options = {}) {
       await loadStoreData(options);
       return;
     }
+    if (tab === 'plan') {
+      await loadPlanData(options);
+      return;
+    }
     if (tab === 'account') {
       await loadAdminUsersData(options);
       return;
@@ -551,12 +710,18 @@ async function loadTablesData(options = {}) {
 async function loadStoreData(options = {}) {
   if (!options.force && state.loadedAdminTabs.has('store')) return;
   const startedAt = performance.now();
-  const data = await request('/api/admin/store');
+  const [data, domains] = await Promise.all([
+    request('/api/admin/store'),
+    request('/api/admin/domains').catch(() => ({ domains: [] }))
+  ]);
   state.store = data.store || state.store;
+  state.storeDomains = domains.domains || [];
   state.loadedAdminTabs.add('store');
   state.loadedAdminTabs.add('integrations');
   logSlowClientLoad('store', startedAt);
+  applyFavicon(state.store?.favicon_url);
   fillStoreForm();
+  renderCustomDomains();
   if (!state.integrationsFormDirty) fillIntegrationSettings(state.store?.integration_settings || {});
   fillPrintSettingsForm();
   fillLoyaltyForm();
@@ -575,14 +740,26 @@ async function loadAdminUsersData(options = {}) {
   renderAdminUsers();
 }
 
+async function loadPlanData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('plan')) return;
+  const startedAt = performance.now();
+  const data = await request('/api/admin/plan');
+  state.plan = data;
+  state.loadedAdminTabs.add('plan');
+  logSlowClientLoad('plan', startedAt);
+  renderPlan();
+}
+
 function render() {
   els.adminUser.textContent = state.admin ? `${state.admin.name} - ${state.admin.email}` : 'Painel';
+  renderStoreSwitcher();
   renderOperation();
   renderOrderMetrics();
   renderOrders();
   renderCustomers();
   renderPromotions();
   renderTables();
+  renderPlan();
   renderTableManager();
   renderPromotionOptions();
   renderMenu();
@@ -590,12 +767,23 @@ function render() {
   renderPermissionedNavigation();
   renderAdminUsers();
   fillStoreForm();
+  applyFavicon(state.store?.favicon_url);
   if (!state.integrationsFormDirty) fillIntegrationSettings(state.store?.integration_settings || {});
   fillPrintSettingsForm();
   fillLoyaltyForm();
   fillAccountForm();
   renderOnboarding();
   renderSoundButton();
+}
+
+function renderStoreSwitcher() {
+  const stores = Array.isArray(state.admin?.stores) ? state.admin.stores : [];
+  const activeId = state.admin?.store_id || state.admin?.active_store?.id || '';
+  if (!els.storeSwitcher || !els.storeSwitcherWrap) return;
+  els.storeSwitcherWrap.hidden = stores.length <= 1;
+  els.storeSwitcher.innerHTML = stores.map((store) => `
+    <option value="${escapeAttribute(store.id)}"${store.id === activeId ? ' selected' : ''}>${escapeHtml(store.name || store.slug || 'Loja')}</option>
+  `).join('');
 }
 
 function renderOrderMetrics() {
@@ -2993,9 +3181,34 @@ async function submitPassword(event) {
   toast('Senha atualizada.');
 }
 
+async function submitDeleteAccount(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(els.deleteAccountForm));
+  if (String(data.confirmation || '').trim() !== 'EXCLUIR CONTA') {
+    toast('Digite EXCLUIR CONTA para confirmar.');
+    return;
+  }
+  const confirmed = window.confirm('Esta acao nao pode ser desfeita. Todos os dados da empresa e loja serao apagados. Deseja continuar?');
+  if (!confirmed) return;
+  await request('/api/admin/account/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  state.admin = null;
+  clearAdminCache();
+  stopOrderPolling();
+  showAuth();
+  toast('Conta excluida.');
+}
+
 async function submitAdminUser(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.adminUserForm));
+  if (!String(data.password || '').trim()) {
+    toast('Informe uma senha inicial ou use Gerar convite.');
+    return;
+  }
   const result = await request('/api/admin/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3007,27 +3220,75 @@ async function submitAdminUser(event) {
   toast('Conta criada.');
 }
 
+async function submitAdminInvitation() {
+  const data = Object.fromEntries(new FormData(els.adminUserForm));
+  try {
+    const result = await request('/api/admin/invitations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const link = `${location.origin}${result.invitation.invite_link}`;
+    await navigator.clipboard?.writeText(link).catch(() => null);
+    els.adminUserForm.reset();
+    toast(result.invitation.whatsapp_status === 'sent'
+      ? 'Convite enviado por WhatsApp e link copiado.'
+      : `Convite gerado e link copiado: ${link}`);
+  } catch (error) {
+    toast(error.message || 'Não foi possível gerar o convite.');
+  }
+}
+
 function renderAdminUsers() {
   if (!els.adminUsersPanel || !els.adminUsersList) return;
   const canManage = hasPermission('admin_users');
   els.adminUsersPanel.hidden = !canManage;
   if (!canManage) return;
+  renderAdminRoleOverview();
+  renderAdminRolePreview();
+  const search = normalizeSearch(els.adminUserSearch?.value || '');
+  const roleFilter = els.adminUserRoleFilter?.value || 'all';
+  const users = state.adminUsers.filter((admin) => {
+    const matchesSearch = !search || normalizeSearch(`${admin.name || ''} ${admin.email || ''}`).includes(search);
+    const matchesRole = roleFilter === 'all'
+      || (roleFilter === 'inactive' ? admin.is_active === false : admin.role === roleFilter);
+    return matchesSearch && matchesRole;
+  });
   if (!state.adminUsers.length) {
-    els.adminUsersList.innerHTML = '<p class="empty-state">Nenhuma conta cadastrada além da atual.</p>';
+    els.adminUsersList.innerHTML = `
+      <div class="empty-state account-empty-state">
+        <strong>Nenhuma conta extra criada.</strong>
+        <span>Crie acessos separados para atendimento, cozinha, entrega ou garcom. Cada pessoa entra com o proprio login.</span>
+      </div>
+    `;
     return;
   }
-  els.adminUsersList.innerHTML = state.adminUsers.map((admin) => `
-    <article class="admin-user-card">
-      <div class="admin-user-main">
-        <div>
-          <strong>${escapeHtml(admin.name)}</strong>
-          <small>${escapeHtml(admin.email)}</small>
-        </div>
-        <span class="pill ${admin.is_active ? 'pill-ok' : 'pill-muted'}">${admin.is_active ? 'Ativa' : 'Inativa'}</span>
+  if (!users.length) {
+    els.adminUsersList.innerHTML = `
+      <div class="empty-state account-empty-state">
+        <strong>Nenhuma conta encontrada.</strong>
+        <span>Ajuste a busca ou o filtro de funcao para visualizar outros acessos.</span>
       </div>
+    `;
+    return;
+  }
+  els.adminUsersList.innerHTML = users.map((admin) => {
+    const canDelete = String(state.admin?.id || '') !== String(admin.id || '');
+    return `
+    <details class="admin-user-card">
+      <summary class="admin-user-main">
+        <div class="admin-user-avatar">${escapeHtml((admin.name || admin.email || 'A').slice(0, 1).toUpperCase())}</div>
+        <div class="admin-user-title">
+          <strong>${escapeHtml(admin.name || 'Conta')}</strong>
+          <small>${escapeHtml(admin.email || '')}</small>
+        </div>
+        <span class="team-role-badge">${escapeHtml(admin.role_label || adminRoleLabel(admin.role))}</span>
+        <span class="pill ${admin.is_active ? 'pill-ok' : 'pill-muted'}">${admin.is_active ? 'Ativa' : 'Inativa'}</span>
+      </summary>
       <div class="admin-user-permissions">
-        <span>${escapeHtml(admin.role_label || adminRoleLabel(admin.role))}</span>
+        <span>${escapeHtml(roleDefinition(admin.role).short)}</span>
         <small>${adminPermissionSummary(admin.role)}</small>
+        <div class="team-permission-chips">${rolePermissionChips(admin.role)}</div>
       </div>
       <form class="admin-user-edit-form" data-admin-user-id="${escapeAttribute(admin.id)}">
         <label>Função
@@ -3044,13 +3305,364 @@ function renderAdminUsers() {
         <label>Nova senha
           <input name="password" type="password" minlength="8" placeholder="Opcional">
         </label>
-        <button class="ghost-button compact">Salvar</button>
+        <div class="admin-user-form-actions">
+          <button class="ghost-button compact">Salvar</button>
+          ${canDelete ? `<button class="danger-button compact admin-user-delete-button" type="button" data-admin-user-id="${escapeAttribute(admin.id)}" data-admin-user-name="${escapeAttribute(admin.name || admin.email || 'esta conta')}">Excluir</button>` : ''}
+        </div>
       </form>
-    </article>
-  `).join('');
+    </details>
+  `;
+  }).join('');
   els.adminUsersList.querySelectorAll('.admin-user-edit-form').forEach((form) => {
     form.addEventListener('submit', submitAdminUserUpdate);
   });
+  els.adminUsersList.querySelectorAll('.admin-user-delete-button').forEach((button) => {
+    button.addEventListener('click', deleteAdminUser);
+  });
+}
+
+function renderAdminRoleOverview() {
+  if (!els.adminRoleOverview) return;
+  const roles = ['admin', 'attendant', 'waiter', 'kitchen', 'delivery'];
+  els.adminRoleOverview.innerHTML = roles.map((role) => {
+    const entry = roleDefinition(role);
+    const count = state.adminUsers.filter((admin) => admin.role === role && admin.is_active !== false).length;
+    return `
+      <article class="team-role-card" data-team-role="${escapeAttribute(role)}">
+        <div>
+          <strong>${escapeHtml(entry.label)}</strong>
+          <small>${escapeHtml(entry.short)}</small>
+        </div>
+        <span>${count}</span>
+      </article>
+    `;
+  }).join('');
+  els.adminRoleOverview.querySelectorAll('[data-team-role]').forEach((card) => {
+    card.addEventListener('click', () => {
+      if (els.adminUserRoleFilter) els.adminUserRoleFilter.value = card.dataset.teamRole;
+      renderAdminUsers();
+    });
+  });
+}
+
+function renderAdminRolePreview() {
+  if (!els.adminRolePreview) return;
+  const role = els.adminUserRoleSelect?.value || 'admin';
+  const entry = roleDefinition(role);
+  els.adminRolePreview.innerHTML = `
+    <div>
+      <strong>${escapeHtml(entry.label)}</strong>
+      <span>${escapeHtml(entry.description)}</span>
+    </div>
+    <div class="team-permission-chips">${rolePermissionChips(role)}</div>
+  `;
+}
+
+function roleDefinition(role) {
+  return ADMIN_ROLE_DEFINITIONS[role] || ADMIN_ROLE_DEFINITIONS.admin;
+}
+
+function rolePermissionChips(role) {
+  return roleDefinition(role).permissions
+    .map((permission) => `<span>${escapeHtml(permission)}</span>`)
+    .join('');
+}
+
+function normalizeSearch(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function renderPlan() {
+  if (!els.planSummary || !els.planUsage || !els.planFeatures) return;
+  const data = state.plan;
+  if (!data) {
+    els.planSummary.innerHTML = '<p class="empty-state">Abra esta aba para carregar seu plano.</p>';
+    els.planUsage.innerHTML = '<p class="empty-state">Uso ainda não carregado.</p>';
+    return;
+  }
+  const plan = data.plan || {};
+  const subscription = data.subscription || {};
+  const pendingSubscription = data.pending_subscription || {};
+  const availablePlans = Array.isArray(data.available_plans) ? data.available_plans : [];
+  const company = data.company || {};
+  const usage = data.usage || {};
+  const features = data.features || [];
+  const billingHistory = Array.isArray(data.billing_history) ? data.billing_history : [];
+  const selectedPlanCode = plan.code || availablePlans[0]?.code || '';
+  const status = subscription.status || company.status || 'indefinido';
+  const statusLabel = commercialStatusLabel(status);
+  const nextRenewal = subscription.next_renewal_at || subscription.current_period_ends_at || subscription.trial_ends_at || '';
+  const pendingCheckoutUrl = pendingSubscription.metadata?.checkout_url || '';
+
+  if (els.planAlerts) {
+    els.planAlerts.innerHTML = planAlerts({ subscription, pendingSubscription, usage, features });
+  }
+
+  els.planSummary.innerHTML = `
+    <div class="plan-main-card">
+      <p class="eyebrow">Plano atual</p>
+      <div class="plan-main-title">
+        <h2>${escapeHtml(plan.name || 'Sem plano definido')}</h2>
+        <span class="plan-status ${planStatusClass(status)}">${escapeHtml(statusLabel)}</span>
+      </div>
+      <p class="muted">${escapeHtml(plan.description || 'Configure o plano pelo painel da plataforma.')}</p>
+      <strong>${money(plan.monthly_price || 0)} / mês</strong>
+      <div class="plan-actions">
+        <label>Plano para contratar
+          <select id="billingPlanSelect">
+            ${availablePlans.map((entry) => `<option value="${escapeAttribute(entry.code)}"${entry.code === selectedPlanCode ? ' selected' : ''}>${escapeHtml(entry.name)} - ${money(entry.monthly_price || 0)}/mês</option>`).join('')}
+          </select>
+        </label>
+        <button class="primary-button compact" id="billingCheckoutButton" type="button"${availablePlans.length ? '' : ' disabled'}>${status === 'active' ? 'Gerenciar assinatura' : 'Ativar plano'}</button>
+      </div>
+    </div>
+  `;
+  document.querySelector('#billingCheckoutButton')?.addEventListener('click', () => createBillingCheckout());
+
+  if (els.planBilling) {
+    els.planBilling.innerHTML = `
+      <p class="eyebrow">Cobrança</p>
+      <h2>${pendingSubscription.id ? 'Cobrança pendente' : 'Sem cobrança pendente'}</h2>
+      <p class="muted">${pendingSubscription.id ? 'Finalize o pagamento para ativar ou alterar a assinatura.' : 'Nenhuma cobrança em aberto no momento.'}</p>
+      <div class="plan-mini-list">
+        <span>Status <strong>${escapeHtml(pendingSubscription.id ? commercialStatusLabel(pendingSubscription.status) : statusLabel)}</strong></span>
+        <span>Vencimento <strong>${dateLabel(pendingSubscription.payment_due_at) || '-'}</strong></span>
+      </div>
+      <div class="row-actions">
+        ${pendingCheckoutUrl ? `<a class="primary-button compact" href="${escapeAttribute(pendingCheckoutUrl)}" target="_blank" rel="noopener">Abrir pagamento</a>` : ''}
+        <button class="ghost-button compact" id="billingRenewButton" type="button"${availablePlans.length ? '' : ' disabled'}>${pendingSubscription.id ? 'Gerar nova cobrança' : 'Gerar cobrança'}</button>
+      </div>
+    `;
+    document.querySelector('#billingRenewButton')?.addEventListener('click', () => createBillingCheckout());
+  }
+
+  if (els.planRenewal) {
+    els.planRenewal.innerHTML = `
+      <p class="eyebrow">Próxima renovação</p>
+      <h2>${dateLabel(nextRenewal) || '-'}</h2>
+      <p class="muted">${renewalMessage(subscription)}</p>
+      <a class="text-button" href="#planHistory">Ver histórico de cobrança</a>
+    `;
+  }
+
+  els.planUsage.innerHTML = `
+    <p class="eyebrow">Uso</p>
+    <h2>Uso e limites</h2>
+    <div class="plan-usage-list">
+      ${usageBar('Produtos cadastrados', usage.products, featureLimit(features, 'digital_menu'))}
+      ${usageBar('Pedidos no mês', usage.orders_month ?? usage.orders, featureLimit(features, 'orders'))}
+      ${usageBar('Clientes', usage.customers, featureLimit(features, 'customers'))}
+      ${usageBar('Mesas', usage.tables, featureLimit(features, 'tables'))}
+      ${usageBar('Usuários da equipe', usage.users, featureLimit(features, 'admin_users'))}
+      ${usageBar('WhatsApp/mensagens', usage.whatsapp_messages, featureLimit(features, 'automatic_whatsapp') || featureLimit(features, 'manual_whatsapp'))}
+    </div>
+  `;
+  els.planFeatures.innerHTML = features.length ? features.map((entry) => {
+    const feature = entry.feature || {};
+    const enabled = entry.is_enabled !== false;
+    return `
+      <article class="feature-row compact ${enabled ? 'enabled' : 'disabled'}">
+        <div>
+          <strong>${escapeHtml(feature.name || feature.code || 'Recurso')}</strong>
+          <small>${escapeHtml(feature.description || 'Recurso incluso neste plano.')}</small>
+        </div>
+        <span class="feature-limit">${featureStatusLabel(entry)}</span>
+      </article>
+    `;
+  }).join('') : '<p class="empty-state">Nenhum recurso cadastrado para este plano.</p>';
+
+  if (els.planCompare) {
+    els.planCompare.innerHTML = availablePlans.length ? availablePlans.map((entry) => comparePlanCard(entry, plan.code)).join('') : '<p class="empty-state">Nenhum plano disponível.</p>';
+    els.planCompare.querySelectorAll('[data-plan-code]').forEach((button) => {
+      button.addEventListener('click', () => createBillingCheckout(button.dataset.planCode));
+    });
+  }
+
+  if (els.planHistory) {
+    els.planHistory.innerHTML = billingHistory.length ? `
+      <div class="plan-history-table">
+        ${billingHistory.map((event) => billingHistoryRow(event)).join('')}
+      </div>
+    ` : '<p class="empty-state">Nenhum evento de cobrança registrado.</p>';
+  }
+}
+
+async function createBillingCheckout(forcedPlanCode = '') {
+  const planCode = forcedPlanCode || document.querySelector('#billingPlanSelect')?.value || state.plan?.plan?.code;
+  if (!planCode) {
+    toast('Plano não encontrado para cobrança.');
+    return;
+  }
+  try {
+    const result = await request('/api/admin/billing/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_code: planCode })
+    });
+    state.plan.pending_subscription = result.subscription || state.plan.pending_subscription;
+    renderPlan();
+    if (result.checkout_url) {
+      window.open(result.checkout_url, '_blank', 'noopener');
+      toast('Cobrança aberta em uma nova aba.');
+    } else {
+      toast('Cobrança criada. Configure o provedor para receber o link.');
+    }
+  } catch (error) {
+    toast(error.message || 'Não foi possível criar a cobrança.');
+  }
+}
+
+function planStatusClass(status) {
+  return ({
+    active: 'ok',
+    trial: 'warn',
+    payment_pending: 'warn',
+    past_due: 'danger',
+    suspended: 'danger',
+    cancelled: 'muted',
+    expired: 'muted'
+  })[status] || 'muted';
+}
+
+function dateLabel(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('pt-BR');
+}
+
+function dateTimeLabel(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function renewalMessage(subscription = {}) {
+  if (subscription.status === 'trial') return 'Periodo de teste ativo. A data acima mostra o fim do teste.';
+  if (subscription.status === 'payment_pending') return 'Existe pagamento pendente para regularizar a assinatura.';
+  if (subscription.status === 'active') return 'Assinatura ativa e liberada para operacao.';
+  return 'Acompanhe aqui a data comercial mais relevante da assinatura.';
+}
+
+function featureLimit(features, code) {
+  const entry = features.find((item) => item.feature?.code === code);
+  const limit = Number(entry?.limit_value || 0);
+  return Number.isFinite(limit) && limit > 0 ? limit : null;
+}
+
+function usageBar(label, value, limit) {
+  const current = Number(value || 0);
+  const hasLimit = Number(limit || 0) > 0;
+  const percent = hasLimit ? Math.min(100, Math.round((current / Number(limit)) * 100)) : 0;
+  const tone = !hasLimit || percent < 70 ? 'ok' : percent < 90 ? 'warn' : 'danger';
+  return `
+    <article class="plan-usage-row">
+      <div>
+        <strong>${escapeHtml(label)}</strong>
+        <span>${current} ${hasLimit ? `/ ${Number(limit)}` : '/ ilimitado'}</span>
+      </div>
+      <div class="plan-progress" aria-label="${escapeAttribute(label)}">
+        <span class="${tone}" style="width:${hasLimit ? percent : 100}%"></span>
+      </div>
+    </article>
+  `;
+}
+
+function featureStatusLabel(entry) {
+  if (entry.is_enabled === false) return 'Bloqueado';
+  return entry.limit_value ? `Até ${Number(entry.limit_value)}` : 'Incluso';
+}
+
+function comparePlanCard(plan, currentCode) {
+  const isCurrent = plan.code === currentCode;
+  const features = Array.isArray(plan.features) ? plan.features.slice(0, 5) : [];
+  return `
+    <article class="plan-compare-card ${isCurrent ? 'current' : ''}">
+      <div>
+        <span class="plan-status ${isCurrent ? 'ok' : 'muted'}">${isCurrent ? 'Plano atual' : 'Disponível'}</span>
+        <h3>${escapeHtml(plan.name || 'Plano')}</h3>
+        <p>${escapeHtml(plan.description || '')}</p>
+      </div>
+      <strong>${money(plan.monthly_price || 0)} / mês</strong>
+      <ul>
+        ${features.map((entry) => `<li>${escapeHtml(entry.name || entry.code || 'Recurso')}${entry.limit_value ? ` · até ${Number(entry.limit_value)}` : ''}</li>`).join('')}
+      </ul>
+      ${isCurrent
+        ? '<button class="ghost-button compact" type="button" disabled>Plano atual</button>'
+        : `<button class="primary-button compact" type="button" data-plan-code="${escapeAttribute(plan.code)}">Mudar para este plano</button>`}
+    </article>
+  `;
+}
+
+function billingHistoryRow(event) {
+  const payload = event.payload || {};
+  const planCode = payload.plan_code || payload.planCode || payload.plan || '-';
+  const receipt = payload.checkout_url || payload.receipt_url || payload.url || '';
+  return `
+    <article class="plan-history-row">
+      <span>${dateTimeLabel(event.created_at)}</span>
+      <strong>${escapeHtml(planCode)}</strong>
+      <span>${escapeHtml(billingEventLabel(event.event_type || event.type || 'Evento'))}</span>
+      <span>${escapeHtml(event.provider || '-')}</span>
+      ${receipt ? `<a href="${escapeAttribute(receipt)}" target="_blank" rel="noopener">Abrir</a>` : '<span>-</span>'}
+    </article>
+  `;
+}
+
+function billingEventLabel(value) {
+  const label = String(value || '').replace(/^billing\./, '');
+  return ({
+    active: 'Pago',
+    checkout_created: 'Cobrança criada',
+    payment_pending: 'Pendente',
+    past_due: 'Atrasado',
+    cancelled: 'Cancelado',
+    suspended: 'Suspenso'
+  })[label] || label;
+}
+
+function planAlerts({ subscription = {}, pendingSubscription = {}, usage = {}, features = [] }) {
+  const alerts = [];
+  if (subscription.status === 'trial' && subscription.trial_ends_at) {
+    const days = Math.ceil((new Date(subscription.trial_ends_at).getTime() - Date.now()) / 86400000);
+    if (days >= 0 && days <= 7) alerts.push(`Seu teste termina em ${days || 1} dia(s).`);
+  }
+  if (pendingSubscription.id) alerts.push('Existe uma cobrança pendente. Regularize para evitar bloqueio.');
+  [
+    ['Produtos', usage.products, featureLimit(features, 'digital_menu')],
+    ['Pedidos no mês', usage.orders_month ?? usage.orders, featureLimit(features, 'orders')],
+    ['Usuários', usage.users, featureLimit(features, 'admin_users')],
+    ['Mesas', usage.tables, featureLimit(features, 'tables')]
+  ].forEach(([label, value, limit]) => {
+    if (!limit) return;
+    const percent = (Number(value || 0) / Number(limit)) * 100;
+    if (percent >= 90) alerts.push(`${label} chegou a ${Math.round(percent)}% do limite do plano.`);
+  });
+  return alerts.length ? alerts.map((alert) => `<div class="plan-alert">${escapeHtml(alert)}</div>`).join('') : '';
+}
+
+function usageMetric(label, value) {
+  return `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></article>`;
+}
+
+function commercialStatusLabel(status) {
+  return ({
+    trial: 'Teste',
+    active: 'Ativo',
+    payment_pending: 'Pagamento pendente',
+    past_due: 'Pendente',
+    grace_period: 'Prazo de regularização',
+    suspended: 'Suspenso',
+    cancelled: 'Cancelado',
+    expired: 'Expirado',
+    archived: 'Arquivado',
+    indefinido: 'Indefinido'
+  })[status] || status;
 }
 
 async function submitAdminUserUpdate(event) {
@@ -3070,28 +3682,45 @@ async function submitAdminUserUpdate(event) {
   toast('Conta atualizada.');
 }
 
+async function deleteAdminUser(event) {
+  const button = event.currentTarget;
+  const userId = button.dataset.adminUserId;
+  const userName = button.dataset.adminUserName || 'esta conta';
+  if (!userId) return;
+  if (!confirm(`Excluir ${userName}? Essa pessoa perdera o acesso ao painel.`)) return;
+  button.disabled = true;
+  try {
+    await request(`/api/admin/users/${userId}`, { method: 'DELETE' });
+    state.adminUsers = state.adminUsers.filter((admin) => admin.id !== userId);
+    renderAdminUsers();
+    toast('Conta excluida.');
+  } catch (error) {
+    toast(error.message || 'Nao foi possivel excluir a conta.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function adminRoleOptions(selectedRole) {
-  return [
-    ['admin', 'Administrador'],
-    ['waiter', 'Garçom'],
-    ['kitchen', 'Cozinha']
-  ].map(([value, label]) => `<option value="${value}" ${value === selectedRole ? 'selected' : ''}>${label}</option>`).join('');
+  const options = [
+    ['admin', roleDefinition('admin').label],
+    ['waiter', roleDefinition('waiter').label],
+    ['attendant', roleDefinition('attendant').label],
+    ['delivery', roleDefinition('delivery').label],
+    ['kitchen', roleDefinition('kitchen').label]
+  ];
+  if (state.admin?.role === 'superadmin' || selectedRole === 'superadmin') {
+    options.unshift(['superadmin', roleDefinition('superadmin').label]);
+  }
+  return options.map(([value, label]) => `<option value="${value}" ${value === selectedRole ? 'selected' : ''}>${label}</option>`).join('');
 }
 
 function adminRoleLabel(role) {
-  return ({
-    admin: 'Administrador',
-    waiter: 'Garçom',
-    kitchen: 'Cozinha'
-  })[role] || 'Administrador';
+  return roleDefinition(role).label;
 }
 
 function adminPermissionSummary(role) {
-  return ({
-    admin: 'Acesso completo ao painel.',
-    waiter: 'Pedidos, mesas e comandas.',
-    kitchen: 'Pedidos e produção da cozinha.'
-  })[role] || 'Acesso completo ao painel.';
+  return roleDefinition(role).description;
 }
 
 function renderCategoryEditors() {
@@ -4043,13 +4672,18 @@ async function submitStore(event) {
   }
   await withSaving(els.storeForm, async () => {
     const logoFile = els.storeForm.elements.logo_file?.files?.[0];
+    const faviconFile = els.storeForm.elements.favicon_file?.files?.[0];
     const coverFile = els.storeForm.elements.cover_file?.files?.[0];
     if (logoFile) {
-      const uploaded = await uploadImage(logoFile);
+      const uploaded = await uploadImage(logoFile, 'logo');
       payload.logo_url = uploaded.url;
     }
+    if (faviconFile) {
+      const uploaded = await uploadImage(faviconFile, 'favicon');
+      payload.favicon_url = uploaded.url;
+    }
     if (coverFile) {
-      const uploaded = await uploadImage(coverFile);
+      const uploaded = await uploadImage(coverFile, 'cover');
       payload.cover_url = uploaded.url;
     }
     const result = await request('/api/admin/store', {
@@ -4059,17 +4693,81 @@ async function submitStore(event) {
     });
     const updatedStore = Array.isArray(result) ? result[0] : result?.[0] || result?.store || result;
     if (updatedStore?.id) {
-      state.store = updatedStore;
+      state.store = {
+        ...updatedStore,
+        slug: payload.slug,
+        public_url: `/${payload.slug}`
+      };
     } else {
-      state.store = { ...(state.store || {}), ...payload };
+      state.store = { ...(state.store || {}), ...payload, public_url: `/${payload.slug}` };
     }
     state.storeFormDirty = false;
     saveAdminCache();
     renderOperation();
+    applyFavicon(state.store?.favicon_url);
     fillStoreForm();
+    renderStorePathPreview();
     if (els.storeForm.elements.logo_file) els.storeForm.elements.logo_file.value = '';
+    if (els.storeForm.elements.favicon_file) els.storeForm.elements.favicon_file.value = '';
     if (els.storeForm.elements.cover_file) els.storeForm.elements.cover_file.value = '';
     toast(`Loja atualizada. WhatsApp salvo: ${payload.whatsapp_number}`);
+  });
+}
+
+async function addCustomDomain() {
+  const domain = els.customDomainInput?.value || '';
+  if (!domain.trim()) {
+    toast('Informe o dominio.');
+    return;
+  }
+  const result = await request('/api/admin/domains', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain })
+  });
+  state.storeDomains = [result.domain, ...state.storeDomains.filter((item) => item.id !== result.domain.id)];
+  if (els.customDomainInput) els.customDomainInput.value = '';
+  renderCustomDomains();
+  toast('Dominio cadastrado.');
+}
+
+async function verifyCustomDomain(id) {
+  const result = await request(`/api/admin/domains/${id}/verify`, { method: 'POST' });
+  state.storeDomains = state.storeDomains.map((item) => item.id === result.domain.id ? result.domain : item);
+  renderCustomDomains();
+  toast('Dominio verificado.');
+}
+
+async function deleteCustomDomain(id) {
+  await request(`/api/admin/domains/${id}`, { method: 'DELETE' });
+  state.storeDomains = state.storeDomains.filter((item) => item.id !== id);
+  renderCustomDomains();
+  toast('Dominio removido.');
+}
+
+function renderCustomDomains() {
+  if (!els.customDomainList) return;
+  if (!state.storeDomains.length) {
+    els.customDomainList.innerHTML = '<p class="empty-state">Nenhum dominio cadastrado.</p>';
+    return;
+  }
+  els.customDomainList.innerHTML = state.storeDomains.map((domain) => `
+    <article class="domain-row">
+      <div>
+        <strong>${escapeHtml(domain.domain)}</strong>
+        <small>Status: ${escapeHtml(domain.status)} - Token DNS: ${escapeHtml(domain.verification_token || '')}</small>
+      </div>
+      <div class="row-actions">
+        <button class="ghost-button compact" data-domain-verify="${escapeAttribute(domain.id)}" type="button">Verificar</button>
+        <button class="ghost-button compact danger" data-domain-delete="${escapeAttribute(domain.id)}" type="button">Remover</button>
+      </div>
+    </article>
+  `).join('');
+  els.customDomainList.querySelectorAll('[data-domain-verify]').forEach((button) => {
+    button.addEventListener('click', () => verifyCustomDomain(button.dataset.domainVerify));
+  });
+  els.customDomainList.querySelectorAll('[data-domain-delete]').forEach((button) => {
+    button.addEventListener('click', () => deleteCustomDomain(button.dataset.domainDelete));
   });
 }
 
@@ -4409,7 +5107,7 @@ async function deleteModifier(modifierId) {
   await loadMenuData({ force: true });
 }
 
-async function uploadImage(file) {
+async function uploadImage(file, usage = 'product') {
   const dataBase64 = await fileToBase64(file);
   return request('/api/admin/uploads', {
     method: 'POST',
@@ -4417,7 +5115,8 @@ async function uploadImage(file) {
     body: JSON.stringify({
       fileName: file.name,
       contentType: file.type,
-      dataBase64
+      dataBase64,
+      usage
     })
   });
 }
@@ -4472,15 +5171,16 @@ function activateAdminTab(tab) {
     return;
   }
   const titles = {
-    operation: 'Operação',
+    operation: 'Operacao',
     orders: 'Pedidos',
-    menu: 'Cardápio',
-    reports: 'Relatórios',
+    menu: 'Cardapio',
+    reports: 'Relatorios',
     tables: 'Mesas e comandas',
-    promotions: 'Promoções',
+    promotions: 'Promocoes',
     customers: 'Clientes',
     store: 'Loja',
-    integrations: 'Integrações',
+    integrations: 'Integracoes',
+    plan: 'Meu plano',
     account: 'Conta'
   };
   state.activeAdminTab = tab;
@@ -4508,7 +5208,7 @@ function renderPermissionedNavigation() {
 }
 
 function firstAllowedAdminTab() {
-  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'account']
+  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account']
     .find((tab) => canAccessTab(tab)) || 'account';
 }
 
@@ -4523,7 +5223,8 @@ function canAccessTab(tab) {
     promotions: 'promotions',
     customers: 'customers',
     store: 'store',
-    integrations: 'store'
+    integrations: 'store',
+    plan: 'plan'
   })[tab];
   return !permission || hasPermission(permission);
 }
@@ -4569,6 +5270,8 @@ function fillStoreForm() {
   setValue(els.storeForm.elements.description, store.description);
   setValue(els.storeForm.elements.whatsapp_number, store.whatsapp_number);
   setValue(els.storeForm.elements.address, store.address);
+  setValue(els.storeForm.elements.page_title, store.page_title);
+  setValue(els.storeForm.elements.favicon_url, store.favicon_url);
   setValue(els.storeForm.elements.logo_url, store.logo_url);
   setValue(els.storeForm.elements.cover_url, store.cover_url);
   setValue(els.storeForm.elements.delivery_fee, store.delivery_fee);
@@ -4584,7 +5287,38 @@ function fillStoreForm() {
   fillBusinessHours(store.business_hours || {});
   fillThemeSettings(store.theme_settings || {});
   fillPrintSettingsForm();
+  renderStorePathPreview();
   renderThemePreview();
+}
+
+function renderStorePathPreview() {
+  if (!els.storePathPreview || !els.storeForm) return;
+  const inputSlug = els.storeForm.elements.slug?.value || state.store?.slug || '';
+  const slug = publicSlug(inputSlug || state.store?.slug || state.store?.public_url || '');
+  const url = storePublicUrl(slug);
+  const link = els.storePathPreview.querySelector('a');
+  if (!link) return;
+  link.href = url;
+  link.textContent = url.replace(/^https?:\/\//, '');
+}
+
+function storePublicUrl(slug) {
+  const clean = publicSlug(slug);
+  return clean ? `${window.location.origin}/${clean}` : `${window.location.origin}/cardapio`;
+}
+
+function publicSlug(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .replace(/^\/+/, '')
+    .split('/')[0]
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
 }
 
 function fillAccountForm() {
@@ -4785,10 +5519,12 @@ function formToStore(form) {
   ].map((item) => item.trim()).filter(Boolean);
   return {
     name: data.get('name'),
-    slug: data.get('slug'),
+    slug: publicSlug(data.get('slug') || data.get('name')),
     description: data.get('description'),
     whatsapp_number: data.get('whatsapp_number'),
     address: data.get('address'),
+    page_title: data.get('page_title'),
+    favicon_url: data.get('favicon_url'),
     logo_url: data.get('logo_url'),
     cover_url: data.get('cover_url'),
     delivery_fee: data.get('delivery_fee'),
@@ -4947,8 +5683,28 @@ function formatDateLabel(value) {
 
 function saveAdminCache() {
   try {
+    const admin = state.admin ? {
+      id: state.admin.id,
+      name: state.admin.name,
+      email: state.admin.email,
+      role: state.admin.role,
+      role_label: state.admin.role_label,
+      permissions: state.admin.permissions,
+      company_id: state.admin.company_id,
+      store_id: state.admin.store_id,
+      active_store: state.admin.active_store || null,
+      stores: Array.isArray(state.admin.stores) ? state.admin.stores.map((store) => ({
+        id: store.id,
+        company_id: store.company_id || null,
+        name: store.name,
+        slug: store.slug,
+        public_url: store.public_url,
+        is_active: store.is_active !== false
+      })) : []
+    } : null;
     localStorage.setItem(ADMIN_CACHE_KEY, JSON.stringify({
-      admin: state.admin,
+      version: 2,
+      admin,
       store: state.store ? {
         id: state.store.id,
         name: state.store.name,
@@ -4965,6 +5721,7 @@ function saveAdminCache() {
 function loadAdminCache() {
   try {
     const cached = JSON.parse(localStorage.getItem(ADMIN_CACHE_KEY) || 'null');
+    if (cached?.version !== 2) return null;
     if (cached?.store?.integration_settings) {
       delete cached.store.integration_settings;
       localStorage.setItem(ADMIN_CACHE_KEY, JSON.stringify(cached));
@@ -4977,6 +5734,7 @@ function loadAdminCache() {
 
 function clearAdminCache() {
   localStorage.removeItem(ADMIN_CACHE_KEY);
+  localStorage.removeItem('admin_profile_cache_v1');
 }
 
 function fileToBase64(file) {
@@ -4990,6 +5748,30 @@ function fileToBase64(file) {
 
 function setValue(field, value) {
   if (field) field.value = value ?? '';
+}
+
+function applyFavicon(url) {
+  const safeUrl = safeImageUrl(url);
+  if (!safeUrl) return;
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = safeUrl;
+}
+
+function safeImageUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(text)) return text;
+  try {
+    const url = new URL(text, window.location.origin);
+    return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : '';
+  } catch {
+    return '';
+  }
 }
 
 function clampNumber(value, min, max, fallback) {
