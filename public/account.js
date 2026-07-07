@@ -145,7 +145,8 @@ async function register(event) {
     body: JSON.stringify({
       customer: customerFromForm(form),
       password: form.get('password'),
-      address: addressFromForm(form)
+      address: addressFromForm(form),
+      accept_terms: form.get('accept_terms') === 'on'
     })
   });
   state.customer = result.customer;
@@ -875,6 +876,3 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
-
-
-

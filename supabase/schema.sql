@@ -377,7 +377,7 @@ create table if not exists public.dining_tables (
   id uuid primary key default gen_random_uuid(),
   store_id uuid references public.stores(id) on delete cascade,
   name text not null,
-  code text not null unique,
+  code text not null,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -819,6 +819,10 @@ create index if not exists order_payment_events_store_order_idx
 
 create index if not exists dining_tables_store_active_idx
   on public.dining_tables (store_id, is_active, name);
+
+drop index if exists public.dining_tables_code_key;
+create unique index if not exists dining_tables_store_code_idx
+  on public.dining_tables (store_id, code);
 
 create index if not exists customer_tabs_store_status_idx
   on public.customer_tabs (store_id, status, opened_at desc);

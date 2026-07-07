@@ -2263,7 +2263,7 @@ function sanitizePortalSignup(data = {}) {
   if (!ownerName) throw httpError(422, 'Informe seu nome completo.');
   if (!ownerEmail) throw httpError(422, 'Informe um e-mail válido.');
   if (ownerPhone.length < 10) throw httpError(422, 'Informe um WhatsApp válido.');
-  if (data.accept_terms !== true && data.acceptTerms !== true) throw httpError(422, 'Aceite os Termos de Uso para continuar.');
+  if (data.accept_terms !== true && data.acceptTerms !== true) throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Politica de Privacidade para continuar.');
 
   const displayName = cleanText(business.display_name || business.displayName || business.name || '');
   const companyName = cleanText(business.company_name || business.companyName || business.name || displayName);
@@ -2311,7 +2311,8 @@ async function createPortalStoreSettings(storeId, parsed) {
     payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
     business_hours: defaultBusinessHours(),
     theme_settings: defaultThemeSettings(),
-    onboarding_completed: true
+    onboarding_completed: false,
+    is_open: false
   }, ['Prefer: return=minimal']);
 }
 
@@ -3649,11 +3650,12 @@ async function companyIdForStore(storeId) {
 }
 
 async function recordUsageEvent(data) {
-  if (!cleanUuid(data.company_id)) return;
+  const companyId = data.company_id ? cleanUuid(data.company_id) : null;
+  if (!companyId) return;
   await dbRequest('POST', 'usage_events', {}, {
-    company_id: data.company_id,
-    store_id: cleanUuid(data.store_id) || null,
-    feature_id: cleanUuid(data.feature_id) || null,
+    company_id: companyId,
+    store_id: data.store_id ? cleanUuid(data.store_id) : null,
+    feature_id: data.feature_id ? cleanUuid(data.feature_id) : null,
     usage_key: cleanText(data.usage_key || ''),
     quantity: Math.max(1, Number(data.quantity || 1)),
     entity_type: cleanText(data.entity_type || '') || null,
@@ -3691,6 +3693,9 @@ function isPlatformAdmin(admin) {
 async function registerCustomer(data, storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId) || (await getDefaultStore())?.id || null;
+  if (data.accept_terms !== true && data.acceptTerms !== true) {
+    throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Politica de Privacidade para continuar.');
+  }
   const customer = sanitizeCustomer(data.customer || data);
   const password = validatePassword(data.password);
   const address = data.address && data.address.street ? sanitizeAddress(data.address) : null;
@@ -4101,14 +4106,8 @@ async function getStoreBySlug(slug) {
 
 async function getDefaultStore() {
   const bySlug = await getStoreBySlug(DEFAULT_STORE_SLUG);
-  if (bySlug) return bySlug;
-  const rows = await dbRequest('GET', 'stores', {
-    select: '*',
-    is_active: 'eq.true',
-    order: 'created_at.asc',
-    limit: '1'
-  });
-  return rows[0] || await ensureDefaultStoreStructure();
+  if (bySlug) return ensureDefaultStoreContent(bySlug);
+  return ensureDefaultStoreStructure();
 }
 
 async function ensureDefaultStoreStructure() {
@@ -4150,6 +4149,131 @@ async function ensureDefaultStoreStructure() {
     onboarding_completed: false,
     is_open: false
   }, ['Prefer: return=minimal']).catch(() => {});
+  return ensureDefaultStoreContent(store);
+}
+
+async function ensureDefaultStoreContent(store) {
+  if (!store?.id) return store || null;
+  const settings = await dbRequest('GET', 'store_settings', {
+    select: 'id',
+    store_id: `eq.${store.id}`,
+    limit: '1'
+  }).catch(() => []);
+  if (!settings.length) {
+    await dbRequest('POST', 'store_settings', {}, {
+      store_id: store.id,
+      name: store.name || 'LSK Burguer',
+      slug: store.slug || DEFAULT_STORE_SLUG,
+      description: store.description || 'Cardapio digital de demonstracao.',
+      is_open: true,
+      accepts_delivery: true,
+      accepts_pickup: true,
+      delivery_fee: 5,
+      minimum_order: 20,
+      payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
+      business_hours: defaultBusinessHours(),
+      theme_settings: defaultThemeSettings(),
+      print_settings: defaultPrintSettings(),
+      integration_settings: defaultIntegrationSettings(),
+      onboarding_completed: true
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+
+  const existingItems = await dbRequest('GET', 'menu_items', {
+    select: 'id',
+    store_id: `eq.${store.id}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existingItems.length) return store;
+
+  const demoCategories = [
+    { name: 'Hamburgueres', description: 'Burgers artesanais com pao macio, queijo e molhos da casa.', sort_order: 10 },
+    { name: 'Porcoes', description: 'Entradas e acompanhamentos para compartilhar.', sort_order: 20 },
+    { name: 'Bebidas', description: 'Opcoes geladas para acompanhar o pedido.', sort_order: 30 }
+  ];
+  const categoriesByName = new Map();
+  for (const category of demoCategories) {
+    const [existingCategory] = await dbRequest('GET', 'menu_categories', {
+      select: '*',
+      store_id: `eq.${store.id}`,
+      name: `eq.${category.name}`,
+      limit: '1'
+    }).catch(() => []);
+    const [created] = existingCategory ? [existingCategory] : await dbRequest('POST', 'menu_categories', {}, {
+      store_id: store.id,
+      name: category.name,
+      description: category.description,
+      sort_order: category.sort_order,
+      is_active: true
+    }, ['Prefer: return=representation']).catch(async () => dbRequest('GET', 'menu_categories', {
+      select: '*',
+      store_id: `eq.${store.id}`,
+      name: `eq.${category.name}`,
+      limit: '1'
+    }).catch(() => []));
+    if (created?.id) categoriesByName.set(category.name, created);
+  }
+
+  const demoItems = [
+    {
+      category: 'Hamburgueres',
+      name: 'Luske Smash',
+      description: 'Dois smash burgers, cheddar cremoso, cebola caramelizada e molho da casa.',
+      price: 34.9,
+      image_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+      tags: ['smash', 'cheddar'],
+      is_featured: true,
+      sort_order: 10
+    },
+    {
+      category: 'Hamburgueres',
+      name: 'Bacon Supreme',
+      description: 'Burger artesanal, bacon crocante, queijo prato, alface, tomate e maionese temperada.',
+      price: 39.9,
+      image_url: 'https://images.unsplash.com/photo-1553979459-d2229ba7433b?auto=format&fit=crop&w=900&q=80',
+      tags: ['bacon', 'artesanal'],
+      is_featured: true,
+      sort_order: 20
+    },
+    {
+      category: 'Porcoes',
+      name: 'Batata da Casa',
+      description: 'Batata crocante com cheddar, bacon e molho especial.',
+      price: 24.9,
+      image_url: 'https://images.unsplash.com/photo-1630384060421-cb20d0e0649d?auto=format&fit=crop&w=900&q=80',
+      tags: ['porcao'],
+      is_featured: false,
+      sort_order: 10
+    },
+    {
+      category: 'Bebidas',
+      name: 'Refrigerante Lata',
+      description: 'Escolha o sabor nas observacoes do pedido.',
+      price: 7.9,
+      image_url: '',
+      tags: ['bebida'],
+      is_featured: false,
+      sort_order: 10
+    }
+  ];
+  for (const item of demoItems) {
+    const category = categoriesByName.get(item.category);
+    if (!category?.id) continue;
+    await dbRequest('POST', 'menu_items', {}, {
+      store_id: store.id,
+      category_id: category.id,
+      name: item.name,
+      description: item.description,
+      price: item.price,
+      image_url: item.image_url || null,
+      tags: item.tags,
+      is_featured: item.is_featured,
+      is_available: true,
+      sort_order: item.sort_order
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  clearMenuCache();
+  clearStoreSettingsCache();
   return store;
 }
 
@@ -6296,12 +6420,45 @@ async function resolveDiningTable(code, storeId, options = {}) {
 
 async function createDiningTable(data, storeId, options = {}) {
   const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) throw httpError(422, 'Loja ativa nao encontrada.');
   const payload = sanitizeDiningTable(data, true);
-  const [table] = await db('POST', 'dining_tables', {}, {
+  const basePayload = {
     ...payload,
-    store_id: cleanUuid(storeId) || null
-  }, ['Prefer: return=representation']);
-  return table;
+    store_id: resolvedStoreId
+  };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = payload.code || await nextDiningTableCode(resolvedStoreId, options);
+    try {
+      const [table] = await db('POST', 'dining_tables', {}, {
+        ...basePayload,
+        code
+      }, ['Prefer: return=representation']);
+      return table;
+    } catch (error) {
+      if (!isUniqueViolation(error) || payload.code || attempt === 4) {
+        throw httpError(409, 'Ja existe uma mesa com este codigo nesta loja.', error.detail || error);
+      }
+    }
+  }
+  throw httpError(409, 'Nao foi possivel gerar um codigo unico para a mesa. Tente novamente.');
+}
+
+async function nextDiningTableCode(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const rows = await db('GET', 'dining_tables', {
+    select: 'code',
+    store_id: `eq.${resolvedStoreId}`,
+    order: 'created_at.desc',
+    limit: '10000'
+  });
+  const highest = rows.reduce((max, table) => {
+    const match = String(table.code || '').match(/^mesa-(\d+)$/);
+    return match ? Math.max(max, Number.parseInt(match[1], 10) || 0) : max;
+  }, 0);
+  return `mesa-${highest + 1}`;
 }
 
 async function updateDiningTable(id, data, storeId, options = {}) {
@@ -7387,8 +7544,6 @@ function sanitizeDiningTable(data, creating) {
     is_active: 'boolean'
   }, creating ? ['name'] : []);
   if ('code' in table) table.code = cleanSlug(table.code || table.name);
-  if (!table.code && table.name) table.code = cleanSlug(table.name);
-  if (creating && !table.code) throw httpError(422, 'Informe o código da mesa.');
   return table;
 }
 
@@ -7915,6 +8070,14 @@ function httpError(status, message, detail) {
   return error;
 }
 
+function isUniqueViolation(error) {
+  const detail = error?.detail || {};
+  return error?.code === '23505'
+    || detail?.code === '23505'
+    || /unique|duplicate key/i.test(String(error?.message || ''))
+    || /unique|duplicate key/i.test(String(detail?.message || detail?.detail || ''));
+}
+
 function localDbErrorMessage(data) {
   if (typeof data === 'string' && data.trim()) return data.trim().slice(0, 500);
   if (isPlainObject(data)) {
@@ -7956,7 +8119,7 @@ function cleanText(value) {
 
 function cleanUuid(value, field = 'id') {
   const text = cleanText(value).toLowerCase();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(text)) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(text)) {
     throw httpError(422, `${fieldLabel(field)} inválido.`);
   }
   return text;

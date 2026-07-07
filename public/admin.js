@@ -4567,15 +4567,18 @@ async function submitItem(event) {
       return;
     }
 
-    const created = await request('/api/items', {
+    await request('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     await loadMenuData({ force: true });
-    const item = Array.isArray(created) ? created[0] : created?.[0];
+    state.editingProductId = null;
+    state.selectedOptionsProductId = null;
+    els.itemForm.reset();
+    els.itemForm.dataset.itemId = '';
+    if (els.productDialog.open) els.productDialog.close();
     toast('Produto criado.');
-    if (item?.id) openEditProductDialog(findProduct(item.id) || item);
   });
 }
 
@@ -4583,21 +4586,15 @@ async function submitTable(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.tableForm));
   data.is_active = els.tableForm.elements.is_active.checked;
-  const result = await request('/api/admin/tables', {
+  await request('/api/admin/tables', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  const table = result.table || result?.[0] || null;
-  if (table?.id && !state.diningTables.some((entry) => entry.id === table.id)) {
-    state.diningTables = [{ ...table, open_tabs: [], open_tab: null }, ...state.diningTables];
-    state.loadedAdminTabs.add('tables');
-    renderTables();
-  }
   els.tableForm.reset();
   els.tableForm.elements.is_active.checked = true;
+  await loadTablesData({ force: true });
   toast('Mesa cadastrada.');
-  loadTablesData({ force: true }).catch(() => {});
 }
 
 async function submitTab(event) {
