@@ -1421,8 +1421,14 @@ async function loginAdmin(data) {
   });
 
   const admin = rows[0];
-  if (!admin || admin.is_active === false || !verifyPassword(password, admin.password_hash)) {
-    throw httpError(401, 'E-mail ou senha inválidos.');
+  if (!admin) {
+    throw httpError(404, 'N?o existe uma conta administrativa com este e-mail.');
+  }
+  if (admin.is_active === false) {
+    throw httpError(403, 'Esta conta administrativa est? desativada.');
+  }
+  if (!verifyPassword(password, admin.password_hash)) {
+    throw httpError(401, 'Senha incorreta.');
   }
 
   await dbRequest('PATCH', 'admin_users', { id: `eq.${admin.id}` }, {
@@ -7424,9 +7430,10 @@ async function serveUpload(res, requestPath) {
 }
 
 function routePath(requestPath) {
-  if (requestPath === '/') return '/marketing.html';
+  if (requestPath === '/') return '/home.html';
   if (requestPath === '/cardapio') return '/app.html';
-  if (['/recursos', '/planos', '/demonstracao'].includes(requestPath)) return '/marketing.html';
+  if (requestPath === '/planos') return '/plans.html';
+  if (['/recursos', '/demonstracao'].includes(requestPath)) return '/home.html';
   if (requestPath === '/termos') return '/terms.html';
   if (requestPath === '/privacidade') return '/privacy.html';
   if (requestPath === '/entrar') return '/login.html';
@@ -7458,7 +7465,7 @@ async function sendFile(res, filePath) {
     ...(ext === '.html' ? { 'Clear-Site-Data': '"cache"' } : {})
   };
   res.writeHead(200, {
-    ...securityHeaders(),
+    ...securityHeaders({ allowSameOriginFrame: ext === '.html' }),
     ...cacheHeaders,
     'Content-Type': mimeTypes.get(ext) || 'application/octet-stream'
   });
@@ -8033,7 +8040,8 @@ function json(res, status, data, headers = {}) {
   res.end(JSON.stringify(data));
 }
 
-function securityHeaders() {
+function securityHeaders(options = {}) {
+  const frameAncestors = options.allowSameOriginFrame ? "frame-ancestors 'self'" : "frame-ancestors 'none'";
   return {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
@@ -8045,9 +8053,10 @@ function securityHeaders() {
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       "connect-src 'self'",
+      "frame-src 'self'",
       "base-uri 'self'",
       "form-action 'self'",
-      "frame-ancestors 'none'",
+      frameAncestors,
       "object-src 'none'"
     ].join('; ')
   };

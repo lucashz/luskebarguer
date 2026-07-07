@@ -164,6 +164,7 @@ const els = {
   storeSwitcher: document.querySelector('#storeSwitcher'),
   setupForm: document.querySelector('#setupForm'),
   loginForm: document.querySelector('#loginForm'),
+  adminLoginMessage: document.querySelector('#adminLoginMessage'),
   logoutButton: document.querySelector('#logoutButton'),
   adminHeaderLogoutButton: document.querySelector('#adminHeaderLogoutButton'),
   onboardingPanel: document.querySelector('#onboardingPanel'),
@@ -502,15 +503,32 @@ async function submitSetup(event) {
 async function submitLogin(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.loginForm));
-  const result = await request('/api/admin/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  state.admin = result.admin;
-  saveAdminCache();
-  showPanel();
-  await loadAdminData();
+  const button = els.loginForm.querySelector('button[type="submit"], button:not([type])');
+  if (els.adminLoginMessage) els.adminLoginMessage.textContent = '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Entrando...';
+  }
+  try {
+    const result = await request('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    state.admin = result.admin;
+    saveAdminCache();
+    showPanel();
+    await loadAdminData();
+  } catch (error) {
+    const message = error.message || 'Não foi possível entrar. Confira os dados e tente novamente.';
+    if (els.adminLoginMessage) els.adminLoginMessage.textContent = message;
+    toast(message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Entrar';
+    }
+  }
 }
 
 async function logout() {
@@ -774,6 +792,17 @@ function render() {
   fillAccountForm();
   renderOnboarding();
   renderSoundButton();
+}
+
+function adminStoreHomeUrl() {
+  const store = state.admin?.active_store || state.store || state.admin?.stores?.[0] || null;
+  return store?.public_url || (store?.slug ? '/' + store.slug : '/cardapio');
+}
+
+function updateAdminStoreHomeLinks() {
+  document.querySelectorAll('[data-admin-store-home]').forEach((link) => {
+    link.href = adminStoreHomeUrl();
+  });
 }
 
 function renderStoreSwitcher() {

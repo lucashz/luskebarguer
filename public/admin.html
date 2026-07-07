@@ -4,12 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin - Cardápio</title>
-    <link rel="stylesheet" href="/styles.css?v=20260630-charset-fix">
+    <link rel="stylesheet" href="/styles.css?v=20260707-terms-home">
   </head>
   <body class="admin-page">
     <main class="admin-layout auth-only" id="adminLayout">
       <aside class="admin-sidebar" id="adminSidebar" hidden>
-        <a class="brand-mark" href="/">Cardápio</a>
+        <a class="brand-mark" href="/" data-admin-store-home>Cardápio</a>
         <nav class="admin-nav" id="adminNav">
           <button class="active" data-admin-tab="operation" type="button">Operação</button>
           <button data-admin-tab="orders" type="button">Pedidos</button>
@@ -53,6 +53,7 @@
               <input name="email" required type="email" placeholder="E-mail">
               <input name="password" required type="password" placeholder="Senha">
               <button class="primary-button wide">Entrar</button>
+              <p class="form-message" id="adminLoginMessage" role="alert" aria-live="polite"></p>
             </form>
           </div>
         </section>
@@ -1113,6 +1114,5 @@
     <script src="/admin.js?v=20260630-charset-fix" type="module"></script>
   </body>
 </html>
-
 
 

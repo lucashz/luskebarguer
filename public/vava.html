@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vavazinha</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: Arial, Helvetica, sans-serif;
+      background:
+        radial-gradient(circle at top left, #ffe1ee, transparent 35%),
+        radial-gradient(circle at bottom right, #ffd1e3, transparent 35%),
+        linear-gradient(135deg, #fff5fa, #ffeaf3);
+      color: #a63f72;
+      overflow: hidden;
+    }
+
+    .card {
+      width: min(90%, 520px);
+      text-align: center;
+      padding: 38px 28px;
+      border-radius: 32px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 18px 50px rgba(185, 76, 126, 0.18);
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(255, 255, 255, 0.9);
+    }
+
+    h1 {
+      margin: 0 0 18px;
+      font-size: clamp(2.8rem, 10vw, 5rem);
+      letter-spacing: 2px;
+      text-transform: lowercase;
+      animation: flutuar 2.2s ease-in-out infinite;
+      text-shadow: 0 6px 18px rgba(255, 105, 180, 0.25);
+    }
+
+    img {
+      width: min(100%, 320px);
+      border-radius: 24px;
+      box-shadow: 0 12px 30px rgba(255, 105, 180, 0.2);
+    }
+
+    p {
+      margin: 18px 0 0;
+      font-size: 1.05rem;
+      color: #7f5570;
+    }
+
+    .hearts {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .heart {
+      position: absolute;
+      bottom: -30px;
+      animation: subir linear infinite;
+      opacity: 0.65;
+    }
+
+    .heart:nth-child(1) { left: 10%; animation-duration: 7s; font-size: 22px; }
+    .heart:nth-child(2) { left: 30%; animation-duration: 9s; font-size: 30px; }
+    .heart:nth-child(3) { left: 55%; animation-duration: 6s; font-size: 20px; }
+    .heart:nth-child(4) { left: 75%; animation-duration: 8s; font-size: 28px; }
+    .heart:nth-child(5) { left: 90%; animation-duration: 10s; font-size: 18px; }
+
+    @keyframes flutuar {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-8px) scale(1.03); }
+    }
+
+    @keyframes subir {
+      from { transform: translateY(0) rotate(0deg); }
+      to { transform: translateY(-115vh) rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="hearts" aria-hidden="true">
+    <span class="heart">💗</span>
+    <span class="heart">💖</span>
+    <span class="heart">💕</span>
+    <span class="heart">💓</span>
+    <span class="heart">💞</span>
+  </div>
+
+  <main class="card">
+    <h1>vavazinha</h1>
+    <img src="vavazinha_fofo.gif" alt="linda s2" />
+    <p>uma página bem fofinha feita com carinho ✨</p>
+  </main>
+</body>
+</html>

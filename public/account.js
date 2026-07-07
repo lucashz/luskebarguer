@@ -133,7 +133,7 @@ async function login(event) {
   const me = await request('/api/customer/me');
   state.customer = me.customer;
   saveAccountCache();
-  window.location.href = '/';
+  window.location.href = storeHomeUrl();
 }
 
 async function register(event) {
@@ -503,7 +503,25 @@ async function loadStoreTheme() {
   state.store = data.store || null;
   applyStoreTheme(data.store?.theme_settings);
   applyPageMode();
+  updateStoreHomeLinks();
   applyFavicon(data.store?.favicon_url);
+}
+
+function storeHomeUrl() {
+  const raw = state.store?.public_url || (state.store?.slug ? '/' + state.store.slug : '/');
+  try {
+    const url = new URL(raw, window.location.origin);
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return '/';
+  }
+}
+
+function updateStoreHomeLinks() {
+  const href = storeHomeUrl();
+  document.querySelectorAll('[data-store-home]').forEach((link) => {
+    link.href = href;
+  });
 }
 
 function applyStoreTheme(theme = {}) {
@@ -730,7 +748,7 @@ function repeatOrder(order) {
   localStorage.setItem('cart', JSON.stringify(cart));
   toast('Pedido colocado na sacola.');
   setTimeout(() => {
-    window.location.href = '/';
+    window.location.href = storeHomeUrl();
   }, 550);
 }
 

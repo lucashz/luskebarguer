@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Vitrine Gourmet</title>
+  <desc id="desc">Logo ficticio da loja demonstrativa Vitrine Gourmet.</desc>
+  <defs>
+    <linearGradient id="bg" x1="84" y1="64" x2="432" y2="448" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ef4444"/>
+      <stop offset="1" stop-color="#7f1d1d"/>
+    </linearGradient>
+    <linearGradient id="plate" x1="118" y1="104" x2="398" y2="408" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff1f2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <circle cx="256" cy="258" r="168" fill="url(#plate)"/>
+  <path d="M167 206h178c18 0 30 18 23 34l-61 128a42 42 0 0 1-38 24h-26a42 42 0 0 1-38-24l-61-128c-7-16 5-34 23-34z" fill="#b42318"/>
+  <path d="M177 206c14-48 45-80 79-80s65 32 79 80" fill="none" stroke="#f59e0b" stroke-width="24" stroke-linecap="round"/>
+  <path d="M207 258h98M223 310h66" fill="none" stroke="#fff7ed" stroke-width="22" stroke-linecap="round"/>
+  <path d="M154 397h204" fill="none" stroke="#f59e0b" stroke-width="24" stroke-linecap="round"/>
+</svg>

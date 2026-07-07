@@ -22,7 +22,10 @@ async function initPortal() {
   if (signupForm) initSignup();
   if (portalLoginForm) initLogin();
   if (portalRecoverForm) initRecover();
-  if (onboardingChecklist) await loadOnboarding();
+  if (onboardingChecklist) {
+    setupAdminStoreHomeLinks().catch(() => {});
+    await loadOnboarding();
+  }
   if (inviteAcceptForm) await initInviteAccept();
 }
 
@@ -199,6 +202,17 @@ async function loadOnboarding() {
     `;
     if (onboardingMessage) onboardingMessage.textContent = 'Faça login para ver seu checklist.';
   }
+}
+
+async function setupAdminStoreHomeLinks() {
+  const links = document.querySelectorAll('[data-admin-store-home]');
+  if (!links.length) return;
+  const data = await request('/api/admin/me');
+  const store = data.admin?.active_store || data.admin?.stores?.[0] || null;
+  const href = store?.public_url || (store?.slug ? '/' + store.slug : '/cardapio');
+  links.forEach((link) => {
+    link.href = href;
+  });
 }
 
 function renderOnboarding(data) {
