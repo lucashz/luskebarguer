@@ -174,7 +174,7 @@ async function submitSignup(event) {
       body: JSON.stringify(payload)
     });
     signupMessage.textContent = 'Conta criada. Abrindo onboarding...';
-    location.href = data.redirect || '/onboarding';
+    location.href = data.redirect || '/admin';
   } catch (error) {
     signupMessage.textContent = error.message || 'Não foi possível criar a conta.';
     setSignupLoading(false);

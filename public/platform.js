@@ -31,7 +31,7 @@ els.storeForm.addEventListener('submit', submitStore);
 els.auditFilterForm?.addEventListener('submit', submitAuditFilters);
 
 init().catch((error) => {
-  toast(error.message || 'Nao foi possivel carregar a plataforma.');
+  toast(error.message || 'Não foi possível carregar a plataforma.');
 });
 
 async function init() {
@@ -145,7 +145,7 @@ function renderCompanies() {
                 </div>
                 <button class="ghost-button compact" data-delete-override="${escapeAttribute(override.id)}" type="button">Remover</button>
               </article>
-            `).join('') : '<p class="empty-state">Nenhuma excecao cadastrada.</p>'}
+            `).join('') : '<p class="empty-state">Nenhuma exceção cadastrada.</p>'}
           </div>
         </div>
       </article>
@@ -262,14 +262,14 @@ async function submitOverride(event) {
     body: JSON.stringify(data)
   });
   await loadPlatform();
-  toast('Excecao adicionada.');
+  toast('Exceção adicionada.');
 }
 
 async function deleteOverride(event) {
   const id = event.currentTarget.dataset.deleteOverride;
   await request(`/api/platform/overrides/${id}`, { method: 'DELETE' });
   await loadPlatform();
-  toast('Excecao removida.');
+  toast('Exceção removida.');
 }
 
 async function logout() {
@@ -293,7 +293,7 @@ function statusOptions(selected) {
     ['trial', 'Teste'],
     ['active', 'Ativa'],
     ['payment_pending', 'Pagamento pendente'],
-    ['grace_period', 'Prazo de regularizacao'],
+    ['grace_period', 'Prazo de regularização'],
     ['past_due', 'Pendente'],
     ['suspended', 'Suspensa'],
     ['cancelled', 'Cancelada'],
@@ -306,7 +306,7 @@ function statusLabel(status) {
     trial: 'Teste',
     active: 'Ativa',
     payment_pending: 'Pagamento pendente',
-    grace_period: 'Prazo de regularizacao',
+    grace_period: 'Prazo de regularização',
     past_due: 'Pendente',
     suspended: 'Suspensa',
     cancelled: 'Cancelada',

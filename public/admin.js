@@ -38,6 +38,7 @@ const state = {
   pendingOrderStatuses: new Map(),
   onboardingStep: 0,
   onboardingCategoryId: null,
+  onboardingOverview: null,
   activeAdminTab: 'operation',
   loadedAdminTabs: new Set(),
   loadingAdminTabs: new Set()
@@ -45,6 +46,8 @@ const state = {
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
 const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
+const ONBOARDING_SKIPPED_KEY = 'admin_onboarding_skipped_v1';
+const ONBOARDING_STEP_LABELS = ['Boas-vindas', 'Loja', 'Operação', 'Pagamentos', 'Entrega', 'Categoria', 'Produto', 'Aparência', 'Treinamento', 'Publicar'];
 const THEME_DEFAULTS = {
   primaryColor: '#f97316',
   secondaryColor: '#111827',
@@ -106,8 +109,8 @@ const ADMIN_ROLE_DEFINITIONS = {
   admin: {
     label: 'Administrador',
     short: 'Tudo da loja',
-    description: 'Acesso completo ao painel da loja, equipe, cardapio, pedidos, relatorios e configuracoes.',
-    permissions: ['Operacao', 'Pedidos', 'Cardapio', 'Relatorios', 'Clientes', 'Loja', 'Equipe']
+    description: 'Acesso completo ao painel da loja, equipe, cardápio, pedidos, relatórios e configurações.',
+    permissions: ['Operação', 'Pedidos', 'Cardápio', 'Relatórios', 'Clientes', 'Loja', 'Equipe']
   },
   attendant: {
     label: 'Atendimento',
@@ -118,7 +121,7 @@ const ADMIN_ROLE_DEFINITIONS = {
   waiter: {
     label: 'Garcom',
     short: 'Salao e comandas',
-    description: 'Acesso focado em pedidos de mesa, comandas e atendimento no salao.',
+    description: 'Acesso focado em pedidos de mesa, comandas e atendimento no salão.',
     permissions: ['Pedidos', 'Mesas', 'Comandas']
   },
   kitchen: {
@@ -170,6 +173,15 @@ const els = {
   onboardingPanel: document.querySelector('#onboardingPanel'),
   onboardingStepText: document.querySelector('#onboardingStepText'),
   onboardingProgressBar: document.querySelector('#onboardingProgressBar'),
+  onboardingStepNav: document.querySelector('#onboardingStepNav'),
+  onboardingStatusMessage: document.querySelector('#onboardingStatusMessage'),
+  onboardingSkipButton: document.querySelector('#onboardingSkipButton'),
+  onboardingResumeButton: document.querySelector('#onboardingResumeButton'),
+  onboardingReminder: document.querySelector('#onboardingReminder'),
+  onboardingPublishButton: document.querySelector('#onboardingPublishButton'),
+  onboardingPublicLink: document.querySelector('#onboardingPublicLink'),
+  onboardingFinalChecklist: document.querySelector('#onboardingFinalChecklist'),
+  onboardingSlugStatus: document.querySelector('#onboardingSlugStatus'),
   onboardingBackButton: document.querySelector('#onboardingBackButton'),
   onboardingNextButton: document.querySelector('#onboardingNextButton'),
   onboardingProductCategory: document.querySelector('#onboardingProductCategory'),
@@ -320,6 +332,12 @@ els.storeSwitcher?.addEventListener('change', switchStore);
 els.refreshPlanButton?.addEventListener('click', () => loadPlanData({ force: true }));
 els.onboardingBackButton?.addEventListener('click', previousOnboardingStep);
 els.onboardingNextButton?.addEventListener('click', nextOnboardingStep);
+els.onboardingSkipButton?.addEventListener('click', skipOnboardingForNow);
+els.onboardingResumeButton?.addEventListener('click', reopenOnboarding);
+els.onboardingPublishButton?.addEventListener('click', publishOnboardingFromWizard);
+document.querySelectorAll('[data-reopen-onboarding]').forEach((button) => {
+  button.addEventListener('click', reopenOnboarding);
+});
 els.startOperationButton?.addEventListener('click', startOperation);
 els.stopOperationButton?.addEventListener('click', stopOperation);
 els.refreshAdminButton.addEventListener('click', () => loadSummary());
@@ -599,6 +617,7 @@ async function loadSummary(options = {}) {
   if ('dining_tables' in data) state.diningTables = data.dining_tables || [];
   if ('customer_tabs' in data) state.customerTabs = data.customer_tabs || [];
   if (Array.isArray(data.permissions)) state.admin.permissions = data.permissions;
+  if (data.plan_access) state.admin.plan_access = data.plan_access;
   saveAdminCache();
   detectNewOrders(previousIds, state.orders, options);
   state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
@@ -730,10 +749,12 @@ async function loadStoreData(options = {}) {
   const startedAt = performance.now();
   const [data, domains] = await Promise.all([
     request('/api/admin/store'),
-    request('/api/admin/domains').catch(() => ({ domains: [] }))
+    request('/api/admin/domains').catch(() => ({ domains: [] })),
+    loadMenuData({ force: true }).catch(() => null)
   ]);
   state.store = data.store || state.store;
   state.storeDomains = domains.domains || [];
+  await loadOnboardingOverview();
   state.loadedAdminTabs.add('store');
   state.loadedAdminTabs.add('integrations');
   logSlowClientLoad('store', startedAt);
@@ -745,6 +766,16 @@ async function loadStoreData(options = {}) {
   fillLoyaltyForm();
   renderOperation();
   renderOnboarding();
+}
+
+async function loadOnboardingOverview() {
+  if (!els.onboardingPanel) return null;
+  try {
+    state.onboardingOverview = await request('/api/admin/onboarding');
+  } catch (error) {
+    state.onboardingOverview = null;
+  }
+  return state.onboardingOverview;
 }
 
 async function loadAdminUsersData(options = {}) {
@@ -1253,7 +1284,7 @@ function printTableQr(table, options = {}) {
 function renderOperation() {
   if (!state.store) {
     els.operationTitle.textContent = 'Carregando operação';
-    els.operationText.textContent = 'Buscando o status real da loja antes de liberar qualquer acao.';
+    els.operationText.textContent = 'Buscando o status real da loja antes de liberar qualquer ação.';
     els.operationBadge.textContent = 'Carregando';
     els.operationBadge.classList.remove('closed');
     els.operationMetricOrders.textContent = '-';
@@ -1282,36 +1313,58 @@ function renderOperation() {
 
 function renderOnboarding() {
   if (!els.onboardingPanel || !state.store) return;
-  const completed = state.store.onboarding_completed === true || localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true';
-  if (state.store.onboarding_completed === true) {
-    localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
+  const completed = state.store.onboarding_completed === true || state.onboardingOverview?.progress?.is_completed === true;
+  const skipped = localStorage.getItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY)) === 'true';
+  if (completed) {
+    localStorage.setItem(onboardingStorageKey(ONBOARDING_COMPLETED_KEY), 'true');
+    localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
   }
-  els.onboardingPanel.hidden = completed;
+  els.onboardingPanel.hidden = completed || skipped;
+  if (els.onboardingReminder) els.onboardingReminder.hidden = completed || !skipped;
   if (completed) return;
   fillOnboardingDefaults();
   updateOnboardingProductCategories();
+  renderOnboardingStepNav();
+  renderOnboardingChecklist();
   showOnboardingStep(state.onboardingStep);
 }
 
 function fillOnboardingDefaults() {
   const store = state.store || {};
-  const whatsappInput = document.querySelector('[data-onboarding-step="0"] input[name="whatsapp_number"]');
-  if (whatsappInput && !whatsappInput.value) whatsappInput.value = store.whatsapp_number || '';
+  const storeForm = document.querySelector('[data-onboarding-step="1"]');
+  if (storeForm) {
+    setValue(storeForm.elements.name, store.name);
+    setValue(storeForm.elements.slug, store.slug);
+    setValue(storeForm.elements.description, store.description);
+    setValue(storeForm.elements.address, store.address);
+    setValue(storeForm.elements.whatsapp_number, store.whatsapp_number);
+  }
 
-  const hoursForm = document.querySelector('[data-onboarding-step="1"]');
+  const hoursForm = document.querySelector('[data-onboarding-step="2"]');
   const monday = store.business_hours?.monday || {};
   if (hoursForm && !hoursForm.elements.open.value) hoursForm.elements.open.value = monday.open || '18:00';
   if (hoursForm && !hoursForm.elements.close.value) hoursForm.elements.close.value = monday.close || '23:00';
+  if (hoursForm?.elements.accepts_delivery) hoursForm.elements.accepts_delivery.checked = store.accepts_delivery !== false;
+  if (hoursForm?.elements.accepts_pickup) hoursForm.elements.accepts_pickup.checked = store.accepts_pickup !== false;
 
-  document.querySelectorAll('[data-onboarding-step="2"] input[name="payment_methods"]').forEach((input) => {
+  document.querySelectorAll('[data-onboarding-step="3"] input[name="payment_methods"]').forEach((input) => {
     input.checked = (store.payment_methods || ['Pix', 'Dinheiro']).includes(input.value);
   });
 
-  const deliveryForm = document.querySelector('[data-onboarding-step="3"]');
+  const deliveryForm = document.querySelector('[data-onboarding-step="4"]');
   if (deliveryForm && !deliveryForm.elements.delivery_fee.value) deliveryForm.elements.delivery_fee.value = store.delivery_fee || 0;
   if (deliveryForm && !deliveryForm.elements.minimum_order.value) deliveryForm.elements.minimum_order.value = store.minimum_order || 0;
   if (deliveryForm && !deliveryForm.elements.delivery_neighborhood_fees.value) {
     deliveryForm.elements.delivery_neighborhood_fees.value = neighborhoodFeesToText(store.delivery_neighborhood_fees);
+  }
+
+  const appearanceForm = document.querySelector('[data-onboarding-step="7"]');
+  if (appearanceForm) {
+    setValue(appearanceForm.elements.logo_url, store.logo_url);
+    setValue(appearanceForm.elements.cover_url, store.cover_url);
+    setValue(appearanceForm.elements.theme_primaryColor, store.theme_settings?.primaryColor || THEME_PRESETS.classic.primaryColor);
+    setValue(appearanceForm.elements.theme_buttonColor, store.theme_settings?.buttonColor || THEME_PRESETS.classic.buttonColor);
+    setValue(appearanceForm.elements.theme_backgroundColor, store.theme_settings?.backgroundColor || THEME_PRESETS.classic.backgroundColor);
   }
 }
 
@@ -1327,7 +1380,77 @@ function showOnboardingStep(step) {
   if (els.onboardingStepText) els.onboardingStepText.textContent = `Passo ${current} de ${total}`;
   if (els.onboardingProgressBar) els.onboardingProgressBar.style.width = `${Math.round((current / total) * 100)}%`;
   if (els.onboardingBackButton) els.onboardingBackButton.disabled = state.onboardingStep === 0;
-  if (els.onboardingNextButton) els.onboardingNextButton.textContent = state.onboardingStep === max ? 'Finalizar configuração' : 'Salvar e continuar';
+  if (els.onboardingNextButton) {
+    els.onboardingNextButton.hidden = state.onboardingStep === max;
+    els.onboardingNextButton.textContent = 'Salvar e continuar';
+  }
+  renderOnboardingStepNav();
+  renderOnboardingChecklist();
+}
+
+function renderOnboardingStepNav() {
+  if (!els.onboardingStepNav) return;
+  const steps = [...document.querySelectorAll('[data-onboarding-step]')];
+  const completed = new Set(state.onboardingOverview?.progress?.completed_steps || []);
+  els.onboardingStepNav.innerHTML = steps.map((form, index) => {
+    const key = form.dataset.onboardingKey || String(index);
+    const done = completed.has(key) || inferredOnboardingDone(key);
+    return `<button class="${index === state.onboardingStep ? 'active' : ''} ${done ? 'done' : ''}" type="button" data-onboarding-jump="${index}"><span>${index + 1}</span>${escapeHtml(ONBOARDING_STEP_LABELS[index] || key)}</button>`;
+  }).join('');
+  els.onboardingStepNav.querySelectorAll('[data-onboarding-jump]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = Number(button.dataset.onboardingJump);
+      if (canJumpToOnboardingStep(target)) {
+        setOnboardingStatus('');
+        showOnboardingStep(target);
+        return;
+      }
+      setOnboardingStatus('Salve as etapas anteriores antes de avançar para este passo.');
+      els.onboardingNextButton?.focus();
+    });
+  });
+}
+
+function canJumpToOnboardingStep(target) {
+  if (!Number.isFinite(target) || target <= state.onboardingStep) return true;
+  const steps = [...document.querySelectorAll('[data-onboarding-step]')];
+  return steps.slice(0, target).every((form) => {
+    const key = form.dataset.onboardingKey || '';
+    return (state.onboardingOverview?.progress?.completed_steps || []).includes(key) || inferredOnboardingDone(key);
+  });
+}
+
+function renderOnboardingChecklist() {
+  if (!els.onboardingFinalChecklist) return;
+  const checks = [
+    ['Dados da loja', Boolean(state.store?.name && state.store?.slug && state.store?.whatsapp_number)],
+    ['Operação configurada', Boolean(state.store?.business_hours && Object.keys(state.store.business_hours || {}).length)],
+    ['Pagamentos definidos', Array.isArray(state.store?.payment_methods) && state.store.payment_methods.length > 0],
+    ['Entrega revisada', state.store?.delivery_fee !== undefined && state.store?.minimum_order !== undefined],
+    ['Categoria criada', state.categories.length > 0],
+    ['Produto criado', state.categories.some((category) => (category.items || []).length > 0)],
+    ['Treinamento visto', (state.onboardingOverview?.progress?.completed_steps || []).includes('training')]
+  ];
+  els.onboardingFinalChecklist.innerHTML = checks.map(([label, done]) => `
+    <article class="${done ? 'done' : ''}">
+      <span>${done ? 'OK' : 'Pendente'}</span>
+      <strong>${escapeHtml(label)}</strong>
+    </article>
+  `).join('');
+  if (els.onboardingPublicLink) els.onboardingPublicLink.href = adminStoreHomeUrl();
+}
+
+function inferredOnboardingDone(key) {
+  if (key === 'welcome') return true;
+  if (key === 'store') return Boolean(state.store?.name && state.store?.slug && state.store?.whatsapp_number);
+  if (key === 'operation') return Boolean(state.store?.business_hours && Object.keys(state.store.business_hours || {}).length);
+  if (key === 'payments') return Array.isArray(state.store?.payment_methods) && state.store.payment_methods.length > 0;
+  if (key === 'delivery') return state.store?.delivery_fee !== undefined && state.store?.minimum_order !== undefined;
+  if (key === 'category') return state.categories.length > 0;
+  if (key === 'product') return state.categories.some((category) => (category.items || []).length > 0);
+  if (key === 'appearance') return Boolean(state.store?.logo_url || state.store?.cover_url || Object.keys(state.store?.theme_settings || {}).length);
+  if (key === 'publish') return state.store?.onboarding_completed === true;
+  return false;
 }
 
 function previousOnboardingStep() {
@@ -1338,16 +1461,15 @@ async function nextOnboardingStep() {
   const form = document.querySelector(`[data-onboarding-step="${state.onboardingStep}"]`);
   if (!form?.reportValidity()) return;
   els.onboardingNextButton.disabled = true;
+  setOnboardingStatus('');
   try {
     await saveOnboardingStep(state.onboardingStep, new FormData(form));
     const total = document.querySelectorAll('[data-onboarding-step]').length;
-    if (state.onboardingStep >= total - 1) {
-      await completeOnboarding();
-      return;
-    }
+    if (state.onboardingStep >= total - 1) return;
     showOnboardingStep(state.onboardingStep + 1);
     toast('Etapa salva.');
   } catch (error) {
+    setOnboardingStatus(error.message || 'Não foi possível salvar esta etapa.');
     toast(error.message || 'Não foi possível salvar esta etapa.');
   } finally {
     els.onboardingNextButton.disabled = false;
@@ -1355,48 +1477,86 @@ async function nextOnboardingStep() {
 }
 
 async function saveOnboardingStep(step, data) {
+  const form = document.querySelector(`[data-onboarding-step="${step}"]`);
+  const key = form?.dataset.onboardingKey || String(step);
   if (step === 0) {
-    const whatsapp = digits(data.get('whatsapp_number'));
-    if (!whatsapp || whatsapp.length < 12) throw new Error('Informe o WhatsApp com DDI e DDD.');
-    await updateOnboardingStore({ whatsapp_number: whatsapp });
+    await saveOnboardingProgress(key);
+    return;
   }
   if (step === 1) {
-    await updateOnboardingStore({ business_hours: businessHoursEveryDay(data.get('open') || '18:00', data.get('close') || '23:00') });
+    const name = cleanText(data.get('name'));
+    const slug = publicSlug(data.get('slug') || name);
+    const whatsapp = digits(data.get('whatsapp_number'));
+    if (!name) throw new Error('Informe o nome da loja.');
+    if (!slug || slug.length < 3) throw new Error('Informe um link público válido.');
+    if (!whatsapp || whatsapp.length < 12) throw new Error('Informe o WhatsApp com DDI e DDD.');
+    await validateOnboardingSlug(slug);
+    await updateOnboardingStore({
+      name,
+      slug,
+      description: data.get('description'),
+      address: data.get('address'),
+      whatsapp_number: whatsapp
+    });
   }
   if (step === 2) {
+    await updateOnboardingStore({
+      accepts_delivery: data.get('accepts_delivery') === 'on',
+      accepts_pickup: data.get('accepts_pickup') === 'on',
+      business_hours: businessHoursEveryDay(data.get('open') || '18:00', data.get('close') || '23:00'),
+      is_open: false
+    });
+    await saveOnboardingProgress(key, {
+      accepts_counter: data.get('accepts_counter') === 'on',
+      accepts_tables: data.get('accepts_tables') === 'on',
+      start_closed: data.get('start_closed') === 'on'
+    });
+    return;
+  }
+  if (step === 3) {
     const paymentMethods = data.getAll('payment_methods');
     if (!paymentMethods.length) throw new Error('Escolha ao menos uma forma de pagamento.');
     await updateOnboardingStore({ payment_methods: paymentMethods });
+    await saveOnboardingProgress(key, { payment_notes: cleanText(data.get('payment_notes')) });
+    return;
   }
-  if (step === 3) {
+  if (step === 4) {
     await updateOnboardingStore({
       delivery_fee: data.get('delivery_fee'),
       minimum_order: data.get('minimum_order'),
       delivery_neighborhood_fees: parseNeighborhoodFees(data.get('delivery_neighborhood_fees'))
     });
   }
-  if (step === 4) {
-    const category = await createOnboardingCategory({
-      name: data.get('name'),
-      description: data.get('description'),
-      sort_order: nextCategorySortOrder(),
-      is_active: true
-    });
-    state.onboardingCategoryId = category?.id || state.onboardingCategoryId;
-    await loadMenuData({ force: true });
-    updateOnboardingProductCategories();
-  }
   if (step === 5) {
+    const name = cleanText(data.get('name'));
+    if (!state.categories.length || name) {
+      if (!name) throw new Error('Informe o nome da primeira categoria.');
+      const category = await createOnboardingCategory({
+        name,
+        description: data.get('description'),
+        sort_order: nextCategorySortOrder(),
+        is_active: true
+      });
+      state.onboardingCategoryId = category?.id || state.onboardingCategoryId;
+      await loadMenuData({ force: true });
+      updateOnboardingProductCategories();
+    }
+  }
+  if (step === 6) {
     const categoryId = data.get('category_id') || state.onboardingCategoryId || state.categories[0]?.id;
+    const name = cleanText(data.get('name'));
+    const price = Number.parseFloat(String(data.get('price') || '').replace(',', '.'));
     if (!categoryId) throw new Error('Crie uma categoria antes do produto.');
+    if (!name) throw new Error('Informe o nome do produto inicial.');
+    if (!Number.isFinite(price) || price <= 0) throw new Error('Informe um preço válido para o produto.');
     await request('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         category_id: categoryId,
-        name: data.get('name'),
+        name,
         description: data.get('description'),
-        price: data.get('price'),
+        price,
         is_featured: true,
         is_available: true,
         sort_order: 0,
@@ -1405,6 +1565,23 @@ async function saveOnboardingStep(step, data) {
     });
     await loadMenuData({ force: true });
   }
+  if (step === 7) {
+    await updateOnboardingStore({
+      logo_url: data.get('logo_url'),
+      cover_url: data.get('cover_url'),
+      theme_settings: {
+        ...(state.store?.theme_settings || {}),
+        primaryColor: data.get('theme_primaryColor') || THEME_PRESETS.classic.primaryColor,
+        buttonColor: data.get('theme_buttonColor') || THEME_PRESETS.classic.buttonColor,
+        backgroundColor: data.get('theme_backgroundColor') || THEME_PRESETS.classic.backgroundColor,
+        buttonTextColor: '#ffffff'
+      }
+    });
+  }
+  if (step === 8) {
+    if (data.get('training_seen') !== 'on') throw new Error('Confirme que você viu o treinamento rápido.');
+  }
+  await saveOnboardingProgress(key);
 }
 
 async function updateOnboardingStore(partial) {
@@ -1416,6 +1593,7 @@ async function updateOnboardingStore(partial) {
   });
   state.store = Array.isArray(result) ? result[0] : result?.[0] || result?.store || result;
   saveAdminCache();
+  await loadOnboardingOverview();
 }
 
 async function createOnboardingCategory(payload) {
@@ -1428,11 +1606,79 @@ async function createOnboardingCategory(payload) {
 }
 
 async function completeOnboarding() {
-  localStorage.setItem(ONBOARDING_COMPLETED_KEY, 'true');
-  if (els.onboardingPanel) els.onboardingPanel.hidden = true;
-  await updateOnboardingStore({ onboarding_completed: true });
-  await loadStoreData({ force: true });
-  toast('Sistema pronto para receber pedidos.');
+  await publishOnboardingFromWizard();
+}
+
+async function saveOnboardingProgress(stepKey, metadata = {}) {
+  state.onboardingOverview = await request('/api/admin/onboarding', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      current_step: stepKey,
+      completed_steps: [stepKey],
+      metadata: {
+        ...(state.onboardingOverview?.progress?.metadata || {}),
+        ...metadata
+      }
+    })
+  });
+}
+
+async function validateOnboardingSlug(slug) {
+  const currentSlug = publicSlug(state.store?.slug || '');
+  if (slug === currentSlug) return;
+  const data = await request(`/api/portal/slug?slug=${encodeURIComponent(slug)}`);
+  if (!data.available) throw new Error(data.reason || 'Este link público já está em uso.');
+  if (els.onboardingSlugStatus) {
+    els.onboardingSlugStatus.textContent = 'Endereço disponível.';
+    els.onboardingSlugStatus.className = 'muted slug-ok';
+  }
+}
+
+function setOnboardingStatus(message) {
+  if (els.onboardingStatusMessage) els.onboardingStatusMessage.textContent = message || '';
+}
+
+function skipOnboardingForNow() {
+  localStorage.setItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY), 'true');
+  renderOnboarding();
+  toast('Onboarding pausado. Você pode reabrir quando quiser.');
+}
+
+function reopenOnboarding() {
+  localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
+  if (els.onboardingPanel) els.onboardingPanel.hidden = false;
+  if (els.onboardingReminder) els.onboardingReminder.hidden = true;
+  renderOnboarding();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function publishOnboardingFromWizard() {
+  if (!els.onboardingPublishButton) return;
+  els.onboardingPublishButton.disabled = true;
+  setOnboardingStatus('');
+  try {
+    const overview = state.onboardingOverview || await loadOnboardingOverview();
+    if (overview && !overview.can_publish) {
+      throw new Error(`Antes de publicar, conclua: ${overview.blockers.join(', ')}.`);
+    }
+    state.onboardingOverview = await request('/api/admin/onboarding/publish', { method: 'POST' });
+    localStorage.setItem(onboardingStorageKey(ONBOARDING_COMPLETED_KEY), 'true');
+    localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
+    await loadStoreData({ force: true });
+    activateAdminTab('operation');
+    toast('Loja publicada e pronta para receber pedidos.');
+  } catch (error) {
+    setOnboardingStatus(error.message || 'Revise os itens pendentes antes de publicar.');
+    toast(error.message || 'Não foi possível publicar a loja.');
+  } finally {
+    els.onboardingPublishButton.disabled = false;
+  }
+}
+
+function onboardingStorageKey(baseKey) {
+  const storeKey = state.store?.store_id || state.store?.id || state.admin?.store_id || state.store?.slug || 'global';
+  return `${baseKey}:${storeKey}`;
 }
 
 function businessHoursEveryDay(open, close) {
@@ -3212,23 +3458,42 @@ async function submitPassword(event) {
 
 async function submitDeleteAccount(event) {
   event.preventDefault();
+  const button = els.deleteAccountForm.querySelector('button[type="submit"]');
   const data = Object.fromEntries(new FormData(els.deleteAccountForm));
   if (String(data.confirmation || '').trim() !== 'EXCLUIR CONTA') {
     toast('Digite EXCLUIR CONTA para confirmar.');
     return;
   }
-  const confirmed = window.confirm('Esta acao nao pode ser desfeita. Todos os dados da empresa e loja serao apagados. Deseja continuar?');
+  if (!String(data.password || '').trim()) {
+    toast('Informe sua senha atual para excluir a conta.');
+    els.deleteAccountForm.elements.password?.focus();
+    return;
+  }
+  const confirmed = window.confirm('Esta ação não pode ser desfeita. Todos os dados da empresa e loja serão apagados. Deseja continuar?');
   if (!confirmed) return;
-  await request('/api/admin/account/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  state.admin = null;
-  clearAdminCache();
-  stopOrderPolling();
-  showAuth();
-  toast('Conta excluida.');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Excluindo...';
+  }
+  try {
+    await request('/api/admin/account/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    state.admin = null;
+    clearAdminCache();
+    stopOrderPolling();
+    showAuth();
+    toast('Conta excluída.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível excluir a conta.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Excluir definitivamente';
+    }
+  }
 }
 
 async function submitAdminUser(event) {
@@ -3426,6 +3691,12 @@ function renderPlan() {
   const statusLabel = commercialStatusLabel(status);
   const nextRenewal = subscription.next_renewal_at || subscription.current_period_ends_at || subscription.trial_ends_at || '';
   const pendingCheckoutUrl = pendingSubscription.metadata?.checkout_url || '';
+  const daysRemaining = subscriptionDaysRemaining(nextRenewal);
+  const billingStatus = pendingSubscription.id
+    ? commercialStatusLabel(pendingSubscription.status)
+    : status === 'active' || status === 'trial'
+      ? 'Em dia'
+      : statusLabel;
 
   if (els.planAlerts) {
     els.planAlerts.innerHTML = planAlerts({ subscription, pendingSubscription, usage, features });
@@ -3439,14 +3710,18 @@ function renderPlan() {
         <span class="plan-status ${planStatusClass(status)}">${escapeHtml(statusLabel)}</span>
       </div>
       <p class="muted">${escapeHtml(plan.description || 'Configure o plano pelo painel da plataforma.')}</p>
-      <strong>${money(plan.monthly_price || 0)} / mês</strong>
+      <strong>${formatPlanPrice(plan.monthly_price)}</strong>
+      <div class="plan-mini-list">
+        <span>Status <strong>${escapeHtml(statusLabel)}</strong></span>
+        <span>Dias restantes <strong>${daysRemaining === null ? '-' : `${daysRemaining} dia(s)`}</strong></span>
+      </div>
       <div class="plan-actions">
         <label>Plano para contratar
           <select id="billingPlanSelect">
             ${availablePlans.map((entry) => `<option value="${escapeAttribute(entry.code)}"${entry.code === selectedPlanCode ? ' selected' : ''}>${escapeHtml(entry.name)} - ${money(entry.monthly_price || 0)}/mês</option>`).join('')}
           </select>
         </label>
-        <button class="primary-button compact" id="billingCheckoutButton" type="button"${availablePlans.length ? '' : ' disabled'}>${status === 'active' ? 'Gerenciar assinatura' : 'Ativar plano'}</button>
+        <button class="primary-button compact" id="billingCheckoutButton" type="button"${availablePlans.length ? '' : ' disabled'}>${plan.code ? 'Alterar plano' : 'Ativar plano'}</button>
       </div>
     </div>
   `;
@@ -3455,15 +3730,16 @@ function renderPlan() {
   if (els.planBilling) {
     els.planBilling.innerHTML = `
       <p class="eyebrow">Cobrança</p>
-      <h2>${pendingSubscription.id ? 'Cobrança pendente' : 'Sem cobrança pendente'}</h2>
-      <p class="muted">${pendingSubscription.id ? 'Finalize o pagamento para ativar ou alterar a assinatura.' : 'Nenhuma cobrança em aberto no momento.'}</p>
+      <h2>${escapeHtml(billingStatus)}</h2>
+      <p class="muted">${pendingSubscription.id ? 'Finalize o pagamento para ativar ou alterar a assinatura.' : 'Plano sem cobrança em aberto no momento.'}</p>
       <div class="plan-mini-list">
         <span>Status <strong>${escapeHtml(pendingSubscription.id ? commercialStatusLabel(pendingSubscription.status) : statusLabel)}</strong></span>
+        <span>Valor <strong>${money(pendingSubscription.metadata?.amount_cents ? Number(pendingSubscription.metadata.amount_cents) / 100 : plan.monthly_price || 0)}</strong></span>
         <span>Vencimento <strong>${dateLabel(pendingSubscription.payment_due_at) || '-'}</strong></span>
       </div>
       <div class="row-actions">
         ${pendingCheckoutUrl ? `<a class="primary-button compact" href="${escapeAttribute(pendingCheckoutUrl)}" target="_blank" rel="noopener">Abrir pagamento</a>` : ''}
-        <button class="ghost-button compact" id="billingRenewButton" type="button"${availablePlans.length ? '' : ' disabled'}>${pendingSubscription.id ? 'Gerar nova cobrança' : 'Gerar cobrança'}</button>
+        <button class="ghost-button compact" id="billingRenewButton" type="button"${availablePlans.length ? '' : ' disabled'}>${pendingSubscription.id ? 'Trocar plano' : 'Ativar/alterar plano'}</button>
       </div>
     `;
     document.querySelector('#billingRenewButton')?.addEventListener('click', () => createBillingCheckout());
@@ -3474,7 +3750,10 @@ function renderPlan() {
       <p class="eyebrow">Próxima renovação</p>
       <h2>${dateLabel(nextRenewal) || '-'}</h2>
       <p class="muted">${renewalMessage(subscription)}</p>
-      <a class="text-button" href="#planHistory">Ver histórico de cobrança</a>
+      <div class="plan-mini-list">
+        <span>Início do ciclo <strong>${dateLabel(subscription.current_period_starts_at) || '-'}</strong></span>
+        <span>Fim do ciclo <strong>${dateLabel(subscription.current_period_ends_at || subscription.trial_ends_at) || '-'}</strong></span>
+      </div>
     `;
   }
 
@@ -3483,6 +3762,7 @@ function renderPlan() {
     <h2>Uso e limites</h2>
     <div class="plan-usage-list">
       ${usageBar('Produtos cadastrados', usage.products, featureLimit(features, 'digital_menu'))}
+      ${usageBar('Categorias', usage.categories, featureLimit(features, 'menu_categories'))}
       ${usageBar('Pedidos no mês', usage.orders_month ?? usage.orders, featureLimit(features, 'orders'))}
       ${usageBar('Clientes', usage.customers, featureLimit(features, 'customers'))}
       ${usageBar('Mesas', usage.tables, featureLimit(features, 'tables'))}
@@ -3526,22 +3806,31 @@ async function createBillingCheckout(forcedPlanCode = '') {
     toast('Plano não encontrado para cobrança.');
     return;
   }
+  if (planCode === state.plan?.plan?.code && ['trial', 'active'].includes(state.plan?.subscription?.status)) {
+    toast('Este já é o plano atual.');
+    return;
+  }
+  const buttons = [...document.querySelectorAll('#billingCheckoutButton, #billingRenewButton, [data-plan-code]')];
+  buttons.forEach((button) => { button.disabled = true; });
   try {
     const result = await request('/api/admin/billing/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan_code: planCode })
     });
-    state.plan.pending_subscription = result.subscription || state.plan.pending_subscription;
-    renderPlan();
+    await loadPlanData({ force: true });
     if (result.checkout_url) {
       window.open(result.checkout_url, '_blank', 'noopener');
       toast('Cobrança aberta em uma nova aba.');
+    } else if (result.activated) {
+      toast(result.already_current ? 'Este já era o plano atual.' : 'Plano ativado com sucesso.');
     } else {
-      toast('Cobrança criada. Configure o provedor para receber o link.');
+      toast('Solicitação registrada.');
     }
   } catch (error) {
     toast(error.message || 'Não foi possível criar a cobrança.');
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
   }
 }
 
@@ -3571,10 +3860,22 @@ function dateTimeLabel(value) {
   return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function subscriptionDaysRemaining(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 86400000));
+}
+
+function formatPlanPrice(value) {
+  const price = Number(value || 0);
+  return price > 0 ? `${money(price)} / mês` : 'R$ 0 / teste';
+}
+
 function renewalMessage(subscription = {}) {
-  if (subscription.status === 'trial') return 'Periodo de teste ativo. A data acima mostra o fim do teste.';
+  if (subscription.status === 'trial') return 'Período de teste ativo. A data acima mostra o fim do teste.';
   if (subscription.status === 'payment_pending') return 'Existe pagamento pendente para regularizar a assinatura.';
-  if (subscription.status === 'active') return 'Assinatura ativa e liberada para operacao.';
+  if (subscription.status === 'active') return 'Assinatura ativa e liberada para operação.';
   return 'Acompanhe aqui a data comercial mais relevante da assinatura.';
 }
 
@@ -3604,7 +3905,7 @@ function usageBar(label, value, limit) {
 
 function featureStatusLabel(entry) {
   if (entry.is_enabled === false) return 'Bloqueado';
-  return entry.limit_value ? `Até ${Number(entry.limit_value)}` : 'Incluso';
+  return entry.limit_value ? `Até ${Number(entry.limit_value)}` : 'Ilimitado';
 }
 
 function comparePlanCard(plan, currentCode) {
@@ -3629,15 +3930,16 @@ function comparePlanCard(plan, currentCode) {
 }
 
 function billingHistoryRow(event) {
-  const payload = event.payload || {};
-  const planCode = payload.plan_code || payload.planCode || payload.plan || '-';
+  const payload = event.metadata || {};
+  const planCode = payload.plan_code || payload.planCode || payload.plan_name || '-';
   const receipt = payload.checkout_url || payload.receipt_url || payload.url || '';
+  const amount = payload.amount_cents ? money(Number(payload.amount_cents) / 100) : '-';
   return `
     <article class="plan-history-row">
       <span>${dateTimeLabel(event.created_at)}</span>
       <strong>${escapeHtml(planCode)}</strong>
       <span>${escapeHtml(billingEventLabel(event.event_type || event.type || 'Evento'))}</span>
-      <span>${escapeHtml(event.provider || '-')}</span>
+      <span>${escapeHtml(amount)}</span>
       ${receipt ? `<a href="${escapeAttribute(receipt)}" target="_blank" rel="noopener">Abrir</a>` : '<span>-</span>'}
     </article>
   `;
@@ -3648,6 +3950,8 @@ function billingEventLabel(value) {
   return ({
     active: 'Pago',
     checkout_created: 'Cobrança criada',
+    plan_activated: 'Plano ativado',
+    plan_changed: 'Plano alterado',
     payment_pending: 'Pendente',
     past_due: 'Atrasado',
     cancelled: 'Cancelado',
@@ -3664,6 +3968,7 @@ function planAlerts({ subscription = {}, pendingSubscription = {}, usage = {}, f
   if (pendingSubscription.id) alerts.push('Existe uma cobrança pendente. Regularize para evitar bloqueio.');
   [
     ['Produtos', usage.products, featureLimit(features, 'digital_menu')],
+    ['Categorias', usage.categories, featureLimit(features, 'menu_categories')],
     ['Pedidos no mês', usage.orders_month ?? usage.orders, featureLimit(features, 'orders')],
     ['Usuários', usage.users, featureLimit(features, 'admin_users')],
     ['Mesas', usage.tables, featureLimit(features, 'tables')]
@@ -3724,7 +4029,7 @@ async function deleteAdminUser(event) {
     renderAdminUsers();
     toast('Conta excluida.');
   } catch (error) {
-    toast(error.message || 'Nao foi possivel excluir a conta.');
+    toast(error.message || 'Não foi possível excluir a conta.');
   } finally {
     button.disabled = false;
   }
@@ -4743,7 +5048,7 @@ async function submitStore(event) {
 async function addCustomDomain() {
   const domain = els.customDomainInput?.value || '';
   if (!domain.trim()) {
-    toast('Informe o dominio.');
+    toast('Informe o domínio.');
     return;
   }
   const result = await request('/api/admin/domains', {
@@ -4754,27 +5059,27 @@ async function addCustomDomain() {
   state.storeDomains = [result.domain, ...state.storeDomains.filter((item) => item.id !== result.domain.id)];
   if (els.customDomainInput) els.customDomainInput.value = '';
   renderCustomDomains();
-  toast('Dominio cadastrado.');
+  toast('Domínio cadastrado.');
 }
 
 async function verifyCustomDomain(id) {
   const result = await request(`/api/admin/domains/${id}/verify`, { method: 'POST' });
   state.storeDomains = state.storeDomains.map((item) => item.id === result.domain.id ? result.domain : item);
   renderCustomDomains();
-  toast('Dominio verificado.');
+  toast('Domínio verificado.');
 }
 
 async function deleteCustomDomain(id) {
   await request(`/api/admin/domains/${id}`, { method: 'DELETE' });
   state.storeDomains = state.storeDomains.filter((item) => item.id !== id);
   renderCustomDomains();
-  toast('Dominio removido.');
+  toast('Domínio removido.');
 }
 
 function renderCustomDomains() {
   if (!els.customDomainList) return;
   if (!state.storeDomains.length) {
-    els.customDomainList.innerHTML = '<p class="empty-state">Nenhum dominio cadastrado.</p>';
+    els.customDomainList.innerHTML = '<p class="empty-state">Nenhum domínio cadastrado.</p>';
     return;
   }
   els.customDomainList.innerHTML = state.storeDomains.map((domain) => `
@@ -5190,6 +5495,9 @@ function stopOrderPolling() {
 
 function activateAdminTab(tab) {
   if (!canAccessTab(tab)) {
+    if (hasRoleAccessToTab(tab) && !isTabAvailableInPlan(tab)) {
+      toast('Recurso disponível em planos superiores.');
+    }
     const fallback = firstAllowedAdminTab();
     if (fallback && fallback !== tab) {
       activateAdminTab(fallback);
@@ -5197,15 +5505,15 @@ function activateAdminTab(tab) {
     return;
   }
   const titles = {
-    operation: 'Operacao',
+    operation: 'Operação',
     orders: 'Pedidos',
-    menu: 'Cardapio',
-    reports: 'Relatorios',
+    menu: 'Cardápio',
+    reports: 'Relatórios',
     tables: 'Mesas e comandas',
-    promotions: 'Promocoes',
+    promotions: 'Promoções',
     customers: 'Clientes',
     store: 'Loja',
-    integrations: 'Integracoes',
+    integrations: 'Integrações',
     plan: 'Meu plano',
     account: 'Conta'
   };
@@ -5222,11 +5530,17 @@ function activateAdminTab(tab) {
 
 function renderPermissionedNavigation() {
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
-    const allowed = canAccessTab(button.dataset.adminTab);
-    button.hidden = !allowed;
+    const tab = button.dataset.adminTab;
+    const roleAllowed = hasRoleAccessToTab(tab);
+    const planAllowed = isTabAvailableInPlan(tab);
+    button.hidden = !roleAllowed;
+    button.disabled = roleAllowed && !planAllowed;
+    button.classList.toggle('plan-locked', roleAllowed && !planAllowed);
+    if (roleAllowed && !planAllowed) button.title = 'Recurso disponível em planos superiores';
   });
   document.querySelectorAll('[data-admin-section]').forEach((section) => {
     section.hidden = !canAccessTab(section.dataset.adminSection);
+    renderPlanBlockedSection(section);
   });
   if (!canAccessTab(state.activeAdminTab)) {
     activateAdminTab(firstAllowedAdminTab());
@@ -5239,6 +5553,12 @@ function firstAllowedAdminTab() {
 }
 
 function canAccessTab(tab) {
+  if (tab === 'account') return true;
+  if (!hasRoleAccessToTab(tab)) return false;
+  return isTabAvailableInPlan(tab);
+}
+
+function hasRoleAccessToTab(tab) {
   if (tab === 'account') return true;
   const permission = ({
     operation: 'operation',
@@ -5253,6 +5573,37 @@ function canAccessTab(tab) {
     plan: 'plan'
   })[tab];
   return !permission || hasPermission(permission);
+}
+
+function isTabAvailableInPlan(tab) {
+  const feature = ({
+    operation: 'orders',
+    orders: 'orders',
+    menu: 'digital_menu',
+    reports: 'basic_reports',
+    tables: 'tables',
+    promotions: 'promotions',
+    customers: 'customers',
+    store: 'store_settings',
+    integrations: 'store_settings'
+  })[tab];
+  if (!feature || tab === 'plan' || tab === 'account') return true;
+  const access = state.admin?.plan_access?.[feature];
+  return access ? access.enabled !== false : true;
+}
+
+function renderPlanBlockedSection(section) {
+  if (!section || section.hidden || !section.dataset.adminSection) return;
+  if (isTabAvailableInPlan(section.dataset.adminSection)) return;
+  section.innerHTML = `
+    <section class="panel plan-blocked-panel">
+      <p class="eyebrow">Plano atual</p>
+      <h2>Recurso disponível em planos superiores</h2>
+      <p>Este recurso não faz parte do plano atual da loja. Acesse Meu plano para comparar opções e liberar esta área.</p>
+      <button class="primary-button compact" type="button" data-admin-tab-jump="plan">Ver planos</button>
+    </section>
+  `;
+  section.querySelector('[data-admin-tab-jump]')?.addEventListener('click', () => activateAdminTab('plan'));
 }
 
 function hasPermission(permission) {
@@ -5345,6 +5696,10 @@ function publicSlug(value) {
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
+}
+
+function cleanText(value) {
+  return String(value || '').trim();
 }
 
 function fillAccountForm() {
@@ -5679,7 +6034,13 @@ async function request(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof data.detail === 'string' ? data.detail : '';
-    throw new Error(detail || data.error || 'Falha na requisicao.');
+    const error = new Error(detail || data.error || 'Falha na requisição.');
+    error.code = data.code || data.error_code || '';
+    error.feature = data.feature || '';
+    error.usageKey = data.usage_key || '';
+    error.limit = data.limit;
+    error.used = data.used;
+    throw error;
   }
   return data;
 }
@@ -5719,6 +6080,7 @@ function saveAdminCache() {
       company_id: state.admin.company_id,
       store_id: state.admin.store_id,
       active_store: state.admin.active_store || null,
+      plan_access: state.admin.plan_access || {},
       stores: Array.isArray(state.admin.stores) ? state.admin.stores.map((store) => ({
         id: store.id,
         company_id: store.company_id || null,

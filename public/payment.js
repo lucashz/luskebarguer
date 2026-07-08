@@ -25,14 +25,14 @@ loadStoreIdentity().catch(() => {});
 
 async function loadPayment() {
   if (!code) {
-    setStatus('Pedido nao informado.');
+    setStatus('Pedido não informado.');
     return;
   }
   try {
     const data = await request(`/api/payments/order?code=${encodeURIComponent(code)}`);
     renderPayment(data);
   } catch (error) {
-    setStatus(error.message || 'Nao foi possivel carregar o pagamento.');
+    setStatus(error.message || 'Não foi possível carregar o pagamento.');
   }
 }
 
@@ -54,7 +54,7 @@ async function regeneratePix() {
     renderPayment(data);
     setStatus('Novo Pix gerado.');
   } catch (error) {
-    setStatus(error.message || 'Nao foi possivel gerar um novo Pix.');
+    setStatus(error.message || 'Não foi possível gerar um novo Pix.');
   }
 }
 
@@ -70,7 +70,7 @@ function renderPayment(data) {
   els.subtitle.textContent = `${money(order.total || 0)} - ${financialStatusLabel(order.financial_status)}`;
   els.status.innerHTML = `
     <div><span>Status</span><strong>${financialStatusLabel(order.financial_status)}</strong></div>
-    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleString('pt-BR') : 'Nao informado'}</strong></div>
+    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleString('pt-BR') : 'Não informado'}</strong></div>
     <div><span>Transacao</span><strong>${escapeHtml(payment.transaction_id || 'Aguardando')}</strong></div>
   `;
   els.pixCode.value = payment.pix_code || '';

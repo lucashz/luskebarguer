@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin - Cardápio</title>
-    <link rel="stylesheet" href="/styles.css?v=20260707-terms-home">
+    <link rel="stylesheet" href="/styles.css?v=20260708-plan-gates">
   </head>
   <body class="admin-page">
     <main class="admin-layout auth-only" id="adminLayout">
@@ -77,40 +77,70 @@
             <div class="onboarding-head">
               <div>
                 <p class="eyebrow">Primeira configuração</p>
-                <h2>Vamos configurar sua loja</h2>
-                <p id="onboardingStepText">Passo 1 de 6</p>
+                <h2>Vamos deixar sua loja pronta para vender</h2>
+                <p id="onboardingStepText">Passo 1 de 10</p>
               </div>
-              <div class="onboarding-progress"><span id="onboardingProgressBar"></span></div>
+              <button class="ghost-button compact" id="onboardingSkipButton" type="button">Pular por enquanto</button>
             </div>
+            <div class="onboarding-progress"><span id="onboardingProgressBar"></span></div>
+            <div class="onboarding-step-nav" id="onboardingStepNav" aria-label="Etapas do onboarding"></div>
+            <p class="form-message" id="onboardingStatusMessage" role="alert" aria-live="polite"></p>
 
-            <form class="onboarding-step active" data-onboarding-step="0">
-              <h3>WhatsApp dos pedidos</h3>
-              <p class="muted">Informe o número que receberá os pedidos enviados pelo cliente.</p>
-              <label>WhatsApp<input name="whatsapp_number" required inputmode="tel" placeholder="Ex: 5511999999999"></label>
+            <form class="onboarding-step active" data-onboarding-step="0" data-onboarding-key="welcome">
+              <h3>Boas-vindas</h3>
+              <p class="muted">Este guia configura o essencial da loja e mostra onde cada parte do painel fica. Você pode salvar etapa por etapa e voltar quando quiser.</p>
+              <div class="onboarding-welcome-grid">
+                <article><strong>Loja pronta</strong><span>Nome, link público, WhatsApp, horários e entrega.</span></article>
+                <article><strong>Cardápio inicial</strong><span>Primeira categoria e produto para publicar com segurança.</span></article>
+                <article><strong>Treinamento rápido</strong><span>Pedidos, mesas, relatórios, integrações e rotina operacional.</span></article>
+              </div>
             </form>
 
-            <form class="onboarding-step" data-onboarding-step="1">
-              <h3>Horário de funcionamento</h3>
-              <p class="muted">Para começar, use um horário único para todos os dias. Depois você pode ajustar por dia.</p>
+            <form class="onboarding-step" data-onboarding-step="1" data-onboarding-key="store">
+              <h3>Dados da loja</h3>
+              <p class="muted">Essas informações aparecem para o cliente no cardápio público e ajudam sua equipe a identificar a loja.</p>
+              <div class="two-cols">
+                <label>Nome da loja<input name="name" required placeholder="Ex: Pizzaria Bella"></label>
+                <label>Link público<input name="slug" required placeholder="Ex: pizzaria-bella"></label>
+              </div>
+              <p class="muted" id="onboardingSlugStatus">Use letras, números e hífen.</p>
+              <label>Descrição<textarea name="description" placeholder="Ex: Pizzas artesanais, porções e bebidas geladas."></textarea></label>
+              <div class="two-cols">
+                <label>Endereço<input name="address" placeholder="Rua, número, bairro"></label>
+                <label>WhatsApp dos pedidos<input name="whatsapp_number" required inputmode="tel" placeholder="Ex: 5511999999999"></label>
+              </div>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="2" data-onboarding-key="operation">
+              <h3>Operação</h3>
+              <p class="muted">Defina como a loja atende e qual horário será usado inicialmente. A loja só será publicada ao final.</p>
+              <div class="payment-options">
+                <label class="payment-option"><input name="accepts_delivery" type="checkbox" checked> Delivery</label>
+                <label class="payment-option"><input name="accepts_pickup" type="checkbox" checked> Retirada</label>
+                <label class="payment-option"><input name="accepts_counter" type="checkbox" checked> Balcão</label>
+                <label class="payment-option"><input name="accepts_tables" type="checkbox"> Mesa e comanda</label>
+              </div>
               <div class="two-cols">
                 <label>Abre<input name="open" type="time" value="18:00"></label>
                 <label>Fecha<input name="close" type="time" value="23:00"></label>
               </div>
+              <label class="check"><input name="start_closed" type="checkbox" checked> Manter loja fechada até eu publicar no final</label>
             </form>
 
-            <form class="onboarding-step" data-onboarding-step="2">
-              <h3>Formas de pagamento</h3>
-              <p class="muted">Marque as opções que a loja aceita hoje.</p>
+            <form class="onboarding-step" data-onboarding-step="3" data-onboarding-key="payments">
+              <h3>Pagamentos</h3>
+              <p class="muted">Marque as opções aceitas hoje. Você pode configurar integrações online depois.</p>
               <div class="payment-options">
                 <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix" checked> Pix</label>
                 <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro" checked> Dinheiro</label>
                 <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> Cartão de crédito</label>
                 <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de débito"> Cartão de débito</label>
               </div>
+              <label>Observações de pagamento<textarea name="payment_notes" placeholder="Ex: Troco somente para dinheiro. Pix confirmado no balcão."></textarea></label>
             </form>
 
-            <form class="onboarding-step" data-onboarding-step="3">
-              <h3>Taxas de entrega</h3>
+            <form class="onboarding-step" data-onboarding-step="4" data-onboarding-key="delivery">
+              <h3>Entrega</h3>
               <p class="muted">Configure uma taxa padrão e, se quiser, valores por bairro.</p>
               <div class="two-cols">
                 <label>Taxa padrão<input name="delivery_fee" type="number" min="0" step="0.01" value="5"></label>
@@ -119,14 +149,14 @@
               <label>Taxa por bairro<textarea name="delivery_neighborhood_fees" placeholder="Centro=5&#10;Bela Vista=8&#10;Interior=12"></textarea></label>
             </form>
 
-            <form class="onboarding-step" data-onboarding-step="4">
+            <form class="onboarding-step" data-onboarding-step="5" data-onboarding-key="category">
               <h3>Primeira categoria</h3>
-              <p class="muted">Crie a primeira seção do cardápio.</p>
-              <label>Nome da categoria<input name="name" required placeholder="Ex: Hambúrgueres"></label>
+              <p class="muted">Crie a primeira seção do cardápio. Se já existir uma categoria, você pode seguir sem duplicar.</p>
+              <label>Nome da categoria<input name="name" placeholder="Ex: Hambúrgueres"></label>
               <label>Descrição<input name="description" placeholder="Ex: Artesanais, smash e especiais"></label>
             </form>
 
-            <form class="onboarding-step" data-onboarding-step="5">
+            <form class="onboarding-step" data-onboarding-step="6" data-onboarding-key="product">
               <h3>Primeiro produto</h3>
               <p class="muted">Cadastre um item inicial para o cardápio já nascer com cara de loja aberta.</p>
               <label>Categoria<select name="category_id" id="onboardingProductCategory"></select></label>
@@ -135,10 +165,60 @@
               <label>Preço<input name="price" required type="number" min="0" step="0.01" value="29.90"></label>
             </form>
 
+            <form class="onboarding-step" data-onboarding-step="7" data-onboarding-key="appearance">
+              <h3>Aparência</h3>
+              <p class="muted">Deixe o cardápio com a identidade da loja. Você também pode enviar imagens depois na aba Loja.</p>
+              <div class="two-cols">
+                <label>URL do logo<input name="logo_url" placeholder="https://..."></label>
+                <label>URL da capa<input name="cover_url" placeholder="https://..."></label>
+              </div>
+              <div class="onboarding-theme-grid">
+                <label>Cor principal<input name="theme_primaryColor" type="color" value="#d71920"></label>
+                <label>Cor dos botões<input name="theme_buttonColor" type="color" value="#d71920"></label>
+                <label>Cor de fundo<input name="theme_backgroundColor" type="color" value="#f5f5f4"></label>
+              </div>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="8" data-onboarding-key="training">
+              <h3>Treinamento rápido</h3>
+              <p class="muted">Antes de publicar, veja para que serve cada área principal do painel.</p>
+              <div class="onboarding-training-grid">
+                <article><strong>Pedidos</strong><span>Acompanhe novos pedidos, preparo, entrega e conclusão.</span></article>
+                <article><strong>Cardápio</strong><span>Edite categorias, produtos, fotos, preços e adicionais.</span></article>
+                <article><strong>Loja</strong><span>Configure horário, entrega, pagamentos, domínio, logo e tema.</span></article>
+                <article><strong>Mesas e comandas</strong><span>Crie QR Codes, abra comandas e lance itens no salão.</span></article>
+                <article><strong>Relatórios</strong><span>Confira faturamento, pedidos, ticket médio e fechamento.</span></article>
+                <article><strong>Integrações</strong><span>Conecte WhatsApp, Pix, cartão online e impressão.</span></article>
+              </div>
+              <label class="onboarding-confirm-check">
+                <input name="training_seen" required type="checkbox">
+                <span>Entendi o básico do painel administrativo.</span>
+              </label>
+            </form>
+
+            <form class="onboarding-step" data-onboarding-step="9" data-onboarding-key="publish">
+              <h3>Finalização</h3>
+              <p class="muted">Confira o checklist. Quando publicar, a loja ficará aberta e pronta para receber pedidos.</p>
+              <div class="onboarding-final-checklist" id="onboardingFinalChecklist"></div>
+              <div class="onboarding-final-actions">
+                <button class="primary-button" id="onboardingPublishButton" type="button">Publicar minha loja</button>
+                <a class="ghost-button compact" id="onboardingPublicLink" href="/cardapio" target="_blank" rel="noopener">Abrir cardápio público</a>
+              </div>
+            </form>
+
             <div class="onboarding-actions">
               <button class="ghost-button compact" id="onboardingBackButton" type="button">Voltar</button>
               <button class="primary-button compact" id="onboardingNextButton" type="button">Salvar e continuar</button>
             </div>
+          </section>
+
+          <section class="onboarding-reminder panel" id="onboardingReminder" hidden>
+            <div>
+              <p class="eyebrow">Configuração incompleta</p>
+              <h2>Termine o onboarding antes de publicar sua loja.</h2>
+              <p>Você pode continuar usando o painel, mas a loja só deve ficar pronta depois de revisar atendimento, pagamentos, entrega e cardápio inicial.</p>
+            </div>
+            <button class="primary-button compact" id="onboardingResumeButton" type="button">Continuar onboarding</button>
           </section>
 
           <section class="admin-section active" data-admin-section="operation">
@@ -506,7 +586,10 @@
                   <h2>Configurar loja</h2>
                   <p>Dados que aparecem no cardápio e controlam como os pedidos chegam para a equipe.</p>
                 </div>
-                <button class="primary-button compact" type="submit">Salvar loja</button>
+                <div class="row-actions">
+                  <button class="ghost-button compact" data-reopen-onboarding type="button">Reabrir onboarding</button>
+                  <button class="primary-button compact" type="submit">Salvar loja</button>
+                </div>
               </div>
 
               <section class="store-settings-section">
@@ -520,7 +603,7 @@
                     <label>Caminho da loja<input name="slug" placeholder="Ex: pizzaria-bella"></label>
                   </div>
                   <div class="store-path-preview" id="storePathPreview">
-                    <span>Endereco publico</span>
+                    <span>Endereço público</span>
                     <a href="/cardapio" target="_blank" rel="noopener">Carregando...</a>
                   </div>
                   <label>Descrição<textarea name="description" placeholder="Ex: Pizza artesanal, esfihas e bebidas geladas."></textarea></label>
@@ -530,16 +613,16 @@
 
               <section class="store-settings-section">
                 <div class="store-settings-copy">
-                  <strong>Dominio personalizado</strong>
-                  <p>Cadastre um dominio proprio para abrir o cardapio sem depender do slug. Configure o DNS apontando para esta hospedagem e depois clique em verificar.</p>
+                  <strong>Domínio personalizado</strong>
+                  <p>Cadastre um domínio próprio para abrir o cardápio sem depender do slug. Configure o DNS apontando para esta hospedagem e depois clique em verificar.</p>
                 </div>
                 <div class="store-settings-fields">
                   <div class="inline-form-row">
                     <input id="customDomainInput" type="text" placeholder="Ex: cardapio.sualoja.com.br">
-                    <button class="ghost-button compact" id="addDomainButton" type="button">Adicionar dominio</button>
+                    <button class="ghost-button compact" id="addDomainButton" type="button">Adicionar domínio</button>
                   </div>
                   <div class="domain-list" id="customDomainList">
-                    <p class="empty-state">Nenhum dominio cadastrado.</p>
+                    <p class="empty-state">Nenhum domínio cadastrado.</p>
                   </div>
                 </div>
               </section>
@@ -941,6 +1024,7 @@
                   <h2>Sua conta</h2>
                   <p class="muted">Atualize os dados usados para entrar no painel e mantenha a senha protegida.</p>
                 </div>
+                <button class="ghost-button compact" data-reopen-onboarding type="button">Reabrir onboarding</button>
               </div>
 
               <div class="account-layout account-layout-compact">
@@ -971,7 +1055,7 @@
                 <div>
                   <p class="eyebrow">Zona de risco</p>
                   <h2>Excluir conta e dados</h2>
-                  <p class="muted">Esta acao apaga a empresa, loja, pedidos, clientes, cardapio, mesas, comandas, promocoes, sessoes e configuracoes. Nao pode ser desfeita.</p>
+                  <p class="muted">Esta ação apaga a empresa, loja, pedidos, clientes, cardápio, mesas, comandas, promoções, sessões e configurações. Não pode ser desfeita.</p>
                 </div>
               </div>
               <form id="deleteAccountForm" class="danger-delete-form">
@@ -1111,8 +1195,6 @@
       </section>
     </main>
 
-    <script src="/admin.js?v=20260630-charset-fix" type="module"></script>
+    <script src="/admin.js?v=20260708-plan-gates" type="module"></script>
   </body>
 </html>
-
-

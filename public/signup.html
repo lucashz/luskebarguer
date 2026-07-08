@@ -91,8 +91,17 @@
             </div>
           </label>
           <p class="muted" id="slugStatus">Escolha um endereço fácil de lembrar.</p>
-          <label class="check"><input name="accept_terms" required type="checkbox"> Li e concordo com o EULA, os <a href="/termos" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener">Política de Privacidade</a>. Declaro que tenho autorização para criar esta conta e gerenciar os dados da loja, pedidos e clientes do estabelecimento.</label>
-          <label class="check"><input name="marketing_opt_in" type="checkbox"> Aceito receber dicas e comunicações sobre o sistema.</label>
+          <label class="terms-acceptance">
+            <input name="accept_terms" required type="checkbox">
+            <span>
+              <strong>Li e concordo com o EULA, os <a href="/termos" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.</strong>
+              <small>Declaro que tenho autorização para criar esta conta e gerenciar os dados da loja, pedidos e clientes do estabelecimento.</small>
+            </span>
+          </label>
+          <label class="terms-acceptance compact">
+            <input name="marketing_opt_in" type="checkbox">
+            <span>Aceito receber dicas e comunicações sobre o sistema.</span>
+          </label>
         </section>
 
         <div class="signup-submit-row">

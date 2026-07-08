@@ -84,8 +84,16 @@ const server = createServer(async (req, res) => {
     await serveStatic(res, url.pathname);
   } catch (error) {
     logServerError(error, req);
+    const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
     json(res, error.status || 500, {
       error: error.message || 'Erro interno do servidor.',
+      ...(detail?.code ? { code: detail.code, error_code: detail.error_code || detail.code } : {}),
+      ...(detail && error.status === 403 ? {
+        feature: detail.feature,
+        usage_key: detail.usage_key,
+        used: detail.used,
+        limit: detail.limit
+      } : {}),
       detail: EXPOSE_ERROR_DETAIL ? error.detail || undefined : undefined
     });
   }
@@ -108,7 +116,7 @@ async function handleApi(req, res, url) {
 
   if (!DATABASE_URL) {
     json(res, 500, {
-      error: 'Banco local nao configurado.',
+      error: 'Banco local não configurado.',
       detail: 'Preencha DATABASE_URL no arquivo .env.'
     });
     return;
@@ -604,7 +612,8 @@ async function handleApi(req, res, url) {
     json(res, 200, {
       store,
       orders,
-      permissions
+      permissions,
+      plan_access: admin.company_id ? await getCompanyPlanAccess(admin.company_id) : {}
     });
     return;
   }
@@ -888,9 +897,9 @@ async function handleApi(req, res, url) {
     const op = await adminOperationalOptions(admin);
     const body = await readJson(req);
     if (body.order_id) await assertOrderBelongsToStore(body.order_id, admin.store_id, op);
-    await assertCompanyUsageLimit(admin, 'thermal_printing', 'print_jobs');
+    await assertPlanLimit(admin, 'print_kitchen', 'print_jobs');
     const log = await createPrintLog({ ...body, store_id: admin.store_id }, op);
-    await recordCompanyUsage({ ...admin, entity_type: 'order', entity_id: body.order_id || null }, 'thermal_printing', 'print_jobs');
+    await recordCompanyUsage({ ...admin, entity_type: 'order', entity_id: body.order_id || null }, 'print_kitchen', 'print_jobs');
     await audit('order.print', {
       req,
       company_id: admin.company_id,
@@ -1180,6 +1189,7 @@ async function handleApi(req, res, url) {
     const admin = await requireAdminPermission(req, res, 'menu');
     if (!admin) return;
     const op = await adminOperationalOptions(admin);
+    await assertPlanLimit(admin, 'menu_categories', 'menu_categories');
     const result = await op.db('POST', 'menu_categories', {}, {
       ...sanitizeCategory(await readJson(req), true),
       store_id: admin.store_id || null
@@ -1193,6 +1203,7 @@ async function handleApi(req, res, url) {
       entity_id: result[0]?.id || null,
       after_data: result[0] || null
     });
+    await recordCompanyUsage(admin, 'menu_categories', 'menu_categories');
     clearMenuCache();
     json(res, 201, result);
     return;
@@ -1422,10 +1433,10 @@ async function loginAdmin(data) {
 
   const admin = rows[0];
   if (!admin) {
-    throw httpError(404, 'N?o existe uma conta administrativa com este e-mail.');
+    throw httpError(404, 'Não existe uma conta administrativa com este e-mail.');
   }
   if (admin.is_active === false) {
-    throw httpError(403, 'Esta conta administrativa est? desativada.');
+    throw httpError(403, 'Esta conta administrativa está desativada.');
   }
   if (!verifyPassword(password, admin.password_hash)) {
     throw httpError(401, 'Senha incorreta.');
@@ -1514,7 +1525,7 @@ async function createAdminUser(data, session = null) {
       permissions: [],
       is_active: true
     }, ['Prefer: return=minimal']).catch((error) => {
-      console.warn('Falha ao vincular usuario admin a loja:', error.message || error);
+      console.warn('Falha ao vincular usuário admin à loja:', error.message || error);
     });
   }
   await recordCompanyUsage(session, 'admin_users', 'admin_users');
@@ -1530,13 +1541,13 @@ async function createAdminInvitation(req, data = {}, session = null) {
   const name = cleanText(data.name || '');
   const role = sanitizeInviteRole(data.role || 'attendant');
   if (!email) throw httpError(422, 'Informe o e-mail do funcionario.');
-  if (!session?.company_id || !session?.store_id) throw httpError(422, 'Loja ativa nao encontrada.');
+  if (!session?.company_id || !session?.store_id) throw httpError(422, 'Loja ativa não encontrada.');
   const existing = await dbRequest('GET', 'admin_users', {
     select: 'id',
     email: `eq.${email}`,
     limit: '1'
   });
-  if (existing[0]) throw httpError(409, 'Este e-mail ja possui conta administrativa.');
+  if (existing[0]) throw httpError(409, 'Este e-mail já possui conta administrativa.');
   const token = randomBytes(24).toString('hex');
   const tokenHash = hashInviteToken(token);
   const [created] = await dbRequest('POST', 'admin_invitations', {}, {
@@ -1614,7 +1625,7 @@ async function acceptAdminInvitation(req, token, data = {}) {
   const invitation = await findInvitationByToken(token);
   const password = validatePassword(data.password);
   const confirmPassword = String(data.confirm_password || data.confirmPassword || '');
-  if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmacao de senha nao confere.');
+  if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmação de senha não confere.');
   const name = cleanText(data.name || invitation.name || invitation.email.split('@')[0]);
   const [admin] = await dbRequest('POST', 'admin_users', {}, {
     company_id: invitation.company_id,
@@ -1654,7 +1665,7 @@ async function acceptAdminInvitation(req, token, data = {}) {
 
 async function findInvitationByToken(token) {
   const value = String(token || '').trim();
-  if (!/^[a-f0-9]{32,128}$/i.test(value)) throw httpError(404, 'Convite invalido.');
+  if (!/^[a-f0-9]{32,128}$/i.test(value)) throw httpError(404, 'Convite inválido.');
   const tokenHash = hashInviteToken(value);
   const [invitation] = await dbRequest('GET', 'admin_invitations', {
     select: '*',
@@ -1662,7 +1673,7 @@ async function findInvitationByToken(token) {
     status: 'eq.pending',
     limit: '1'
   });
-  if (!invitation) throw httpError(404, 'Convite invalido ou ja utilizado.');
+  if (!invitation) throw httpError(404, 'Convite inválido ou já utilizado.');
   if (new Date(invitation.expires_at).getTime() < Date.now()) {
     await dbRequest('PATCH', 'admin_invitations', { id: `eq.${invitation.id}` }, { status: 'expired' }, ['Prefer: return=minimal']).catch(() => {});
     throw httpError(410, 'Este convite expirou.');
@@ -1683,7 +1694,7 @@ function hashInviteToken(token) {
 async function updateAdminUser(id, data, session) {
   const target = await getAdminById(id);
   if (!isPlatformAdmin(session) && target.company_id !== session.company_id) {
-    throw httpError(403, 'Voce nao pode editar uma conta de outra empresa.');
+    throw httpError(403, 'Você não pode editar uma conta de outra empresa.');
   }
   const payload = {};
   if ('name' in data) payload.name = cleanText(data.name);
@@ -1718,10 +1729,10 @@ async function updateAdminUser(id, data, session) {
 async function deleteAdminUser(id, session) {
   const target = await getAdminById(id);
   if (!isPlatformAdmin(session) && target.company_id !== session.company_id) {
-    throw httpError(403, 'Voce nao pode excluir uma conta de outra empresa.');
+    throw httpError(403, 'Você não pode excluir uma conta de outra empresa.');
   }
   if (target.id === session.id) {
-    throw httpError(422, 'Voce nao pode excluir sua propria conta.');
+    throw httpError(422, 'Você não pode excluir sua própria conta.');
   }
 
   if (isFullAdminRole(target.role)) {
@@ -1778,7 +1789,7 @@ async function changeAdminPassword(session, data) {
   const admin = await getAdminById(session.id);
 
   if (!verifyPassword(currentPassword, admin.password_hash)) {
-    throw httpError(401, 'Senha atual invalida.');
+    throw httpError(401, 'Senha atual inválida.');
   }
 
   await dbRequest('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
@@ -1797,10 +1808,10 @@ async function deleteCurrentCompanyAccount(req, session, data = {}) {
   }
   const admin = await getAdminById(session.id);
   if (!verifyPassword(String(data.password || ''), admin.password_hash)) {
-    throw httpError(401, 'Senha atual invalida.');
+    throw httpError(401, 'Senha atual inválida.');
   }
   const companyId = session.company_id ? cleanUuid(session.company_id, 'empresa') : null;
-  if (!companyId) throw httpError(422, 'Empresa ativa nao encontrada.');
+  if (!companyId) throw httpError(422, 'Empresa ativa não encontrada.');
   const stores = await dbRequest('GET', 'stores', {
     select: 'id',
     company_id: `eq.${companyId}`,
@@ -2247,7 +2258,7 @@ async function createPortalSignup(req, data = {}) {
         ...session.body,
         company: { id: company.id, name: company.name, status: company.status },
         store: publicStoreRef(store),
-        redirect: '/onboarding'
+        redirect: '/admin'
       }
     };
   } catch (error) {
@@ -2269,7 +2280,7 @@ function sanitizePortalSignup(data = {}) {
   if (!ownerName) throw httpError(422, 'Informe seu nome completo.');
   if (!ownerEmail) throw httpError(422, 'Informe um e-mail válido.');
   if (ownerPhone.length < 10) throw httpError(422, 'Informe um WhatsApp válido.');
-  if (data.accept_terms !== true && data.acceptTerms !== true) throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Politica de Privacidade para continuar.');
+  if (data.accept_terms !== true && data.acceptTerms !== true) throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Política de Privacidade para continuar.');
 
   const displayName = cleanText(business.display_name || business.displayName || business.name || '');
   const companyName = cleanText(business.company_name || business.companyName || business.name || displayName);
@@ -2353,6 +2364,9 @@ async function getAdminOnboarding(admin) {
   const total = computed.steps.length;
   const completedCount = computed.steps.filter((step) => completedSteps.includes(step.key)).length;
   const percent = total ? Math.round((completedCount / total) * 100) : 0;
+  const blockers = computed.steps
+    .filter((step) => !['appearance', 'publish'].includes(step.key) && !completedSteps.includes(step.key))
+    .map((step) => step.title);
 
   return {
     progress: {
@@ -2366,8 +2380,8 @@ async function getAdminOnboarding(admin) {
       completed: completedSteps.includes(step.key)
     })),
     percent,
-    can_publish: computed.canPublish,
-    blockers: computed.blockers,
+    can_publish: blockers.length === 0,
+    blockers,
     public_url: `/${admin.active_store?.slug || store.slug || ''}`
   };
 }
@@ -2435,7 +2449,7 @@ async function ensureOnboardingProgress(companyId, storeId) {
     company_id: companyId,
     store_id: storeId,
     current_step: 'welcome',
-    completed_steps: ['account', 'business', 'slug'],
+    completed_steps: ['welcome'],
     is_completed: false,
     metadata: {}
   }, ['Prefer: return=representation']);
@@ -2445,34 +2459,34 @@ async function ensureOnboardingProgress(companyId, storeId) {
 function computeOnboardingSteps({ store, categories, items }) {
   const steps = [
     {
-      key: 'account',
-      title: 'Conta criada',
-      description: 'Responsável e acesso administrativo configurados.',
+      key: 'welcome',
+      title: 'Boas-vindas',
+      description: 'Entenda o que será configurado antes de publicar.',
       auto_completed: true
     },
     {
-      key: 'visual',
-      title: 'Logo e visual',
-      description: 'Adicione logo ou escolha cores para deixar o cardápio com a cara da loja.',
-      auto_completed: Boolean(store.logo_url || Object.keys(store.theme_settings || {}).length)
+      key: 'store',
+      title: 'Dados da loja',
+      description: 'Nome, endereço público e WhatsApp de pedidos.',
+      auto_completed: Boolean(store.name && store.slug && store.whatsapp_number)
     },
     {
-      key: 'hours',
-      title: 'Horário de atendimento',
-      description: 'Configure quando a loja pode receber pedidos.',
+      key: 'operation',
+      title: 'Operação',
+      description: 'Defina atendimento, horários e canais de pedido.',
       auto_completed: Boolean(store.business_hours && Object.keys(store.business_hours).length)
     },
     {
-      key: 'fulfillment',
-      title: 'Entrega e retirada',
-      description: 'Defina entrega, retirada, taxa e pedido mínimo.',
-      auto_completed: store.accepts_delivery !== false || store.accepts_pickup !== false
-    },
-    {
       key: 'payments',
-      title: 'Formas de pagamento',
+      title: 'Pagamentos',
       description: 'Adicione Pix, cartão, dinheiro ou pagamento online.',
       auto_completed: Array.isArray(store.payment_methods) && store.payment_methods.length > 0
+    },
+    {
+      key: 'delivery',
+      title: 'Entrega',
+      description: 'Defina taxa, pedido mínimo e bairros atendidos.',
+      auto_completed: store.delivery_fee !== undefined && store.minimum_order !== undefined
     },
     {
       key: 'category',
@@ -2487,6 +2501,18 @@ function computeOnboardingSteps({ store, categories, items }) {
       auto_completed: Array.isArray(items) && items.length > 0
     },
     {
+      key: 'appearance',
+      title: 'Aparência',
+      description: 'Adicione logo, capa ou cores para personalizar a loja.',
+      auto_completed: Boolean(store.logo_url || store.cover_url || Object.keys(store.theme_settings || {}).length)
+    },
+    {
+      key: 'training',
+      title: 'Treinamento rápido',
+      description: 'Conheça as áreas principais do painel administrativo.',
+      auto_completed: false
+    },
+    {
       key: 'publish',
       title: 'Publicar cardápio',
       description: 'Libere a loja para receber pedidos.',
@@ -2494,7 +2520,7 @@ function computeOnboardingSteps({ store, categories, items }) {
     }
   ];
   const blockers = steps
-    .filter((step) => !['visual', 'publish'].includes(step.key) && !step.auto_completed)
+    .filter((step) => !['appearance', 'publish'].includes(step.key) && !step.auto_completed)
     .map((step) => step.title);
   return {
     steps,
@@ -2507,8 +2533,8 @@ async function createOnboardingProgress(companyId, storeId, parsed) {
   await dbRequest('POST', 'onboarding_progress', {}, {
     company_id: companyId,
     store_id: storeId,
-    current_step: 'logo',
-    completed_steps: ['account', 'business', 'slug'],
+    current_step: 'welcome',
+    completed_steps: ['welcome'],
     is_completed: false,
     metadata: {
       business_type: parsed.businessType,
@@ -2591,7 +2617,7 @@ async function updatePlatformCompany(id, data, admin) {
   if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
   if (!payload.name && 'name' in payload) throw httpError(422, 'Informe o nome da empresa.');
   const [company] = await dbRequest('PATCH', 'companies', { id: `eq.${companyId}` }, payload, ['Prefer: return=representation']);
-  if (!company) throw httpError(404, 'Empresa nao encontrada.');
+  if (!company) throw httpError(404, 'Empresa não encontrada.');
   await audit('platform.company.update', {
     company_id: company.id,
     actor_admin_id: admin.id,
@@ -2618,7 +2644,7 @@ async function changePlatformCompanyPlan(id, data, admin) {
     is_active: 'eq.true',
     limit: '1'
   });
-  if (!plan) throw httpError(404, 'Plano nao encontrado.');
+  if (!plan) throw httpError(404, 'Plano não encontrado.');
   const startsAt = new Date().toISOString();
   const endsAt = data.current_period_ends_at || new Date(Date.now() + 30 * 86400000).toISOString();
   const payload = {
@@ -2655,10 +2681,10 @@ async function updatePlatformStore(id, data, admin) {
   if ('is_active' in data) payload.is_active = Boolean(data.is_active);
   if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
   if (!payload.name && 'name' in payload) throw httpError(422, 'Informe o nome da loja.');
-  if (!payload.slug && 'slug' in payload) throw httpError(422, 'Informe um endereco publico valido.');
+  if (!payload.slug && 'slug' in payload) throw httpError(422, 'Informe um endereço público válido.');
   if (payload.slug) payload.public_url = `/${payload.slug}`;
   const [store] = await dbRequest('PATCH', 'stores', { id: `eq.${storeId}` }, payload, ['Prefer: return=representation']);
-  if (!store) throw httpError(404, 'Loja nao encontrada.');
+  if (!store) throw httpError(404, 'Loja não encontrada.');
   if (payload.name || payload.slug || payload.description) {
     await dbRequest('PATCH', 'store_settings', { store_id: `eq.${storeId}` }, {
       ...(payload.name ? { name: payload.name } : {}),
@@ -2689,14 +2715,14 @@ async function createCompanyFeatureOverride(companyId, data, admin) {
   const featureCode = cleanSlug(data.feature_code || data.code || '');
   const overrideType = cleanSlug(data.override_type || data.type || '');
   if (!featureCode) throw httpError(422, 'Informe o recurso.');
-  if (!['allow', 'block', 'limit'].includes(overrideType)) throw httpError(422, 'Informe o tipo de excecao.');
+  if (!['allow', 'block', 'limit'].includes(overrideType)) throw httpError(422, 'Informe o tipo de exceção.');
   const company = await getCompanyById(resolvedCompanyId);
   const [feature] = await dbRequest('GET', 'platform_features', {
     select: '*',
     code: `eq.${featureCode}`,
     limit: '1'
   });
-  if (!feature) throw httpError(404, 'Recurso nao encontrado.');
+  if (!feature) throw httpError(404, 'Recurso não encontrado.');
   const payload = {
     company_id: company.id,
     feature_id: feature.id,
@@ -2719,13 +2745,13 @@ async function createCompanyFeatureOverride(companyId, data, admin) {
 }
 
 async function deleteCompanyFeatureOverride(id, admin) {
-  const overrideId = cleanUuid(id, 'excecao');
+  const overrideId = cleanUuid(id, 'exceção');
   const [before] = await dbRequest('GET', 'company_feature_overrides', {
     select: '*',
     id: `eq.${overrideId}`,
     limit: '1'
   });
-  if (!before) throw httpError(404, 'Excecao nao encontrada.');
+  if (!before) throw httpError(404, 'Exceção não encontrada.');
   await dbRequest('DELETE', 'company_feature_overrides', { id: `eq.${overrideId}` }, null, ['Prefer: return=minimal']);
   await audit('platform.feature_override.delete', {
     company_id: before.company_id,
@@ -2798,7 +2824,7 @@ async function listBillingHistory(companyId) {
     select: '*',
     company_id: `eq.${resolvedCompanyId}`,
     order: 'created_at.desc',
-    limit: '5'
+    limit: '20'
   }).catch(() => []);
 }
 
@@ -2813,9 +2839,6 @@ async function createBillingCheckout(req, admin, data = {}) {
     limit: '1'
   });
   if (!plan) throw httpError(404, 'Plano não encontrado.');
-  if (!PLATFORM_BILLING_API_KEY && PLATFORM_BILLING_PROVIDER !== 'mock') {
-    throw httpError(422, 'Configure PLATFORM_BILLING_API_KEY no .env para cobrar assinaturas.');
-  }
   const [company] = await dbRequest('GET', 'companies', {
     select: '*',
     id: `eq.${companyId}`,
@@ -2823,7 +2846,18 @@ async function createBillingCheckout(req, admin, data = {}) {
   });
   if (!company) throw httpError(404, 'Empresa não encontrada.');
   const amount = moneyCents(plan.monthly_price || 0);
-  if (amount <= 0) throw httpError(422, 'Este plano não possui mensalidade configurada.');
+  if (PLATFORM_BILLING_PROVIDER === 'mock' || !PLATFORM_BILLING_API_KEY || amount <= 0) {
+    const activated = await activateCompanyPlan(req, admin, company, plan, {
+      source: amount <= 0 ? 'free_plan' : 'manual_activation',
+      provider: 'manual'
+    });
+    return {
+      ...activated,
+      checkout_url: null,
+      provider: 'manual',
+      activated: true
+    };
+  }
   const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount });
   const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
     company_id: companyId,
@@ -2841,9 +2875,14 @@ async function createBillingCheckout(req, admin, data = {}) {
     company_id: companyId,
     subscription_id: subscription.id,
     event_type: 'checkout_created',
-    provider: PLATFORM_BILLING_PROVIDER,
-    provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
-    payload: { plan_code: plan.code, checkout_url: checkout.checkoutUrl || null },
+    description: `Cobrança criada para o plano ${plan.name}.`,
+    metadata: {
+      provider: PLATFORM_BILLING_PROVIDER,
+      provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
+      plan_code: plan.code,
+      checkout_url: checkout.checkoutUrl || null,
+      amount_cents: amount
+    },
     created_by: admin.id
   }, ['Prefer: return=minimal']).catch(() => {});
   await audit('billing.checkout.create', {
@@ -2861,6 +2900,76 @@ async function createBillingCheckout(req, admin, data = {}) {
     checkout_url: checkout.checkoutUrl || null,
     provider: PLATFORM_BILLING_PROVIDER
   };
+}
+
+async function activateCompanyPlan(req, admin, company, plan, options = {}) {
+  const companyId = cleanUuid(company.id || admin.company_id, 'empresa');
+  const now = new Date();
+  const monthlyPrice = moneyCents(plan.monthly_price || 0);
+  const isTrialPlan = plan.code === 'trial' || monthlyPrice <= 0;
+  const periodDays = isTrialPlan ? Number(plan.settings?.trial_days || 14) || 14 : 30;
+  const periodEnd = new Date(now.getTime() + periodDays * 86400000);
+  const status = isTrialPlan ? 'trial' : 'active';
+  const previousSubscriptions = await listCompanySubscriptions(companyId, 100);
+  const current = previousSubscriptions.find((entry) => ['trial', 'active', 'grace_period'].includes(entry.status));
+  const isSamePlan = current?.plan_id && current.plan_id === plan.id && ['trial', 'active'].includes(current.status);
+
+  if (isSamePlan) {
+    return { subscription: current, plan, already_current: true };
+  }
+
+  await dbRequest('PATCH', 'company_subscriptions', {
+    company_id: `eq.${companyId}`,
+    status: 'in.(trial,active,payment_pending,grace_period,suspended)'
+  }, { status: 'cancelled', cancelled_at: now.toISOString() }, ['Prefer: return=minimal']).catch(() => {});
+
+  const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
+    company_id: companyId,
+    plan_id: plan.id,
+    status,
+    trial_ends_at: isTrialPlan ? periodEnd.toISOString() : null,
+    current_period_starts_at: now.toISOString(),
+    current_period_ends_at: periodEnd.toISOString(),
+    next_renewal_at: periodEnd.toISOString(),
+    billing_provider: options.provider || 'manual',
+    last_payment_at: isTrialPlan ? null : now.toISOString(),
+    metadata: {
+      source: options.source || 'manual_activation',
+      activated_by: admin.id,
+      amount_cents: monthlyPrice
+    }
+  }, ['Prefer: return=representation']);
+
+  await dbRequest('PATCH', 'companies', { id: `eq.${companyId}` }, {
+    status: isTrialPlan ? 'trial' : 'active'
+  }, ['Prefer: return=minimal']).catch(() => {});
+
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: companyId,
+    subscription_id: subscription.id,
+    event_type: current ? 'plan_changed' : 'plan_activated',
+    description: `${current ? 'Plano alterado' : 'Plano ativado'} para ${plan.name}.`,
+    metadata: {
+      provider: options.provider || 'manual',
+      plan_code: plan.code,
+      plan_name: plan.name,
+      previous_subscription_id: current?.id || null,
+      amount_cents: monthlyPrice
+    },
+    created_by: admin.id
+  }, ['Prefer: return=minimal']).catch(() => {});
+
+  await audit('billing.plan.activate', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId,
+    store_id: admin.store_id,
+    entity_type: 'company_subscription',
+    entity_id: subscription.id,
+    after_data: { plan_code: plan.code, status, provider: options.provider || 'manual' }
+  });
+
+  return { subscription, plan };
 }
 
 async function createProviderSubscriptionCheckout({ company, plan, admin, amount }) {
@@ -2927,14 +3036,6 @@ async function receiveBillingWebhook(data, options = {}) {
 
   const [subscription] = await dbRequest('GET', 'company_subscriptions', query);
   if (!subscription) throw httpError(404, 'Assinatura não encontrada.');
-  const [existingEvent] = await dbRequest('GET', 'subscription_events', {
-    select: 'id',
-    provider: `eq.${provider}`,
-    provider_event_id: `eq.${eventId}`,
-    limit: '1'
-  }).catch(() => []);
-  if (existingEvent) return { ok: true, duplicate: true };
-
   let planId = subscription.plan_id;
   if (planCode) {
     const [plan] = await dbRequest('GET', 'subscription_plans', { select: 'id', code: `eq.${planCode}`, limit: '1' });
@@ -2966,9 +3067,13 @@ async function receiveBillingWebhook(data, options = {}) {
     company_id: subscription.company_id,
     subscription_id: subscription.id,
     event_type: `billing.${status}`,
-    provider,
-    provider_event_id: eventId,
-    payload: data
+    description: `Evento de cobrança recebido: ${status}.`,
+    metadata: {
+      provider,
+      provider_event_id: eventId,
+      plan_code: planCode || null,
+      payload: data
+    }
   }, ['Prefer: return=minimal']);
   return { ok: true, subscription: updated };
 }
@@ -2992,21 +3097,21 @@ async function companyCommercialStatus(companyId) {
   const subscription = pickCurrentCompanySubscription(subscriptions);
   const status = subscription?.status || company?.status || 'unknown';
   if (!company || ['suspended', 'cancelled', 'archived'].includes(company.status)) {
-    return { canOperate: false, status: company?.status || 'missing', message: 'Empresa sem permissao comercial para operar.' };
+    return { canOperate: false, status: company?.status || 'missing', message: 'Empresa sem permissão comercial para operar.' };
   }
   if (['suspended', 'cancelled', 'expired'].includes(status)) {
-    return { canOperate: false, status, message: 'Plano indisponivel para operacao. Regularize ou reative a empresa.' };
+    return { canOperate: false, status, message: 'Plano indisponível para operação. Regularize ou reative a empresa.' };
   }
   if (status === 'trial' && subscription?.trial_ends_at && new Date(subscription.trial_ends_at).getTime() < Date.now()) {
-    return { canOperate: false, status: 'trial_expired', message: 'Periodo de teste encerrado. Ative um plano para continuar operando.' };
+    return { canOperate: false, status: 'trial_expired', message: 'Período de teste encerrado. Ative um plano para continuar operando.' };
   }
   if (['payment_pending', 'past_due'].includes(status)) {
-    return { canOperate: false, status, message: 'Pagamento pendente. A operacao esta temporariamente bloqueada.' };
+    return { canOperate: false, status, message: 'Pagamento pendente. A operação está temporariamente bloqueada.' };
   }
   if (status === 'grace_period') {
     const due = subscription?.payment_due_at || subscription?.current_period_ends_at;
     if (due && new Date(due).getTime() < Date.now()) {
-      return { canOperate: false, status: 'grace_period_expired', message: 'Prazo de regularizacao encerrado.' };
+      return { canOperate: false, status: 'grace_period_expired', message: 'Prazo de regularização encerrado.' };
     }
   }
   return { canOperate: true, status, message: '' };
@@ -3056,7 +3161,7 @@ async function companyUsageSnapshot(companyId, storeId) {
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
   const countRows = async (table, extra = {}) => {
-    const storeScopedTables = ['orders', 'menu_items', 'customers', 'dining_tables', 'customer_tabs', 'order_print_logs', 'order_whatsapp_logs', 'order_payment_events'];
+    const storeScopedTables = ['orders', 'menu_categories', 'menu_items', 'customers', 'dining_tables', 'customer_tabs', 'order_print_logs', 'order_whatsapp_logs', 'order_payment_events'];
     if (!scopedFilter && storeScopedTables.includes(table)) return 0;
     const rows = await dbRequest('GET', table, {
       select: 'id',
@@ -3066,13 +3171,14 @@ async function companyUsageSnapshot(companyId, storeId) {
     }).catch(() => []);
     return rows.length;
   };
-  const [users, products, orders, ordersMonth, customers, tables, tabs, whatsappMessages] = await Promise.all([
+  const [users, categories, products, orders, ordersMonth, customers, tables, tabs, whatsappMessages] = await Promise.all([
     resolvedCompanyId ? dbRequest('GET', 'admin_user_store_access', {
       select: 'admin_user_id',
       company_id: `eq.${resolvedCompanyId}`,
       is_active: 'eq.true',
       limit: '1000'
     }).then((rows) => new Set(rows.map((row) => row.admin_user_id)).size).catch(() => 0) : 0,
+    countRows('menu_categories'),
     countRows('menu_items'),
     countRows('orders'),
     countRows('orders', { created_at: `gte.${monthStart.toISOString()}` }),
@@ -3084,6 +3190,7 @@ async function companyUsageSnapshot(companyId, storeId) {
   return {
     stores: stores.length,
     users,
+    categories,
     products,
     orders,
     orders_month: ordersMonth,
@@ -3140,7 +3247,7 @@ async function listStoreDomains(storeId) {
 async function createStoreDomain(data, admin) {
   await assertCompanyUsageLimit(admin, 'custom_domain', 'custom_domains');
   const domain = normalizeDomain(data.domain || '');
-  if (!isValidDomain(domain)) throw httpError(422, 'Informe um dominio valido.');
+  if (!isValidDomain(domain)) throw httpError(422, 'Informe um domínio válido.');
   const [created] = await dbRequest('POST', 'store_domains', {}, {
     store_id: admin.store_id,
     domain,
@@ -3160,14 +3267,14 @@ async function createStoreDomain(data, admin) {
 }
 
 async function verifyStoreDomain(id, admin) {
-  const domainId = cleanUuid(id, 'dominio');
+  const domainId = cleanUuid(id, 'domínio');
   const [domain] = await dbRequest('GET', 'store_domains', {
     select: '*',
     id: `eq.${domainId}`,
     store_id: `eq.${admin.store_id}`,
     limit: '1'
   });
-  if (!domain) throw httpError(404, 'Dominio nao encontrado nesta loja.');
+  if (!domain) throw httpError(404, 'Domínio não encontrado nesta loja.');
   const [updated] = await dbRequest('PATCH', 'store_domains', { id: `eq.${domain.id}` }, {
     status: 'verified',
     verified_at: new Date().toISOString()
@@ -3184,14 +3291,14 @@ async function verifyStoreDomain(id, admin) {
 }
 
 async function deleteStoreDomain(id, admin) {
-  const domainId = cleanUuid(id, 'dominio');
+  const domainId = cleanUuid(id, 'domínio');
   const [domain] = await dbRequest('GET', 'store_domains', {
     select: '*',
     id: `eq.${domainId}`,
     store_id: `eq.${admin.store_id}`,
     limit: '1'
   });
-  if (!domain) throw httpError(404, 'Dominio nao encontrado nesta loja.');
+  if (!domain) throw httpError(404, 'Domínio não encontrado nesta loja.');
   await dbRequest('DELETE', 'store_domains', { id: `eq.${domain.id}` }, undefined, ['Prefer: return=minimal']);
   await audit('store_domain.delete', {
     company_id: admin.company_id,
@@ -3211,7 +3318,7 @@ async function getCompanyById(id) {
     id: `eq.${companyId}`,
     limit: '1'
   });
-  if (!company) throw httpError(404, 'Empresa nao encontrada.');
+  if (!company) throw httpError(404, 'Empresa não encontrada.');
   return company;
 }
 
@@ -3222,14 +3329,14 @@ async function getStoreById(id) {
     id: `eq.${storeId}`,
     limit: '1'
   });
-  if (!store) throw httpError(404, 'Loja nao encontrada.');
+  if (!store) throw httpError(404, 'Loja não encontrada.');
   return store;
 }
 
 function sanitizeCompanyStatus(status) {
   const value = cleanSlug(status || '');
   if (['onboarding', 'active', 'trial', 'payment_pending', 'grace_period', 'past_due', 'suspended', 'cancelled', 'archived'].includes(value)) return value;
-  throw httpError(422, 'Status da empresa invalido.');
+  throw httpError(422, 'Status da empresa inválido.');
 }
 
 function sanitizeSubscriptionStatus(status) {
@@ -3355,13 +3462,15 @@ async function enrichAdminSessionData(admin) {
   const access = await getAdminStoreAccess(admin);
   const selectedAccess = access.find((entry) => entry.store_id === admin.store_id) || access[0] || null;
   const activeStore = selectedAccess?.store || null;
+  const companyId = activeStore?.company_id || admin.company_id || selectedAccess?.company_id || null;
   return {
     ...admin,
     session_version: 2,
-    company_id: activeStore?.company_id || admin.company_id || selectedAccess?.company_id || null,
+    company_id: companyId,
     store_id: activeStore?.id || null,
     active_store: activeStore ? publicStoreRef(activeStore) : null,
-    stores: access.map((entry) => publicStoreRef(entry.store)).filter(Boolean)
+    stores: access.map((entry) => publicStoreRef(entry.store)).filter(Boolean),
+    plan_access: companyId ? await getCompanyPlanAccess(companyId) : {}
   };
 }
 
@@ -3374,13 +3483,13 @@ async function requireAdminPermission(req, res, permission) {
   }
   if (!['account', 'plan', 'platform'].includes(permission)) {
     if (!admin.store_id) {
-      json(res, 403, { error: 'Sua conta nao possui uma loja ativa vinculada.' });
+      json(res, 403, { error: 'Sua conta não possui uma loja ativa vinculada.' });
       return null;
     }
     const access = await getAdminStoreAccess(admin);
     const activeAccess = access.find((entry) => entry.store_id === admin.store_id);
     if (!activeAccess) {
-      json(res, 403, { error: 'Sua sessao nao possui acesso ativo a esta loja. Entre novamente.' });
+      json(res, 403, { error: 'Sua sessão não possui acesso ativo a esta loja. Entre novamente.' });
       return null;
     }
     admin.company_id = activeAccess.company_id;
@@ -3395,8 +3504,8 @@ async function requireAdminPermission(req, res, permission) {
     }
   }
   const featureCode = featureForPermission(permission);
-  if (featureCode && !(await companyCanUseFeature(admin.company_id, featureCode))) {
-    json(res, 402, { error: featureBlockedMessage(featureCode) });
+  if (featureCode && !(await canUseFeature(admin.company_id, featureCode))) {
+    json(res, 403, planErrorPayload('FEATURE_NOT_AVAILABLE', featureBlockedMessage(featureCode), { feature: featureCode }));
     return null;
   }
   return admin;
@@ -3406,7 +3515,7 @@ async function requirePlatformAdmin(req, res) {
   const admin = await requireAdmin(req, res);
   if (!admin) return null;
   if (!isPlatformAdmin(admin)) {
-    json(res, 403, { error: 'Sua conta nao tem acesso ao painel da plataforma.' });
+    json(res, 403, { error: 'Sua conta não tem acesso ao painel da plataforma.' });
     return null;
   }
   return admin;
@@ -3444,6 +3553,24 @@ function featureForPermission(permission) {
   })[permission] || null;
 }
 
+function adminPlanFeatureCodes() {
+  return [
+    'orders',
+    'digital_menu',
+    'menu_categories',
+    'basic_reports',
+    'tables',
+    'promotions',
+    'customers',
+    'store_settings',
+    'admin_users',
+    'manual_whatsapp',
+    'automatic_whatsapp',
+    'print_kitchen',
+    'custom_domain'
+  ];
+}
+
 function featureBlockedMessage(featureCode) {
   return ({
     tables: 'Mesas e comandas não estão disponíveis no plano atual.',
@@ -3451,14 +3578,51 @@ function featureBlockedMessage(featureCode) {
     customers: 'Clientes não estão disponíveis no plano atual.',
     basic_reports: 'Relatórios não estão disponíveis no plano atual.',
     digital_menu: 'Cardápio não está disponível no plano atual.',
+    menu_categories: 'Novas categorias não estão disponíveis no plano atual.',
     orders: 'Pedidos não estão disponíveis no plano atual.',
-    store_settings: 'Configurações da loja não estão disponíveis no plano atual.'
+    store_settings: 'Configurações da loja não estão disponíveis no plano atual.',
+    admin_users: 'Usuários da equipe não estão disponíveis no plano atual.',
+    manual_whatsapp: 'WhatsApp manual não está disponível no plano atual.',
+    automatic_whatsapp: 'Automação de WhatsApp não está disponível no plano atual.',
+    print_kitchen: 'Impressão e cozinha não estão disponíveis no plano atual.',
+    custom_domain: 'Domínio personalizado não está disponível no plano atual.'
   })[featureCode] || 'Recurso não disponível no plano atual.';
 }
 
-async function companyCanUseFeature(companyId, featureCode) {
+async function getCurrentPlan(companyId) {
+  const subscription = await getCurrentSubscription(companyId);
+  if (!subscription?.plan_id) return { subscription, plan: null };
+  const [plan] = await dbRequest('GET', 'subscription_plans', {
+    select: '*',
+    id: `eq.${subscription.plan_id}`,
+    limit: '1'
+  }).catch(() => []);
+  return { subscription, plan: plan || null };
+}
+
+async function canUseFeature(companyId, featureCode) {
   const access = await getCompanyFeatureAccess(companyId, featureCode);
   return access.enabled;
+}
+
+async function companyCanUseFeature(companyId, featureCode) {
+  return canUseFeature(companyId, featureCode);
+}
+
+async function assertFeatureEnabled(companyId, featureCode) {
+  const access = await getCompanyFeatureAccess(companyId, featureCode);
+  if (!access.enabled) {
+    throw httpError(403, featureBlockedMessage(featureCode), planErrorPayload('FEATURE_NOT_AVAILABLE', featureBlockedMessage(featureCode), { feature: featureCode, source: access.source }));
+  }
+  return access;
+}
+
+async function assertPlanLimit(admin, featureCode, usageKey, nextAmount = 1) {
+  return assertCompanyUsageLimit(admin, featureCode, usageKey, nextAmount);
+}
+
+function planErrorPayload(code, message, extra = {}) {
+  return { code, error_code: code, message, ...extra };
 }
 
 async function getCompanyFeatureAccess(companyId, featureCode) {
@@ -3492,12 +3656,7 @@ async function getCompanyFeatureAccess(companyId, featureCode) {
   if (activeOverride?.override_type === 'limit') {
     return { enabled: true, limit_value: activeOverride.limit_value, source: 'override' };
   }
-  const [subscription] = await dbRequest('GET', 'company_subscriptions', {
-    select: 'id,status,plan_id',
-    company_id: `eq.${resolvedCompanyId}`,
-    order: 'created_at.desc',
-    limit: '1'
-  }).catch(() => []);
+  const subscription = await getCurrentSubscription(resolvedCompanyId);
   if (!subscription || ['cancelled', 'expired', 'suspended'].includes(subscription.status)) {
     return { enabled: false, limit_value: null, source: 'subscription' };
   }
@@ -3514,15 +3673,34 @@ async function getCompanyFeatureAccess(companyId, featureCode) {
   };
 }
 
+async function getCompanyPlanAccess(companyId) {
+  const entries = await Promise.all(adminPlanFeatureCodes().map(async (featureCode) => {
+    const access = await getCompanyFeatureAccess(companyId, featureCode).catch(() => ({ enabled: true, limit_value: null, source: 'error' }));
+    return [featureCode, access];
+  }));
+  return Object.fromEntries(entries);
+}
+
+async function getCurrentSubscription(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  if (!resolvedCompanyId) return null;
+  const subscriptions = await listCompanySubscriptions(resolvedCompanyId, 100);
+  return pickCurrentCompanySubscription(subscriptions);
+}
+
 async function assertCompanyUsageLimit(admin, featureCode, usageKey, nextAmount = 1) {
   if (!admin?.company_id) return;
   const access = await getCompanyFeatureAccess(admin.company_id, featureCode);
-  if (!access.enabled) throw httpError(402, featureBlockedMessage(featureCode));
+  if (!access.enabled) {
+    const message = featureBlockedMessage(featureCode);
+    throw httpError(403, message, planErrorPayload('FEATURE_NOT_AVAILABLE', message, { feature: featureCode, usage_key: usageKey, source: access.source }));
+  }
   const limit = Number(access.limit_value);
   if (!Number.isFinite(limit) || limit <= 0) return;
   const used = await currentUsageForKey(admin, usageKey);
   if (used + nextAmount > limit) {
-    throw httpError(402, `Limite do plano atingido para ${usageLabel(usageKey)}. Uso atual: ${used}/${limit}.`);
+    const message = `Limite do plano atingido para ${usageLabel(usageKey)}. Uso atual: ${used}/${limit}.`;
+    throw httpError(403, message, planErrorPayload('PLAN_LIMIT_REACHED', message, { feature: featureCode, usage_key: usageKey, used, limit, next_amount: nextAmount }));
   }
 }
 
@@ -3554,6 +3732,7 @@ async function currentUsageForKey(admin, usageKey) {
     }).catch(() => [])).length;
   }
   const tableByUsage = {
+    menu_categories: 'menu_categories',
     menu_items: 'menu_items',
     dining_tables: 'dining_tables',
     promotions: 'promotions',
@@ -3673,10 +3852,11 @@ async function recordUsageEvent(data) {
 function usageLabel(usageKey) {
   return ({
     stores: 'lojas',
-    admin_users: 'usuarios',
+    admin_users: 'usuários',
+    menu_categories: 'categorias',
     menu_items: 'produtos',
     dining_tables: 'mesas',
-    promotions: 'promocoes',
+    promotions: 'promoções',
     customers: 'clientes'
   })[usageKey] || usageKey;
 }
@@ -3700,7 +3880,7 @@ async function registerCustomer(data, storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId) || (await getDefaultStore())?.id || null;
   if (data.accept_terms !== true && data.acceptTerms !== true) {
-    throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Politica de Privacidade para continuar.');
+    throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Política de Privacidade para continuar.');
   }
   const customer = sanitizeCustomer(data.customer || data);
   const password = validatePassword(data.password);
@@ -3903,7 +4083,7 @@ async function updateCustomerProfile(customerId, data, storeId = null, options =
     id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Cliente nao encontrado nesta loja.');
+  if (!updated) throw httpError(404, 'Cliente não encontrado nesta loja.');
   clearSessionCacheByOwner('customer', customerId);
   if (data.address?.street) {
     await upsertAddress(customerId, sanitizeAddress(data.address), updated.store_id, options);
@@ -3933,7 +4113,7 @@ async function updateCustomerByAdmin(customerId, data, storeId = null, options =
     id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Cliente nao encontrado nesta loja.');
+  if (!updated) throw httpError(404, 'Cliente não encontrado nesta loja.');
   clearSessionCacheByOwner('customer', customerId);
   return getCustomerProfile(customerId, resolvedStoreId, options);
 }
@@ -3979,7 +4159,7 @@ async function updateCustomerAddressByAdmin(customerId, addressId, data, storeId
     customer_id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
-  if (!updated) throw httpError(404, 'Endereco nao encontrado nesta loja.');
+  if (!updated) throw httpError(404, 'Endereço não encontrado nesta loja.');
   return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
@@ -4026,7 +4206,7 @@ async function assertCustomerBelongsToStore(customerId, storeId = null, options 
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     limit: '1'
   });
-  if (!customer) throw httpError(404, 'Cliente nao encontrado nesta loja.');
+  if (!customer) throw httpError(404, 'Cliente não encontrado nesta loja.');
   return customer;
 }
 
@@ -4040,7 +4220,7 @@ async function resolvePublicStore(req, url) {
     ''
   );
   const store = hostStore || (slug ? await getStoreBySlug(slug) : await getDefaultStore());
-  if (!store) throw httpError(404, 'Loja nao encontrada.');
+  if (!store) throw httpError(404, 'Loja não encontrada.');
   return { store };
 }
 
@@ -4131,7 +4311,7 @@ async function ensureDefaultStoreStructure() {
     company_id: company.id,
     name: 'LSK Burguer',
     slug: DEFAULT_STORE_SLUG,
-    description: 'Cardapio digital da LSK Burguer.',
+    description: 'Cardápio digital da LSK Burguer.',
     public_url: `/${DEFAULT_STORE_SLUG}`,
     is_active: true
   }, ['Prefer: return=representation']).catch(async () => {
@@ -4170,7 +4350,7 @@ async function ensureDefaultStoreContent(store) {
       store_id: store.id,
       name: store.name || 'LSK Burguer',
       slug: store.slug || DEFAULT_STORE_SLUG,
-      description: store.description || 'Cardapio digital de demonstracao.',
+      description: store.description || 'Cardápio digital de demonstração.',
       is_open: true,
       accepts_delivery: true,
       accepts_pickup: true,
@@ -4403,13 +4583,13 @@ async function updateStoreSettings(data, storeId, options = {}) {
   const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const payload = sanitizeStore(data);
   const nextSlug = cleanSlug(payload.slug || current.slug || payload.name || '');
-  if (!nextSlug) throw httpError(422, 'Informe o caminho publico da loja.');
+  if (!nextSlug) throw httpError(422, 'Informe o caminho público da loja.');
   if (reservedPublicSlugs().has(nextSlug)) {
-    throw httpError(422, 'Este caminho publico e reservado. Escolha outro.');
+    throw httpError(422, 'Este caminho público é reservado. Escolha outro.');
   }
   const existingStore = await getStoreBySlug(nextSlug);
   if (existingStore && existingStore.id !== resolvedStoreId) {
-    throw httpError(409, 'Este caminho publico ja esta sendo usado por outra loja.');
+    throw httpError(409, 'Este caminho público já está sendo usado por outra loja.');
   }
   payload.slug = nextSlug;
 
@@ -5210,8 +5390,8 @@ function rateLimitRule(method, pathname) {
   if (method === 'POST' && pathname === '/api/customer/reset-password') return limitRule('customer-reset', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/portal/recover-password') return limitRule('admin-recover', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/orders') return limitRule('order-create', 20, 10 * 60 * 1000);
-  if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 60 * 60 * 1000);
-  if (method === 'POST' && pathname === '/api/portal/signup') return limitRule('portal-signup', 5, 60 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 120 * 1000);
+  if (method === 'POST' && pathname === '/api/portal/signup') return limitRule('portal-signup', 5, 120 * 1000);
   if (method === 'POST' && pathname === '/api/admin/uploads') return limitRule('admin-upload', 30, 10 * 60 * 1000);
   return null;
 }
@@ -5693,7 +5873,7 @@ async function updatePaymentTransactionIndexStatus(index, status, amount) {
     financial_status: sanitizeFinancialStatus(status),
     amount: roundMoney(Number.parseFloat(amount || index.amount || 0) || 0)
   }, ['Prefer: return=minimal']).catch((error) => {
-    console.warn('Falha ao atualizar indice de pagamento:', error.message || error);
+    console.warn('Falha ao atualizar índice de pagamento:', error.message || error);
   });
 }
 
@@ -6427,7 +6607,7 @@ async function resolveDiningTable(code, storeId, options = {}) {
 async function createDiningTable(data, storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId);
-  if (!resolvedStoreId) throw httpError(422, 'Loja ativa nao encontrada.');
+  if (!resolvedStoreId) throw httpError(422, 'Loja ativa não encontrada.');
   const payload = sanitizeDiningTable(data, true);
   const basePayload = {
     ...payload,
@@ -6444,11 +6624,11 @@ async function createDiningTable(data, storeId, options = {}) {
       return table;
     } catch (error) {
       if (!isUniqueViolation(error) || payload.code || attempt === 4) {
-        throw httpError(409, 'Ja existe uma mesa com este codigo nesta loja.', error.detail || error);
+        throw httpError(409, 'Já existe uma mesa com este código nesta loja.', error.detail || error);
       }
     }
   }
-  throw httpError(409, 'Nao foi possivel gerar um codigo unico para a mesa. Tente novamente.');
+  throw httpError(409, 'Não foi possível gerar um código único para a mesa. Tente novamente.');
 }
 
 async function nextDiningTableCode(storeId, options = {}) {
@@ -6822,7 +7002,7 @@ async function assertOrderBelongsToStore(orderId, storeId, options = {}) {
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     limit: '1'
   });
-  if (!order) throw httpError(404, 'Pedido nao encontrado nesta loja.');
+  if (!order) throw httpError(404, 'Pedido não encontrado nesta loja.');
   return order;
 }
 
@@ -7357,12 +7537,12 @@ async function uploadImage(data) {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer.length > 5 * 1024 * 1024) throw httpError(422, 'Imagem muito grande. Limite de 5 MB.');
   if (detectImageContentType(buffer) !== contentType) {
-    throw httpError(422, 'O conteudo do arquivo nao corresponde ao tipo de imagem informado.');
+    throw httpError(422, 'O conteúdo do arquivo não corresponde ao tipo de imagem informado.');
   }
 
   const objectPath = `${folder}/${Date.now()}-${randomBytes(6).toString('hex')}-${fileName}`;
   const fullPath = path.join(UPLOAD_DIR, objectPath);
-  if (!fullPath.startsWith(UPLOAD_DIR)) throw httpError(400, 'Caminho de upload invalido.');
+  if (!fullPath.startsWith(UPLOAD_DIR)) throw httpError(400, 'Caminho de upload inválido.');
   await mkdir(path.dirname(fullPath), { recursive: true });
   await writeFile(fullPath, buffer, { flag: 'wx' });
 
@@ -7423,7 +7603,7 @@ async function serveUpload(res, requestPath) {
   const relative = decodeURIComponent(requestPath.replace(/^\/uploads\//, ''));
   const filePath = path.normalize(path.join(UPLOAD_DIR, relative));
   if (!filePath.startsWith(UPLOAD_DIR) || !existsSync(filePath)) {
-    json(res, 404, { error: 'Arquivo nao encontrado.' });
+    json(res, 404, { error: 'Arquivo não encontrado.' });
     return;
   }
   await sendFile(res, filePath);
@@ -7438,7 +7618,7 @@ function routePath(requestPath) {
   if (requestPath === '/privacidade') return '/privacy.html';
   if (requestPath === '/entrar') return '/login.html';
   if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
-  if (requestPath === '/onboarding') return '/onboarding.html';
+  if (requestPath === '/onboarding') return '/admin.html';
   if (requestPath === '/convite') return '/invite.html';
   if (requestPath === '/admin') return '/admin.html';
   if (requestPath === '/platform') return '/platform.html';
@@ -7995,6 +8175,7 @@ function publicAdmin(admin) {
     store_id: admin.store_id || admin.active_store?.id || null,
     active_store: admin.active_store || null,
     stores: Array.isArray(admin.stores) ? admin.stores : [],
+    plan_access: admin.plan_access || {},
     is_active: admin.is_active !== false,
     last_login_at: admin.last_login_at || null,
     created_at: admin.created_at || null
