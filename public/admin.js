@@ -2176,12 +2176,13 @@ function orderCard(order) {
 function orderItemHtml(item) {
   const name = escapeHtml(item.item_snapshot?.name || 'Item');
   const modifiers = item.item_snapshot?.modifiers || [];
+  const modifiersLine = orderItemAddonsText(modifiers);
   const notes = item.notes ? `<small>Obs: ${escapeHtml(item.notes)}</small>` : '';
   return `
     <span>
       <strong>${Number(item.quantity || 0)}x ${name}</strong>
       <small>${money(item.total)}</small>
-      ${modifiers.length ? `<small>${modifiers.map(modifierText).map(escapeHtml).join(', ')}</small>` : ''}
+      ${modifiersLine ? `<small>Adicionais: ${escapeHtml(modifiersLine)}</small>` : ''}
       ${notes}
     </span>
   `;
@@ -2239,6 +2240,15 @@ function modifierText(modifier) {
   const delta = Number(modifier.price_delta || 0);
   const group = modifier.group_name ? `${modifier.group_name}: ` : '';
   return `${group}${modifier.name}${delta > 0 ? ` (+ ${money(delta)})` : ''}`;
+}
+
+function orderItemAddonsText(modifiers = []) {
+  return modifiers
+    .map((modifier) => {
+      const delta = Number(modifier.price_delta || 0);
+      return `${modifier.name || 'Adicional'}${delta > 0 ? ` (+ ${money(delta)})` : ''}`;
+    })
+    .join(', ');
 }
 
 function orderOriginLabel(order) {
