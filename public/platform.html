@@ -1,10 +1,10 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Plataforma - Cardápio</title>
-    <link rel="stylesheet" href="/styles.css?v=20260708-qa-flow">
+    <link rel="stylesheet" href="/styles.css?v=20260709-platform-clarity">
   </head>
   <body class="admin-page platform-page">
     <main class="platform-shell">
@@ -27,25 +27,134 @@
       </section>
 
       <section id="platformContent" hidden>
+        <section class="panel platform-health-panel">
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Saúde operacional</p>
+              <h2>Status da plataforma</h2>
+              <p class="muted">Visão central de API, banco, billing, webhooks, backup, storage, configurações críticas e alertas.</p>
+            </div>
+            <div class="row-actions">
+              <select class="compact-date" id="healthPeriodSelect">
+                <option value="24h">Últimas 24h</option>
+                <option value="7d">7 dias</option>
+                <option value="30d">30 dias</option>
+              </select>
+              <button class="ghost-button compact" id="refreshHealthButton" type="button">Atualizar saúde</button>
+            </div>
+          </div>
+          <div class="platform-health-meta" id="healthMeta">Carregando status operacional...</div>
+          <section class="platform-status-grid" id="platformStatusGrid"></section>
+          <section class="platform-health-grid">
+            <article>
+              <h3>Métricas de latência</h3>
+              <div class="platform-metric-list" id="platformMetrics"></div>
+            </article>
+            <article>
+              <h3>Checklist operacional</h3>
+              <div class="platform-checklist" id="platformConfigChecklist"></div>
+            </article>
+          </section>
+          <section class="platform-health-grid">
+            <article>
+              <h3>Alertas e recomendações</h3>
+              <div class="platform-alert-list" id="platformAlerts"></div>
+            </article>
+            <article>
+              <div class="section-actions compact-section-actions">
+                <h3>Logs operacionais</h3>
+                <div class="row-actions">
+                  <select class="compact-date" id="operationalLogTypeFilter">
+                    <option value="">Todos</option>
+                    <option value="webhook">Webhooks</option>
+                    <option value="backup">Backups</option>
+                    <option value="billing">Billing</option>
+                    <option value="deploy">Deploy/migration</option>
+                    <option value="integration">Integrações</option>
+                    <option value="system">Sistema</option>
+                  </select>
+                  <select class="compact-date" id="operationalLogStatusFilter">
+                    <option value="">Todos status</option>
+                    <option value="failed">Falha</option>
+                    <option value="attention">Atenção</option>
+                    <option value="info">Info</option>
+                  </select>
+                </div>
+              </div>
+              <div class="platform-log-list" id="platformOperationalLogs"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="platform-context-strip">
+          <article class="platform-explain-card">
+            <strong>Empresas</strong>
+            <p>Representam o cliente contratante do SaaS. Aqui ficam plano, cobrança, status comercial e permissões.</p>
+          </article>
+          <article class="platform-explain-card">
+            <strong>Lojas</strong>
+            <p>São os cardápios públicos de uma empresa. Uma empresa pode ter uma ou mais lojas/unidades.</p>
+          </article>
+          <article class="platform-explain-card">
+            <strong>Auditoria e backup</strong>
+            <p>Servem para suporte interno: investigar eventos, conferir rotina de banco e acompanhar operação.</p>
+          </article>
+        </section>
+
         <div class="management-grid platform-management-grid">
           <form class="panel stack-form" id="companyForm">
-            <p class="eyebrow">Nova empresa</p>
-            <h2>Criar empresa</h2>
-            <input name="name" required placeholder="Nome da empresa">
-            <input name="billing_email" type="email" placeholder="E-mail financeiro">
-            <input name="phone" inputmode="tel" placeholder="Telefone">
-            <select name="plan_code" id="companyPlanSelect"></select>
+            <p class="eyebrow">Uso interno</p>
+            <h2>Cadastrar cliente manualmente</h2>
+            <p class="muted">Cria uma conta de empresa no SaaS sem passar pelo fluxo público de cadastro. Use para suporte, implantação assistida ou clientes cadastrados pela equipe comercial.</p>
+            <div class="platform-help-box">
+              <strong>Quando usar?</strong>
+              <span>Somente quando você, Admin Master, precisar criar o cliente por ele. Se o cliente se cadastrou em /cadastro, esta etapa não é necessária.</span>
+            </div>
+            <label class="platform-field">
+              <span>Nome do cliente/empresa</span>
+              <input name="name" required placeholder="Ex: Hamburgueria Central LTDA">
+            </label>
+            <label class="platform-field">
+              <span>E-mail financeiro</span>
+              <input name="billing_email" type="email" placeholder="financeiro@empresa.com.br">
+            </label>
+            <label class="platform-field">
+              <span>Telefone</span>
+              <input name="phone" inputmode="tel" placeholder="(11) 99999-9999">
+            </label>
+            <label class="platform-field">
+              <span>Plano inicial</span>
+              <select name="plan_code" id="companyPlanSelect"></select>
+            </label>
             <button class="primary-button">Criar empresa</button>
           </form>
 
           <form class="panel stack-form" id="storeForm">
-            <p class="eyebrow">Nova loja</p>
-            <h2>Criar loja</h2>
-            <select name="company_id" id="storeCompanySelect" required></select>
-            <input name="name" required placeholder="Nome da loja">
-            <input name="slug" placeholder="Slug público. Ex: lsk-burguer">
-            <input name="whatsapp_number" inputmode="tel" placeholder="WhatsApp">
-            <button class="primary-button">Criar loja</button>
+            <p class="eyebrow">Cardápio do cliente</p>
+            <h2>Criar cardápio ou unidade</h2>
+            <p class="muted">Cria o endereço público do cardápio para uma empresa já cadastrada. Uma mesma empresa pode ter várias lojas/unidades.</p>
+            <div class="platform-help-box">
+              <strong>Exemplo prático</strong>
+              <span>Empresa: “Central Burger”. Loja/cardápio: “Central Burger Centro” com link público /central-burger-centro.</span>
+            </div>
+            <label class="platform-field">
+              <span>Empresa dona da loja</span>
+              <select name="company_id" id="storeCompanySelect" required></select>
+            </label>
+            <label class="platform-field">
+              <span>Nome da loja</span>
+              <input name="name" required placeholder="Ex: Central Burger - Unidade Centro">
+            </label>
+            <label class="platform-field">
+              <span>Endereço público</span>
+              <input name="slug" placeholder="Ex: central-burger">
+              <small>Esse texto vira o link público: /central-burger.</small>
+            </label>
+            <label class="platform-field">
+              <span>WhatsApp da loja</span>
+              <input name="whatsapp_number" inputmode="tel" placeholder="5511999999999">
+            </label>
+            <button class="primary-button">Criar cardápio</button>
           </form>
         </div>
 
@@ -53,7 +162,8 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Empresas</p>
-              <h2>Gestao comercial</h2>
+              <h2>Gestão comercial</h2>
+              <p class="muted">Altere status, plano atual, lojas vinculadas e exceções de recursos por cliente.</p>
             </div>
             <button class="ghost-button compact" id="refreshPlatformButton" type="button">Atualizar</button>
           </div>
@@ -65,6 +175,7 @@
             <div>
               <p class="eyebrow">Auditoria</p>
               <h2>Eventos recentes</h2>
+              <p class="muted">Histórico interno para suporte: alterações, eventos sensíveis, billing, webhooks e integrações.</p>
             </div>
           </div>
           <form class="platform-audit-filters" id="auditFilterForm">
@@ -74,16 +185,28 @@
             <select name="store_id" id="auditStoreSelect">
               <option value="">Todas lojas</option>
             </select>
-            <input name="action" placeholder="Acao. Ex: order.status.update">
+            <input name="action" placeholder="Ação. Ex: order.status.update">
             <input name="from" type="date">
             <input name="to" type="date">
             <button class="ghost-button compact">Filtrar</button>
           </form>
           <div class="audit-list" id="auditList"></div>
         </section>
+
+        <section class="panel">
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Backups</p>
+              <h2>Banco de dados</h2>
+              <p class="muted">Status da rotina diária sem expor credenciais ou dados sensíveis.</p>
+            </div>
+          </div>
+          <div class="backup-status-grid" id="backupStatus"></div>
+        </section>
       </section>
     </main>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260708-accents"></script>
+    <script src="/platform.js?v=20260709-platform-clarity"></script>
   </body>
 </html>
+

@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   admin: null,
   store: null,
   categories: [],
@@ -13,11 +13,16 @@ const state = {
   knownOrderIds: new Set(),
   initialOrdersLoaded: false,
   orderPollTimer: null,
+  ordersRefreshing: false,
   soundEnabled: localStorage.getItem('adminSoundEnabled') === 'true',
   kitchenMode: localStorage.getItem('adminKitchenMode') === 'true',
   autoPrintAccepted: localStorage.getItem('adminAutoPrintAccepted') === 'true',
   autoPrintedKitchenIds: new Set(JSON.parse(localStorage.getItem('adminAutoPrintedKitchenIds') || '[]')),
   orderOriginFilter: 'all',
+  categorySearch: '',
+  categoryStatusFilter: 'all',
+  productSearch: '',
+  productStatusFilter: 'all',
   audioContext: null,
   storeFormDirty: false,
   integrationsFormDirty: false,
@@ -48,6 +53,21 @@ const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
 const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
 const ONBOARDING_SKIPPED_KEY = 'admin_onboarding_skipped_v1';
 const ONBOARDING_STEP_LABELS = ['Boas-vindas', 'Loja', 'Operação', 'Pagamentos', 'Entrega', 'Categoria', 'Produto', 'Aparência', 'Treinamento', 'Publicar'];
+const PLAN_FEATURE_CODES = [
+  'orders',
+  'digital_menu',
+  'menu_categories',
+  'tables',
+  'customers',
+  'promotions',
+  'basic_reports',
+  'store_settings',
+  'admin_users',
+  'manual_whatsapp',
+  'automatic_whatsapp',
+  'print_kitchen',
+  'custom_domain'
+];
 const THEME_DEFAULTS = {
   primaryColor: '#f97316',
   secondaryColor: '#111827',
@@ -191,6 +211,15 @@ const els = {
   operationMetricOrders: document.querySelector('#operationMetricOrders'),
   operationMetricOpen: document.querySelector('#operationMetricOpen'),
   operationMetricStatus: document.querySelector('#operationMetricStatus'),
+  dashboardRevenue: document.querySelector('#dashboardRevenue'),
+  dashboardRevenueHint: document.querySelector('#dashboardRevenueHint'),
+  dashboardProducts: document.querySelector('#dashboardProducts'),
+  dashboardProductsHint: document.querySelector('#dashboardProductsHint'),
+  dashboardTables: document.querySelector('#dashboardTables'),
+  dashboardTablesHint: document.querySelector('#dashboardTablesHint'),
+  dashboardPlan: document.querySelector('#dashboardPlan'),
+  dashboardPlanHint: document.querySelector('#dashboardPlanHint'),
+  dashboardAlertText: document.querySelector('#dashboardAlertText'),
   startOperationButton: document.querySelector('#startOperationButton'),
   stopOperationButton: document.querySelector('#stopOperationButton'),
   refreshAdminButton: document.querySelector('#refreshAdminButton'),
@@ -204,6 +233,12 @@ const els = {
   productEditorList: document.querySelector('#productEditorList'),
   refreshCategoriesButton: document.querySelector('#refreshCategoriesButton'),
   refreshProductsButton: document.querySelector('#refreshProductsButton'),
+  categorySearch: document.querySelector('#categorySearch'),
+  categoryStatusFilter: document.querySelector('#categoryStatusFilter'),
+  productSearch: document.querySelector('#productSearch'),
+  productStatusFilter: document.querySelector('#productStatusFilter'),
+  categoryPlanAlert: document.querySelector('#categoryPlanAlert'),
+  productPlanAlert: document.querySelector('#productPlanAlert'),
   newCategoryButton: document.querySelector('#newCategoryButton'),
   clearQueueButton: document.querySelector('#clearQueueButton'),
   archiveClosedOrdersButton: document.querySelector('#archiveClosedOrdersButton'),
@@ -346,6 +381,30 @@ els.orderOriginFilter?.addEventListener('change', () => {
   state.orderOriginFilter = els.orderOriginFilter.value || 'all';
   renderOrders();
 });
+els.categorySearch?.addEventListener('input', () => {
+  state.categorySearch = els.categorySearch.value || '';
+  renderCategoryEditors();
+});
+els.categoryStatusFilter?.addEventListener('change', () => {
+  state.categoryStatusFilter = els.categoryStatusFilter.value || 'all';
+  renderCategoryEditors();
+});
+els.productSearch?.addEventListener('input', () => {
+  state.productSearch = els.productSearch.value || '';
+  renderProductEditors();
+});
+els.productStatusFilter?.addEventListener('change', () => {
+  state.productStatusFilter = els.productStatusFilter.value || 'all';
+  renderProductEditors();
+});
+document.querySelectorAll('[data-admin-tab-jump]').forEach((button) => {
+  button.addEventListener('click', () => activateAdminTab(button.dataset.adminTabJump));
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.admin) {
+    refreshOrdersOnly({ silent: true, skipNotifications: true }).catch(() => {});
+  }
+});
 els.refreshCategoriesButton.addEventListener('click', () => loadMenuData({ force: true }));
 els.refreshProductsButton.addEventListener('click', () => loadMenuData({ force: true }));
 els.refreshModifiersButton?.addEventListener('click', () => loadMenuData({ force: true }));
@@ -440,6 +499,7 @@ function initStoreAccordions() {
     if (section.dataset.accordionReady) return;
     section.dataset.accordionReady = 'true';
     section.classList.add('store-settings-dropdown');
+    section.style.setProperty('--section-accent', storeSettingsAccent(index));
 
     const copy = section.querySelector('.store-settings-copy');
     const fields = section.querySelector('.store-settings-fields');
@@ -475,6 +535,10 @@ function initStoreAccordions() {
       toggle.setAttribute('aria-expanded', String(nextOpen));
     });
   });
+}
+
+function storeSettingsAccent(index) {
+  return ['#dc2626', '#f97316', '#2563eb', '#7c3aed', '#059669', '#ca8a04', '#0891b2'][index % 7];
 }
 
 async function init() {
@@ -626,22 +690,29 @@ async function loadSummary(options = {}) {
   state.loadedAdminTabs.add('orders');
   logSlowClientLoad('summary', startedAt);
   render();
+  if (!state.plan) loadPlanData({ force: true, background: true }).catch(() => {});
 }
 
 async function refreshOrdersOnly(options = {}) {
+  if (state.ordersRefreshing) return;
+  state.ordersRefreshing = true;
   const previousIds = new Set(state.knownOrderIds);
   const startedAt = performance.now();
-  const data = await request('/api/admin/orders');
-  state.orders = data.orders || [];
-  detectNewOrders(previousIds, state.orders, options);
-  state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
-  state.initialOrdersLoaded = true;
-  logSlowClientLoad('orders', startedAt);
-  renderOperation();
-  renderOrderMetrics();
-  renderOrders();
-  renderTables();
-  renderTableManager();
+  try {
+    const data = await request('/api/admin/orders');
+    state.orders = data.orders || [];
+    detectNewOrders(previousIds, state.orders, options);
+    state.knownOrderIds = new Set(state.orders.map((order) => String(order.id)));
+    state.initialOrdersLoaded = true;
+    logSlowClientLoad('orders', startedAt);
+    renderOperation();
+    renderOrderMetrics();
+    renderOrders();
+    renderTables();
+    renderTableManager();
+  } finally {
+    state.ordersRefreshing = false;
+  }
 }
 
 function logSlowClientLoad(scope, startedAt) {
@@ -709,6 +780,9 @@ async function loadMenuData(options = {}) {
   renderMenu();
   renderCategoryOptions();
   renderPromotionOptions();
+  if (options.force && options.refreshPlan !== false && state.loadedAdminTabs.has('plan')) {
+    await loadPlanData({ force: true });
+  }
 }
 
 async function loadCustomersData(options = {}) {
@@ -794,9 +868,14 @@ async function loadPlanData(options = {}) {
   const startedAt = performance.now();
   const data = await request('/api/admin/plan');
   state.plan = data;
+  if (state.admin && Array.isArray(data.features)) {
+    state.admin.plan_access = planFeaturesToAccess(data.features);
+  }
   state.loadedAdminTabs.add('plan');
   logSlowClientLoad('plan', startedAt);
   renderPlan();
+  renderOperation();
+  renderPlanFeatureHints();
 }
 
 function render() {
@@ -813,6 +892,7 @@ function render() {
   renderPromotionOptions();
   renderMenu();
   renderCategoryOptions();
+  renderPlanFeatureHints();
   renderPermissionedNavigation();
   renderAdminUsers();
   fillStoreForm();
@@ -1290,6 +1370,11 @@ function renderOperation() {
     els.operationMetricOrders.textContent = '-';
     els.operationMetricOpen.textContent = '-';
     els.operationMetricStatus.textContent = '-';
+    if (els.dashboardRevenue) els.dashboardRevenue.textContent = '-';
+    if (els.dashboardProducts) els.dashboardProducts.textContent = '-';
+    if (els.dashboardTables) els.dashboardTables.textContent = '-';
+    if (els.dashboardPlan) els.dashboardPlan.textContent = '-';
+    if (els.dashboardAlertText) els.dashboardAlertText.textContent = 'Carregando dados da loja.';
     els.startOperationButton.disabled = true;
     els.stopOperationButton.disabled = true;
     return;
@@ -1297,7 +1382,17 @@ function renderOperation() {
 
   const isOpen = state.store?.is_open !== false;
   const openOrders = state.orders.filter((order) => !['completed', 'cancelled'].includes(order.status)).length;
-  const todayOrders = todaysOrders().length;
+  const todayList = todaysOrders();
+  const todayOrders = todayList.length;
+  const todayRevenue = todayList
+    .filter((order) => order.status !== 'cancelled')
+    .reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const activeProducts = state.categories.reduce((sum, category) => (
+    sum + (category.items || []).filter((item) => item.is_available !== false).length
+  ), 0);
+  const activeTables = state.diningTables.filter((table) => table.is_active !== false).length;
+  const plan = state.plan?.plan || {};
+  const subscription = state.plan?.subscription || {};
   els.operationTitle.textContent = isOpen ? 'Loja online e recebendo pedidos' : 'Loja offline';
   els.operationText.textContent = isOpen
     ? 'Clientes podem montar a sacola e enviar pedidos pelo WhatsApp da loja.'
@@ -1309,6 +1404,28 @@ function renderOperation() {
   els.operationMetricStatus.textContent = isOpen ? 'Online' : 'Offline';
   els.startOperationButton.disabled = isOpen;
   els.stopOperationButton.disabled = !isOpen;
+  if (els.dashboardRevenue) els.dashboardRevenue.textContent = money(todayRevenue);
+  if (els.dashboardRevenueHint) els.dashboardRevenueHint.textContent = `${todayOrders} pedido(s) hoje, ${openOrders} em aberto.`;
+  if (els.dashboardProducts) els.dashboardProducts.textContent = activeProducts;
+  if (els.dashboardProductsHint) els.dashboardProductsHint.textContent = `${state.categories.length} categoria(s) cadastrada(s).`;
+  if (els.dashboardTables) els.dashboardTables.textContent = activeTables;
+  if (els.dashboardTablesHint) els.dashboardTablesHint.textContent = `${state.customerTabs.filter((tab) => tab.status === 'open').length} comanda(s) aberta(s).`;
+  if (els.dashboardPlan) els.dashboardPlan.textContent = plan.name || 'Carregando';
+  if (els.dashboardPlanHint) {
+    const status = subscription.status ? commercialStatusLabel(subscription.status) : 'Abra Meu plano para detalhes.';
+    els.dashboardPlanHint.textContent = status;
+  }
+  if (els.dashboardAlertText) els.dashboardAlertText.textContent = dashboardAlertMessage({ isOpen, openOrders, activeProducts, activeTables, plan });
+}
+
+function dashboardAlertMessage({ isOpen, openOrders, activeProducts, activeTables, plan }) {
+  if (!state.store?.onboarding_completed) return 'Configuração inicial incompleta. Termine o onboarding para publicar com segurança.';
+  if (!isOpen) return 'A loja está offline. Inicie a operação para receber pedidos.';
+  if (!activeProducts) return 'Nenhum produto ativo no cardápio. Ative ou cadastre um produto antes de divulgar.';
+  if (openOrders > 0) return `${openOrders} pedido(s) precisam de acompanhamento agora.`;
+  if (!activeTables) return 'Cadastre mesas para usar QR Code e comandas no salão.';
+  if (!plan?.name) return 'Plano ainda carregando. Confira limites e recursos em Meu plano.';
+  return 'Tudo pronto para operar. Acompanhe novos pedidos e mantenha o cardápio atualizado.';
 }
 
 function renderOnboarding() {
@@ -1884,6 +2001,12 @@ function renderDailyReport(report) {
   const productRows = (report.top_products || []).map((row) => `
     <span><strong>${escapeHtml(row.name)}</strong><small>${row.quantity} un. - ${money(row.total)}</small></span>
   `).join('');
+  const hourRows = (report.by_hour || []).map((row) => `
+    <span><strong>${escapeHtml(row.key)}</strong><small>${row.count} pedido(s) - ${money(row.total)}</small></span>
+  `).join('');
+  const closingPaymentRows = (closing.by_payment || []).map((row) => `
+    <span><strong>${escapeHtml(row.key)}</strong><small>${money(row.total)} concluído(s)</small></span>
+  `).join('');
 
   els.reportOrders.innerHTML = `
     <article class="report-breakdown">
@@ -1891,6 +2014,14 @@ function renderDailyReport(report) {
       <div><h3>Por pagamento</h3>${paymentRows || '<p class="muted">Sem faturamento.</p>'}</div>
       <div><h3>Por origem</h3>${originRows || '<p class="muted">Sem faturamento.</p>'}</div>
       <div><h3>Mais vendidos</h3>${productRows || '<p class="muted">Sem itens vendidos.</p>'}</div>
+      <div><h3>Horários de pico</h3>${hourRows || '<p class="muted">Sem horários no período.</p>'}</div>
+      <div><h3>Fechamento de caixa</h3>
+        <span><strong>Recebido</strong><small>${money(closing.completed_revenue || 0)}</small></span>
+        <span><strong>Pendente</strong><small>${money(closing.pending_revenue || 0)}</small></span>
+        <span><strong>Descontos/cupons</strong><small>${money(closing.discounts || 0)} - ${closing.coupons || 0} cupom(ns)</small></span>
+        <span><strong>Divergência operacional</strong><small>${money(closing.divergence || 0)}</small></span>
+        ${closingPaymentRows}
+      </div>
     </article>
     ${(report.orders || []).map(reportOrderCard).join('') || '<p class="muted">Nenhum pedido nesta data.</p>'}
   `;
@@ -2076,6 +2207,7 @@ function orderCard(order) {
   const payment = order.payment_method ? escapeHtml(order.payment_method) : 'Pagamento não informado';
   const latestWhatsapp = (order.whatsapp_logs || [])[0];
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
+  const canSendManualWhatsapp = canUsePlanFeature('manual_whatsapp');
   card.innerHTML = `
     <div class="order-card-top">
       <div>
@@ -2122,7 +2254,7 @@ function orderCard(order) {
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="both">Imprimir ambas</button>
           <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
           <button class="ghost-button compact print-order-button" type="button" data-reprint-order="${escapeAttribute(order.id)}">Reimprimir</button>
-          <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Reenviar WhatsApp</button>
+          ${canSendManualWhatsapp ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Reenviar WhatsApp</button>` : ''}
           ${order.financial_status === 'paid' ? `<button class="danger-button compact" type="button" data-refund-order="${escapeAttribute(order.id)}">Estornar pagamento</button>` : ''}
         </div>
       </div>
@@ -2238,8 +2370,7 @@ function orderAddressHtml(order) {
 
 function modifierText(modifier) {
   const delta = Number(modifier.price_delta || 0);
-  const group = modifier.group_name ? `${modifier.group_name}: ` : '';
-  return `${group}${modifier.name}${delta > 0 ? ` (+ ${money(delta)})` : ''}`;
+  return `${modifier.name || 'Adicional'}${delta > 0 ? ` (+ ${money(delta)})` : ''}`;
 }
 
 function orderItemAddonsText(modifiers = []) {
@@ -2861,7 +2992,9 @@ async function updateOrderStatus(orderId, status, options = {}) {
       printOrder({ ...order, status }, { type: 'kitchen', reason: 'auto' });
     }
     if (!state.pendingOrderStatuses.has(orderKey)) {
-      refreshOrdersOnly({ skipNotifications: true, silent: true }).catch(() => {});
+      await refreshOrdersOnly({ skipNotifications: true, silent: true });
+      if (state.loadedAdminTabs.has('tables')) await loadTablesData({ force: true });
+      if (state.loadedAdminTabs.has('plan')) await loadPlanData({ force: true });
     }
   } catch (error) {
     if (order && previousStatus) {
@@ -3368,6 +3501,9 @@ function customerEditor(customer) {
 
 function customerOrderHistoryRow(order) {
   const createdAt = new Date(order.created_at).toLocaleString('pt-BR');
+  const whatsappAction = canUsePlanFeature('manual_whatsapp')
+    ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar</button>`
+    : '';
   return `
     <article class="customer-order-row status-${order.status}">
       <div>
@@ -3375,7 +3511,7 @@ function customerOrderHistoryRow(order) {
         <small>${createdAt} - ${statusLabel(order.status)}</small>
         ${financialStatusBadge(order)}
       </div>
-      <button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar</button>
+      ${whatsappAction}
     </article>
   `;
 }
@@ -4068,24 +4204,41 @@ function adminPermissionSummary(role) {
 }
 
 function renderCategoryEditors() {
+  const categories = filteredCategories();
   if (state.categories.length === 0) {
     els.categoryEditorList.innerHTML = '<p class="muted">Nenhuma categoria cadastrada.</p>';
     return;
   }
+  if (categories.length === 0) {
+    els.categoryEditorList.innerHTML = '<p class="muted">Nenhuma categoria encontrada com os filtros atuais.</p>';
+    return;
+  }
 
-  els.categoryEditorList.replaceChildren(...state.categories.map((category, index) => categoryEditor(category, index)));
+  els.categoryEditorList.replaceChildren(...categories.map((category, index) => categoryEditor(category, index, categories.length)));
 }
 
-function categoryEditor(category, index) {
+function filteredCategories() {
+  const search = normalizeSearch(state.categorySearch);
+  return state.categories.filter((category) => {
+    const matchesSearch = !search || normalizeSearch(`${category.name || ''} ${category.description || ''}`).includes(search);
+    const matchesStatus = state.categoryStatusFilter === 'all'
+      || (state.categoryStatusFilter === 'active' && category.is_active !== false)
+      || (state.categoryStatusFilter === 'inactive' && category.is_active === false);
+    return matchesSearch && matchesStatus;
+  });
+}
+
+function categoryEditor(category, index, visibleCount = state.categories.length) {
   const card = document.createElement('article');
   card.className = 'category-list-card';
-  card.draggable = true;
   card.dataset.categoryId = category.id;
+  const filtered = Boolean(normalizeSearch(state.categorySearch)) || state.categoryStatusFilter !== 'all';
+  card.draggable = !filtered;
   card.innerHTML = `
     <div class="category-row-summary">
       <div class="category-reorder" aria-label="Ordenar categoria">
-        <button class="icon-button mini-icon" type="button" title="Subir categoria" aria-label="Subir categoria" data-category-move="-1" ${index === 0 ? 'disabled' : ''}>&uarr;</button>
-        <button class="icon-button mini-icon" type="button" title="Descer categoria" aria-label="Descer categoria" data-category-move="1" ${index === state.categories.length - 1 ? 'disabled' : ''}>&darr;</button>
+        <button class="icon-button mini-icon" type="button" title="${filtered ? 'Limpe os filtros para ordenar' : 'Subir categoria'}" aria-label="Subir categoria" data-category-move="-1" ${filtered || index === 0 ? 'disabled' : ''}>&uarr;</button>
+        <button class="icon-button mini-icon" type="button" title="${filtered ? 'Limpe os filtros para ordenar' : 'Descer categoria'}" aria-label="Descer categoria" data-category-move="1" ${filtered || index === visibleCount - 1 ? 'disabled' : ''}>&darr;</button>
       </div>
       <button class="customer-toggle" type="button">
         <div>
@@ -4236,29 +4389,45 @@ async function saveCategoryOrder(categories) {
 }
 
 function renderProductEditors() {
-  const products = orderedProducts();
+  const products = filteredProducts();
 
-  if (products.length === 0) {
+  if (orderedProducts().length === 0) {
     els.productEditorList.innerHTML = '<p class="muted">Nenhum produto cadastrado.</p>';
+    return;
+  }
+  if (products.length === 0) {
+    els.productEditorList.innerHTML = '<p class="muted">Nenhum produto encontrado com os filtros atuais.</p>';
     return;
   }
 
   els.productEditorList.replaceChildren(...products.map((item, index) => productEditor(item, index, products)));
 }
 
+function filteredProducts() {
+  const search = normalizeSearch(state.productSearch);
+  return orderedProducts().filter((item) => {
+    const matchesSearch = !search || normalizeSearch(`${item.name || ''} ${item.description || ''} ${item.categoryName || ''}`).includes(search);
+    const matchesStatus = state.productStatusFilter === 'all'
+      || (state.productStatusFilter === 'active' && item.is_available !== false)
+      || (state.productStatusFilter === 'inactive' && item.is_available === false);
+    return matchesSearch && matchesStatus;
+  });
+}
+
 function productEditor(item, _index, products) {
   const card = document.createElement('article');
   card.className = 'product-list-card';
-  card.draggable = true;
   card.dataset.productId = item.id;
   card.dataset.categoryId = item.category_id;
+  const filtered = Boolean(normalizeSearch(state.productSearch)) || state.productStatusFilter !== 'all';
+  card.draggable = !filtered;
   const sameCategory = products.filter((product) => product.category_id === item.category_id);
   const categoryIndex = sameCategory.findIndex((product) => product.id === item.id);
   card.innerHTML = `
     <div class="product-row-summary">
       <div class="product-reorder" aria-label="Ordenar produto">
-        <button class="icon-button mini-icon" type="button" title="Subir produto" aria-label="Subir produto" data-product-move="-1" ${categoryIndex === 0 ? 'disabled' : ''}>&uarr;</button>
-        <button class="icon-button mini-icon" type="button" title="Descer produto" aria-label="Descer produto" data-product-move="1" ${categoryIndex === sameCategory.length - 1 ? 'disabled' : ''}>&darr;</button>
+        <button class="icon-button mini-icon" type="button" title="${filtered ? 'Limpe os filtros para ordenar' : 'Subir produto'}" aria-label="Subir produto" data-product-move="-1" ${filtered || categoryIndex === 0 ? 'disabled' : ''}>&uarr;</button>
+        <button class="icon-button mini-icon" type="button" title="${filtered ? 'Limpe os filtros para ordenar' : 'Descer produto'}" aria-label="Descer produto" data-product-move="1" ${filtered || categoryIndex === sameCategory.length - 1 ? 'disabled' : ''}>&darr;</button>
       </div>
       <button class="customer-toggle product-toggle" type="button">
         <div class="product-summary-media">
@@ -4448,7 +4617,8 @@ function fillProductForm(item) {
   setValue(els.itemForm.elements.description, item.description || '');
   setValue(els.itemForm.elements.price, Number(item.price || 0));
   setValue(els.itemForm.elements.image_url, item.image_url || '');
-  setValue(els.itemForm.elements.tags, (item.tags || []).join(', '));
+  setValue(els.itemForm.elements.product_type, productTypeFromTags(item.tags || []));
+  setValue(els.itemForm.elements.tags, visibleProductTags(item.tags || []).join(', '));
   els.itemForm.elements.is_featured.checked = Boolean(item.is_featured);
   els.itemForm.elements.is_available.checked = item.is_available !== false;
   els.itemImageFile.value = '';
@@ -4937,7 +5107,7 @@ async function submitTable(event) {
   });
   els.tableForm.reset();
   els.tableForm.elements.is_active.checked = true;
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
   toast('Mesa cadastrada.');
 }
 
@@ -4953,12 +5123,12 @@ async function updateDiningTable(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
 }
 
 async function deleteDiningTable(id) {
   await request(`/api/admin/tables/${id}`, { method: 'DELETE' });
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
   toast('Mesa excluída.');
 }
 
@@ -4968,7 +5138,7 @@ async function createCustomerTab(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
   toast('Comanda aberta.');
 }
 
@@ -4978,7 +5148,7 @@ async function closeCustomerTab(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
   toast('Comanda fechada.');
 }
 
@@ -4988,7 +5158,7 @@ async function transferCustomerTab(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
   toast('Comanda transferida.');
 }
 
@@ -4998,8 +5168,18 @@ async function addItemToCustomerTab(id, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await loadTablesData({ force: true });
+  await refreshTablesAfterMutation();
   toast('Item adicionado à comanda.');
+}
+
+async function refreshTablesAfterMutation() {
+  await loadTablesData({ force: true });
+  if (state.loadedAdminTabs.has('orders') || state.loadedAdminTabs.has('operation')) {
+    await refreshOrdersOnly({ silent: true, skipNotifications: true });
+  }
+  if (state.loadedAdminTabs.has('plan')) {
+    await loadPlanData({ force: true });
+  }
 }
 
 async function submitStore(event) {
@@ -5493,8 +5673,9 @@ function showPanel() {
 function startOrderPolling() {
   if (state.orderPollTimer) return;
   state.orderPollTimer = setInterval(() => {
+    if (document.hidden) return;
     refreshOrdersOnly({ silent: true }).catch(() => {});
-  }, 12000);
+  }, 8000);
 }
 
 function stopOrderPolling() {
@@ -5600,6 +5781,58 @@ function isTabAvailableInPlan(tab) {
   if (!feature || tab === 'plan' || tab === 'account') return true;
   const access = state.admin?.plan_access?.[feature];
   return access ? access.enabled !== false : true;
+}
+
+function canUsePlanFeature(feature) {
+  const access = state.admin?.plan_access?.[feature];
+  return access ? access.enabled !== false : true;
+}
+
+function planFeaturesToAccess(features = []) {
+  const map = Object.fromEntries(PLAN_FEATURE_CODES.map((code) => [code, {
+    enabled: false,
+    limit_value: null,
+    source: 'plan'
+  }]));
+  return features.reduce((map, entry) => {
+    const code = entry.feature?.code;
+    if (!code) return map;
+    map[code] = {
+      enabled: entry.is_enabled !== false,
+      limit_value: entry.limit_value ?? null,
+      source: 'plan'
+    };
+    return map;
+  }, map);
+}
+
+function renderPlanFeatureHints() {
+  const categoryAllowed = canUsePlanFeature('menu_categories');
+  const productAllowed = canUsePlanFeature('digital_menu');
+  const tableAllowed = canUsePlanFeature('tables');
+  setFeatureGate(els.newCategoryButton, els.categoryPlanAlert, categoryAllowed, 'Novas categorias estão disponíveis em planos superiores.');
+  setFeatureGate(els.newProductButton, els.productPlanAlert, productAllowed, 'Novos produtos estão disponíveis em planos superiores.');
+  setFormFeatureGate(els.tableForm, tableAllowed, 'Mesas e QR Code estão disponíveis em planos superiores.');
+}
+
+function setFeatureGate(button, alert, allowed, message) {
+  if (button) {
+    button.disabled = !allowed;
+    button.title = allowed ? '' : `${message} Acesse Meu plano para liberar.`;
+  }
+  if (alert) {
+    alert.hidden = allowed;
+    alert.innerHTML = allowed ? '' : `${escapeHtml(message)} <button type="button" data-admin-tab-jump="plan">Ver planos</button>`;
+    alert.querySelector('[data-admin-tab-jump]')?.addEventListener('click', () => activateAdminTab('plan'));
+  }
+}
+
+function setFormFeatureGate(form, allowed, message) {
+  if (!form) return;
+  form.querySelectorAll('input, select, textarea, button').forEach((field) => {
+    if (field.type !== 'button') field.disabled = !allowed;
+  });
+  form.title = allowed ? '' : `${message} Acesse Meu plano para liberar.`;
 }
 
 function renderPlanBlockedSection(section) {
@@ -5827,17 +6060,40 @@ function formToItem(form) {
   const sortOrder = current && current.category_id === selectedCategoryId
     ? (form.dataset.sortOrder || current.sort_order || 0)
     : nextProductSortOrder(selectedCategoryId);
+  const type = cleanProductType(data.get('product_type'));
+  const tags = String(data.get('tags') || '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .filter((tag) => !tag.toLowerCase().startsWith('tipo:'));
+  if (type) tags.push(`tipo:${type}`);
   return {
     category_id: selectedCategoryId,
     name: data.get('name'),
     description: data.get('description'),
     price: data.get('price'),
     image_url: data.get('image_url'),
-    tags: String(data.get('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean),
+    tags,
     sort_order: sortOrder,
     is_featured: data.get('is_featured') === 'on',
     is_available: data.get('is_available') === 'on'
   };
+}
+
+function cleanProductType(value) {
+  return ['burger', 'pizza', 'main', 'side', 'drink', 'dessert'].includes(String(value || '')) ? String(value) : '';
+}
+
+function productTypeFromTags(tags = []) {
+  const type = (tags || [])
+    .map((tag) => String(tag || '').trim().toLowerCase())
+    .find((tag) => tag.startsWith('tipo:'))
+    ?.replace('tipo:', '');
+  return cleanProductType(type);
+}
+
+function visibleProductTags(tags = []) {
+  return (tags || []).filter((tag) => !String(tag || '').trim().toLowerCase().startsWith('tipo:'));
 }
 
 function formToModifierGroup(form) {
@@ -6044,7 +6300,7 @@ async function request(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof data.detail === 'string' ? data.detail : '';
-    const error = new Error(detail || data.error || 'Falha na requisição.');
+    const error = new Error(detail || data.error || friendlyRequestError(url, response, data));
     error.code = data.code || data.error_code || '';
     error.feature = data.feature || '';
     error.usageKey = data.usage_key || '';
@@ -6053,6 +6309,24 @@ async function request(url, options = {}) {
     throw error;
   }
   return data;
+}
+
+function friendlyRequestError(url, response, data = {}) {
+  if (data.code === 'PLAN_LIMIT_REACHED') return 'Limite do plano atingido. Acesse Meu plano para liberar mais uso.';
+  if (data.code === 'FEATURE_NOT_AVAILABLE') return 'Recurso disponível em planos superiores.';
+  const path = String(url || '');
+  if (response.status === 401 && path.includes('/login')) return 'Senha incorreta. Confira seus dados e tente novamente.';
+  if (response.status === 404 && path.includes('/login')) return 'Não existe uma conta com este e-mail.';
+  if (response.status === 413) return 'Arquivo ou dados muito grandes para enviar.';
+  if (path.includes('/uploads')) return 'Não foi possível enviar a imagem. Use JPG, PNG ou WebP com até 5 MB.';
+  if (path.includes('/billing') || path.includes('/plan')) return 'Não foi possível atualizar o plano ou a cobrança agora.';
+  if (path.includes('/tables') || path.includes('/tabs')) return 'Não foi possível atualizar mesas ou comandas.';
+  if (path.includes('/categories') || path.includes('/items') || path.includes('/modifier')) return 'Não foi possível salvar o cardápio.';
+  if (path.includes('/orders')) return 'Não foi possível atualizar o pedido.';
+  if (path.includes('/store')) return 'Não foi possível salvar os dados da loja.';
+  if (response.status === 403) return 'Sua conta não tem permissão para esta ação.';
+  if (response.status >= 500) return 'Instabilidade no servidor. Tente novamente em instantes.';
+  return 'Não foi possível concluir a ação.';
 }
 
 function todaysOrders() {
@@ -6220,6 +6494,9 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
+
+
+
 
 
 

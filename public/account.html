@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
@@ -56,7 +56,13 @@
             </div>
             <input name="city" placeholder="Cidade">
             <input name="complement" placeholder="Complemento">
-            <label class="check"><input name="accept_terms" required type="checkbox"> Li e concordo com o EULA, os <a href="/termos" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener">Política de Privacidade</a>. Autorizo a loja a usar meus dados para identificar minha conta, salvar endereços e processar meus pedidos.</label>
+            <label class="account-consent-box">
+              <input name="accept_terms" required type="checkbox">
+              <span>
+                <strong>Li e concordo com o EULA, os <a href="/termos" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.</strong>
+                <small>Autorizo a loja a usar meus dados para identificar minha conta, salvar endereços e processar meus pedidos.</small>
+              </span>
+            </label>
             <button class="primary-button wide">Criar conta</button>
           </form>
         </div>
@@ -200,4 +206,5 @@
     <script src="/account.js?v=20260630-multitenant-fix" type="module"></script>
   </body>
 </html>
+
 

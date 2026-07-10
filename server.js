@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const UPLOAD_DIR = path.resolve(__dirname, process.env.UPLOAD_DIR || 'uploads');
+const BACKUP_DIR = path.resolve(__dirname, process.env.BACKUP_DIR || 'backups');
 const STORE_WHATSAPP_NUMBER = onlyDigits(process.env.STORE_WHATSAPP_NUMBER || '');
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const ADMIN_COOKIE = 'admin_session';
@@ -29,6 +30,7 @@ const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false)
 const PLATFORM_BILLING_PROVIDER = cleanText(process.env.PLATFORM_BILLING_PROVIDER || 'abacatepay').toLowerCase();
 const PLATFORM_BILLING_API_KEY = process.env.PLATFORM_BILLING_API_KEY || process.env.ABACATEPAY_API_KEY || '';
 const PLATFORM_BILLING_WEBHOOK_SECRET = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.ABACATEPAY_WEBHOOK_SECRET || '';
+const BILLING_GRACE_DAYS = clampNumber(Number(process.env.BILLING_GRACE_DAYS || 7), 1, 30);
 const PUBLIC_BOOTSTRAP_CACHE_MS = 1000 * 20;
 const STORE_SETTINGS_CACHE_MS = 1000 * 10;
 const MENU_CACHE_MS = 1000 * 15;
@@ -48,6 +50,8 @@ let adminPromotionsCache = null;
 let adminTablesCache = null;
 let adminUsersCache = null;
 const rateLimitBuckets = new Map();
+const requestMetrics = [];
+const MAX_REQUEST_METRICS = 5000;
 const allowedUploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const orderStatuses = new Set([
@@ -73,8 +77,19 @@ const mimeTypes = new Map([
 ]);
 
 const server = createServer(async (req, res) => {
+  const startedAt = performance.now();
+  let pathname = '/';
+  res.on('finish', () => {
+    recordRequestMetric({
+      method: req.method || 'GET',
+      pathname,
+      status: res.statusCode,
+      duration_ms: Math.round(performance.now() - startedAt)
+    });
+  });
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || HOST}`);
+    pathname = url.pathname;
 
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);
@@ -386,10 +401,16 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/billing/webhook') {
     const payload = await readJson(req);
-    json(res, 200, await receiveBillingWebhook(payload, {
-      provider: url.searchParams.get('provider') || PLATFORM_BILLING_PROVIDER,
-      webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || ''
-    }));
+    const provider = url.searchParams.get('provider') || PLATFORM_BILLING_PROVIDER;
+    const webhookSecret = req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || '';
+    try {
+      json(res, 200, await receiveBillingWebhook(payload, { provider, webhookSecret }));
+    } catch (error) {
+      await recordBillingWebhookFailure(payload, { provider, error }).catch((logError) => {
+        console.error('Falha ao registrar erro de webhook de assinatura:', logError.message || logError);
+      });
+      throw error;
+    }
     return;
   }
 
@@ -503,6 +524,20 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res);
     if (!admin) return;
     json(res, 200, await listAuditLogs(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/health') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await platformOperationalHealth(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/backups') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await platformBackupStatus());
     return;
   }
 
@@ -2828,6 +2863,46 @@ async function listBillingHistory(companyId) {
   }).catch(() => []);
 }
 
+async function assertTrialCanBeActivated(companyId, plan) {
+  if (plan?.code !== 'trial' && moneyCents(plan?.monthly_price || 0) > 0) return;
+  const subscriptions = await listCompanySubscriptions(companyId, 100);
+  const usedTrial = subscriptions.some((entry) => entry.status === 'trial' || entry.trial_ends_at || entry.metadata?.source === 'free_plan');
+  if (usedTrial) throw httpError(409, 'Esta empresa já utilizou o período de teste.');
+}
+
+function billingPlanChangeType(currentPlan, nextPlan) {
+  if (!currentPlan?.code) return 'activation';
+  const currentOrder = Number(currentPlan.sort_order || 0);
+  const nextOrder = Number(nextPlan.sort_order || 0);
+  if (nextOrder > currentOrder) return 'upgrade';
+  if (nextOrder < currentOrder) return 'downgrade';
+  return 'same_plan';
+}
+
+async function planLimitWarnings(companyId, storeId, plan) {
+  if (!plan?.id) return [];
+  const [features, usage] = await Promise.all([
+    listCompanyPlanFeatures(plan.id),
+    companyUsageSnapshot(companyId, storeId)
+  ]);
+  const labels = {
+    digital_menu: ['products', 'Produtos'],
+    menu_categories: ['categories', 'Categorias'],
+    orders: ['orders_month', 'Pedidos no mês'],
+    admin_users: ['users', 'Usuários da equipe'],
+    tables: ['tables', 'Mesas'],
+    customers: ['customers', 'Clientes']
+  };
+  return features.flatMap((entry) => {
+    const code = entry.feature?.code;
+    const limit = Number(entry.limit_value || 0);
+    const [usageKey, label] = labels[code] || [];
+    if (!usageKey || !limit) return [];
+    const used = Number(usage[usageKey] ?? usage[usageKey.replace('_month', '')] ?? 0);
+    return used > limit ? [{ feature: code, usage_key: usageKey, label, used, limit }] : [];
+  });
+}
+
 async function createBillingCheckout(req, admin, data = {}) {
   const companyId = cleanUuid(admin.company_id, 'empresa');
   const planCode = cleanSlug(data.plan_code || data.planCode || '');
@@ -2845,17 +2920,29 @@ async function createBillingCheckout(req, admin, data = {}) {
     limit: '1'
   });
   if (!company) throw httpError(404, 'Empresa não encontrada.');
+  await assertTrialCanBeActivated(companyId, plan);
+  const currentSubscription = pickCurrentCompanySubscription(await listCompanySubscriptions(companyId, 100));
+  const currentPlan = currentSubscription?.plan_id
+    ? (await dbRequest('GET', 'subscription_plans', { select: '*', id: `eq.${currentSubscription.plan_id}`, limit: '1' }).catch(() => []))[0] || null
+    : null;
+  const changeType = billingPlanChangeType(currentPlan, plan);
+  const downgradeWarnings = await planLimitWarnings(companyId, admin.store_id, plan);
   const amount = moneyCents(plan.monthly_price || 0);
   if (PLATFORM_BILLING_PROVIDER === 'mock' || !PLATFORM_BILLING_API_KEY || amount <= 0) {
     const activated = await activateCompanyPlan(req, admin, company, plan, {
       source: amount <= 0 ? 'free_plan' : 'manual_activation',
-      provider: 'manual'
+      provider: 'manual',
+      currentPlan,
+      changeType,
+      downgradeWarnings
     });
     return {
       ...activated,
       checkout_url: null,
       provider: 'manual',
-      activated: true
+      activated: true,
+      change_type: changeType,
+      downgrade_warnings: downgradeWarnings
     };
   }
   const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount });
@@ -2868,7 +2955,11 @@ async function createBillingCheckout(req, admin, data = {}) {
     payment_due_at: new Date(Date.now() + 3 * 86400000).toISOString(),
     metadata: {
       source: 'admin_billing_checkout',
-      checkout_url: checkout.checkoutUrl || null
+      checkout_url: checkout.checkoutUrl || null,
+      plan_code: plan.code,
+      amount_cents: amount,
+      change_type: changeType,
+      downgrade_warnings: downgradeWarnings
     }
   }, ['Prefer: return=representation']);
   await dbRequest('POST', 'subscription_events', {}, {
@@ -2881,7 +2972,9 @@ async function createBillingCheckout(req, admin, data = {}) {
       provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
       plan_code: plan.code,
       checkout_url: checkout.checkoutUrl || null,
-      amount_cents: amount
+      amount_cents: amount,
+      change_type: changeType,
+      downgrade_warnings: downgradeWarnings
     },
     created_by: admin.id
   }, ['Prefer: return=minimal']).catch(() => {});
@@ -2898,7 +2991,9 @@ async function createBillingCheckout(req, admin, data = {}) {
     subscription,
     plan,
     checkout_url: checkout.checkoutUrl || null,
-    provider: PLATFORM_BILLING_PROVIDER
+    provider: PLATFORM_BILLING_PROVIDER,
+    change_type: changeType,
+    downgrade_warnings: downgradeWarnings
   };
 }
 
@@ -2913,9 +3008,14 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
   const previousSubscriptions = await listCompanySubscriptions(companyId, 100);
   const current = previousSubscriptions.find((entry) => ['trial', 'active', 'grace_period'].includes(entry.status));
   const isSamePlan = current?.plan_id && current.plan_id === plan.id && ['trial', 'active'].includes(current.status);
+  const changeType = options.changeType || billingPlanChangeType(options.currentPlan || null, plan);
+  const downgradeWarnings = Array.isArray(options.downgradeWarnings) ? options.downgradeWarnings : [];
 
   if (isSamePlan) {
     return { subscription: current, plan, already_current: true };
+  }
+  if (isTrialPlan && previousSubscriptions.some((entry) => entry.status === 'trial' || entry.trial_ends_at)) {
+    throw httpError(409, 'Esta empresa já utilizou o período de teste.');
   }
 
   await dbRequest('PATCH', 'company_subscriptions', {
@@ -2936,7 +3036,9 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
     metadata: {
       source: options.source || 'manual_activation',
       activated_by: admin.id,
-      amount_cents: monthlyPrice
+      amount_cents: monthlyPrice,
+      change_type: changeType,
+      downgrade_warnings: downgradeWarnings
     }
   }, ['Prefer: return=representation']);
 
@@ -2947,14 +3049,16 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
   await dbRequest('POST', 'subscription_events', {}, {
     company_id: companyId,
     subscription_id: subscription.id,
-    event_type: current ? 'plan_changed' : 'plan_activated',
+    event_type: current ? `plan_${changeType}` : 'plan_activated',
     description: `${current ? 'Plano alterado' : 'Plano ativado'} para ${plan.name}.`,
     metadata: {
       provider: options.provider || 'manual',
       plan_code: plan.code,
       plan_name: plan.name,
       previous_subscription_id: current?.id || null,
-      amount_cents: monthlyPrice
+      amount_cents: monthlyPrice,
+      change_type: changeType,
+      downgrade_warnings: downgradeWarnings
     },
     created_by: admin.id
   }, ['Prefer: return=minimal']).catch(() => {});
@@ -2969,7 +3073,7 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
     after_data: { plan_code: plan.code, status, provider: options.provider || 'manual' }
   });
 
-  return { subscription, plan };
+  return { subscription, plan, change_type: changeType, downgrade_warnings: downgradeWarnings };
 }
 
 async function createProviderSubscriptionCheckout({ company, plan, admin, amount }) {
@@ -3043,12 +3147,14 @@ async function receiveBillingWebhook(data, options = {}) {
   }
   const now = new Date();
   const periodEnd = new Date(now.getTime() + 30 * 86400000).toISOString();
+  const graceEnd = new Date(now.getTime() + BILLING_GRACE_DAYS * 86400000).toISOString();
+  const nextPaymentDue = status === 'grace_period' ? graceEnd : status === 'payment_pending' || status === 'past_due' ? subscription.payment_due_at || periodEnd : null;
   const [updated] = await dbRequest('PATCH', 'company_subscriptions', { id: `eq.${subscription.id}` }, {
     status,
     plan_id: planId,
     external_subscription_id: externalId || subscription.external_subscription_id || null,
     last_payment_at: status === 'active' ? now.toISOString() : subscription.last_payment_at,
-    payment_due_at: status === 'payment_pending' || status === 'past_due' ? subscription.payment_due_at || periodEnd : null,
+    payment_due_at: nextPaymentDue,
     current_period_starts_at: status === 'active' ? now.toISOString() : subscription.current_period_starts_at,
     current_period_ends_at: status === 'active' ? periodEnd : subscription.current_period_ends_at,
     next_renewal_at: status === 'active' ? periodEnd : subscription.next_renewal_at,
@@ -3061,7 +3167,7 @@ async function receiveBillingWebhook(data, options = {}) {
       status: 'in.(trial,active,payment_pending,grace_period,past_due,suspended)'
     }, { status: 'cancelled' }, ['Prefer: return=minimal']).catch(() => {});
   }
-  const companyStatus = status === 'active' ? 'active' : status === 'cancelled' ? 'cancelled' : status === 'suspended' ? 'suspended' : status === 'past_due' ? 'past_due' : 'payment_pending';
+  const companyStatus = status === 'active' ? 'active' : status === 'cancelled' ? 'cancelled' : status === 'suspended' ? 'suspended' : status === 'past_due' ? 'past_due' : status === 'grace_period' ? 'grace_period' : 'payment_pending';
   await dbRequest('PATCH', 'companies', { id: `eq.${subscription.company_id}` }, { status: companyStatus }, ['Prefer: return=minimal']);
   await dbRequest('POST', 'subscription_events', {}, {
     company_id: subscription.company_id,
@@ -3076,6 +3182,26 @@ async function receiveBillingWebhook(data, options = {}) {
     }
   }, ['Prefer: return=minimal']);
   return { ok: true, subscription: updated };
+}
+
+async function recordBillingWebhookFailure(data, options = {}) {
+  const payload = data?.data || data?.billing || data?.subscription || data || {};
+  const metadata = payload.metadata || data?.metadata || {};
+  const companyId = cleanUuid(metadata.companyId || metadata.company_id || data?.companyId || '');
+  if (!companyId) return;
+  const error = options.error || {};
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: companyId,
+    subscription_id: null,
+    event_type: 'billing.webhook_failed',
+    description: error.message || 'Falha ao processar webhook de cobrança.',
+    metadata: {
+      provider: cleanSlug(options.provider || PLATFORM_BILLING_PROVIDER),
+      status: error.status || 500,
+      code: error.detail?.code || error.code || null,
+      payload: data
+    }
+  }, ['Prefer: return=minimal']);
 }
 
 function billingProviderStatus(value) {
@@ -3232,6 +3358,384 @@ async function listAuditLogs(params = new URLSearchParams()) {
     })
     : rows;
   return { logs: filtered };
+}
+
+async function platformBackupStatus() {
+  const statusPath = path.join(BACKUP_DIR, 'backup-status.json');
+  const manifest = await readJsonFile(statusPath).catch(() => null);
+  const entries = await readdir(BACKUP_DIR).catch(() => []);
+  const dumps = await Promise.all(entries
+    .filter((entry) => /^postgres-.+\.dump$/.test(entry))
+    .map(async (entry) => {
+      const info = await stat(path.join(BACKUP_DIR, entry)).catch(() => null);
+      return info ? {
+        file: entry,
+        size_bytes: info.size,
+        created_at: info.mtime.toISOString()
+      } : null;
+    }));
+  const recent = dumps
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 10);
+  return {
+    status: sanitizeBackupStatus(manifest?.status),
+    updated_at: cleanText(manifest?.updated_at || ''),
+    started_at: cleanText(manifest?.started_at || ''),
+    finished_at: cleanText(manifest?.finished_at || ''),
+    latest: recent[0] || null,
+    last_output: cleanBackupFileName(manifest?.output || ''),
+    retention_days: clampNumber(Number(manifest?.retention_days || process.env.BACKUP_RETENTION_DAYS || 14), 1, 365),
+    error: manifest?.status === 'failed' ? cleanText(manifest.error || '').slice(0, 240) : '',
+    recent
+  };
+}
+
+async function platformOperationalHealth(params = new URLSearchParams()) {
+  const period = platformHealthPeriod(params.get?.('period') || '24h');
+  const [database, backup, operationalLogs] = await Promise.all([
+    checkDatabaseHealth(),
+    platformBackupStatus(),
+    listOperationalLogs(period.since)
+  ]);
+  const metrics = platformMetricsSnapshot(period);
+  const config = await platformConfigChecklist();
+  const statuses = [
+    platformStatus('api', 'Aplicação/API', 'healthy', `Servidor ativo desde ${new Date(Date.now() - process.uptime() * 1000).toLocaleString('pt-BR')}.`, null),
+    database,
+    platformStatus('auth', 'Autenticação', config.items.find((item) => item.key === 'cookie_secret')?.ok === false ? 'attention' : 'healthy', 'Sessões administrativas e cookies operando.', null),
+    billingHealthStatus(),
+    webhookHealthStatus(operationalLogs),
+    backupHealthStatus(backup),
+    platformStatus('jobs', 'Filas/jobs', 'unknown', 'Nenhuma fila dedicada configurada neste projeto.', null),
+    await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads')
+  ];
+  const alerts = platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs });
+  return normalizePortuguesePayload({
+    checked_at: new Date().toISOString(),
+    period: period.label,
+    statuses,
+    metrics,
+    backup,
+    config,
+    alerts,
+    logs: operationalLogs
+  });
+}
+
+function platformHealthPeriod(value) {
+  const key = ['7d', '30d'].includes(String(value)) ? String(value) : '24h';
+  const days = key === '30d' ? 30 : key === '7d' ? 7 : 1;
+  return {
+    key,
+    label: key === '24h' ? 'Últimas 24h' : key === '7d' ? 'Últimos 7 dias' : 'Últimos 30 dias',
+    since: Date.now() - days * 86400000
+  };
+}
+
+function recordRequestMetric(entry) {
+  if (!entry?.pathname) return;
+  requestMetrics.push({
+    ...entry,
+    created_at: Date.now()
+  });
+  if (requestMetrics.length > MAX_REQUEST_METRICS) requestMetrics.splice(0, requestMetrics.length - MAX_REQUEST_METRICS);
+}
+
+function platformMetricsSnapshot(period) {
+  const rows = requestMetrics.filter((entry) => entry.created_at >= period.since);
+  const apiRows = rows.filter((entry) => entry.pathname.startsWith('/api/'));
+  const checkoutRows = rows.filter((entry) => entry.pathname === '/api/orders');
+  const orderMutationRows = rows.filter((entry) => /^\/api\/admin\/orders/.test(entry.pathname) && ['POST', 'PUT', 'PATCH'].includes(entry.method));
+  const stats = (entries) => latencyStats(entries.map((entry) => entry.duration_ms));
+  return {
+    period: period.label,
+    api: { ...stats(apiRows), requests: apiRows.length, errors_5xx: apiRows.filter((entry) => entry.status >= 500).length },
+    database: { average_ms: null, p95_ms: null, p99_ms: null, source: 'verificação atual no card de banco' },
+    checkout: { ...stats(checkoutRows), requests: checkoutRows.length },
+    order_mutations: { ...stats(orderMutationRows), requests: orderMutationRows.length }
+  };
+}
+
+function latencyStats(values = []) {
+  const clean = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!clean.length) return { average_ms: null, p95_ms: null, p99_ms: null };
+  const average = Math.round(clean.reduce((sum, value) => sum + value, 0) / clean.length);
+  return {
+    average_ms: average,
+    p95_ms: percentile(clean, 0.95),
+    p99_ms: percentile(clean, 0.99)
+  };
+}
+
+function percentile(values, ratio) {
+  if (!values.length) return null;
+  const index = Math.min(values.length - 1, Math.ceil(values.length * ratio) - 1);
+  return Math.round(values[index]);
+}
+
+async function checkDatabaseHealth() {
+  const startedAt = performance.now();
+  try {
+    await dbRequest('GET', 'companies', { select: 'id', limit: '1' });
+    const duration = Math.round(performance.now() - startedAt);
+    return platformStatus('database', 'Banco PostgreSQL', duration > 800 ? 'attention' : 'healthy', `Resposta em ${duration} ms.`, duration);
+  } catch (error) {
+    return platformStatus('database', 'Banco PostgreSQL', 'error', error.message || 'Banco indisponível.', null);
+  }
+}
+
+function platformStatus(key, label, status, message, latencyMs = null) {
+  return {
+    key,
+    label,
+    status,
+    message,
+    latency_ms: latencyMs,
+    checked_at: new Date().toISOString()
+  };
+}
+
+function billingHealthStatus() {
+  const configured = Boolean(PLATFORM_BILLING_API_KEY);
+  return platformStatus(
+    'billing',
+    'Billing/Abacate Pay',
+    configured ? 'healthy' : 'attention',
+    configured ? 'Provider e API key configurados.' : 'API key de billing não configurada; ativações podem ficar em modo manual/mock.',
+    null
+  );
+}
+
+function webhookHealthStatus(logs = []) {
+  const failed = logs.filter((entry) => entry.type === 'webhook' && entry.status === 'failed').length;
+  return platformStatus(
+    'webhooks',
+    'Webhooks',
+    failed ? 'attention' : 'healthy',
+    failed ? `${failed} falha(s) recente(s) em webhooks.` : 'Sem falhas recentes registradas.',
+    null
+  );
+}
+
+function backupHealthStatus(backup = {}) {
+  if (backup.status === 'running') return platformStatus('backup', 'Backup', 'attention', 'Backup em andamento.', null);
+  if (backup.status === 'failed') return platformStatus('backup', 'Backup', 'error', backup.error || 'Último backup falhou.', null);
+  if (!backup.latest?.created_at) return platformStatus('backup', 'Backup', 'unknown', 'Nenhum backup local registrado.', null);
+  const ageHours = (Date.now() - new Date(backup.latest.created_at).getTime()) / 3600000;
+  return platformStatus(
+    'backup',
+    'Backup',
+    backup.status === 'success' && ageHours <= 24 ? 'healthy' : 'attention',
+    ageHours <= 24 ? 'Backup gerado nas últimas 24h.' : 'Backup bem-sucedido atrasado há mais de 24h.',
+    null
+  );
+}
+
+async function storageHealthStatus(directory, key, label) {
+  try {
+    await mkdir(directory, { recursive: true });
+    const file = path.join(directory, `.health-${Date.now()}.tmp`);
+    await writeFile(file, 'ok');
+    await unlink(file).catch(() => {});
+    return platformStatus(key, label, 'healthy', 'Diretório configurado e gravável.', null);
+  } catch (error) {
+    return platformStatus(key, label, 'error', 'Diretório sem permissão de escrita.', null);
+  }
+}
+
+async function platformConfigChecklist() {
+  const uploads = await directoryWritable(UPLOAD_DIR);
+  const backups = await directoryWritable(BACKUP_DIR);
+  const production = process.env.NODE_ENV === 'production';
+  const appUrl = process.env.APP_URL || process.env.PUBLIC_APP_URL || '';
+  const apiUrl = process.env.API_URL || appUrl || '';
+  const items = [
+    configItem('database_url', 'DATABASE_URL configurada', Boolean(DATABASE_URL), maskConfigValue(DATABASE_URL, 'url')),
+    configItem('app_url', 'APP_URL/PUBLIC_APP_URL configurada', Boolean(appUrl), maskConfigValue(appUrl, 'url')),
+    configItem('api_url', 'API_URL configurada', Boolean(apiUrl), maskConfigValue(apiUrl, 'url')),
+    configItem('https', 'HTTPS ativo em produção', !production || /^https:\/\//i.test(appUrl), production ? 'Obrigatório em produção' : 'Ambiente não produção'),
+    configItem('jwt_secret', 'Secrets de sessão não padrão', hasStrongSessionSecret(), hasStrongSessionSecret() ? 'Configurado' : 'Configure SESSION_SECRET/COOKIE_SECRET'),
+    configItem('cookie_secret', 'COOKIE_SECRET/SESSION_SECRET configurado', Boolean(process.env.COOKIE_SECRET || process.env.SESSION_SECRET), 'Não exibe segredo'),
+    configItem('cookie_secure', 'COOKIE_SECURE correto para produção', !production || COOKIE_SECURE === true, String(COOKIE_SECURE)),
+    configItem('abacate_api', 'Abacate Pay configurado', Boolean(PLATFORM_BILLING_API_KEY), PLATFORM_BILLING_API_KEY ? 'Configurado' : 'Ausente'),
+    configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(PLATFORM_BILLING_WEBHOOK_SECRET), PLATFORM_BILLING_WEBHOOK_SECRET ? 'Configurado' : 'Ausente'),
+    configItem('uploads', 'Upload/storage gravável', uploads, maskConfigValue(UPLOAD_DIR, 'path')),
+    configItem('smtp', 'SMTP/e-mail configurado', Boolean(process.env.SMTP_URL || process.env.SMTP_HOST), process.env.SMTP_URL || process.env.SMTP_HOST ? 'Configurado' : 'Não configurado', true),
+    configItem('proxy', 'Proxy/Nginx compatível', Boolean(process.env.TRUST_PROXY || process.env.PUBLIC_APP_URL || process.env.APP_URL), 'Verifique headers X-Forwarded-* no Nginx'),
+    configItem('rate_limit', 'Rate limit ativo', true, 'Ativo em memória por rota sensível'),
+    configItem('backup_dir', 'Diretório de backup configurado', Boolean(BACKUP_DIR), maskConfigValue(BACKUP_DIR, 'path')),
+    configItem('backup_write', 'Permissão de escrita em backups', backups, maskConfigValue(BACKUP_DIR, 'path'))
+  ];
+  return {
+    ok: items.every((item) => item.ok || item.optional),
+    items
+  };
+}
+
+function configItem(key, label, ok, hint = '', optional = false) {
+  return { key, label, ok: Boolean(ok), hint, optional };
+}
+
+async function directoryWritable(directory) {
+  try {
+    await mkdir(directory, { recursive: true });
+    const file = path.join(directory, `.health-${Date.now()}-${randomBytes(3).toString('hex')}.tmp`);
+    await writeFile(file, 'ok');
+    await unlink(file).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasStrongSessionSecret() {
+  const value = process.env.COOKIE_SECRET || process.env.SESSION_SECRET || '';
+  return value.length >= 24 && !/^(secret|changeme|default|password|dev)$/i.test(value);
+}
+
+function maskConfigValue(value, type = 'text') {
+  const text = String(value || '');
+  if (!text) return 'Não configurado';
+  if (type === 'path') return path.basename(text) ? `.../${path.basename(text)}` : 'Configurado';
+  if (type === 'url') {
+    try {
+      const url = new URL(text);
+      return `${url.protocol}//${url.hostname}${url.port ? ':' + url.port : ''}`;
+    } catch {
+      return 'Configurado';
+    }
+  }
+  return 'Configurado';
+}
+
+function platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs }) {
+  const alerts = [];
+  const add = (type, severity, title, message, action) => alerts.push({ key: type, type, severity, title, message, action });
+  for (const status of statuses) {
+    if (status.status === 'error') add(status.key, 'critical', `${status.label} com erro`, status.message, 'Verifique logs do servidor e configuração.');
+    if (status.status === 'attention') add(status.key, 'warning', `${status.label} exige atenção`, status.message, 'Revise a configuração operacional.');
+  }
+  const missingConfig = (config.items || []).filter((item) => !item.ok && !item.optional);
+  if (missingConfig.length) {
+    add('config', 'warning', 'Configurações críticas ausentes', `${missingConfig.length} item(ns) precisam de revisão.`, 'Abra o checklist operacional e complete os itens pendentes.');
+  }
+  if (backup.latest?.created_at && (Date.now() - new Date(backup.latest.created_at).getTime()) > 86400000) {
+    add('backup_delayed', 'warning', 'Backup atrasado', 'Não há backup bem-sucedido nas últimas 24h.', 'Execute npm run db:backup e confira o agendamento.');
+  }
+  if (metrics.api.errors_5xx >= 5) {
+    add('api_5xx', 'critical', 'Erros 5xx frequentes', `${metrics.api.errors_5xx} erro(s) 5xx no período em memória.`, 'Verifique logs e rotas com falha.');
+  }
+  if (metrics.api.p95_ms && metrics.api.p95_ms > 1500) {
+    add('latency', 'warning', 'Latência alta', `P95 da API em ${metrics.api.p95_ms} ms.`, 'Verifique banco, integrações e servidor.');
+  }
+  const failedWebhooks = operationalLogs.filter((entry) => entry.type === 'webhook' && entry.status === 'failed').length;
+  if (failedWebhooks) {
+    add('webhook', 'warning', 'Falhas recentes em webhooks', `${failedWebhooks} falha(s) registradas.`, 'Confira segredo do webhook e payloads recebidos.');
+  }
+  return alerts;
+}
+
+async function listOperationalLogs(sinceMs) {
+  const since = new Date(sinceMs).toISOString();
+  const [auditRows, events] = await Promise.all([
+    dbRequest('GET', 'audit_logs', {
+      select: 'id,company_id,store_id,action,severity,entity_type,created_at',
+      created_at: `gte.${since}`,
+      order: 'created_at.desc',
+      limit: '80'
+    }).catch(() => []),
+    dbRequest('GET', 'subscription_events', {
+      select: 'id,company_id,event_type,description,created_at',
+      created_at: `gte.${since}`,
+      order: 'created_at.desc',
+      limit: '80'
+    }).catch(() => [])
+  ]);
+  const auditLogs = auditRows
+    .filter((row) => ['critical', 'warning'].includes(row.severity) || /(webhook|backup|billing|migration|deploy|integration)/i.test(row.action || ''))
+    .map((row) => ({
+      id: row.id,
+      type: operationalLogType(row.action),
+      status: row.severity === 'critical' ? 'failed' : row.severity === 'warning' ? 'attention' : 'info',
+      action: row.action,
+      company_id: row.company_id || null,
+      store_id: row.store_id || null,
+      message: row.entity_type || row.action,
+      created_at: row.created_at
+    }));
+  const eventLogs = events.map((event) => ({
+    id: event.id,
+    type: operationalLogType(event.event_type),
+    status: /failed|past_due|suspended|cancelled/i.test(event.event_type || '') ? 'failed' : 'info',
+    action: event.event_type,
+    company_id: event.company_id || null,
+    store_id: null,
+    message: event.description || event.event_type,
+    created_at: event.created_at
+  }));
+  return [...auditLogs, ...eventLogs]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 100);
+}
+
+function operationalLogType(action = '') {
+  if (/webhook/i.test(action)) return 'webhook';
+  if (/backup/i.test(action)) return 'backup';
+  if (/billing|subscription|payment/i.test(action)) return 'billing';
+  if (/deploy|migration/i.test(action)) return 'deploy';
+  if (/integration/i.test(action)) return 'integration';
+  return 'system';
+}
+
+function normalizePortuguesePayload(value) {
+  if (typeof value === 'string') return normalizePortugueseText(value);
+  if (Array.isArray(value)) return value.map(normalizePortuguesePayload);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalizePortuguesePayload(entry)]));
+  }
+  return value;
+}
+
+function normalizePortugueseText(value) {
+  return String(value)
+    .replaceAll('\u00c3\u0080', 'À')
+    .replaceAll('\u00c3\u0081', 'Á')
+    .replaceAll('\u00c3\u0082', 'Â')
+    .replaceAll('\u00c3\u0083', 'Ã')
+    .replaceAll('\u00c3\u0087', 'Ç')
+    .replaceAll('\u00c3\u0089', 'É')
+    .replaceAll('\u00c3\u008a', 'Ê')
+    .replaceAll('\u00c3\u008d', 'Í')
+    .replaceAll('\u00c3\u0093', 'Ó')
+    .replaceAll('\u00c3\u0094', 'Ô')
+    .replaceAll('\u00c3\u0095', 'Õ')
+    .replaceAll('\u00c3\u009a', 'Ú')
+    .replaceAll('\u00c3\u00a0', 'à')
+    .replaceAll('\u00c3\u00a1', 'á')
+    .replaceAll('\u00c3\u00a2', 'â')
+    .replaceAll('\u00c3\u00a3', 'ã')
+    .replaceAll('\u00c3\u00a7', 'ç')
+    .replaceAll('\u00c3\u00a9', 'é')
+    .replaceAll('\u00c3\u00aa', 'ê')
+    .replaceAll('\u00c3\u00ad', 'í')
+    .replaceAll('\u00c3\u00b3', 'ó')
+    .replaceAll('\u00c3\u00b4', 'ô')
+    .replaceAll('\u00c3\u00b5', 'õ')
+    .replaceAll('\u00c3\u00ba', 'ú');
+}
+
+async function readJsonFile(filePath) {
+  return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+function sanitizeBackupStatus(value) {
+  return ['success', 'failed', 'running'].includes(String(value || '')) ? String(value) : 'unknown';
+}
+
+function cleanBackupFileName(value) {
+  const file = path.basename(cleanText(value || ''));
+  return /^postgres-.+\.dump$/.test(file) ? file : '';
 }
 
 async function listStoreDomains(storeId) {
@@ -6649,25 +7153,35 @@ async function nextDiningTableCode(storeId, options = {}) {
 
 async function updateDiningTable(id, data, storeId, options = {}) {
   const db = options.db || dbRequest;
-  const [table] = await db('PATCH', 'dining_tables', {
-    id: `eq.${id}`,
-    ...(cleanUuid(storeId) ? { store_id: `eq.${cleanUuid(storeId)}` } : {})
-  }, sanitizeDiningTable(data, false), ['Prefer: return=representation']);
+  let table;
+  try {
+    [table] = await db('PATCH', 'dining_tables', {
+      id: `eq.${id}`,
+      ...(cleanUuid(storeId) ? { store_id: `eq.${cleanUuid(storeId)}` } : {})
+    }, sanitizeDiningTable(data, false), ['Prefer: return=representation']);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw httpError(409, 'JÃ¡ existe uma mesa com este cÃ³digo nesta loja.', error.detail || error);
+    }
+    throw error;
+  }
   if (!table) throw httpError(404, 'Mesa não encontrada nesta loja.');
   return table;
 }
 
 async function deleteDiningTable(id, storeId, options = {}) {
   const db = options.db || dbRequest;
-  await db('DELETE', 'dining_tables', {
+  const removed = await db('DELETE', 'dining_tables', {
     id: `eq.${id}`,
     ...(cleanUuid(storeId) ? { store_id: `eq.${cleanUuid(storeId)}` } : {})
-  }, undefined, ['Prefer: return=minimal']);
+  }, undefined, ['Prefer: return=representation']);
+  if (Array.isArray(removed) && removed.length === 0) throw httpError(404, 'Mesa nÃ£o encontrada nesta loja.');
 }
 
 async function openCustomerTab(data, storeId, options = {}) {
   const db = options.db || dbRequest;
   const tableId = cleanText(data.dining_table_id || '');
+  if (tableId) await requireActiveDiningTable(tableId, storeId, options);
   const payload = {
     store_id: cleanUuid(storeId) || null,
     name: cleanText(data.name || `Comanda ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`),
@@ -6883,6 +7397,7 @@ async function orderReportBetween(start, end, period, storeId, options = {}) {
     by_status: groupOrderTotals(withItems, 'status'),
     by_payment: groupOrderTotals(withItems.filter((order) => order.status !== 'cancelled'), 'payment_method'),
     by_origin: groupOrderTotals(withItems.filter((order) => order.status !== 'cancelled'), 'fulfillment_method'),
+    by_hour: hourlyOrderTotals(withItems.filter((order) => order.status !== 'cancelled')),
     cash_closing: cashClosingTotals(withItems),
     top_products: topProductTotals(withItems.filter((order) => order.status !== 'cancelled')),
     orders: withItems
@@ -6940,15 +7455,38 @@ function groupOrderTotals(orders, field) {
 function cashClosingTotals(orders) {
   const billable = orders.filter((order) => order.status !== 'cancelled');
   const completed = orders.filter((order) => order.status === 'completed');
+  const expectedRevenue = roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.total), 0));
+  const completedRevenue = roundMoney(completed.reduce((sum, order) => sum + moneyNumber(order.total), 0));
   return {
-    expected_revenue: roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
-    completed_revenue: roundMoney(completed.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    expected_revenue: expectedRevenue,
+    completed_revenue: completedRevenue,
     pending_revenue: roundMoney(billable
       .filter((order) => order.status !== 'completed')
       .reduce((sum, order) => sum + moneyNumber(order.total), 0)),
     delivery_fees: roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.delivery_fee), 0)),
+    discounts: roundMoney(billable.reduce((sum, order) => sum + moneyNumber(order.discount), 0)),
+    coupons: billable.filter((order) => order.promotion_code).length,
+    divergence: roundMoney(expectedRevenue - completedRevenue),
+    by_payment: groupOrderTotals(completed, 'payment_method'),
     order_count: billable.length
   };
+}
+
+function hourlyOrderTotals(orders) {
+  const grouped = new Map();
+  for (const order of orders) {
+    const hour = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      hour12: false
+    }).format(new Date(order.created_at));
+    const key = `${hour}:00`;
+    const current = grouped.get(key) || { key, count: 0, total: 0 };
+    current.count += 1;
+    current.total = roundMoney(current.total + moneyNumber(order.total));
+    grouped.set(key, current);
+  }
+  return [...grouped.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
 function topProductTotals(orders) {
@@ -7621,7 +8159,7 @@ function routePath(requestPath) {
   if (requestPath === '/onboarding') return '/admin.html';
   if (requestPath === '/convite') return '/invite.html';
   if (requestPath === '/admin') return '/admin.html';
-  if (requestPath === '/platform') return '/platform.html';
+  if (requestPath === '/platform' || requestPath === '/plataform') return '/platform.html';
   if (requestPath === '/cozinha') return '/kitchen.html';
   if (requestPath === '/pagamento') return '/payment.html';
   if (requestPath === '/conta' || requestPath === '/cliente') return '/account.html';

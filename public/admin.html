@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
@@ -253,6 +253,43 @@
               <article><span>Em aberto</span><strong id="operationMetricOpen">0</strong></article>
               <article><span>Status</span><strong id="operationMetricStatus">-</strong></article>
             </section>
+
+            <section class="dashboard-grid" id="operationDashboard">
+              <article class="dashboard-card">
+                <span>Faturamento hoje</span>
+                <strong id="dashboardRevenue">R$ 0,00</strong>
+                <small id="dashboardRevenueHint">Pedidos concluídos e em andamento.</small>
+              </article>
+              <article class="dashboard-card">
+                <span>Produtos ativos</span>
+                <strong id="dashboardProducts">0</strong>
+                <small id="dashboardProductsHint">Itens disponíveis no cardápio.</small>
+              </article>
+              <article class="dashboard-card">
+                <span>Mesas ativas</span>
+                <strong id="dashboardTables">0</strong>
+                <small id="dashboardTablesHint">Mesas liberadas para QR Code.</small>
+              </article>
+              <article class="dashboard-card">
+                <span>Plano atual</span>
+                <strong id="dashboardPlan">-</strong>
+                <small id="dashboardPlanHint">Limites e recursos da loja.</small>
+              </article>
+            </section>
+
+            <section class="dashboard-actions panel">
+              <div>
+                <p class="eyebrow">Ações rápidas</p>
+                <h2>Próximos passos da operação</h2>
+                <p id="dashboardAlertText">Carregando alertas importantes da loja.</p>
+              </div>
+              <div class="row-actions">
+                <button class="ghost-button compact" data-admin-tab-jump="orders" type="button">Ver pedidos</button>
+                <button class="ghost-button compact" data-admin-tab-jump="menu" type="button">Editar cardápio</button>
+                <button class="ghost-button compact" data-admin-tab-jump="tables" type="button">Mesas</button>
+                <button class="primary-button compact" data-admin-tab-jump="plan" type="button">Meu plano</button>
+              </div>
+            </section>
           </section>
 
           <section class="admin-section" data-admin-section="orders">
@@ -365,10 +402,17 @@
                       <h2>Categorias</h2>
                     </div>
                     <div class="row-actions">
+                      <input class="compact-search" id="categorySearch" type="search" placeholder="Buscar categoria">
+                      <select class="compact-date" id="categoryStatusFilter">
+                        <option value="all">Todas</option>
+                        <option value="active">Ativas</option>
+                        <option value="inactive">Pausadas</option>
+                      </select>
                       <button class="primary-button compact" id="newCategoryButton" type="button">Nova categoria</button>
                       <button class="ghost-button compact" id="refreshCategoriesButton" type="button">Atualizar</button>
                     </div>
                   </div>
+                  <div class="plan-inline-alert" id="categoryPlanAlert" hidden></div>
                   <div class="admin-list" id="categoryEditorList"></div>
                 </section>
               </section>
@@ -381,10 +425,17 @@
                       <h2>Produtos</h2>
                     </div>
                     <div class="row-actions">
+                      <input class="compact-search" id="productSearch" type="search" placeholder="Buscar produto">
+                      <select class="compact-date" id="productStatusFilter">
+                        <option value="all">Todos</option>
+                        <option value="active">Disponíveis</option>
+                        <option value="inactive">Pausados</option>
+                      </select>
                       <button class="primary-button compact" id="newProductButton" type="button">Novo produto</button>
                       <button class="ghost-button compact" id="refreshProductsButton" type="button">Atualizar</button>
                     </div>
                   </div>
+                  <div class="plan-inline-alert" id="productPlanAlert" hidden></div>
                   <div class="admin-list" id="productEditorList"></div>
                 </section>
               </section>
@@ -1164,6 +1215,17 @@
                   <div class="editor-grid">
                     <label class="editor-wide">URL da imagem<input name="image_url" placeholder="https://..."></label>
                     <label class="editor-wide">Enviar imagem<input name="image_file" id="itemImageFile" type="file" accept="image/*"></label>
+                    <label>Tipo para sugestão
+                      <select name="product_type">
+                        <option value="">Detectar automaticamente</option>
+                        <option value="burger">Lanche/hambúrguer</option>
+                        <option value="pizza">Pizza</option>
+                        <option value="main">Prato/combo</option>
+                        <option value="side">Acompanhamento</option>
+                        <option value="drink">Bebida</option>
+                        <option value="dessert">Sobremesa</option>
+                      </select>
+                    </label>
                     <label class="editor-wide">Palavras de busca<input name="tags" placeholder="Ex: artesanal, promocao, bacon"></label>
                   </div>
                 </section>
@@ -1198,3 +1260,6 @@
     <script src="/admin.js?v=20260708-plan-gates" type="module"></script>
   </body>
 </html>
+
+
+

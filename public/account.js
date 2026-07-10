@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   customer: null,
   orders: [],
   ordersFromCache: false,
@@ -760,7 +760,8 @@ function orderItemsText(order) {
 }
 
 function modifierText(modifier) {
-  return `${modifier.group_name ? `${modifier.group_name}: ` : ''}${modifier.name}`;
+  const price = Number(modifier.price_delta || 0);
+  return `${modifier.name || 'Adicional'}${price > 0 ? ` (+ ${money(price)})` : ''}`;
 }
 
 function formatAddress(address) {
@@ -894,3 +895,6 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
+
+
+

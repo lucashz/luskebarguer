@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   orders: [],
   filter: 'all',
   knownOrderIds: new Set(),
@@ -7,6 +7,7 @@ const state = {
 };
 
 const waitingLimitMs = 15 * 60 * 1000;
+const rushLimitMs = 25 * 60 * 1000;
 const columns = [
   { key: 'new', title: 'Novo', statuses: ['new', 'accepted'] },
   { key: 'preparing', title: 'Preparando', statuses: ['preparing'] },
@@ -57,7 +58,8 @@ async function loadOrders(options = {}) {
 function renderKitchen() {
   const activeOrders = state.orders.filter((order) => !['cancelled'].includes(order.status));
   const waitingOrders = activeOrders.filter(isWaitingTooLong);
-  els.status.textContent = `${activeOrders.length} pedido(s) na cozinha${waitingOrders.length ? ` - ${waitingOrders.length} aguardando mais de 15 min` : ''}`;
+  const rushOrders = activeOrders.filter(isRushOrder);
+  els.status.textContent = `${activeOrders.length} pedido(s) na cozinha${waitingOrders.length ? ` - ${waitingOrders.length} aguardando mais de 15 min` : ''}${rushOrders.length ? ` - ${rushOrders.length} prioridade alta` : ''}`;
 
   const visibleColumns = columns.filter((column) => state.filter === 'all' || column.key === state.filter);
   els.board.classList.toggle('is-filtered', state.filter !== 'all');
@@ -77,11 +79,16 @@ function kitchenCard(order) {
   const createdAt = new Date(order.created_at);
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
   const waitingTooLong = isWaitingTooLong(order);
-  card.className = `kitchen-card status-${order.status}${waitingTooLong ? ' is-late' : ''}`;
+  const rushOrder = isRushOrder(order);
+  card.className = `kitchen-card status-${order.status}${waitingTooLong ? ' is-late' : ''}${rushOrder ? ' is-rush' : ''}`;
   card.innerHTML = `
     <div class="kitchen-card-head">
       <strong>#${escapeHtml(order.public_code)}</strong>
-      <span>${timeSince(createdAt)}</span>
+      <span>${timeSince(createdAt)} - ${statusLabel(order.status)}</span>
+    </div>
+    <div class="kitchen-priority-row">
+      <span class="kitchen-priority ${rushOrder ? 'high' : waitingTooLong ? 'medium' : 'normal'}">${rushOrder ? 'Prioridade alta' : waitingTooLong ? 'Atenção' : 'No prazo'}</span>
+      <span>${escapeHtml(order.payment_method || 'Pagamento não informado')}</span>
     </div>
     <h3>${escapeHtml(orderCardTitle(order, customer))}</h3>
     <p>${money(order.total)} - ${itemCount} ${itemCount === 1 ? 'item' : 'itens'} - ${escapeHtml(orderOriginLabel(order))}</p>
@@ -166,6 +173,11 @@ function isWaitingTooLong(order) {
   return Date.now() - new Date(order.created_at).getTime() > waitingLimitMs;
 }
 
+function isRushOrder(order) {
+  if (['completed', 'cancelled'].includes(order.status)) return false;
+  return Date.now() - new Date(order.created_at).getTime() > rushLimitMs;
+}
+
 function timeSince(date) {
   const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
   if (minutes < 1) return 'agora';
@@ -215,13 +227,21 @@ async function toggleFullscreen() {
 function printOrderLabel(order) {
   const popup = window.open('', '_blank', 'width=360,height=640');
   if (!popup) {
-    toast('Permita pop-ups para imprimir a etiqueta.');
+    toast('Permita pop-ups para imprimir a etiqueta. Depois clique em Imprimir novamente.');
     return;
   }
-  popup.document.write(orderLabelHtml(order));
-  popup.document.close();
-  popup.focus();
-  setTimeout(() => popup.print(), 250);
+  try {
+    popup.document.write(orderLabelHtml(order));
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => {
+      popup.print();
+      toast(`Pedido #${order.public_code} enviado para impressão.`);
+    }, 250);
+  } catch (error) {
+    popup.close();
+    toast('Não foi possível abrir a impressão. Tente atualizar a tela da cozinha.');
+  }
 }
 
 function orderLabelHtml(order) {
@@ -268,7 +288,7 @@ function statusLabel(status) {
 
 function modifierText(modifier) {
   const price = Number(modifier.price_delta || 0);
-  return `${modifier.group_name ? `${modifier.group_name}: ` : ''}${modifier.name}${price > 0 ? ` + ${money(price)}` : ''}`;
+  return `${modifier.name || 'Adicional'}${price > 0 ? ` (+ ${money(price)})` : ''}`;
 }
 
 function formatAddress(address = {}) {
@@ -300,3 +320,6 @@ function toast(message) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => els.toast.classList.remove('visible'), 2600);
 }
+
+
+

@@ -17,14 +17,14 @@
     "admin:create": "node scripts/create-admin.mjs",
     "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js",
     "test:local": "node scripts/local-db-smoke.mjs",
-    "test:security": "node scripts/sql-injection-tests.mjs"
+    "test:security": "node scripts/sql-injection-tests.mjs",
+    "test:flows": "node scripts/core-flow-smoke.mjs",
+    "test:platform-health": "node scripts/platform-health-smoke.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.3",
-    "jsonwebtoken": "^9.0.3",
-    "pg": "^8.16.3",
-    "zod": "^4.4.3"
+    "pg": "^8.16.3"
   },
   "engines": {
     "node": ">=20"

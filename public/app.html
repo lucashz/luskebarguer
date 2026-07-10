@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
@@ -48,7 +48,7 @@
         <div class="feed-toolbar">
           <div>
             <strong id="status">Carregando cardápio...</strong>
-            <p>Produtos dispon?veis para pedido agora.</p>
+            <p>Produtos disponíveis para pedido agora.</p>
           </div>
         </div>
         <section class="favorites-strip" id="favoritesStrip" hidden></section>
@@ -65,6 +65,7 @@
           <button class="text-button" id="clearCartButton">Limpar</button>
         </div>
         <div class="bag-items" id="cartItems"></div>
+        <section class="cart-suggestions" id="cartSuggestions" hidden></section>
         <div class="bag-totals">
           <div><span>Subtotal</span><strong id="cartSubtotal">R$ 0,00</strong></div>
           <div><span>Entrega</span><strong id="cartDelivery">R$ 0,00</strong></div>
@@ -167,6 +168,7 @@
             <button class="ghost-button compact" id="applyCouponButton" type="button">Aplicar</button>
           </div>
           <p class="coupon-feedback" id="couponFeedback" hidden></p>
+          <section class="checkout-suggestions" id="checkoutSuggestions" hidden></section>
           <textarea name="notes" placeholder="Observações do pedido"></textarea>
         </fieldset>
 
@@ -225,3 +227,6 @@
     <script src="/app.js?v=20260630-multitenant-fix" type="module"></script>
   </body>
 </html>
+
+
+

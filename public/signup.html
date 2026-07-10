@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8">
@@ -20,16 +20,16 @@
         <p class="eyebrow">Teste grátis</p>
         <h1>Vamos criar sua loja digital.</h1>
         <p>Você cadastra a conta, informa os dados do estabelecimento e escolhe o endereço público do cardápio.</p>
-        <div class="signup-progress">
-          <span class="active">Plano</span>
-          <span>Responsável</span>
-          <span>Loja</span>
-          <span>Publicar</span>
+        <div class="signup-progress" id="signupProgress">
+          <span class="active" data-signup-progress="plan">Plano</span>
+          <span data-signup-progress="owner">Responsável</span>
+          <span data-signup-progress="business">Loja</span>
+          <span data-signup-progress="publish">Publicar</span>
         </div>
       </section>
 
       <form class="signup-card" id="signupForm">
-        <section class="signup-step">
+        <section class="signup-step" data-signup-step="plan">
           <p class="eyebrow">Etapa 1</p>
           <h2>Escolha o plano</h2>
           <div class="signup-plan-options" id="signupPlanOptions">
@@ -37,7 +37,7 @@
           </div>
         </section>
 
-        <section class="signup-step">
+        <section class="signup-step" data-signup-step="owner">
           <p class="eyebrow">Etapa 2</p>
           <h2>Responsável pela conta</h2>
           <div class="two-cols">
@@ -51,7 +51,7 @@
           <label>Confirmar senha<input name="confirm_password" required type="password" minlength="8" autocomplete="new-password"></label>
         </section>
 
-        <section class="signup-step">
+        <section class="signup-step" data-signup-step="business">
           <p class="eyebrow">Etapa 3</p>
           <h2>Dados do estabelecimento</h2>
           <div class="two-cols">
@@ -81,7 +81,7 @@
           </div>
         </section>
 
-        <section class="signup-step">
+        <section class="signup-step" data-signup-step="publish">
           <p class="eyebrow">Etapa 4</p>
           <h2>Endereço do cardápio</h2>
           <label>Identificador público
@@ -114,3 +114,4 @@
     <script src="/portal.js?v=20260707-terms-home" type="module"></script>
   </body>
 </html>
+

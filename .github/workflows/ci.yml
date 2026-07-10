@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cardapio_local
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cardapio_local"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cardapio_local?schema=public
+      PLATFORM_BILLING_PROVIDER: mock
+      NODE_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Apply migrations
+        run: npm run db:schema
+
+      - name: Syntax check
+        run: npm run test:syntax
+
+      - name: Local database smoke
+        run: npm run test:local
+
+      - name: Core flow smoke
+        run: npm run test:flows
+
+      - name: Platform health smoke
+        run: npm run test:platform-health
+
+      - name: Security smoke
+        run: |
+          npm start &
+          SERVER_PID=$!
+          sleep 4
+          npm run test:security
+          kill $SERVER_PID

@@ -92,6 +92,7 @@ enum SubscriptionStatus {
   active
   payment_pending
   grace_period
+  past_due
   cancelled
   expired
   suspended

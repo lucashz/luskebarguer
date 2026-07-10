@@ -1,4 +1,4 @@
-import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -18,31 +18,65 @@ await mkdir(backupsDir, { recursive: true });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const output = path.join(backupsDir, `postgres-${stamp}.dump`);
+const statusFile = path.join(backupsDir, 'backup-status.json');
 
-const child = spawn('pg_dump', [
-  '--format=custom',
-  '--no-owner',
-  '--no-privileges',
-  '--file',
-  output,
-  connectionString
-], {
-  stdio: 'inherit',
-  shell: process.platform === 'win32'
-});
-
-child.on('exit', (code) => {
-  if (code === 0) {
-    console.log(`Backup criado em ${output}`);
-    cleanupOldBackups().catch((error) => {
-      console.error(`Backup criado, mas a limpeza de backups antigos falhou: ${error.message || error}`);
-      process.exit(1);
-    });
-    return;
+try {
+  await writeBackupStatus({ status: 'running', started_at: new Date().toISOString(), output: path.basename(output) });
+  const code = await runPgDump(output);
+  if (code !== 0) {
+    throw new Error('Falha ao executar pg_dump. Verifique se o PostgreSQL client esta instalado.');
   }
-  console.error('Falha ao executar pg_dump. Verifique se o PostgreSQL client esta instalado.');
-  process.exit(code || 1);
-});
+  const info = await stat(output);
+  await cleanupOldBackups();
+  await writeBackupStatus({
+    status: 'success',
+    started_at: new Date(stampToDate(stamp)).toISOString(),
+    finished_at: new Date().toISOString(),
+    output: path.basename(output),
+    size_bytes: info.size,
+    retention_days: retentionDays
+  });
+  console.log(`Backup criado em ${output}`);
+} catch (error) {
+  await writeBackupStatus({
+    status: 'failed',
+    finished_at: new Date().toISOString(),
+    output: path.basename(output),
+    error: error.message || String(error),
+    retention_days: retentionDays
+  }).catch(() => {});
+  console.error(error.message || error);
+  process.exit(1);
+}
+
+function runPgDump(outputFile) {
+  return new Promise((resolve) => {
+    const child = spawn('pg_dump', [
+      '--format=custom',
+      '--no-owner',
+      '--no-privileges',
+      '--file',
+      outputFile,
+      connectionString
+    ], {
+      stdio: 'inherit',
+      shell: process.platform === 'win32'
+    });
+    child.on('exit', (code) => resolve(code || 0));
+    child.on('error', () => resolve(1));
+  });
+}
+
+async function writeBackupStatus(data) {
+  await writeFile(statusFile, JSON.stringify({
+    ...data,
+    updated_at: new Date().toISOString()
+  }, null, 2));
+}
+
+function stampToDate(value) {
+  return value.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}).+$/, '$1T$2:$3:$4.000Z');
+}
 
 function pgDumpConnectionString(value) {
   if (!value) return '';

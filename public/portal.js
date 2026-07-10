@@ -1,8 +1,9 @@
-const planContainers = [
+﻿const planContainers = [
   document.querySelector('#portalPlans'),
   document.querySelector('#signupPlanOptions')
 ].filter(Boolean);
 const signupForm = document.querySelector('#signupForm');
+const signupProgress = document.querySelector('#signupProgress');
 const slugInput = document.querySelector('#signupSlug');
 const slugStatus = document.querySelector('#slugStatus');
 const signupMessage = document.querySelector('#signupMessage');
@@ -49,6 +50,7 @@ async function loadPlans() {
 
 function initSignup() {
   const businessName = signupForm.elements.business_name;
+  initSignupProgress();
   businessName?.addEventListener('input', () => {
     if (!slugInput || slugInput.dataset.touched === 'true') return;
     slugInput.value = slugify(businessName.value);
@@ -60,6 +62,50 @@ function initSignup() {
     validateSlugSoon();
   });
   signupForm.addEventListener('submit', submitSignup);
+}
+
+function initSignupProgress() {
+  if (!signupForm || !signupProgress) return;
+  signupForm.addEventListener('focusin', (event) => {
+    const step = event.target.closest('[data-signup-step]')?.dataset.signupStep;
+    if (step) setSignupProgress(step);
+  });
+  signupForm.addEventListener('input', updateSignupProgressState);
+  signupForm.addEventListener('change', updateSignupProgressState);
+  document.addEventListener('scroll', markVisibleSignupStep, { passive: true });
+  updateSignupProgressState();
+  markVisibleSignupStep();
+}
+
+function markVisibleSignupStep() {
+  if (!signupForm || !signupProgress) return;
+  const steps = [...signupForm.querySelectorAll('[data-signup-step]')];
+  const current = steps
+    .map((section) => ({ section, top: Math.abs(section.getBoundingClientRect().top - 120) }))
+    .sort((a, b) => a.top - b.top)[0]?.section?.dataset.signupStep;
+  if (current) setSignupProgress(current);
+}
+
+function updateSignupProgressState() {
+  if (!signupProgress) return;
+  const completed = {
+    plan: Boolean(signupForm.querySelector('input[name="plan_code"]:checked')),
+    owner: ['owner_name', 'owner_phone', 'owner_email', 'password', 'confirm_password']
+      .every((name) => String(signupForm.elements[name]?.value || '').trim()),
+    business: ['business_name', 'business_type']
+      .every((name) => String(signupForm.elements[name]?.value || '').trim()),
+    publish: Boolean(String(signupForm.elements.slug?.value || '').trim() && signupForm.elements.accept_terms?.checked)
+  };
+  signupProgress.querySelectorAll('[data-signup-progress]').forEach((item) => {
+    item.classList.toggle('done', Boolean(completed[item.dataset.signupProgress]));
+  });
+}
+
+function setSignupProgress(step) {
+  if (!signupProgress) return;
+  signupProgress.querySelectorAll('[data-signup-progress]').forEach((item) => {
+    item.classList.toggle('active', item.dataset.signupProgress === step);
+  });
 }
 
 function initLogin() {
@@ -391,3 +437,4 @@ function cssEscape(value) {
   if (window.CSS?.escape) return window.CSS.escape(value);
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
 }
+

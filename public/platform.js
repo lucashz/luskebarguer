@@ -1,9 +1,11 @@
-const state = {
+﻿const state = {
   admin: null,
   companies: [],
   plans: [],
   features: [],
-  logs: []
+  logs: [],
+  backup: null,
+  health: null
 };
 
 const els = {
@@ -21,6 +23,17 @@ const els = {
   auditStoreSelect: document.querySelector('#auditStoreSelect'),
   companyList: document.querySelector('#companyList'),
   auditList: document.querySelector('#auditList'),
+  backupStatus: document.querySelector('#backupStatus'),
+  healthPeriodSelect: document.querySelector('#healthPeriodSelect'),
+  refreshHealthButton: document.querySelector('#refreshHealthButton'),
+  healthMeta: document.querySelector('#healthMeta'),
+  platformStatusGrid: document.querySelector('#platformStatusGrid'),
+  platformMetrics: document.querySelector('#platformMetrics'),
+  platformConfigChecklist: document.querySelector('#platformConfigChecklist'),
+  platformAlerts: document.querySelector('#platformAlerts'),
+  operationalLogTypeFilter: document.querySelector('#operationalLogTypeFilter'),
+  operationalLogStatusFilter: document.querySelector('#operationalLogStatusFilter'),
+  platformOperationalLogs: document.querySelector('#platformOperationalLogs'),
   toast: document.querySelector('#toast')
 };
 
@@ -29,6 +42,10 @@ els.refreshPlatformButton.addEventListener('click', loadPlatform);
 els.companyForm.addEventListener('submit', submitCompany);
 els.storeForm.addEventListener('submit', submitStore);
 els.auditFilterForm?.addEventListener('submit', submitAuditFilters);
+els.refreshHealthButton?.addEventListener('click', loadHealth);
+els.healthPeriodSelect?.addEventListener('change', loadHealth);
+els.operationalLogTypeFilter?.addEventListener('change', renderOperationalLogs);
+els.operationalLogStatusFilter?.addEventListener('change', renderOperationalLogs);
 
 init().catch((error) => {
   toast(error.message || 'Não foi possível carregar a plataforma.');
@@ -47,31 +64,56 @@ async function init() {
 }
 
 async function loadPlatform() {
-  const [companies, plans, audit] = await Promise.all([
+  const [companies, plans, audit, backup, health] = await Promise.all([
     request('/api/platform/companies'),
     request('/api/platform/plans'),
-    request(`/api/platform/audit${auditQueryString()}`)
+    request(`/api/platform/audit${auditQueryString()}`),
+    request('/api/platform/backups').catch(() => ({ status: 'unknown', recent: [] })),
+    request(healthUrl()).catch((error) => ({ error: error.message || 'Não foi possível carregar saúde operacional.' }))
   ]);
   state.companies = companies.companies || [];
   state.features = companies.features || [];
   state.plans = plans.plans || [];
   state.logs = audit.logs || [];
+  state.backup = backup;
+  state.health = health;
   render();
+}
+
+async function loadHealth() {
+  if (els.refreshHealthButton) els.refreshHealthButton.disabled = true;
+  try {
+    state.health = await request(healthUrl());
+    renderHealth();
+  } catch (error) {
+    state.health = { error: error.message || 'Não foi possível carregar saúde operacional.' };
+    renderHealth();
+  } finally {
+    if (els.refreshHealthButton) els.refreshHealthButton.disabled = false;
+  }
+}
+
+function healthUrl() {
+  const period = els.healthPeriodSelect?.value || '24h';
+  return `/api/platform/health?period=${encodeURIComponent(period)}`;
 }
 
 function render() {
   renderSelects();
   renderCompanies();
   renderAudit();
+  renderBackupStatus();
+  renderHealth();
 }
 
 function renderSelects() {
   const planOptions = state.plans.map((plan) => `<option value="${escapeAttribute(plan.code)}">${escapeHtml(plan.name)}</option>`).join('');
-  els.companyPlanSelect.innerHTML = planOptions || '<option value="essential">Essencial</option>';
+  els.companyPlanSelect.innerHTML = `<option value="">Selecione o plano inicial</option>${planOptions || '<option value="essential">Essencial</option>'}`;
   const companyOptions = state.companies
     .map((company) => `<option value="${escapeAttribute(company.id)}">${escapeHtml(company.name)}</option>`)
     .join('');
-  els.storeCompanySelect.innerHTML = companyOptions;
+  els.storeCompanySelect.innerHTML = `<option value="">Selecione a empresa</option>${companyOptions}`;
+  els.storeCompanySelect.disabled = !state.companies.length;
   els.auditCompanySelect.innerHTML = `<option value="">Todas empresas</option>${companyOptions}`;
   const stores = state.companies.flatMap((company) => (company.stores || []).map((store) => ({ ...store, company_name: company.name })));
   els.auditStoreSelect.innerHTML = '<option value="">Todas lojas</option>' + stores
@@ -177,6 +219,157 @@ function renderAudit() {
   `).join('') : '<p class="empty-state">Nenhum evento recente.</p>';
 }
 
+function renderHealth() {
+  const health = state.health || {};
+  if (health.error) {
+    if (els.healthMeta) els.healthMeta.textContent = health.error;
+    if (els.platformStatusGrid) els.platformStatusGrid.innerHTML = '<p class="empty-state">Não foi possível carregar os checks operacionais.</p>';
+    return;
+  }
+  if (els.healthMeta) {
+    els.healthMeta.textContent = health.checked_at
+      ? `Última verificação: ${new Date(health.checked_at).toLocaleString('pt-BR')} - ${health.period || 'período atual'}`
+      : 'Sem verificação registrada.';
+  }
+  renderPlatformStatuses(health.statuses || []);
+  renderPlatformMetrics(health.metrics || {});
+  renderPlatformChecklist(health.config?.items || []);
+  renderPlatformAlerts(health.alerts || []);
+  renderOperationalLogs();
+}
+
+function renderPlatformStatuses(statuses) {
+  if (!els.platformStatusGrid) return;
+  els.platformStatusGrid.innerHTML = statuses.length ? statuses.map((item) => `
+    <article class="platform-status-card status-${escapeAttribute(item.status)}">
+      <span>${escapeHtml(statusLabelHealth(item.status))}</span>
+      <strong>${escapeHtml(item.label)}</strong>
+      <p>${escapeHtml(item.message || '-')}</p>
+      ${item.latency_ms !== null && item.latency_ms !== undefined ? `<small>${Number(item.latency_ms)} ms</small>` : ''}
+    </article>
+  `).join('') : '<p class="empty-state">Nenhum status disponível.</p>';
+}
+
+function renderPlatformMetrics(metrics) {
+  if (!els.platformMetrics) return;
+  const rows = [
+    ['API', metrics.api],
+    ['Banco', metrics.database],
+    ['Checkout', metrics.checkout],
+    ['Pedidos', metrics.order_mutations]
+  ];
+  els.platformMetrics.innerHTML = rows.map(([label, data = {}]) => `
+    <div class="platform-metric-row">
+      <strong>${escapeHtml(label)}</strong>
+      <span>Média: ${metricMs(data.average_ms)}</span>
+      <span>P95: ${metricMs(data.p95_ms)}</span>
+      <span>P99: ${metricMs(data.p99_ms)}</span>
+      ${data.requests !== undefined ? `<small>${Number(data.requests || 0)} req.</small>` : ''}
+    </div>
+  `).join('');
+}
+
+function renderPlatformChecklist(items) {
+  if (!els.platformConfigChecklist) return;
+  els.platformConfigChecklist.innerHTML = items.length ? items.map((item) => `
+    <article class="platform-check-row ${item.ok ? 'ok' : 'danger'}">
+      <span>${item.ok ? 'OK' : '!'}</span>
+      <div>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.hint || '')}</small>
+      </div>
+    </article>
+  `).join('') : '<p class="empty-state">Checklist indisponível.</p>';
+}
+
+function renderPlatformAlerts(alerts) {
+  if (!els.platformAlerts) return;
+  els.platformAlerts.innerHTML = alerts.length ? alerts.map((alert) => `
+    <article class="platform-alert-row severity-${escapeAttribute(alert.severity)}">
+      <strong>${escapeHtml(alert.title)}</strong>
+      <p>${escapeHtml(alert.message || '')}</p>
+      <small>${escapeHtml(alert.action || '')}</small>
+    </article>
+  `).join('') : '<p class="empty-state">Nenhum alerta operacional no momento.</p>';
+}
+
+function renderOperationalLogs() {
+  if (!els.platformOperationalLogs) return;
+  const type = els.operationalLogTypeFilter?.value || '';
+  const status = els.operationalLogStatusFilter?.value || '';
+  const logs = (state.health?.logs || [])
+    .filter((entry) => !type || entry.type === type)
+    .filter((entry) => !status || entry.status === status);
+  els.platformOperationalLogs.innerHTML = logs.length ? logs.map((entry) => `
+    <article class="platform-log-row status-${escapeAttribute(entry.status)}">
+      <div>
+        <strong>${escapeHtml(entry.action || entry.type)}</strong>
+        <small>${entry.created_at ? new Date(entry.created_at).toLocaleString('pt-BR') : '-'} - ${escapeHtml(entry.type || 'system')}</small>
+      </div>
+      <p>${escapeHtml(entry.message || '')}</p>
+    </article>
+  `).join('') : '<p class="empty-state">Nenhum log operacional para os filtros.</p>';
+}
+
+function statusLabelHealth(status) {
+  return ({
+    healthy: 'Saudável',
+    attention: 'Atenção',
+    error: 'Erro',
+    unknown: 'Desconhecido'
+  })[status] || 'Desconhecido';
+}
+
+function metricMs(value) {
+  return value === null || value === undefined ? '-' : `${Number(value)} ms`;
+}
+
+function renderBackupStatus() {
+  if (!els.backupStatus) return;
+  const backup = state.backup || {};
+  const latest = backup.latest || {};
+  const recent = Array.isArray(backup.recent) ? backup.recent : [];
+  els.backupStatus.innerHTML = `
+    <article>
+      <span>Status</span>
+      <strong class="${backup.status === 'success' ? 'ok' : backup.status === 'failed' ? 'danger' : 'muted'}">${escapeHtml(backupStatusLabel(backup.status))}</strong>
+      <p>${backup.error ? escapeHtml(backup.error) : 'Última execução registrada pela rotina de backup.'}</p>
+    </article>
+    <article>
+      <span>Último arquivo</span>
+      <strong>${escapeHtml(latest.file || backup.last_output || '-')}</strong>
+      <p>${latest.size_bytes ? formatBytes(latest.size_bytes) : 'Sem arquivo local registrado.'}</p>
+    </article>
+    <article>
+      <span>Atualizado em</span>
+      <strong>${backup.updated_at ? new Date(backup.updated_at).toLocaleString('pt-BR') : '-'}</strong>
+      <p>Retenção configurada: ${Number(backup.retention_days || 14)} dia(s).</p>
+    </article>
+    <article>
+      <span>Histórico recente</span>
+      <strong>${recent.length} backup(s)</strong>
+      <p>${recent.slice(0, 3).map((entry) => `${entry.file} (${formatBytes(entry.size_bytes)})`).join(' · ') || 'Nenhum backup encontrado no diretório local.'}</p>
+    </article>
+  `;
+}
+
+function backupStatusLabel(status) {
+  return ({
+    success: 'Sucesso',
+    failed: 'Falhou',
+    running: 'Em execução',
+    unknown: 'Sem registro'
+  })[status] || 'Sem registro';
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 async function submitAuditFilters(event) {
   event.preventDefault();
   const audit = await request(`/api/platform/audit${auditQueryString()}`);
@@ -205,7 +398,7 @@ async function submitCompany(event) {
   });
   els.companyForm.reset();
   await loadPlatform();
-  toast('Empresa criada.');
+  toast('Cliente cadastrado na plataforma.');
 }
 
 async function submitStore(event) {
@@ -218,7 +411,7 @@ async function submitStore(event) {
   });
   els.storeForm.reset();
   await loadPlatform();
-  toast('Loja criada.');
+  toast('Cardápio criado para o cliente.');
 }
 
 async function submitCompanyManagement(event) {
@@ -341,3 +534,4 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
+

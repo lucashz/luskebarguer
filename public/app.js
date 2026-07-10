@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   store: null,
   customer: null,
   categories: [],
@@ -58,6 +58,7 @@ const els = {
   mobileBagTotal: document.querySelector('#mobileBagTotal'),
   clearCartButton: document.querySelector('#clearCartButton'),
   cartItems: document.querySelector('#cartItems'),
+  cartSuggestions: document.querySelector('#cartSuggestions'),
   cartSubtotal: document.querySelector('#cartSubtotal'),
   cartDelivery: document.querySelector('#cartDelivery'),
   cartTotal: document.querySelector('#cartTotal'),
@@ -86,6 +87,7 @@ const els = {
   couponCode: document.querySelector('#couponCode'),
   applyCouponButton: document.querySelector('#applyCouponButton'),
   couponFeedback: document.querySelector('#couponFeedback'),
+  checkoutSuggestions: document.querySelector('#checkoutSuggestions'),
   accountPrefill: document.querySelector('#accountPrefill'),
   accountPrefillTitle: document.querySelector('#accountPrefillTitle'),
   accountPrefillText: document.querySelector('#accountPrefillText'),
@@ -449,7 +451,7 @@ function renderFavoritesStrip() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'favorite-chip';
-    button.innerHTML = `<span>♥</span><strong>${escapeHtml(item.name)}</strong><small>${money(item.price)}</small>`;
+    button.innerHTML = `<span aria-hidden="true">&hearts;</span><strong>${escapeHtml(item.name)}</strong><small>${money(item.price)}</small>`;
     button.addEventListener('click', () => startAddToCart(item));
     return button;
   }));
@@ -559,6 +561,7 @@ function productRow(item) {
   const row = document.createElement('article');
   row.className = 'product-row';
   const storeClosed = isStoreClosed();
+  const isFavorite = state.favorites.has(item.id);
   row.innerHTML = `
     <div class="product-info">
       <h3>${escapeHtml(item.name)}</h3>
@@ -566,7 +569,7 @@ function productRow(item) {
       <strong>${money(item.price)}</strong>
       <div class="tags">${(item.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
     </div>
-    <button class="favorite-button ${state.favorites.has(item.id) ? 'active' : ''}" type="button" aria-label="Favoritar ${escapeAttribute(item.name)}">${state.favorites.has(item.id) ? '♥' : '♡'}</button>
+    <button class="favorite-button ${isFavorite ? 'active' : ''}" type="button" aria-pressed="${isFavorite ? 'true' : 'false'}" aria-label="${isFavorite ? 'Remover dos favoritos' : 'Favoritar'} ${escapeAttribute(item.name)}">${favoriteIcon(isFavorite)}</button>
     <button class="add-product" type="button" aria-label="Adicionar ${escapeAttribute(item.name)}" ${storeClosed ? 'disabled' : ''}>
       ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="">` : '<span>+</span>'}
       <b>${storeClosed ? 'Fechado' : '+'}</b>
@@ -578,6 +581,10 @@ function productRow(item) {
   });
   row.querySelector('.add-product').addEventListener('click', () => startAddToCart(item));
   return row;
+}
+
+function favoriteIcon(active) {
+  return active ? '&hearts;' : '&#9825;';
 }
 
 function toggleFavorite(itemId) {
@@ -611,7 +618,195 @@ function renderCart() {
   els.mobileBagButton.classList.toggle('visible', quantity > 0);
   els.checkoutButton.disabled = quantity === 0 || isStoreClosed();
   els.mobileBagButton.disabled = isStoreClosed();
+  renderCartSuggestions();
   renderCheckoutReview();
+}
+
+function renderCartSuggestions() {
+  const suggestions = cartSuggestions();
+  renderSuggestionBox(els.cartSuggestions, suggestions, suggestionTitle(suggestions, 'Combine com seu pedido'));
+  renderSuggestionBox(els.checkoutSuggestions, suggestions, 'Que tal adicionar também?');
+}
+
+function renderSuggestionBox(container, suggestions, title) {
+  if (!container) return;
+  container.hidden = suggestions.length === 0;
+  if (!suggestions.length) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = `
+    <div class="cart-suggestions-head">
+      <strong>${escapeHtml(title)}</strong>
+    </div>
+    <div class="cart-suggestion-list">
+      ${suggestions.map((item) => `
+        <button type="button" data-suggest-item="${escapeAttribute(item.id)}">
+          <span class="cart-suggestion-copy">
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${escapeHtml(item.suggestion_reason || 'Boa pedida para completar')}</small>
+            <em>${money(item.price)}</em>
+          </span>
+          <b>Adicionar</b>
+        </button>
+      `).join('')}
+    </div>
+  `;
+  container.querySelectorAll('[data-suggest-item]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = findProductById(button.dataset.suggestItem);
+      if (item) startAddToCart(item);
+    });
+  });
+}
+
+function cartSuggestions() {
+  if (!state.cart.length || isStoreClosed()) return [];
+  const cartIds = new Set(state.cart.map((item) => String(item.id)));
+  const cartCategories = new Set(state.cart.map((item) => productCategoryId(item.id)).filter(Boolean));
+  const cartProfile = cartFlavorProfile(state.cart);
+  return allAvailableProducts()
+    .filter((item) => !cartIds.has(String(item.id)))
+    .map((item) => decorateSuggestion(item, cartProfile, cartCategories))
+    .sort((a, b) => b.suggestion_score - a.suggestion_score || a.suggestion_bucket.localeCompare(b.suggestion_bucket) || Number(a.price || 0) - Number(b.price || 0))
+    .filter(uniqueSuggestionBucket())
+    .slice(0, 3);
+}
+
+function decorateSuggestion(item, cartProfile, cartCategories) {
+  const kind = productKind(item);
+  const sameCategory = cartCategories.has(productCategoryId(item.id));
+  const average = cartAveragePrice();
+  let score = item.is_featured ? 4 : 0;
+  let reason = 'Boa pedida para completar';
+  let bucket = kind;
+
+  if (cartProfile.hasMain && kind === 'drink') {
+    score += 9;
+    reason = 'Bebida para acompanhar';
+    bucket = 'drink';
+  } else if (cartProfile.hasMain && kind === 'side') {
+    score += 8;
+    reason = 'Acompanhamento que combina';
+    bucket = 'side';
+  } else if (cartProfile.hasSavory && kind === 'dessert') {
+    score += 7;
+    reason = 'Para fechar com doce';
+    bucket = 'dessert';
+  } else if (cartProfile.hasDrink && ['burger', 'pizza', 'main', 'snack'].includes(kind)) {
+    score += 6;
+    reason = 'Vai bem com a bebida';
+    bucket = 'main-after-drink';
+  } else if (sameCategory) {
+    score += 4;
+    reason = 'Da mesma seção que você escolheu';
+    bucket = `same-${productCategoryId(item.id)}`;
+  }
+
+  if (Number(item.price || 0) <= average) score += 2;
+  if (hasAnyText(item, ['combo', 'duplo', 'familia', 'família', 'promocao', 'promoção'])) {
+    score += 2;
+    reason = 'Oferta boa para aumentar o pedido';
+  }
+  if (hasAnyText(item, ['mais vendido', 'favorito', 'especial', 'chef'])) {
+    score += 2;
+    reason = 'Favorito da casa';
+  }
+
+  return {
+    ...item,
+    suggestion_score: score,
+    suggestion_reason: reason,
+    suggestion_bucket: bucket
+  };
+}
+
+function uniqueSuggestionBucket() {
+  const used = new Set();
+  return (item) => {
+    const bucket = item.suggestion_bucket || 'general';
+    if (used.has(bucket)) return false;
+    used.add(bucket);
+    return true;
+  };
+}
+
+function suggestionTitle(suggestions, fallback) {
+  const reasons = new Set(suggestions.map((item) => item.suggestion_reason));
+  if (reasons.has('Bebida para acompanhar')) return 'Seu pedido pede uma bebida';
+  if (reasons.has('Acompanhamento que combina')) return 'Complete a experiência';
+  if (reasons.has('Para fechar com doce')) return 'Finalize com algo doce';
+  return fallback;
+}
+
+function suggestionSubtitle(suggestions) {
+  const labels = suggestions.map((item) => item.suggestion_reason).filter(Boolean);
+  return labels.length ? labels.slice(0, 2).join(' + ') : 'Escolhas rápidas';
+}
+
+function cartFlavorProfile(items) {
+  const kinds = new Set(items.map(productKind));
+  return {
+    hasMain: [...kinds].some((kind) => ['burger', 'pizza', 'main', 'snack'].includes(kind)),
+    hasSavory: [...kinds].some((kind) => !['drink', 'dessert'].includes(kind)),
+    hasDrink: kinds.has('drink')
+  };
+}
+
+function productKind(item) {
+  const explicitType = productTypeFromTags(item.tags || []);
+  if (explicitType) return explicitType;
+  const text = suggestionSearchText(item);
+  if (/(bebida|refrigerante|refri|suco|limonada|agua|água|cha|chá|drink|coca|guarana|guaraná|pink lemonade)/i.test(text)) return 'drink';
+  if (/(sobremesa|doce|brownie|pudim|sorvete|milk.?shake|cookie|bolo|torta|acai|açaí)/i.test(text)) return 'dessert';
+  if (/(batata|frita|porcao|porção|onion|anel|mandioca|nugget|bacon jam|molho|maionese|extra)/i.test(text)) return 'side';
+  if (/(hamb[uú]rguer|burger|smash|x-|lanche|sanduiche|sanduíche|hot dog)/i.test(text)) return 'burger';
+  if (/(pizza|esfiha|calzone)/i.test(text)) return 'pizza';
+  if (/(combo|prato|marmita|executivo)/i.test(text)) return 'main';
+  return 'snack';
+}
+
+function productTypeFromTags(tags = []) {
+  const type = (tags || [])
+    .map((tag) => String(tag || '').trim().toLowerCase())
+    .find((tag) => tag.startsWith('tipo:'))
+    ?.replace('tipo:', '');
+  return ['burger', 'pizza', 'main', 'side', 'drink', 'dessert'].includes(type) ? type : '';
+}
+
+function hasAnyText(item, terms = []) {
+  const text = suggestionSearchText(item);
+  return terms.some((term) => text.includes(term.toLowerCase()));
+}
+
+function suggestionSearchText(item) {
+  return [
+    item.name,
+    item.description,
+    productCategoryName(item.id),
+    ...(item.tags || [])
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function allAvailableProducts() {
+  return state.categories.flatMap((category) => (category.items || [])
+    .filter((item) => item.is_active !== false && item.is_available !== false));
+}
+
+function productCategoryId(itemId) {
+  const category = state.categories.find((entry) => (entry.items || []).some((item) => String(item.id) === String(itemId)));
+  return category?.id || null;
+}
+
+function productCategoryName(itemId) {
+  const category = state.categories.find((entry) => (entry.items || []).some((item) => String(item.id) === String(itemId)));
+  return category?.name || '';
+}
+
+function cartAveragePrice() {
+  const items = state.cart.filter((item) => Number(item.price || 0) > 0);
+  if (!items.length) return Number.POSITIVE_INFINITY;
+  return items.reduce((sum, item) => sum + Number(item.price || 0), 0) / items.length;
 }
 
 function cartRow(item) {
@@ -959,7 +1154,7 @@ function renderProductChoiceSummary(selected, quantity, unitTotal, total) {
       ${grouped.size ? [...grouped.entries()].map(([groupName, modifiers]) => `
         <article>
           <strong>${escapeHtml(groupName)}</strong>
-          ${modifiers.map((modifier) => `<span>✓ ${escapeHtml(modifier.name)}${Number(modifier.price_delta || 0) > 0 ? ` + ${money(modifier.price_delta)}` : ''}</span>`).join('')}
+          ${modifiers.map((modifier) => `<span>âœ“ ${escapeHtml(modifier.name)}${Number(modifier.price_delta || 0) > 0 ? ` + ${money(modifier.price_delta)}` : ''}</span>`).join('')}
         </article>
       `).join('') : '<p>Nenhuma opção selecionada ainda.</p>'}
     </div>
@@ -1513,7 +1708,8 @@ function addressLabel(address) {
 }
 
 function modifierText(modifier) {
-  return `${modifier.group_name ? `${modifier.group_name}: ` : ''}${modifier.name}`;
+  const price = Number(modifier.price_delta || 0);
+  return `${modifier.name || 'Adicional'}${price > 0 ? ` (+ ${money(price)})` : ''}`;
 }
 
 function clearAddressFields() {
@@ -1834,3 +2030,6 @@ function safeImageUrl(value) {
   }
   return '';
 }
+
+
+

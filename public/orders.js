@@ -1,4 +1,4 @@
-const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
+﻿const ACCOUNT_CACHE_KEY = 'customer_account_cache_v1';
 const THEME_DEFAULTS = {
   primaryColor: '#d71920',
   secondaryColor: '#1f1f1f',
@@ -326,7 +326,8 @@ function currentStoreSlug() {
 }
 
 function modifierText(modifier) {
-  return `${modifier.group_name ? `${modifier.group_name}: ` : ''}${modifier.name}`;
+  const price = Number(modifier.price_delta || 0);
+  return `${modifier.name || 'Adicional'}${price > 0 ? ` (+ ${money(price)})` : ''}`;
 }
 
 function statusLabel(status) {
@@ -380,3 +381,6 @@ function escapeHtml(value) {
 function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, '&#096;');
 }
+
+
+
