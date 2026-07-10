@@ -7799,7 +7799,7 @@ legend {
   font-weight: 800;
 }
 
-/* PÃ¡gina de visita do cardÃ¡pio */
+/* Página de visita do cardápio */
 .visit-page {
   min-height: 100vh;
   background: #fbfbf8;
@@ -8368,7 +8368,7 @@ legend {
 }
 
 
-/* Ajustes premium de contraste para todos os temas do cardÃ¡pio pÃºblico */
+/* Ajustes premium de contraste para todos os temas do cardápio público */
 .menu-page .public-topbar .brand-mark {
   color: var(--color-button);
 }

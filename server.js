@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+﻿import { createServer } from 'node:http';
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -3945,7 +3945,7 @@ async function requireAdmin(req, res) {
   const token = cookies[ADMIN_COOKIE];
   const session = await readPersistentSession(token, 'admin');
   if (!session) {
-    json(res, 401, { error: 'Faca login para acessar o admin.' });
+    json(res, 401, { error: 'Faça login para acessar o admin.' });
     return null;
   }
   if (session.data?.session_version !== 2 || !session.data?.store_id) {
@@ -4496,7 +4496,7 @@ async function createCustomerSession(customer) {
 async function requireCustomer(req, res) {
   const session = await readPersistentSession(parseCookies(req)[CUSTOMER_COOKIE], 'customer');
   if (!session) {
-    json(res, 401, { error: 'Faca login para acessar sua conta.' });
+    json(res, 401, { error: 'Faça login para acessar sua conta.' });
     return null;
   }
   return session.data;
@@ -5889,7 +5889,7 @@ function enforceRateLimit(req, method, pathname) {
 }
 
 function rateLimitRule(method, pathname) {
-  if (method === 'POST' && pathname === '/api/admin/login') return limitRule('admin-login', 8, 15 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/admin/login') return limitRule('admin-login', 8, 120 * 1000);
   if (method === 'POST' && pathname === '/api/customer/login') return limitRule('customer-login', 10, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/customer/reset-password') return limitRule('customer-reset', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/portal/recover-password') return limitRule('admin-recover', 5, 30 * 60 * 1000);
@@ -7161,7 +7161,7 @@ async function updateDiningTable(id, data, storeId, options = {}) {
     }, sanitizeDiningTable(data, false), ['Prefer: return=representation']);
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw httpError(409, 'JÃ¡ existe uma mesa com este cÃ³digo nesta loja.', error.detail || error);
+      throw httpError(409, 'Já existe uma mesa com este código nesta loja.', error.detail || error);
     }
     throw error;
   }
@@ -7175,7 +7175,7 @@ async function deleteDiningTable(id, storeId, options = {}) {
     id: `eq.${id}`,
     ...(cleanUuid(storeId) ? { store_id: `eq.${cleanUuid(storeId)}` } : {})
   }, undefined, ['Prefer: return=representation']);
-  if (Array.isArray(removed) && removed.length === 0) throw httpError(404, 'Mesa nÃ£o encontrada nesta loja.');
+  if (Array.isArray(removed) && removed.length === 0) throw httpError(404, 'Mesa não encontrada nesta loja.');
 }
 
 async function openCustomerTab(data, storeId, options = {}) {
@@ -9037,6 +9037,7 @@ function loadEnv(filePath) {
     if (!process.env[key.trim()]) process.env[key.trim()] = value;
   }
 }
+
 
 
 

@@ -588,14 +588,17 @@ function favoriteIcon(active) {
 }
 
 function toggleFavorite(itemId) {
+  const item = allProducts().find((product) => product.id === itemId);
   if (state.favorites.has(itemId)) {
     state.favorites.delete(itemId);
-    setStatus('Produto removido dos favoritos.');
+    setStatus(item ? `${item.name} removido dos favoritos.` : 'Produto removido dos favoritos.');
   } else {
     state.favorites.add(itemId);
-    setStatus('Produto salvo nos favoritos.');
+    setStatus(item ? `${item.name} salvo nos favoritos.` : 'Produto salvo nos favoritos.');
   }
-  persistFavorites();
+  if (!persistFavorites()) {
+    setStatus('Favorito atualizado nesta sessão. Seu navegador bloqueou o salvamento permanente.');
+  }
   renderNav();
   renderFavoritesStrip();
   renderMenu();
@@ -1154,7 +1157,7 @@ function renderProductChoiceSummary(selected, quantity, unitTotal, total) {
       ${grouped.size ? [...grouped.entries()].map(([groupName, modifiers]) => `
         <article>
           <strong>${escapeHtml(groupName)}</strong>
-          ${modifiers.map((modifier) => `<span>âœ“ ${escapeHtml(modifier.name)}${Number(modifier.price_delta || 0) > 0 ? ` + ${money(modifier.price_delta)}` : ''}</span>`).join('')}
+          ${modifiers.map((modifier) => `<span>${escapeHtml(modifier.name)}${Number(modifier.price_delta || 0) > 0 ? ` + ${money(modifier.price_delta)}` : ''}</span>`).join('')}
         </article>
       `).join('') : '<p>Nenhuma opção selecionada ainda.</p>'}
     </div>
@@ -1967,19 +1970,31 @@ function loadCart() {
 }
 
 function persistCart() {
-  localStorage.setItem('cart', JSON.stringify(state.cart));
+  try {
+    localStorage.setItem('cart', JSON.stringify(state.cart));
+    return true;
+  } catch {
+    setStatus('Sua sacola foi atualizada nesta sessão. O navegador bloqueou o salvamento permanente.');
+    return false;
+  }
 }
 
 function loadFavorites() {
   try {
-    return new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'));
+    const parsed = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+    return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
   } catch {
     return new Set();
   }
 }
 
 function persistFavorites() {
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...state.favorites]));
+  try {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([...state.favorites]));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderEmptyState() {

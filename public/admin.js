@@ -3698,7 +3698,7 @@ function renderAdminUsers() {
     els.adminUsersList.innerHTML = `
       <div class="empty-state account-empty-state">
         <strong>Nenhuma conta extra criada.</strong>
-        <span>Crie acessos separados para atendimento, cozinha, entrega ou garcom. Cada pessoa entra com o proprio login.</span>
+        <span>Crie acessos separados para atendimento, cozinha, entrega ou garçom. Cada pessoa entra com o próprio login.</span>
       </div>
     `;
     return;
