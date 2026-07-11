@@ -15,7 +15,7 @@
     "db:schema": "prisma migrate deploy",
     "db:backup": "node scripts/backup-postgres.mjs",
     "admin:create": "node scripts/create-admin.mjs",
-    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js",
+    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js",
     "test:local": "node scripts/local-db-smoke.mjs",
     "test:security": "node scripts/sql-injection-tests.mjs",
     "test:flows": "node scripts/core-flow-smoke.mjs",

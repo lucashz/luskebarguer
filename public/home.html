@@ -3,105 +3,257 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cardápio Digital - pedidos, mesas e gestão para restaurantes</title>
-    <meta name="description" content="Plataforma de cardápio digital para vender no delivery, atender mesas por QR Code, organizar comandas, cozinha, clientes e pagamentos.">
-    <link rel="stylesheet" href="/styles.css?v=20260708-qa-flow">
+    <title>Cardápio digital para restaurante vender melhor</title>
+    <meta name="description" content="Crie um cardápio digital para receber pedidos, organizar delivery, mesas e comandas. Simples para o restaurante e fácil para o cliente.">
+    <meta property="og:title" content="Cardápio digital para restaurante vender melhor">
+    <meta property="og:description" content="Pedidos pelo celular, cardápio sempre atualizado e painel para organizar a operação do restaurante.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="/">
+    <meta property="og:image" content="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=1200&q=80">
+    <link rel="canonical" href="/">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23080a0f'/%3E%3Cpath d='M16 20h32v6H16zm0 12h32v6H16zm0 12h22v6H16z' fill='%23ef2332'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/styles.css?v=20260710-home-clean">
   </head>
-  <body class="portal-page commercial-page">
-    <header class="portal-topbar">
-      <a class="portal-brand" href="/">Cardápio Digital</a>
-      <nav>
-        <a href="/#recursos">Recursos</a>
-        <a href="/planos">Planos</a>
-        <a href="/cardapio">Cardápio demo</a>
+  <body class="portal-page commercial-home clean-home">
+    <header class="clean-topbar">
+      <a class="clean-brand" href="/" aria-label="Início">
+        <span>CD</span>
+        <strong>Cardápio Digital</strong>
+      </a>
+      <button class="clean-menu-button" id="homeMenuButton" type="button" aria-expanded="false" aria-controls="homeNav">Menu</button>
+      <nav class="clean-nav" id="homeNav" aria-label="Navegação principal">
+        <a href="#recursos">Recursos</a>
+        <a href="#como-funciona">Como funciona</a>
+        <a href="#demo">Demonstração</a>
+        <a href="#planos">Planos</a>
         <a href="/entrar">Entrar</a>
-        <a class="portal-button small" href="/cadastro">Começar grátis</a>
+        <a class="clean-nav-cta" href="/cadastro">Criar meu cardápio</a>
       </nav>
     </header>
 
     <main>
-      <section class="portal-hero commercial-hero">
+      <section class="clean-hero">
+        <div class="clean-hero-copy">
+          <p class="clean-eyebrow">Para delivery, retirada e salão</p>
+          <h1>Seu cardápio vendendo. Sua cozinha no controle.</h1>
+          <p>Pedidos claros, adicionais organizados e acompanhamento em tempo real para o restaurante vender melhor sem depender de conversa perdida.</p>
+          <div class="clean-actions">
+            <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
+            <a class="clean-button ghost" href="/cardapio">Ver demonstração</a>
+          </div>
+          <p class="clean-hero-note">Teste grátis para configurar sua loja e ver o fluxo funcionando.</p>
+          <div class="clean-proof">
+            <span>Sem aplicativo</span>
+            <span>Funciona no celular</span>
+            <span>Pedidos organizados</span>
+            <span>Suporte em português</span>
+          </div>
+        </div>
+
+        <section class="clean-preview clean-system-carousel" aria-label="Imagens do sistema em funcionamento">
+          <div class="clean-carousel-track">
+            <figure class="clean-system-shot is-active" data-home-slide>
+              <img src="/assets/sistema-cardapio-preview.png" alt="Tela do cardápio digital com loja demonstração, categorias, produtos e sacola" width="1440" height="980" fetchpriority="high" decoding="async">
+              <figcaption>Cardápio público com produtos, categorias e sacola.</figcaption>
+            </figure>
+            <figure class="clean-system-shot" data-home-slide>
+              <img src="/assets/sistema-admin-pedidos-preview.png" alt="Tela do painel administrativo com cards de pedidos por status" width="1440" height="980" decoding="async">
+              <figcaption>Administração com cards de pedidos em tempo real.</figcaption>
+            </figure>
+          </div>
+          <div class="clean-carousel-controls" aria-label="Selecionar imagem do sistema">
+            <button class="is-active" type="button" data-home-slide-control="0" aria-label="Ver cardápio público"></button>
+            <button type="button" data-home-slide-control="1" aria-label="Ver cards de pedidos no admin"></button>
+          </div>
+        </section>
+      </section>
+
+      <section class="clean-benefits" id="recursos">
+        <article>
+          <strong>Menos erros nos pedidos</strong>
+          <p>Produto, adicional, observação e pagamento chegam claros.</p>
+        </article>
+        <article>
+          <strong>Atendimento mais rápido</strong>
+          <p>O cliente escolhe no celular e o pedido entra no painel.</p>
+        </article>
+        <article>
+          <strong>Cardápio sempre atualizado</strong>
+          <p>Altere preços, fotos e disponibilidade sem reimprimir cardápio.</p>
+        </article>
+        <article>
+          <strong>Pedidos mais organizados</strong>
+          <p>Acompanhe novo, preparando, pronto e finalizado.</p>
+        </article>
+        <article>
+          <strong>Imagem mais profissional</strong>
+          <p>Seu cliente abre um cardápio bonito e fácil de usar.</p>
+        </article>
+      </section>
+
+      <section class="clean-cta-strip" aria-label="Ação rápida">
+        <strong>Quer ver como seu cliente faria o pedido?</strong>
         <div>
-          <p class="eyebrow">Cardápio, pedidos, mesas e comandas</p>
-          <h1>Venda online e organize o salão sem transformar sua operação em improviso.</h1>
-          <p>Uma plataforma para restaurantes, hamburguerias, lanchonetes e delivery receberem pedidos pelo navegador, controlarem a cozinha e acompanharem clientes em um único painel.</p>
-          <div class="portal-actions">
-            <a class="portal-button" href="/cadastro">Criar minha loja</a>
-            <a class="portal-button ghost" href="/planos">Ver planos</a>
-          </div>
-        </div>
-        <aside class="commercial-hero-card" aria-label="Resumo operacional">
-          <img src="https://images.unsplash.com/photo-1559329007-40df8a9345d8?auto=format&fit=crop&w=1000&q=85" alt="Equipe preparando pedidos em restaurante">
-          <div>
-            <span>Operação ao vivo</span>
-            <strong>18 pedidos hoje</strong>
-            <p>Delivery, retirada, mesas e comandas reunidos no mesmo fluxo.</p>
-          </div>
-        </aside>
-      </section>
-
-      <section class="portal-section commercial-strip" aria-label="Indicadores da plataforma">
-        <article><strong>QR Code por mesa</strong><span>O cliente pede sem fila e a equipe recebe com contexto.</span></article>
-        <article><strong>Cozinha em tempo real</strong><span>Pedidos por status, impressão e acompanhamento visual.</span></article>
-        <article><strong>Loja com sua marca</strong><span>Cores, logo, fotos, domínio e cardápio sempre aberto.</span></article>
-      </section>
-
-      <section class="portal-section" id="recursos">
-        <p class="eyebrow">Recursos</p>
-        <h2>O essencial para vender mais e atender melhor, sem complicar o dia a dia.</h2>
-        <div class="portal-feature-grid">
-          <article><strong>Cardápio público</strong><p>Produtos com fotos, categorias, adicionais, destaques e busca.</p></article>
-          <article><strong>Pedidos e cozinha</strong><p>Fila operacional por status, modo cozinha, impressão e histórico.</p></article>
-          <article><strong>Mesas e comandas</strong><p>QR Code, consumo no salão, comandas abertas e fechamento organizado.</p></article>
-          <article><strong>Clientes</strong><p>Conta, endereços salvos, pedidos recentes e experiência de recompra.</p></article>
-          <article><strong>Promoções</strong><p>Cupons, campanhas, fidelidade e incentivos para o cliente voltar.</p></article>
-          <article><strong>Multiempresa</strong><p>Lojas isoladas, equipe por permissão, limites por plano e gestão segura.</p></article>
+          <a class="clean-button" href="/cardapio">Abrir demonstração</a>
+          <a class="clean-button ghost" href="/cadastro">Criar meu cardápio</a>
         </div>
       </section>
 
-      <section class="portal-section commercial-split">
+      <section class="clean-section clean-story">
         <div>
-          <p class="eyebrow">Demonstração real</p>
-          <h2>O demo fica onde deve ficar: em uma loja de exemplo separada.</h2>
-          <p>A página inicial apresenta a plataforma. O endereço `/cardapio` abre uma loja demonstrativa completa, com produtos, categorias, fotos e checkout para o futuro cliente testar como consumidor.</p>
-          <div class="portal-actions">
-            <a class="portal-button" href="/cardapio">Abrir cardápio demo</a>
-            <a class="portal-button ghost" href="/cadastro">Criar loja</a>
-          </div>
+          <p class="clean-eyebrow">Problemas reais</p>
+          <h2>Quando o movimento aperta, cada detalhe do pedido importa.</h2>
+          <p>Preço antigo, adicional esquecido, mesa esperando e cozinha perguntando de novo. A plataforma organiza o pedido antes dele chegar na equipe.</p>
         </div>
-        <div class="commercial-demo-panel">
-          <img src="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=85" alt="Combo de hambúrguer com batatas">
+        <div class="clean-story-board" aria-label="Problemas resolvidos">
+          <article><span>WhatsApp</span><strong>Menos conversa repetida</strong><p>Cliente escolhe produto, adicional, entrega e pagamento.</p></article>
+          <article><span>Cozinha</span><strong>Pedido pronto para preparar</strong><p>Itens, extras e observações aparecem no painel.</p></article>
+          <article><span>Salão</span><strong>Mesas e comandas no controle</strong><p>QR Code por mesa e status do pedido para acompanhar.</p></article>
+        </div>
+      </section>
+
+      <section class="clean-section clean-showcase">
+        <div>
+          <p class="clean-eyebrow">Recursos</p>
+          <h2>Recursos que o restaurante usa no dia a dia.</h2>
+          <p>Sem tela complicada: cardápio, pedidos, produtos, mesas e pagamentos em uma rotina fácil de entender.</p>
+        </div>
+        <div class="clean-feature-list">
+          <span>Cardápio digital</span>
+          <span>Entrega</span>
+          <span>Retirada</span>
+          <span>Pedidos por mesa</span>
+          <span>Comandas</span>
+          <span>Adicionais</span>
+          <span>Painel de pedidos</span>
+          <span>Categorias</span>
+          <span>Disponibilidade</span>
+          <span>Impressão</span>
+          <span>WhatsApp</span>
+          <span>Relatórios</span>
+          <span>Pagamentos</span>
+        </div>
+      </section>
+
+      <section class="clean-section clean-split" id="demo">
+        <div>
+          <p class="clean-eyebrow">Demonstração pública</p>
+          <h2>Teste o cardápio como seu cliente testaria.</h2>
+          <p>Escolha produto, adicional, sacola e checkout em uma loja demonstração com dados realistas.</p>
+          <a class="clean-button" href="/cardapio">Abrir cardápio demonstração</a>
+        </div>
+        <div class="clean-demo-card">
+          <img src="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80" alt="Hambúrguer artesanal com batatas" loading="lazy" decoding="async">
           <div>
             <strong>Vitrine Gourmet</strong>
-            <span>Loja fictícia para demonstração do cardápio público.</span>
+            <span>Loja demonstração aberta para teste</span>
           </div>
         </div>
       </section>
 
-      <section class="portal-section commercial-plans-preview">
-        <div class="section-actions">
-          <div>
-            <p class="eyebrow">Planos</p>
-            <h2>Comece simples e evolua conforme sua operação cresce.</h2>
-          </div>
-          <a class="portal-button ghost" href="/planos">Comparar planos</a>
+      <section class="clean-section" id="como-funciona">
+        <p class="clean-eyebrow">Como funciona</p>
+        <h2>Comece sem depender de ajuda técnica.</h2>
+        <div class="clean-steps">
+          <article><span>1</span><strong>Crie sua conta</strong><p>Informe os dados básicos da loja.</p></article>
+          <article><span>2</span><strong>Configure a operação</strong><p>Entrega, retirada, mesa, horários e pagamentos.</p></article>
+          <article><span>3</span><strong>Monte o cardápio</strong><p>Categorias, produtos, fotos e adicionais.</p></article>
+          <article><span>4</span><strong>Compartilhe o link</strong><p>Receba pedidos no painel administrativo.</p></article>
         </div>
-        <div class="commercial-plan-row">
-          <article><strong>Essencial</strong><span>Para publicar o cardápio e receber os primeiros pedidos.</span></article>
-          <article><strong>Profissional</strong><span>Para delivery, salão, equipe e rotina operacional completa.</span></article>
-          <article><strong>Escala</strong><span>Para várias lojas, permissões, relatórios e gestão avançada.</span></article>
+      </section>
+
+      <section class="clean-section clean-segments">
+        <p class="clean-eyebrow">Para vários tipos de negócio</p>
+        <h2>Feito para atendimento corrido e cliente com pressa.</h2>
+        <div>
+          <span>Hamburguerias</span>
+          <span>Pizzarias</span>
+          <span>Restaurantes</span>
+          <span>Bares</span>
+          <span>Lancherias</span>
+          <span>Cafés</span>
+          <span>Marmitarias</span>
+          <span>Food trucks</span>
+        </div>
+      </section>
+
+      <section class="clean-section clean-panel-section">
+        <div class="clean-admin-card">
+          <div><span>Exemplo</span><strong>Loja aberta</strong></div>
+          <div><span>Painel</span><strong>Pedidos do dia</strong></div>
+          <div><span>Salão</span><strong>Mesas em uso</strong></div>
+        </div>
+        <div>
+          <p class="clean-eyebrow">Painel inicial</p>
+          <h2>Um painel para saber o que está acontecendo.</h2>
+          <p>Veja pedidos, status, mesas, link do cardápio e atalhos para manter a operação andando.</p>
+          <div class="clean-actions">
+            <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
+            <a class="clean-button ghost dark" href="/cardapio">Ver demonstração</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="clean-section" id="planos">
+        <p class="clean-eyebrow">Planos</p>
+        <h2>Planos para começar simples e crescer com a loja.</h2>
+        <p class="clean-section-lead">A Home mostra apenas planos pagos. O teste grátis aparece no cadastro para você experimentar antes de contratar.</p>
+        <div class="clean-plans" id="homePlans">
+          <article>
+            <span>Carregando</span>
+            <strong>Planos</strong>
+            <p>Buscando planos cadastrados no sistema.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="clean-section clean-faq">
+        <div>
+          <p class="clean-eyebrow">Dúvidas frequentes</p>
+          <h2>Respostas diretas antes de começar.</h2>
+        </div>
+        <div>
+          <details><summary>Preciso instalar aplicativo?</summary><p>Não. Cliente, equipe e dono usam pelo navegador.</p></details>
+          <details><summary>Funciona no celular?</summary><p>Sim. A experiência é pensada primeiro para celular.</p></details>
+          <details><summary>Posso receber pedidos pelo WhatsApp?</summary><p>Sim. O WhatsApp pode ser usado conforme a configuração da loja e o plano contratado.</p></details>
+          <details><summary>Posso alterar preços quando quiser?</summary><p>Sim. Produtos, preços e disponibilidade são editados no painel.</p></details>
+          <details><summary>Funciona para mesas e comandas?</summary><p>Sim. O sistema tem QR Code por mesa e comandas.</p></details>
+          <details><summary>Posso imprimir pedidos?</summary><p>Sim. A impressão para operação e cozinha depende do plano e da configuração.</p></details>
+          <details><summary>Preciso entender de tecnologia?</summary><p>Não. O onboarding guia a configuração inicial.</p></details>
+          <details><summary>Existe suporte?</summary><p>Sim. O atendimento é em português para ajudar na configuração e no uso do sistema.</p></details>
+          <details><summary>Posso cancelar o plano?</summary><p>Sim. O plano pode ser alterado ou cancelado conforme as regras comerciais da assinatura.</p></details>
+          <details><summary>Meus dados ficam seguros?</summary><p>O sistema usa autenticação, permissões e isolamento por loja.</p></details>
+        </div>
+      </section>
+
+      <section class="clean-final">
+        <h2>Seu próximo pedido pode chegar mais organizado.</h2>
+        <p>Crie seu cardápio digital, teste a demonstração e publique sua loja quando estiver pronto.</p>
+        <div class="clean-actions">
+          <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
+          <a class="clean-button ghost dark" href="https://wa.me/5511999999999?text=Quero%20conhecer%20o%20Card%C3%A1pio%20Digital" target="_blank" rel="noopener">Falar pelo WhatsApp</a>
         </div>
       </section>
     </main>
 
-    <footer class="portal-footer">
-      <span>Cardápio Digital</span>
+    <footer class="clean-footer">
+      <div>
+        <a class="clean-brand" href="/"><span>CD</span><strong>Cardápio Digital</strong></a>
+        <p>Cardápio digital, pedidos e gestão simples para restaurantes.</p>
+      </div>
       <nav>
+        <a href="#recursos">Recursos</a>
         <a href="/planos">Planos</a>
-        <a href="/termos">Termos</a>
-        <a href="/privacidade">Privacidade</a>
-        <a href="/entrar">Entrar</a>
+        <a href="/cardapio">Demonstração</a>
+        <a href="/entrar">Login</a>
+        <a href="/cadastro">Criar conta</a>
+        <a href="/termos">Termos de uso</a>
+        <a href="/privacidade">Política de privacidade</a>
+        <a href="mailto:suporte@cardapio.local">Contato</a>
+        <a href="/platform">Status do sistema</a>
       </nav>
     </footer>
+
+    <script src="/home.js?v=20260710-commercial-flow" defer></script>
   </body>
 </html>
