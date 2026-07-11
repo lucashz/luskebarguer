@@ -256,15 +256,23 @@ function loadAccountCache() {
 
 function saveAccountCache() {
   if (!state.customer?.id) return;
-  localStorage.setItem(ACCOUNT_CACHE_KEY, JSON.stringify({
-    customer: state.customer,
-    orders: state.orders,
-    saved_at: new Date().toISOString()
-  }));
+  try {
+    localStorage.setItem(ACCOUNT_CACHE_KEY, JSON.stringify({
+      customer: state.customer,
+      orders: state.orders,
+      saved_at: new Date().toISOString()
+    }));
+  } catch {
+    // Cache local é apenas conveniência offline; a conta continua funcionando sem ele.
+  }
 }
 
 function clearAccountCache() {
-  localStorage.removeItem(ACCOUNT_CACHE_KEY);
+  try {
+    localStorage.removeItem(ACCOUNT_CACHE_KEY);
+  } catch {
+    // Sem ação: alguns navegadores bloqueiam storage em modo privado.
+  }
 }
 
 function showDashboard() {
@@ -745,7 +753,12 @@ function repeatOrder(order) {
     return;
   }
 
-  localStorage.setItem('cart', JSON.stringify(cart));
+  try {
+    localStorage.setItem('cart', JSON.stringify(cart));
+  } catch {
+    toast('Não foi possível salvar a sacola neste navegador. Tente novamente fora do modo privado.');
+    return;
+  }
   toast('Pedido colocado na sacola.');
   setTimeout(() => {
     window.location.href = storeHomeUrl();

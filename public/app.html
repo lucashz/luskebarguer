@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cardápio Digital</title>
+    <meta name="description" content="Demonstração pública de cardápio digital com categorias, produtos, adicionais, sacola e checkout simulado.">
     <link rel="stylesheet" href="/styles.css?v=20260708-qa-flow">
   </head>
   <body class="menu-page">
@@ -17,6 +18,12 @@
         <button class="text-button" id="customerLogoutButton" type="button" hidden>Sair</button>
       </div>
     </header>
+
+    <section class="demo-notice" id="demoNotice" hidden>
+      <strong>Você está testando uma demonstração.</strong>
+      <span>Pedidos feitos aqui são simulados e não entram na operação real.</span>
+      <a href="/cadastro">Criar meu próprio cardápio</a>
+    </section>
 
     <section class="store-header">
       <div class="store-cover" id="storeCover"></div>
@@ -189,6 +196,29 @@
           <button class="primary-button" id="confirmOrderButton" type="submit">Confirmar pedido</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog class="dialog demo-order-dialog" id="demoOrderDialog">
+      <form method="dialog" class="dialog-header">
+        <div>
+          <p class="eyebrow">Pedido simulado</p>
+          <h2>Demonstração concluída</h2>
+        </div>
+        <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+      </form>
+      <section class="demo-order-body">
+        <strong id="demoOrderCode">DEMO-0000</strong>
+        <p>Este pedido não foi enviado para nenhuma operação real. Ele serve para você testar a experiência do cliente no cardápio.</p>
+        <ol>
+          <li>Pedido recebido</li>
+          <li>Itens conferidos</li>
+          <li>Status simulado: em preparo</li>
+        </ol>
+        <div class="demo-order-actions">
+          <a class="primary-button" href="/cadastro">Criar meu próprio cardápio</a>
+          <button class="ghost-button" type="submit">Continuar testando</button>
+        </div>
+      </section>
     </dialog>
 
     <dialog class="dialog" id="productDialog">

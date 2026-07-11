@@ -6,6 +6,7 @@
   query: '',
   activeCategory: 'all',
   customerChecked: false,
+  isDemoMode: window.location.pathname === '/cardapio',
   savedAddressApplied: false,
   customizingItem: null,
   editingCartKey: null,
@@ -108,8 +109,13 @@ const els = {
   closedStoreDialog: document.querySelector('#closedStoreDialog'),
   closedStoreTitle: document.querySelector('#closedStoreTitle'),
   closedStoreText: document.querySelector('#closedStoreText'),
-  closedStoreRefreshButton: document.querySelector('#closedStoreRefreshButton')
+  closedStoreRefreshButton: document.querySelector('#closedStoreRefreshButton'),
+  demoOrderDialog: document.querySelector('#demoOrderDialog'),
+  demoOrderCode: document.querySelector('#demoOrderCode')
 };
+
+document.querySelector('#demoNotice')?.toggleAttribute('hidden', !state.isDemoMode);
+document.body.classList.toggle('demo-mode', state.isDemoMode);
 
 els.searchInput.addEventListener('input', () => {
   state.query = els.searchInput.value.trim().toLowerCase();
@@ -211,6 +217,7 @@ async function loadBootstrap() {
     const data = await request('/api/bootstrap');
     state.store = data.store || null;
     state.categories = data.categories || [];
+    if (state.isDemoMode) applyDemoStoreHints();
     applyStoreTheme(state.store?.theme_settings);
     applyStoreIdentity(state.store);
     saveCachedBootstrap(data);
@@ -228,6 +235,7 @@ function renderCachedBootstrap() {
   if (!cached) return;
   state.store = cached.store || null;
   state.categories = cached.categories || [];
+  if (state.isDemoMode) applyDemoStoreHints();
   applyStoreTheme(state.store?.theme_settings);
   applyStoreIdentity(state.store);
   render();
@@ -455,6 +463,17 @@ function renderFavoritesStrip() {
     button.addEventListener('click', () => startAddToCart(item));
     return button;
   }));
+}
+
+function applyDemoStoreHints() {
+  state.store = {
+    ...(state.store || {}),
+    is_open: true,
+    demo_mode: true,
+    name: state.store?.name || 'Vitrine Gourmet',
+    description: state.store?.description || 'Hamburgueria artesanal de demonstração para testar o cardápio digital.',
+    page_title: state.store?.page_title || 'Loja demonstração - Cardápio Digital'
+  };
 }
 
 function renderSearchSuggestions() {
@@ -1279,6 +1298,11 @@ async function submitOrder(event) {
     }))
   };
 
+  if (state.isDemoMode) {
+    await simulateDemoOrder();
+    return;
+  }
+
   try {
     setOrderSubmitting(true);
     const result = await request('/api/orders', {
@@ -1512,7 +1536,30 @@ function loadAccountCache() {
 }
 
 function clearAccountCache() {
-  localStorage.removeItem(ACCOUNT_CACHE_KEY);
+  try {
+    localStorage.removeItem(ACCOUNT_CACHE_KEY);
+  } catch {
+    // Sem ação: cache local é opcional.
+  }
+}
+
+async function simulateDemoOrder() {
+  try {
+    setOrderSubmitting(true);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const publicCode = `DEMO-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+    state.cart = [];
+    state.coupon = null;
+    clearCouponFeedback();
+    persistCart();
+    renderCart();
+    els.checkoutDialog.close();
+    setStatus(`Pedido ${publicCode} simulado. Crie sua conta para receber pedidos reais.`);
+    if (els.demoOrderCode) els.demoOrderCode.textContent = publicCode;
+    if (els.demoOrderDialog?.showModal) els.demoOrderDialog.showModal();
+  } finally {
+    setOrderSubmitting(false);
+  }
 }
 
 function renderCustomerActions() {
@@ -1841,7 +1888,7 @@ function currentStoreSlug() {
 
 function loadCachedBootstrap() {
   try {
-    const cached = JSON.parse(localStorage.getItem(BOOTSTRAP_CACHE_KEY) || 'null');
+    const cached = JSON.parse(localStorage.getItem(scopedStorageKey(BOOTSTRAP_CACHE_KEY)) || 'null');
     if (!cached || !Array.isArray(cached.categories)) return null;
     return cached;
   } catch {
@@ -1851,7 +1898,7 @@ function loadCachedBootstrap() {
 
 function saveCachedBootstrap(data) {
   try {
-    localStorage.setItem(BOOTSTRAP_CACHE_KEY, JSON.stringify({
+    localStorage.setItem(scopedStorageKey(BOOTSTRAP_CACHE_KEY), JSON.stringify({
       store: data.store || null,
       categories: data.categories || [],
       saved_at: new Date().toISOString()
@@ -1957,7 +2004,7 @@ function normalizeText(value) {
 
 function loadCart() {
   try {
-    return JSON.parse(localStorage.getItem('cart') || '[]').map((item) => ({
+    return JSON.parse(localStorage.getItem(scopedStorageKey('cart')) || '[]').map((item) => ({
       ...item,
       key: item.key || cartItemKey(item.id, item.modifier_ids || [], item.notes || ''),
       modifier_ids: item.modifier_ids || [],
@@ -1971,12 +2018,17 @@ function loadCart() {
 
 function persistCart() {
   try {
-    localStorage.setItem('cart', JSON.stringify(state.cart));
+    localStorage.setItem(scopedStorageKey('cart'), JSON.stringify(state.cart));
     return true;
   } catch {
     setStatus('Sua sacola foi atualizada nesta sessão. O navegador bloqueou o salvamento permanente.');
     return false;
   }
+}
+
+function scopedStorageKey(base) {
+  const slug = currentStoreSlug() || 'default';
+  return `${base}:${slug}`;
 }
 
 function loadFavorites() {
