@@ -16,12 +16,12 @@
           <button data-admin-tab="menu" type="button">Cardápio</button>
           <button data-admin-tab="reports" type="button">Relatórios</button>
           <button data-admin-tab="tables" type="button">Mesas</button>
-          <button data-admin-tab="promotions" type="button">Promoções</button>
           <button data-admin-tab="customers" type="button">Clientes</button>
-          <button data-admin-tab="store" type="button">Loja</button>
+          <button data-admin-tab="promotions" type="button">Cupons e Campanhas</button>
+          <button data-admin-tab="store" type="button">Configurações da Loja</button>
           <button data-admin-tab="integrations" type="button">Integrações</button>
-          <button data-admin-tab="plan" type="button">Meu plano</button>
-          <button data-admin-tab="account" type="button">Conta</button>
+          <button data-admin-tab="plan" type="button">Plano</button>
+          <button data-admin-tab="account" type="button">Conta e usuários</button>
         </nav>
       </aside>
 
@@ -314,8 +314,8 @@
                 <a class="ghost-button compact" href="/cozinha" target="_blank" rel="noopener">Tela cozinha</a>
                 <button class="ghost-button compact" id="autoPrintButton" type="button">Auto imprimir</button>
                 <button class="ghost-button compact" id="archiveClosedOrdersButton" type="button">Limpar finalizados</button>
-                <button class="danger-button compact" id="clearQueueButton" type="button">Fechar operação</button>
                 <button class="ghost-button compact" id="refreshAdminButton" type="button">Atualizar</button>
+                <button class="danger-button compact" id="clearQueueButton" type="button">Fechar operação</button>
               </div>
             </div>
             <div class="order-board" id="adminOrders"></div>
@@ -741,12 +741,12 @@
                   <div class="payment-options">
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix"> Pix</label>
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro"> Dinheiro</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> Cartão de crédito</label>
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de débito"> Cartão de débito</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Vale refeicao"> Vale refeicao</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> Cartão de crédito</label>
                     <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pagamento online"> Pagamento online</label>
+                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Vale refeicao"> Vale refeição</label>
                   </div>
-                  <label>Outras formas<input name="payment_methods_extra" placeholder="Ex: PicPay, boleto, transferencia"></label>
+                  <label>Outras formas<input name="payment_methods_extra" placeholder="Ex: PicPay, boleto, transferência"></label>
                 </div>
               </section>
 
@@ -796,6 +796,16 @@
                       <strong>Clássico delivery</strong>
                       <small>Vermelho, fundo neutro e ação forte.</small>
                     </button>
+                    <button type="button" data-theme-preset="modern">
+                      <span style="--swatch:#2563eb"></span>
+                      <strong>Moderno azul</strong>
+                      <small>Azul limpo, direto e confiável.</small>
+                    </button>
+                    <button type="button" data-theme-preset="premium">
+                      <span style="--swatch:#f59e0b"></span>
+                      <strong>Premium escuro</strong>
+                      <small>Dourado, grafite e contraste elegante.</small>
+                    </button>
                     <button type="button" data-theme-preset="burger">
                       <span style="--swatch:#f97316"></span>
                       <strong>Quente</strong>
@@ -805,16 +815,6 @@
                       <span style="--swatch:#64748b"></span>
                       <strong>Urbano slate</strong>
                       <small>Azul acinzentado, limpo e moderno.</small>
-                    </button>
-                    <button type="button" data-theme-preset="premium">
-                      <span style="--swatch:#f59e0b"></span>
-                      <strong>Premium escuro</strong>
-                      <small>Dourado, grafite e contraste elegante.</small>
-                    </button>
-                    <button type="button" data-theme-preset="modern">
-                      <span style="--swatch:#2563eb"></span>
-                      <strong>Moderno azul</strong>
-                      <small>Azul limpo, direto e confiável.</small>
                     </button>
                   </div>
                   <div class="theme-color-grid">
@@ -850,8 +850,8 @@
                   </div>
                   <label>Largura do papel
                     <select name="paperWidth">
-                      <option value="80">80 mm</option>
                       <option value="58">58 mm</option>
+                      <option value="80">80 mm</option>
                     </select>
                   </label>
                   <label>Vias da cozinha<input name="kitchenCopies" type="number" min="1" max="5" value="1"></label>
@@ -1042,7 +1042,7 @@
                 <input name="password" type="password" minlength="8" placeholder="Senha inicial para criar direto">
                 <select name="role" id="adminUserRoleSelect">
                   <option value="admin">Administrador</option>
-                  <option value="waiter">Garcom</option>
+                  <option value="waiter">Garçom</option>
                   <option value="attendant">Atendimento</option>
                   <option value="delivery">Entrega</option>
                   <option value="kitchen">Cozinha</option>
@@ -1055,59 +1055,109 @@
               <div class="team-toolbar">
                 <input id="adminUserSearch" type="search" placeholder="Buscar por nome ou e-mail">
                 <select id="adminUserRoleFilter">
-                  <option value="all">Todas as funcoes</option>
+                  <option value="all">Todas as funções</option>
                   <option value="admin">Administrador</option>
                   <option value="attendant">Atendimento</option>
-                  <option value="waiter">Garcom</option>
+                  <option value="waiter">Garçom</option>
                   <option value="delivery">Entrega</option>
                   <option value="kitchen">Cozinha</option>
                   <option value="inactive">Inativas</option>
                 </select>
               </div>
 
+              <div class="team-bulk-actions" id="adminUsersBulkActions">
+                <label class="check team-bulk-select">
+                  <input id="selectAllAdminUsers" type="checkbox">
+                  Selecionar contas visíveis
+                </label>
+                <span id="selectedAdminUsersCount">0 selecionadas</span>
+                <button class="danger-button compact" id="deleteSelectedAdminUsersButton" type="button" disabled>Excluir selecionadas</button>
+              </div>
+
               <div class="admin-users-list" id="adminUsersList"></div>
             </section>
 
             <section class="panel account-access-panel">
-              <div class="section-actions">
+              <div class="account-access-header">
                 <div>
                   <p class="eyebrow">Acesso</p>
                   <h2>Sua conta</h2>
-                  <p class="muted">Atualize os dados usados para entrar no painel e mantenha a senha protegida.</p>
+                  <p>Gerencie seu login, revise o perfil ativo e mantenha a senha protegida.</p>
                 </div>
                 <button class="ghost-button compact" data-reopen-onboarding type="button">Reabrir onboarding</button>
               </div>
 
-              <div class="account-layout account-layout-compact">
-                <form id="accountForm" class="account-card account-mini-form">
+              <div class="account-access-grid">
+                <aside class="account-profile-summary">
+                  <div class="account-profile-avatar" id="accountProfileAvatar">A</div>
                   <div>
-                    <p class="eyebrow">Perfil</p>
-                    <h3>Dados de acesso</h3>
+                    <span>Conta conectada</span>
+                    <strong id="accountProfileName">Administrador</strong>
+                    <small id="accountProfileEmail">admin@cardapio.local</small>
                   </div>
-                  <input name="name" required placeholder="Nome">
-                  <input name="email" required type="email" placeholder="E-mail">
-                  <button class="primary-button compact">Salvar conta</button>
-                </form>
+                  <dl>
+                    <div>
+                      <dt>Função</dt>
+                      <dd id="accountProfileRole">Administrador</dd>
+                    </div>
+                    <div>
+                      <dt>Loja atual</dt>
+                      <dd id="accountProfileStore">Cardápio</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd><span class="account-status-pill">Ativa</span></dd>
+                    </div>
+                  </dl>
+                </aside>
 
-                <form id="passwordForm" class="account-card account-mini-form">
-                  <div>
-                    <p class="eyebrow">Seguranca</p>
-                    <h3>Trocar senha</h3>
-                  </div>
-                  <input name="current_password" required type="password" placeholder="Senha atual">
-                  <input name="new_password" required type="password" minlength="8" placeholder="Nova senha">
-                  <button class="primary-button compact">Atualizar senha</button>
-                </form>
+                <div class="account-access-forms">
+                  <form id="accountForm" class="account-card account-mini-form">
+                    <div class="account-form-head">
+                      <span class="account-form-icon">P</span>
+                      <div>
+                        <p class="eyebrow">Perfil</p>
+                        <h3>Dados de acesso</h3>
+                        <small>Nome e e-mail usados para entrar no painel.</small>
+                      </div>
+                    </div>
+                    <label>Nome
+                      <input name="name" required placeholder="Nome">
+                    </label>
+                    <label>E-mail
+                      <input name="email" required type="email" placeholder="E-mail">
+                    </label>
+                    <button class="primary-button compact">Salvar conta</button>
+                  </form>
+
+                  <form id="passwordForm" class="account-card account-mini-form">
+                    <div class="account-form-head">
+                      <span class="account-form-icon danger">S</span>
+                      <div>
+                        <p class="eyebrow">Segurança</p>
+                        <h3>Trocar senha</h3>
+                        <small>Use no mínimo 8 caracteres e evite senhas reutilizadas.</small>
+                      </div>
+                    </div>
+                    <label>Senha atual
+                      <input name="current_password" required type="password" autocomplete="current-password" placeholder="Senha atual">
+                    </label>
+                    <label>Nova senha
+                      <input name="new_password" required type="password" minlength="8" autocomplete="new-password" placeholder="Nova senha">
+                    </label>
+                    <button class="primary-button compact">Atualizar senha</button>
+                  </form>
+                </div>
               </div>
             </section>
 
             <section class="panel danger-zone-panel">
-              <div class="section-actions">
+              <div class="danger-zone-copy">
                 <div>
                   <p class="eyebrow">Zona de risco</p>
                   <h2>Excluir conta e dados</h2>
-                  <p class="muted">Esta ação apaga a empresa, loja, pedidos, clientes, cardápio, mesas, comandas, promoções, sessões e configurações. Não pode ser desfeita.</p>
                 </div>
+                <p>Esta ação apaga a empresa, loja, pedidos, clientes, cardápio, mesas, comandas, promoções, sessões e configurações. Não pode ser desfeita.</p>
               </div>
               <form id="deleteAccountForm" class="danger-delete-form">
                 <label>Digite EXCLUIR CONTA para confirmar

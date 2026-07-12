@@ -33,7 +33,7 @@ function initHomeCarousel() {
   const carousel = document.querySelector('.clean-system-carousel');
   carousel?.addEventListener('mouseenter', stopHomeSlideTimer);
   carousel?.addEventListener('mouseleave', startHomeSlideTimer);
-  startHomeSlideTimer();
+  waitForHomeSlideImages().then(startHomeSlideTimer);
 }
 
 function showHomeSlide(index) {
@@ -63,6 +63,15 @@ function stopHomeSlideTimer() {
 function restartHomeSlideTimer() {
   stopHomeSlideTimer();
   startHomeSlideTimer();
+}
+
+function waitForHomeSlideImages() {
+  const images = homeSlides.map((slide) => slide.querySelector('img')).filter(Boolean);
+  if (!images.length || images.every((image) => image.complete)) return Promise.resolve();
+  return Promise.allSettled(images.map((image) => new Promise((resolve) => {
+    image.addEventListener('load', resolve, { once: true });
+    image.addEventListener('error', resolve, { once: true });
+  })));
 }
 
 async function loadHomePlans() {

@@ -449,6 +449,36 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/platform/summary') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await platformCommercialSummary());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/analytics') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await platformCommercialAnalytics(url.searchParams));
+    return;
+  }
+
+  const platformCompanyDetailMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/detail$/i);
+  if (platformCompanyDetailMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await getPlatformCompanyDetail(platformCompanyDetailMatch[1]));
+    return;
+  }
+
+  const platformCompanyNoteMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/notes$/i);
+  if (platformCompanyNoteMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res);
+    if (!admin) return;
+    json(res, 201, { note: await createPlatformCompanyNote(platformCompanyNoteMatch[1], await readJson(req), admin, req) });
+    return;
+  }
+
   if (method === 'POST' && url.pathname === '/api/platform/companies') {
     const admin = await requirePlatformAdmin(req, res);
     if (!admin) return;
@@ -1519,11 +1549,12 @@ async function getAdminById(adminId) {
 
 async function listAdminUsers(session = null) {
   const now = Date.now();
-  const cacheKey = isPlatformAdmin(session) ? 'platform' : cleanUuid(session?.company_id) || 'default';
+  const companyId = cleanUuid(session?.company_id);
+  const cacheKey = companyId ? `company:${companyId}` : `admin:${cleanUuid(session?.id) || 'default'}`;
   if (adminUsersCache?.[cacheKey]?.expiresAt > now) return adminUsersCache[cacheKey].data;
   const rows = await dbRequest('GET', 'admin_users', {
     select: 'id,name,email,role,is_active,last_login_at,created_at',
-    ...(!isPlatformAdmin(session) && session?.company_id ? { company_id: `eq.${session.company_id}` } : {}),
+    ...(companyId ? { company_id: `eq.${companyId}` } : { id: `eq.${cleanUuid(session?.id)}` }),
     order: 'name.asc',
     limit: '200'
   });
@@ -1540,8 +1571,8 @@ async function createAdminUser(data, session = null) {
   await assertCompanyUsageLimit(session, 'admin_users', 'admin_users');
   const admin = sanitizeAdminUser(data);
   const role = sanitizeAdminRole(data.role);
-  if (role === 'superadmin' && !isPlatformAdmin(session)) {
-    throw httpError(403, 'Apenas a plataforma pode criar contas superadmin.');
+  if (role === 'superadmin') {
+    throw httpError(403, 'Contas superadmin não podem ser criadas pelo painel da loja.');
   }
   const password = validatePassword(data.password);
   const [created] = await dbRequest('POST', 'admin_users', {}, {
@@ -1728,7 +1759,7 @@ function hashInviteToken(token) {
 
 async function updateAdminUser(id, data, session) {
   const target = await getAdminById(id);
-  if (!isPlatformAdmin(session) && target.company_id !== session.company_id) {
+  if (target.company_id !== session.company_id) {
     throw httpError(403, 'Você não pode editar uma conta de outra empresa.');
   }
   const payload = {};
@@ -1736,8 +1767,8 @@ async function updateAdminUser(id, data, session) {
   if ('email' in data) payload.email = cleanEmail(data.email);
   if ('role' in data) {
     payload.role = sanitizeAdminRole(data.role);
-    if (payload.role === 'superadmin' && !isPlatformAdmin(session)) {
-      throw httpError(403, 'Apenas a plataforma pode atribuir superadmin.');
+    if (payload.role === 'superadmin' && normalizeAdminRole(target.role) !== 'superadmin') {
+      throw httpError(403, 'Contas da loja não podem ser promovidas para superadmin.');
     }
   }
   if ('is_active' in data) payload.is_active = Boolean(data.is_active);
@@ -1763,7 +1794,7 @@ async function updateAdminUser(id, data, session) {
 
 async function deleteAdminUser(id, session) {
   const target = await getAdminById(id);
-  if (!isPlatformAdmin(session) && target.company_id !== session.company_id) {
+  if (target.company_id !== session.company_id) {
     throw httpError(403, 'Você não pode excluir uma conta de outra empresa.');
   }
   if (target.id === session.id) {
@@ -2005,7 +2036,7 @@ async function switchAdminStore(req, data, admin) {
 }
 
 async function listPlatformCompanies() {
-  const [companies, stores, subscriptions, features, overrides] = await Promise.all([
+  const [companies, stores, domains, admins, subscriptions, features, overrides] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
       order: 'created_at.desc',
@@ -2016,6 +2047,16 @@ async function listPlatformCompanies() {
       order: 'name.asc',
       limit: '500'
     }),
+    dbRequest('GET', 'store_domains', {
+      select: 'id,store_id,domain,status,verified_at',
+      order: 'created_at.desc',
+      limit: '1000'
+    }).catch(() => []),
+    dbRequest('GET', 'admin_users', {
+      select: 'id,company_id,name,email,role,is_active,last_login_at,created_at',
+      order: 'created_at.asc',
+      limit: '1000'
+    }).catch(() => []),
     dbRequest('GET', 'company_subscriptions', {
       select: '*',
       order: 'created_at.desc',
@@ -2033,10 +2074,18 @@ async function listPlatformCompanies() {
     })
   ]);
   const featureById = new Map(features.map((feature) => [feature.id, feature]));
+  const domainsByStore = new Map();
+  for (const domain of domains) {
+    if (!domainsByStore.has(domain.store_id)) domainsByStore.set(domain.store_id, []);
+    domainsByStore.get(domain.store_id).push(domain);
+  }
   const storesByCompany = new Map();
   for (const store of stores) {
     if (!storesByCompany.has(store.company_id)) storesByCompany.set(store.company_id, []);
-    storesByCompany.get(store.company_id).push(publicStoreRef(store));
+    storesByCompany.get(store.company_id).push({
+      ...publicStoreRef(store),
+      domains: domainsByStore.get(store.id) || []
+    });
   }
   const subscriptionByCompany = new Map();
   for (const subscription of subscriptions) {
@@ -2050,15 +2099,583 @@ async function listPlatformCompanies() {
       feature: featureById.get(override.feature_id) || null
     });
   }
+  const adminsByCompany = new Map();
+  for (const admin of admins) {
+    if (!admin.company_id) continue;
+    if (!adminsByCompany.has(admin.company_id)) adminsByCompany.set(admin.company_id, []);
+    adminsByCompany.get(admin.company_id).push({
+      id: admin.id,
+      name: admin.name,
+      email: admin.email,
+      role: normalizeAdminRole(admin.role),
+      is_active: admin.is_active !== false,
+      last_login_at: admin.last_login_at || null,
+      created_at: admin.created_at
+    });
+  }
   return {
     features,
     companies: companies.map((company) => ({
       ...company,
       stores: storesByCompany.get(company.id) || [],
+      admins: adminsByCompany.get(company.id) || [],
       subscription: subscriptionByCompany.get(company.id) || null,
       overrides: overridesByCompany.get(company.id) || []
     }))
   };
+}
+
+async function getPlatformCompanyDetail(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId, 'empresa');
+  const [company] = await dbRequest('GET', 'companies', {
+    select: '*',
+    id: `eq.${resolvedCompanyId}`,
+    limit: '1'
+  });
+  if (!company) throw httpError(404, 'Cliente não encontrado.');
+
+  const [stores, admins, subscriptions, plans, billingHistory, auditLogs, usageCounters] = await Promise.all([
+    dbRequest('GET', 'stores', {
+      select: 'id,company_id,name,slug,public_url,is_active,created_at,updated_at',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'name.asc',
+      limit: '200'
+    }).catch(() => []),
+    dbRequest('GET', 'admin_users', {
+      select: 'id,name,email,role,is_active,last_login_at,created_at',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'created_at.asc',
+      limit: '200'
+    }).catch(() => []),
+    listCompanySubscriptions(resolvedCompanyId, 50),
+    dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }).catch(() => []),
+    listBillingHistory(resolvedCompanyId),
+    dbRequest('GET', 'audit_logs', {
+      select: 'id,action,severity,entity_type,entity_id,store_id,actor_admin_id,after_data,created_at',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'created_at.desc',
+      limit: '80'
+    }).catch(() => []),
+    dbRequest('GET', 'company_usage_counters', {
+      select: '*',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'updated_at.desc',
+      limit: '100'
+    }).catch(() => [])
+  ]);
+
+  const storeIds = cleanUuidArray(stores.map((store) => store.id));
+  const [orders, settings, domains, products, customers] = storeIds.length ? await Promise.all([
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,financial_status,payment_method,fulfillment_method,created_at',
+      store_id: uuidInFilter(storeIds),
+      order: 'created_at.desc',
+      limit: '2000'
+    }).catch(() => []),
+    dbRequest('GET', 'store_settings', {
+      select: 'store_id,whatsapp_number,onboarding_completed,is_open',
+      store_id: uuidInFilter(storeIds),
+      limit: '200'
+    }).catch(() => []),
+    dbRequest('GET', 'store_domains', {
+      select: 'id,store_id,domain,status,verified_at',
+      store_id: uuidInFilter(storeIds),
+      limit: '200'
+    }).catch(() => []),
+    dbRequest('GET', 'menu_items', {
+      select: 'id,store_id,is_active,created_at',
+      store_id: uuidInFilter(storeIds),
+      limit: '5000'
+    }).catch(() => []),
+    dbRequest('GET', 'customers', {
+      select: 'id,store_id,created_at,last_login_at',
+      store_id: uuidInFilter(storeIds),
+      limit: '5000'
+    }).catch(() => [])
+  ]) : [[], [], [], [], []];
+
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const subscription = pickCurrentCompanySubscription(subscriptions);
+  const plan = subscription?.plan_id ? planById.get(subscription.plan_id) || null : null;
+  const settingsByStore = new Map(settings.map((row) => [row.store_id, row]));
+  const domainsByStore = new Map();
+  for (const domain of domains) {
+    if (!domainsByStore.has(domain.store_id)) domainsByStore.set(domain.store_id, []);
+    domainsByStore.get(domain.store_id).push(domain);
+  }
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
+  const billableOrders = orders.filter((order) => order.status !== 'cancelled');
+  const orders30 = billableOrders.filter((order) => new Date(order.created_at) >= thirtyDaysAgo);
+  const orders7 = billableOrders.filter((order) => new Date(order.created_at) >= sevenDaysAgo);
+  const lastOrder = orders[0] || null;
+  const timeline = buildPlatformCompanyTimeline({ company, stores, orders, billingHistory, auditLogs, subscription });
+  const attention = platformCompanyAttention({ company, stores, settingsByStore, orders, subscription, products });
+
+  return {
+    company,
+    stores: stores.map((store) => ({
+      ...publicStoreRef(store),
+      domains: domainsByStore.get(store.id) || [],
+      settings: settingsByStore.get(store.id) || null,
+      products_count: products.filter((item) => item.store_id === store.id).length,
+      active_products_count: products.filter((item) => item.store_id === store.id && item.is_active !== false).length,
+      customers_count: customers.filter((customer) => customer.store_id === store.id).length
+    })),
+    admins: admins.map((admin) => ({
+      id: admin.id,
+      name: admin.name,
+      email: admin.email,
+      role: normalizeAdminRole(admin.role),
+      is_active: admin.is_active !== false,
+      last_login_at: admin.last_login_at || null,
+      created_at: admin.created_at
+    })),
+    subscription,
+    plan,
+    billing_history: billingHistory,
+    usage_counters: usageCounters,
+    metrics: {
+      stores_count: stores.length,
+      products_count: products.length,
+      active_products_count: products.filter((item) => item.is_active !== false).length,
+      customers_count: customers.length,
+      orders_7d: orders7.length,
+      revenue_7d: roundMoney(orders7.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+      orders_30d: orders30.length,
+      revenue_30d: roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+      average_ticket_30d: orders30.length ? roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0) / orders30.length) : 0,
+      last_order_at: lastOrder?.created_at || null,
+      mrr: moneyNumber(plan?.monthly_price || 0)
+    },
+    attention,
+    timeline,
+    audit_logs: auditLogs.slice(0, 30)
+  };
+}
+
+async function createPlatformCompanyNote(companyId, data, admin, req) {
+  const resolvedCompanyId = cleanUuid(companyId, 'empresa');
+  const text = cleanText(data.note || data.text || '');
+  if (!text || text.length < 3) throw httpError(422, 'Informe uma nota interna com pelo menos 3 caracteres.');
+  const status = cleanText(data.status || '').slice(0, 80);
+  const nextContactAt = data.next_contact_at ? new Date(data.next_contact_at) : null;
+  const payload = {
+    note: text.slice(0, 1000),
+    support_status: status || null,
+    next_contact_at: nextContactAt && !Number.isNaN(nextContactAt.getTime()) ? nextContactAt.toISOString() : null,
+    responsible: cleanText(data.responsible || admin?.name || '').slice(0, 120) || null
+  };
+  await audit('platform.client.note', {
+    req,
+    company_id: resolvedCompanyId,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: resolvedCompanyId,
+    severity: 'info',
+    after_data: payload
+  });
+  return {
+    ...payload,
+    created_at: new Date().toISOString(),
+    actor_admin_id: admin.id
+  };
+}
+
+async function platformCommercialSummary() {
+  const now = new Date();
+  const todayStart = startOfLocalDay(now);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents] = await Promise.all([
+    dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
+    dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+    dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
+    dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }),
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,financial_status,payment_method,fulfillment_method,created_at',
+      created_at: `gte.${thirtyDaysAgo.toISOString()}`,
+      limit: '5000'
+    }).catch(() => []),
+    dbRequest('GET', 'store_settings', {
+      select: 'store_id,whatsapp_number,onboarding_completed,is_open',
+      limit: '2000'
+    }).catch(() => []),
+    dbRequest('GET', 'subscription_events', {
+      select: 'id,company_id,event_type,created_at,metadata',
+      created_at: `gte.${thirtyDaysAgo.toISOString()}`,
+      limit: '1000'
+    }).catch(() => [])
+  ]);
+  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings });
+  const todayOrders = orders.filter((order) => new Date(order.created_at) >= todayStart && order.status !== 'cancelled');
+  const monthOrders = orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
+  const activeStatuses = new Set(['active']);
+  const trialStatuses = new Set(['trial']);
+  const delinquentStatuses = new Set(['payment_pending', 'grace_period', 'past_due', 'suspended']);
+  const churnStatuses = new Set(['cancelled', 'archived']);
+  const cards = {
+    active_clients: companies.filter((company) => activeStatuses.has(company.status)).length,
+    trial_clients: companies.filter((company) => trialStatuses.has(company.status)).length,
+    delinquent_clients: companies.filter((company) => delinquentStatuses.has(company.status)).length,
+    published_stores: stores.filter((store) => store.is_active !== false).length,
+    orders_today: todayOrders.length,
+    revenue_today: roundMoney(todayOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    mrr_estimated: platformEstimatedMrr(companies, context.subscriptionByCompany, context.planById),
+    churn_clients: companies.filter((company) => churnStatuses.has(company.status)).length
+  };
+  return {
+    generated_at: new Date().toISOString(),
+    cards,
+    billing: platformBillingMetrics({ companies, subscriptions, plans, subscriptionEvents, monthOrders }),
+    alerts: platformCommercialAlerts(companies, stores, context)
+  };
+}
+
+async function platformCommercialAnalytics(params = new URLSearchParams()) {
+  const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
+  const [companies, stores, subscriptions, plans, orders, settings] = await Promise.all([
+    dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
+    dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+    dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
+    dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }),
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,financial_status,payment_method,fulfillment_method,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '8000'
+    }).catch(() => []),
+    dbRequest('GET', 'store_settings', {
+      select: 'store_id,whatsapp_number,onboarding_completed,is_open',
+      limit: '2000'
+    }).catch(() => [])
+  ]);
+  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings });
+  return {
+    period: period.label,
+    generated_at: new Date().toISOString(),
+    daily: platformDailySeries(orders, period),
+    ranking: platformStoreRanking(orders, context.storeById).slice(0, 8),
+    by_payment: platformGroupOrders(orders.filter((order) => order.status !== 'cancelled'), 'payment_method'),
+    by_status: platformGroupOrders(orders, 'status'),
+    company_metrics: platformCompanyMetrics(companies, context),
+    comparison: platformAnalyticsComparison(orders, period)
+  };
+}
+
+function platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings }) {
+  const storeById = new Map(stores.map((store) => [store.id, store]));
+  const settingsByStore = new Map(settings.map((row) => [row.store_id, row]));
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const subscriptionByCompany = new Map();
+  for (const subscription of subscriptions) {
+    if (!subscriptionByCompany.has(subscription.company_id)) subscriptionByCompany.set(subscription.company_id, subscription);
+  }
+  const storesByCompany = new Map();
+  for (const store of stores) {
+    if (!storesByCompany.has(store.company_id)) storesByCompany.set(store.company_id, []);
+    storesByCompany.get(store.company_id).push(store);
+  }
+  const ordersByCompany = new Map();
+  for (const order of orders) {
+    const store = storeById.get(order.store_id);
+    if (!store?.company_id) continue;
+    if (!ordersByCompany.has(store.company_id)) ordersByCompany.set(store.company_id, []);
+    ordersByCompany.get(store.company_id).push(order);
+  }
+  return { storeById, settingsByStore, planById, subscriptionByCompany, storesByCompany, ordersByCompany };
+}
+
+function platformCompanyMetrics(companies, context) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  return companies.map((company) => {
+    const subscription = context.subscriptionByCompany.get(company.id) || null;
+    const plan = subscription?.plan_id ? context.planById.get(subscription.plan_id) : null;
+    const stores = context.storesByCompany.get(company.id) || [];
+    const orders = context.ordersByCompany.get(company.id) || [];
+    const monthOrders = orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
+    const lastOrder = orders.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+    return {
+      company_id: company.id,
+      stores_count: stores.length,
+      active_stores_count: stores.filter((store) => store.is_active !== false).length,
+      plan_name: plan?.name || 'Sem plano',
+      plan_code: plan?.code || '',
+      subscription_status: subscription?.status || company.status || 'unknown',
+      mrr: moneyNumber(plan?.monthly_price || 0),
+      orders_month: monthOrders.length,
+      revenue_month: roundMoney(monthOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+      last_order_at: lastOrder?.created_at || null,
+      has_orders: orders.length > 0
+    };
+  });
+}
+
+function platformDailySeries(orders, period) {
+  const days = [];
+  for (let cursor = new Date(period.start); cursor <= period.end; cursor.setDate(cursor.getDate() + 1)) {
+    days.push({ date: cursor.toISOString().slice(0, 10), orders: 0, revenue: 0 });
+  }
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  for (const order of orders) {
+    const key = new Date(order.created_at).toISOString().slice(0, 10);
+    const row = byDate.get(key);
+    if (!row) continue;
+    row.orders += 1;
+    if (order.status !== 'cancelled') row.revenue = roundMoney(row.revenue + moneyNumber(order.total));
+  }
+  return days;
+}
+
+function platformStoreRanking(orders, storeById) {
+  const grouped = new Map();
+  for (const order of orders) {
+    const store = storeById.get(order.store_id);
+    if (!store) continue;
+    const current = grouped.get(order.store_id) || {
+      store_id: order.store_id,
+      store_name: store.name || store.slug || 'Loja',
+      slug: store.slug || '',
+      orders: 0,
+      revenue: 0
+    };
+    current.orders += 1;
+    if (order.status !== 'cancelled') current.revenue = roundMoney(current.revenue + moneyNumber(order.total));
+    grouped.set(order.store_id, current);
+  }
+  return [...grouped.values()].sort((a, b) => b.orders - a.orders || b.revenue - a.revenue);
+}
+
+function platformGroupOrders(orders, field) {
+  const grouped = new Map();
+  for (const order of orders) {
+    const key = order[field] || 'Não informado';
+    const current = grouped.get(key) || { key, count: 0, revenue: 0 };
+    current.count += 1;
+    current.revenue = roundMoney(current.revenue + moneyNumber(order.total));
+    grouped.set(key, current);
+  }
+  return [...grouped.values()].sort((a, b) => b.count - a.count || b.revenue - a.revenue);
+}
+
+function platformAnalyticsComparison(orders, period) {
+  const midpoint = new Date(period.end.getTime() - Math.floor((period.end - period.start) / 2));
+  const previous = orders.filter((order) => new Date(order.created_at) < midpoint);
+  const current = orders.filter((order) => new Date(order.created_at) >= midpoint);
+  const totals = (rows) => ({
+    orders: rows.length,
+    revenue: roundMoney(rows.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + moneyNumber(order.total), 0))
+  });
+  return { previous: totals(previous), current: totals(current) };
+}
+
+function platformBillingMetrics({ companies, subscriptions, plans, subscriptionEvents, monthOrders }) {
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const subscriptionByCompany = new Map();
+  for (const subscription of subscriptions) {
+    if (!subscriptionByCompany.has(subscription.company_id)) subscriptionByCompany.set(subscription.company_id, subscription);
+  }
+  const revenueByPlan = new Map();
+  let mrr = 0;
+  for (const company of companies) {
+    const subscription = subscriptionByCompany.get(company.id);
+    const plan = subscription?.plan_id ? planById.get(subscription.plan_id) : null;
+    const price = moneyNumber(plan?.monthly_price || 0);
+    if (['active', 'trial', 'grace_period', 'payment_pending'].includes(subscription?.status || company.status)) mrr += price;
+    const key = plan?.name || 'Sem plano';
+    revenueByPlan.set(key, roundMoney((revenueByPlan.get(key) || 0) + price));
+  }
+  const eventCount = (patterns) => subscriptionEvents.filter((event) => patterns.some((pattern) => String(event.event_type || '').includes(pattern))).length;
+  return {
+    mrr: roundMoney(mrr),
+    monthly_order_revenue: roundMoney(monthOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    trials_started: eventCount(['trial']),
+    upgrades: eventCount(['upgrade']),
+    downgrades: eventCount(['downgrade']),
+    cancellations: eventCount(['cancel']),
+    paid_events: eventCount(['paid', 'payment_approved']),
+    refused_events: eventCount(['failed', 'refused', 'rejected']),
+    revenue_by_plan: [...revenueByPlan.entries()].map(([plan, revenue]) => ({ plan, revenue }))
+  };
+}
+
+function platformEstimatedMrr(companies, subscriptionByCompany, planById) {
+  return roundMoney(companies.reduce((sum, company) => {
+    const subscription = subscriptionByCompany.get(company.id);
+    if (!['active', 'trial', 'grace_period', 'payment_pending'].includes(subscription?.status || company.status)) return sum;
+    const plan = subscription?.plan_id ? planById.get(subscription.plan_id) : null;
+    return sum + moneyNumber(plan?.monthly_price || 0);
+  }, 0));
+}
+
+function platformCommercialAlerts(companies, stores, context) {
+  const alerts = [];
+  const now = Date.now();
+  for (const company of companies) {
+    const subscription = context.subscriptionByCompany.get(company.id);
+    const companyStores = context.storesByCompany.get(company.id) || [];
+    const orders = context.ordersByCompany.get(company.id) || [];
+    if (subscription?.trial_ends_at) {
+      const daysLeft = Math.ceil((new Date(subscription.trial_ends_at).getTime() - now) / 86400000);
+      if (daysLeft >= 0 && daysLeft <= 3) alerts.push({ type: 'trial', severity: 'warning', company_id: company.id, title: `${company.name}: trial acaba em ${daysLeft} dia(s)`, action: 'Entrar em contato ou orientar upgrade.' });
+    }
+    if (['payment_pending', 'past_due', 'grace_period'].includes(subscription?.status || company.status)) {
+      alerts.push({ type: 'billing', severity: 'critical', company_id: company.id, title: `${company.name}: cobrança pendente`, action: 'Verificar pagamento e webhook.' });
+    }
+    if (!orders.length && companyStores.length) alerts.push({ type: 'sales', severity: 'attention', company_id: company.id, title: `${company.name}: sem pedidos recentes`, action: 'Acompanhar onboarding e divulgação.' });
+    for (const store of companyStores) {
+      const setting = context.settingsByStore.get(store.id);
+      if (setting && !setting.whatsapp_number) alerts.push({ type: 'setup', severity: 'warning', company_id: company.id, store_id: store.id, title: `${store.name}: WhatsApp não configurado`, action: 'Completar configurações da loja.' });
+      if (setting && setting.onboarding_completed === false) alerts.push({ type: 'setup', severity: 'attention', company_id: company.id, store_id: store.id, title: `${store.name}: onboarding incompleto`, action: 'Reabrir onboarding ou orientar cliente.' });
+      if (store.is_active === false) alerts.push({ type: 'store', severity: 'attention', company_id: company.id, store_id: store.id, title: `${store.name}: loja suspensa/inativa`, action: 'Validar se foi bloqueio comercial.' });
+    }
+  }
+  return alerts.slice(0, 12);
+}
+
+function platformCompanyAttention({ company, stores, settingsByStore, orders, subscription, products }) {
+  const alerts = [];
+  const now = Date.now();
+  const lastOrder = orders[0] || null;
+  const subscriptionStatus = subscription?.status || company.status || '';
+  if (subscription?.trial_ends_at) {
+    const daysLeft = Math.ceil((new Date(subscription.trial_ends_at).getTime() - now) / 86400000);
+    if (daysLeft >= 0 && daysLeft <= 3) {
+      alerts.push({ type: 'trial', severity: 'warning', title: `Trial acaba em ${daysLeft} dia(s)`, action: 'Entrar em contato e orientar upgrade.' });
+    }
+  }
+  if (['payment_pending', 'past_due', 'grace_period', 'suspended'].includes(subscriptionStatus)) {
+    alerts.push({ type: 'billing', severity: 'critical', title: 'Pagamento pendente ou cliente suspenso', action: 'Verificar cobrança, webhook e status comercial.' });
+  }
+  if (!stores.length) {
+    alerts.push({ type: 'setup', severity: 'critical', title: 'Cliente sem loja/cardápio', action: 'Criar uma loja para o cliente.' });
+  }
+  if (stores.some((store) => store.is_active === false)) {
+    alerts.push({ type: 'store', severity: 'attention', title: 'Existe loja inativa', action: 'Confirmar se a suspensão foi intencional.' });
+  }
+  const storesWithoutWhatsapp = stores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number);
+  if (storesWithoutWhatsapp.length) {
+    alerts.push({ type: 'setup', severity: 'warning', title: `${storesWithoutWhatsapp.length} loja(s) sem WhatsApp`, action: 'Completar configuração da loja.' });
+  }
+  const incompleteStores = stores.filter((store) => settingsByStore.get(store.id)?.onboarding_completed === false);
+  if (incompleteStores.length) {
+    alerts.push({ type: 'onboarding', severity: 'attention', title: 'Onboarding incompleto', action: 'Reabrir onboarding ou orientar o cliente.' });
+  }
+  const closedStores = stores.filter((store) => settingsByStore.get(store.id)?.is_open === false);
+  if (closedStores.length) {
+    alerts.push({ type: 'operation', severity: 'attention', title: `${closedStores.length} loja(s) fechada(s)`, action: 'Validar horário/status de operação.' });
+  }
+  if (!products.length && stores.length) {
+    alerts.push({ type: 'menu', severity: 'critical', title: 'Cliente sem produtos cadastrados', action: 'Ajudar a criar o cardápio inicial.' });
+  }
+  if (!lastOrder && stores.length) {
+    alerts.push({ type: 'sales', severity: 'attention', title: 'Nenhum pedido registrado', action: 'Acompanhar ativação comercial.' });
+  } else if (lastOrder && Date.now() - new Date(lastOrder.created_at).getTime() > 7 * 86400000) {
+    alerts.push({ type: 'sales', severity: 'warning', title: 'Mais de 7 dias sem pedidos', action: 'Verificar divulgação, loja aberta e cardápio.' });
+  }
+  return alerts;
+}
+
+function buildPlatformCompanyTimeline({ company, stores, orders, billingHistory, auditLogs, subscription }) {
+  const events = [];
+  if (company?.created_at) {
+    events.push({
+      type: 'company',
+      title: 'Conta criada',
+      description: company.name,
+      created_at: company.created_at
+    });
+  }
+  for (const store of stores || []) {
+    if (store.created_at) {
+      events.push({
+        type: 'store',
+        title: 'Loja criada',
+        description: `${store.name} /${store.slug}`,
+        created_at: store.created_at
+      });
+    }
+  }
+  if (subscription?.created_at) {
+    events.push({
+      type: 'billing',
+      title: 'Assinatura iniciada',
+      description: subscription.status || 'assinatura',
+      created_at: subscription.created_at
+    });
+  }
+  const firstOrder = (orders || []).slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+  if (firstOrder?.created_at) {
+    events.push({
+      type: 'order',
+      title: 'Primeiro pedido',
+      description: `${moneyNumber(firstOrder.total).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+      created_at: firstOrder.created_at
+    });
+  }
+  for (const event of billingHistory || []) {
+    events.push({
+      type: 'billing',
+      title: subscriptionEventLabel(event.event_type),
+      description: event.status || event.provider || 'billing',
+      created_at: event.created_at
+    });
+  }
+  for (const log of auditLogs || []) {
+    events.push({
+      type: String(log.action || '').includes('note') ? 'note' : 'audit',
+      title: auditActionLabel(log.action),
+      description: platformTimelineDescription(log),
+      created_at: log.created_at
+    });
+  }
+  return events
+    .filter((event) => event.created_at)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 30);
+}
+
+function subscriptionEventLabel(type) {
+  const value = String(type || '').replaceAll('_', ' ');
+  if (!value) return 'Evento de cobrança';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function auditActionLabel(action) {
+  const labels = {
+    'platform.client.note': 'Nota interna',
+    'platform.company.update': 'Cliente atualizado',
+    'platform.company.status': 'Status alterado',
+    'platform.company.plan': 'Plano alterado',
+    'platform.store.update': 'Loja atualizada',
+    'platform.store.status': 'Status da loja alterado',
+    'admin.setup.create': 'Conta criada',
+    'admin.login.success': 'Login no admin',
+    'order.status.update': 'Pedido atualizado'
+  };
+  return labels[action] || subscriptionEventLabel(action || 'Evento');
+}
+
+function platformTimelineDescription(log) {
+  if (log?.action === 'platform.client.note') {
+    return cleanText(log.after_data?.note || 'Nota registrada.');
+  }
+  return cleanText(log.after_data?.status || log.after_data?.reason || log.entity_type || '').slice(0, 180) || 'Evento registrado.';
+}
+
+function platformAnalyticsPeriod(value) {
+  const days = ({ '7d': 7, '15d': 15, '30d': 30 })[value] || 30;
+  const end = startOfLocalDay(new Date());
+  const start = new Date(end);
+  start.setDate(start.getDate() - days + 1);
+  end.setHours(23, 59, 59, 999);
+  return { label: `${days}d`, days, start, end, since: start };
+}
+
+function startOfLocalDay(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
 }
 
 async function createPlatformCompany(data, admin) {
@@ -3328,8 +3945,8 @@ async function companyUsageSnapshot(companyId, storeId) {
 }
 
 async function listAuditLogs(params = new URLSearchParams()) {
-  const companyId = cleanUuid(params.get?.('company_id') || '');
-  const storeId = cleanUuid(params.get?.('store_id') || '');
+  const companyId = cleanOptionalUuid(params.get?.('company_id') || '');
+  const storeId = cleanOptionalUuid(params.get?.('store_id') || '');
   const action = cleanText(params.get?.('action') || '');
   const from = cleanOptionalDate(params.get?.('from') || '');
   const to = cleanOptionalDate(params.get?.('to') || '');
@@ -8851,6 +9468,11 @@ function cleanUuid(value, field = 'id') {
     throw httpError(422, `${fieldLabel(field)} inválido.`);
   }
   return text;
+}
+
+function cleanOptionalUuid(value, field = 'id') {
+  const text = cleanText(value).toLowerCase();
+  return text ? cleanUuid(text, field) : '';
 }
 
 function cleanUuidArray(value, field = 'id') {

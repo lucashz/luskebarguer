@@ -46,7 +46,8 @@
   onboardingOverview: null,
   activeAdminTab: 'operation',
   loadedAdminTabs: new Set(),
-  loadingAdminTabs: new Set()
+  loadingAdminTabs: new Set(),
+  selectedAdminUserIds: new Set()
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
@@ -130,7 +131,7 @@ const ADMIN_ROLE_DEFINITIONS = {
     label: 'Administrador',
     short: 'Tudo da loja',
     description: 'Acesso completo ao painel da loja, equipe, cardápio, pedidos, relatórios e configurações.',
-    permissions: ['Operação', 'Pedidos', 'Cardápio', 'Relatórios', 'Clientes', 'Loja', 'Equipe']
+    permissions: ['Operação', 'Pedidos', 'Cardápio', 'Relatórios', 'Clientes', 'Configurações', 'Usuários']
   },
   attendant: {
     label: 'Atendimento',
@@ -309,11 +310,20 @@ const els = {
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
   passwordForm: document.querySelector('#passwordForm'),
+  accountProfileAvatar: document.querySelector('#accountProfileAvatar'),
+  accountProfileName: document.querySelector('#accountProfileName'),
+  accountProfileEmail: document.querySelector('#accountProfileEmail'),
+  accountProfileRole: document.querySelector('#accountProfileRole'),
+  accountProfileStore: document.querySelector('#accountProfileStore'),
   deleteAccountForm: document.querySelector('#deleteAccountForm'),
   adminUserForm: document.querySelector('#adminUserForm'),
   adminUserRoleSelect: document.querySelector('#adminUserRoleSelect'),
   adminUserSearch: document.querySelector('#adminUserSearch'),
   adminUserRoleFilter: document.querySelector('#adminUserRoleFilter'),
+  adminUsersBulkActions: document.querySelector('#adminUsersBulkActions'),
+  selectAllAdminUsers: document.querySelector('#selectAllAdminUsers'),
+  selectedAdminUsersCount: document.querySelector('#selectedAdminUsersCount'),
+  deleteSelectedAdminUsersButton: document.querySelector('#deleteSelectedAdminUsersButton'),
   adminRoleOverview: document.querySelector('#adminRoleOverview'),
   adminRolePreview: document.querySelector('#adminRolePreview'),
   inviteAdminButton: document.querySelector('#inviteAdminButton'),
@@ -477,6 +487,8 @@ els.adminUserForm?.addEventListener('submit', submitAdminUser);
 els.adminUserRoleSelect?.addEventListener('change', renderAdminRolePreview);
 els.adminUserSearch?.addEventListener('input', renderAdminUsers);
 els.adminUserRoleFilter?.addEventListener('change', renderAdminUsers);
+els.selectAllAdminUsers?.addEventListener('change', toggleVisibleAdminUsersSelection);
+els.deleteSelectedAdminUsersButton?.addEventListener('click', deleteSelectedAdminUsers);
 els.inviteAdminButton?.addEventListener('click', submitAdminInvitation);
 els.promotionForm?.addEventListener('submit', submitPromotion);
 els.cancelPromotionEditButton?.addEventListener('click', resetPromotionForm);
@@ -1955,12 +1967,22 @@ async function withReportLoading(callback) {
   buttons.forEach((button) => { button.disabled = true; });
   const previousTitle = els.reportOrdersTitle.textContent;
   els.reportOrdersTitle.textContent = 'Carregando relatório...';
+  els.reportSummary.innerHTML = reportSummarySkeleton();
+  els.reportOrders.innerHTML = reportContentSkeleton();
   try {
     await callback();
   } catch (error) {
     toast(error.message || 'Não foi possível carregar o relatório.');
-    els.reportSummary.innerHTML = '<p class="muted">Não foi possível carregar o relatório com esse filtro.</p>';
-    els.reportOrders.innerHTML = '';
+    els.reportSummary.innerHTML = reportStateMessage('!', 'Relatório indisponível', 'Não foi possível carregar os dados com esse filtro.');
+    els.reportOrders.innerHTML = `
+      <section class="report-state report-state-error">
+        <span class="report-state-icon">!</span>
+        <strong>Não foi possível carregar o relatório.</strong>
+        <p>Confira o período selecionado e tente novamente.</p>
+        <button class="ghost-button" type="button" id="retryReportButton">Tentar novamente</button>
+      </section>
+    `;
+    document.getElementById('retryReportButton')?.addEventListener('click', () => loadReportPreset(activeReportPreset() || 'today'));
     els.reportOrdersTitle.textContent = previousTitle || 'Pedidos do período';
   } finally {
     buttons.forEach((button) => { button.disabled = false; });
@@ -1970,7 +1992,7 @@ async function withReportLoading(callback) {
 function renderDailyReport(report) {
   if (!report) {
     state.currentReport = null;
-    els.reportSummary.innerHTML = '<p class="muted">Selecione uma data para ver o relatório.</p>';
+    els.reportSummary.innerHTML = reportStateMessage('i', 'Selecione um período', 'Escolha uma data ou um atalho para montar o relatório.');
     els.reportOrders.innerHTML = '';
     return;
   }
@@ -1980,50 +2002,423 @@ function renderDailyReport(report) {
   const comparison = report.comparison || {};
   const closing = report.cash_closing || {};
   const period = report.period || { label: report.date ? `Dia ${formatDateLabel(report.date)}` : 'Período selecionado' };
+  const orders = Array.isArray(report.orders) ? report.orders : [];
+  const totalOrders = safeReportNumber(totals.orders || sumReportRows(report.by_status || [], 'count') || orders.length);
+  const statusRows = buildStatusRows(report.by_status || [], totalOrders);
+  const paymentRows = buildPaymentRows(report.by_payment || []);
+  const originRows = buildOriginRows(report.by_origin || []);
+  const topProducts = Array.isArray(report.top_products) ? report.top_products : [];
+  const hourRows = Array.isArray(report.by_hour) ? report.by_hour : [];
+  const totalRevenue = safeReportNumber(totals.gross_revenue);
+  const topPayment = paymentRows.filter((row) => row.total > 0 || row.count > 0).sort((a, b) => b.count - a.count || b.total - a.total)[0];
+  const topOrigin = originRows.filter((row) => row.total > 0 || row.count > 0).sort((a, b) => b.total - a.total || b.count - a.count)[0];
+  const peakHour = hourRows.slice().sort((a, b) => safeReportNumber(b.count) - safeReportNumber(a.count))[0];
+  const revenueHour = hourRows.slice().sort((a, b) => safeReportNumber(b.total) - safeReportNumber(a.total))[0];
+  const hasOrders = totalOrders > 0 || orders.length > 0;
+
   els.reportOrdersTitle.textContent = `Pedidos - ${period.label}`;
   els.reportSummary.innerHTML = `
-    <article><span>${escapeHtml(period.label)}</span><strong>${money(totals.gross_revenue || 0)}</strong><p>Faturamento sem cancelados</p></article>
-    <article><span>Concluído</span><strong>${money(totals.completed_revenue || 0)}</strong><p>${totals.completed_orders || 0} pedido(s)</p></article>
-    <article><span>Ticket médio</span><strong>${money(totals.average_ticket || 0)}</strong><p>${totals.billable_orders || 0} pedido(s) válidos</p></article>
-    <article><span>Comparativo</span><strong>${formatDeltaMoney(comparison.revenue_delta || 0)}</strong><p>${formatDeltaNumber(comparison.orders_delta || 0)} pedido(s) vs. período anterior</p></article>
-    <article><span>Fechamento</span><strong>${money(closing.expected_revenue || 0)}</strong><p>${money(closing.pending_revenue || 0)} ainda pendente</p></article>
+    ${reportMetricCard('R$', escapeHtml(period.label), money(totalRevenue), 'Faturamento sem cancelados', 'accent')}
+    ${reportMetricCard('#', 'Pedidos', totalOrders, `${safeReportNumber(totals.billable_orders)} pedido(s) faturáveis`, 'muted')}
+    ${reportMetricCard('T', 'Ticket médio', money(totals.average_ticket || 0), `${safeReportNumber(totals.completed_orders)} concluído(s)`, 'success')}
+    ${reportMetricCard('%', 'Comparativo', formatDeltaMoney(comparison.revenue_delta || 0), `${formatDeltaNumber(comparison.orders_delta || 0)} pedido(s) vs. período anterior`, reportTone(comparison.revenue_delta || 0))}
+    ${reportMetricCard('C', 'Fechamento', money(closing.expected_revenue || 0), `${money(closing.pending_revenue || 0)} ainda pendente`, 'warning')}
   `;
 
-  const statusRows = (report.by_status || []).map((row) => `
-    <span><strong>${statusLabel(row.key)}</strong><small>${row.count} - ${money(row.total)}</small></span>
-  `).join('');
-  const paymentRows = (report.by_payment || []).map((row) => `
-    <span><strong>${escapeHtml(row.key)}</strong><small>${row.count} - ${money(row.total)} - ticket ${money(row.average_ticket || 0)}</small></span>
-  `).join('');
-  const originRows = (report.by_origin || []).map((row) => `
-    <span><strong>${escapeHtml(originLabel(row.key))}</strong><small>${row.count} - ${money(row.total)} - ticket ${money(row.average_ticket || 0)}</small></span>
-  `).join('');
-  const productRows = (report.top_products || []).map((row) => `
-    <span><strong>${escapeHtml(row.name)}</strong><small>${row.quantity} un. - ${money(row.total)}</small></span>
-  `).join('');
-  const hourRows = (report.by_hour || []).map((row) => `
-    <span><strong>${escapeHtml(row.key)}</strong><small>${row.count} pedido(s) - ${money(row.total)}</small></span>
-  `).join('');
-  const closingPaymentRows = (closing.by_payment || []).map((row) => `
-    <span><strong>${escapeHtml(row.key)}</strong><small>${money(row.total)} concluído(s)</small></span>
-  `).join('');
-
   els.reportOrders.innerHTML = `
+    ${hasOrders ? '' : reportEmptyState('Sem pedidos no período', 'Quando chegarem pedidos, os gráficos e rankings aparecerão aqui.')}
     <article class="report-breakdown">
-      <div><h3>Por status</h3>${statusRows || '<p class="muted">Sem pedidos.</p>'}</div>
-      <div><h3>Por pagamento</h3>${paymentRows || '<p class="muted">Sem faturamento.</p>'}</div>
-      <div><h3>Por origem</h3>${originRows || '<p class="muted">Sem faturamento.</p>'}</div>
-      <div><h3>Mais vendidos</h3>${productRows || '<p class="muted">Sem itens vendidos.</p>'}</div>
-      <div><h3>Horários de pico</h3>${hourRows || '<p class="muted">Sem horários no período.</p>'}</div>
-      <div><h3>Fechamento de caixa</h3>
-        <span><strong>Recebido</strong><small>${money(closing.completed_revenue || 0)}</small></span>
-        <span><strong>Pendente</strong><small>${money(closing.pending_revenue || 0)}</small></span>
-        <span><strong>Descontos/cupons</strong><small>${money(closing.discounts || 0)} - ${closing.coupons || 0} cupom(ns)</small></span>
-        <span><strong>Divergência operacional</strong><small>${money(closing.divergence || 0)}</small></span>
-        ${closingPaymentRows}
-      </div>
+      ${reportStatusCard(statusRows, totalOrders)}
+      ${reportPaymentCard(paymentRows, topPayment)}
+      ${reportOriginCard(originRows, topOrigin)}
+      ${reportTopProductsCard(topProducts)}
+      ${reportHoursCard(hourRows, peakHour, revenueHour)}
+      ${reportCashClosingCard(closing)}
     </article>
-    ${(report.orders || []).map(reportOrderCard).join('') || '<p class="muted">Nenhum pedido nesta data.</p>'}
+    <section class="report-orders-list">
+      <div class="report-card-title-row">
+        <div>
+          <span class="report-kicker">Detalhamento</span>
+          <h3>Pedidos do período</h3>
+        </div>
+        <strong>${orders.length} pedido(s)</strong>
+      </div>
+      ${orders.map(reportOrderCard).join('') || reportEmptyState('Nenhum pedido listado', 'A lista respeita o período selecionado e os dados da loja atual.')}
+    </section>
+  `;
+}
+
+function safeReportNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function sumReportRows(rows, field) {
+  return (rows || []).reduce((total, row) => total + safeReportNumber(row?.[field]), 0);
+}
+
+function reportPercent(value, total) {
+  const base = safeReportNumber(total);
+  if (base <= 0) return 0;
+  return Math.max(0, Math.min(100, (safeReportNumber(value) / base) * 100));
+}
+
+function reportPercentLabel(value, total) {
+  return `${reportPercent(value, total).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+}
+
+function normalizeReportKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function reportTone(value) {
+  const number = safeReportNumber(value);
+  if (number > 0) return 'success';
+  if (number < 0) return 'danger';
+  return 'muted';
+}
+
+function reportMetricCard(icon, label, value, helper, tone = 'accent') {
+  return `
+    <article class="report-metric report-tone-${tone}">
+      <div class="report-card-head">
+        <span class="report-icon">${escapeHtml(icon)}</span>
+        <span>${label}</span>
+      </div>
+      <strong>${value}</strong>
+      <p>${escapeHtml(helper)}</p>
+    </article>
+  `;
+}
+
+function reportStateMessage(icon, title, message) {
+  return `
+    <article class="report-state report-state-inline">
+      <span class="report-state-icon">${escapeHtml(icon)}</span>
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(message)}</p>
+    </article>
+  `;
+}
+
+function reportEmptyState(title, message) {
+  return `
+    <div class="report-state">
+      <span class="report-state-icon">i</span>
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function reportSummarySkeleton() {
+  return Array.from({ length: 5 }).map(() => `
+    <article class="report-metric report-skeleton-card" aria-hidden="true">
+      <span class="report-skeleton-line short"></span>
+      <span class="report-skeleton-line big"></span>
+      <span class="report-skeleton-line"></span>
+    </article>
+  `).join('');
+}
+
+function reportContentSkeleton() {
+  return `
+    <article class="report-breakdown">
+      ${Array.from({ length: 6 }).map(() => `
+        <div class="report-card report-skeleton-card" aria-hidden="true">
+          <span class="report-skeleton-line short"></span>
+          <span class="report-skeleton-line big"></span>
+          <span class="report-skeleton-line"></span>
+          <span class="report-skeleton-line"></span>
+        </div>
+      `).join('')}
+    </article>
+  `;
+}
+
+const REPORT_STATUS_META = {
+  new: { label: 'Novo', color: '#f59e0b' },
+  accepted: { label: 'Confirmado', color: '#2563eb' },
+  preparing: { label: 'Preparando', color: '#ea580c' },
+  ready: { label: 'Pronto', color: '#7c3aed' },
+  completed: { label: 'Entregue', color: '#16a34a' },
+  cancelled: { label: 'Cancelado', color: '#dc2626' }
+};
+
+function buildStatusRows(rows, totalOrders) {
+  const byKey = new Map((rows || []).map((row) => [row.key, row]));
+  return Object.entries(REPORT_STATUS_META).map(([key, meta]) => {
+    const row = byKey.get(key) || {};
+    const count = safeReportNumber(row.count);
+    const total = safeReportNumber(row.total);
+    return { key, ...meta, count, total, percent: reportPercent(count, totalOrders) };
+  });
+}
+
+function paymentBucket(value) {
+  const key = normalizeReportKey(value);
+  if (key.includes('pix')) return 'pix';
+  if (key.includes('dinheiro')) return 'cash';
+  if (key.includes('cartao') || key.includes('credito') || key.includes('debito') || key.includes('card')) return 'card';
+  return 'other';
+}
+
+function buildPaymentRows(rows) {
+  const buckets = {
+    pix: { key: 'pix', label: 'Pix', color: '#16a34a', count: 0, total: 0 },
+    cash: { key: 'cash', label: 'Dinheiro', color: '#f59e0b', count: 0, total: 0 },
+    card: { key: 'card', label: 'Cartão', color: '#2563eb', count: 0, total: 0 },
+    other: { key: 'other', label: 'Outros', color: '#64748b', count: 0, total: 0 }
+  };
+  for (const row of rows || []) {
+    const bucket = buckets[paymentBucket(row.key)];
+    bucket.count += safeReportNumber(row.count);
+    bucket.total += safeReportNumber(row.total);
+  }
+  const totalRevenue = Object.values(buckets).reduce((sum, row) => sum + row.total, 0);
+  return Object.values(buckets).map((row) => ({ ...row, percent: reportPercent(row.total, totalRevenue) }));
+}
+
+function originBucket(value) {
+  const key = normalizeReportKey(value);
+  if (key.includes('mesa')) return 'table';
+  if (key.includes('comanda') || key === 'tab') return 'tab';
+  if (key.includes('balcao') || key.includes('counter')) return 'counter';
+  if (key.includes('delivery') || key.includes('entrega')) return 'delivery';
+  if (key.includes('whatsapp')) return 'whatsapp';
+  if (key.includes('admin')) return 'admin';
+  return 'online';
+}
+
+function buildOriginRows(rows) {
+  const buckets = {
+    online: { key: 'online', label: 'Cardápio online', color: '#e11d48', count: 0, total: 0 },
+    table: { key: 'table', label: 'Mesa', color: '#7c3aed', count: 0, total: 0 },
+    counter: { key: 'counter', label: 'Balcão', color: '#f97316', count: 0, total: 0 },
+    delivery: { key: 'delivery', label: 'Delivery', color: '#0ea5e9', count: 0, total: 0 },
+    whatsapp: { key: 'whatsapp', label: 'WhatsApp', color: '#16a34a', count: 0, total: 0 },
+    admin: { key: 'admin', label: 'Administração', color: '#64748b', count: 0, total: 0 },
+    tab: { key: 'tab', label: 'Comanda', color: '#db2777', count: 0, total: 0 }
+  };
+  for (const row of rows || []) {
+    const bucket = buckets[originBucket(row.key)] || buckets.online;
+    bucket.count += safeReportNumber(row.count);
+    bucket.total += safeReportNumber(row.total);
+  }
+  const totalRevenue = Object.values(buckets).reduce((sum, row) => sum + row.total, 0);
+  return Object.values(buckets).map((row) => ({ ...row, percent: reportPercent(row.total, totalRevenue) }));
+}
+
+function reportProgressRow(row, total, mode = 'count') {
+  const value = mode === 'value' ? safeReportNumber(row.total) : safeReportNumber(row.count);
+  return `
+    <div class="report-progress-row">
+      <div class="report-progress-label">
+        <strong>${escapeHtml(row.label)}</strong>
+        <small>${safeReportNumber(row.count)} pedido(s) · ${money(row.total || 0)}</small>
+      </div>
+      <span>${reportPercentLabel(value, total)}</span>
+      <div class="report-progress-track" aria-hidden="true">
+        <i style="width: ${reportPercent(value, total)}%; background: ${row.color};"></i>
+      </div>
+    </div>
+  `;
+}
+
+function reportStatusCard(rows, totalOrders) {
+  return `
+    <div class="report-card">
+      <div class="report-card-title-row">
+        <div><span class="report-kicker">Status</span><h3>Por status</h3></div>
+        <span class="report-icon">#</span>
+      </div>
+      <strong class="report-main-number">${totalOrders} pedido(s)</strong>
+      <p class="report-card-summary">Distribuição da operação no período selecionado.</p>
+      ${totalOrders > 0 ? rows.map((row) => reportProgressRow(row, totalOrders)).join('') : reportEmptyState('Sem pedidos por status', 'Os status aparecem assim que houver pedidos.')}
+    </div>
+  `;
+}
+
+function reportPaymentCard(rows, topPayment) {
+  const totalRevenue = rows.reduce((sum, row) => sum + row.total, 0);
+  return `
+    <div class="report-card">
+      <div class="report-card-title-row">
+        <div><span class="report-kicker">Pagamento</span><h3>Por pagamento</h3></div>
+        <span class="report-icon">R$</span>
+      </div>
+      <strong class="report-main-number">${money(totalRevenue)}</strong>
+      <p class="report-card-summary">${topPayment ? `${escapeHtml(topPayment.label)} é a forma mais usada.` : 'Sem forma de pagamento dominante.'}</p>
+      ${totalRevenue > 0 ? rows.map((row) => reportProgressRow(row, totalRevenue, 'value')).join('') : reportEmptyState('Sem faturamento por pagamento', 'Quando houver pedidos pagos, a participação por método aparecerá aqui.')}
+    </div>
+  `;
+}
+
+function reportOriginCard(rows, topOrigin) {
+  const totalRevenue = rows.reduce((sum, row) => sum + row.total, 0);
+  return `
+    <div class="report-card">
+      <div class="report-card-title-row">
+        <div><span class="report-kicker">Origem</span><h3>Por origem</h3></div>
+        <span class="report-icon">O</span>
+      </div>
+      <strong class="report-main-number">${money(totalRevenue)}</strong>
+      <p class="report-card-summary">${topOrigin ? `${escapeHtml(topOrigin.label)} gerou o maior faturamento.` : 'Sem origem dominante no período.'}</p>
+      ${totalRevenue > 0 ? rows.map((row) => reportProgressRow(row, totalRevenue, 'value')).join('') : reportEmptyState('Sem faturamento por origem', 'Os canais aparecem quando houver pedidos no período.')}
+    </div>
+  `;
+}
+
+function reportTopProductsCard(products) {
+  const visibleProducts = products.slice(0, 5);
+  const maxQuantity = Math.max(...visibleProducts.map((row) => safeReportNumber(row.quantity)), 0);
+  return `
+    <div class="report-card">
+      <div class="report-card-title-row">
+        <div><span class="report-kicker">Produtos</span><h3>Mais vendidos</h3></div>
+        <span class="report-icon">5</span>
+      </div>
+      <strong class="report-main-number">${visibleProducts.length ? `${safeReportNumber(visibleProducts[0].quantity)} un.` : '0 un.'}</strong>
+      <p class="report-card-summary">${visibleProducts[0] ? `${escapeHtml(visibleProducts[0].name)} lidera o ranking.` : 'Nenhum item vendido no período.'}</p>
+      ${visibleProducts.length ? visibleProducts.map((row, index) => `
+        <div class="report-ranking-row">
+          <span class="report-rank">${index + 1}</span>
+          <div>
+            <strong>${escapeHtml(row.name || 'Produto sem nome')}</strong>
+            <small>${safeReportNumber(row.quantity)} un. · ${money(row.total || 0)}</small>
+            <div class="report-progress-track" aria-hidden="true">
+              <i style="width: ${reportPercent(row.quantity, maxQuantity)}%;"></i>
+            </div>
+          </div>
+        </div>
+      `).join('') : reportEmptyState('Sem itens vendidos', 'O ranking será montado com os produtos dos pedidos.')}
+      ${products.length > 5 ? `<details class="report-more"><summary>Ver mais ${products.length - 5} produto(s)</summary>${products.slice(5).map((row) => `<p>${escapeHtml(row.name || 'Produto sem nome')} · ${safeReportNumber(row.quantity)} un. · ${money(row.total || 0)}</p>`).join('')}</details>` : ''}
+    </div>
+  `;
+}
+
+function reportHoursCard(rows, peakHour, revenueHour) {
+  const hourSlots = buildReportHourSlots(rows);
+  const maxOrders = Math.max(...hourSlots.map((row) => safeReportNumber(row.count)), 0);
+  const maxRevenue = Math.max(...hourSlots.map((row) => safeReportNumber(row.total)), 0);
+  return `
+    <div class="report-card">
+      <div class="report-card-title-row">
+        <div><span class="report-kicker">Horários</span><h3>Horários de pico</h3></div>
+        <span class="report-icon">H</span>
+      </div>
+      <strong class="report-main-number">${peakHour ? escapeHtml(peakHour.key) : '--:--'}</strong>
+      <p class="report-card-summary">${peakHour ? `${safeReportNumber(peakHour.count)} pedido(s) no maior movimento.` : 'Sem movimento por hora.'}</p>
+      ${hourSlots.length ? `
+        <div class="report-hour-legend">
+          <span><i class="movement"></i>Pedidos</span>
+          <span><i class="revenue"></i>Faturamento</span>
+        </div>
+        <div class="report-hour-chart" role="img" aria-label="Pedidos por hora no período selecionado">
+          ${hourSlots.map((row) => {
+            const orderHeight = row.count ? Math.max(24, reportPercent(row.count, maxOrders) * 0.74 + 14) : 5;
+            const revenueHeight = row.total ? Math.max(12, reportPercent(row.total, maxRevenue) * 0.82 + 8) : 0;
+            const averageTicket = row.count ? safeReportNumber(row.total) / safeReportNumber(row.count) : 0;
+            const tooltip = `${row.key} | ${safeReportNumber(row.count)} pedido(s) | ${money(row.total || 0)} | Ticket ${money(averageTicket)}`;
+            return `
+            <div class="report-hour-bar ${row.count ? 'has-data' : 'is-empty'} ${peakHour?.key === row.key ? 'active' : ''} ${revenueHour?.key === row.key ? 'revenue-active' : ''}" data-tooltip="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}" tabindex="0">
+              <span class="report-hour-value">${row.count ? safeReportNumber(row.count) : ''}</span>
+              <i style="--hour-height: ${orderHeight}%; --revenue-height: ${revenueHeight}%;">
+                <b></b>
+              </i>
+              <span class="report-hour-label">${escapeHtml(row.label)}</span>
+            </div>
+          `;
+          }).join('')}
+        </div>
+        <div class="report-mini-facts">
+          <span>Maior movimento <strong>${escapeHtml(peakHour?.key || '--')}</strong></span>
+          <span>Maior faturamento <strong>${escapeHtml(revenueHour?.key || '--')} · ${money(revenueHour?.total || 0)}</strong></span>
+        </div>
+      ` : reportEmptyState('Sem horários no período', 'O gráfico aparece quando houver pedidos com horário registrado.')}
+    </div>
+  `;
+}
+
+function buildReportHourSlots(rows) {
+  const normalizedRows = (rows || [])
+    .map((row) => {
+      const hour = Number.parseInt(String(row.key || '').slice(0, 2), 10);
+      if (!Number.isFinite(hour)) return null;
+      return {
+        key: `${String(hour).padStart(2, '0')}:00`,
+        label: `${String(hour).padStart(2, '0')}h`,
+        count: safeReportNumber(row.count),
+        total: safeReportNumber(row.total)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number.parseInt(a.key, 10) - Number.parseInt(b.key, 10));
+
+  if (!normalizedRows.length) return [];
+
+  const byHour = new Map(normalizedRows.map((row) => [Number.parseInt(row.key, 10), row]));
+  const hours = [...byHour.keys()];
+  let start = Math.max(0, Math.min(...hours) - 1);
+  let end = Math.min(23, Math.max(...hours) + 1);
+
+  while (end - start < 7) {
+    if (start > 0) start -= 1;
+    if (end - start >= 7) break;
+    if (end < 23) end += 1;
+    if (start === 0 && end === 23) break;
+  }
+
+  return Array.from({ length: end - start + 1 }, (_, index) => {
+    const hour = start + index;
+    return byHour.get(hour) || {
+      key: `${String(hour).padStart(2, '0')}:00`,
+      label: `${String(hour).padStart(2, '0')}h`,
+      count: 0,
+      total: 0
+    };
+  });
+}
+
+function reportCashClosingCard(closing) {
+  const divergence = safeReportNumber(closing.divergence);
+  const isBalanced = Math.abs(divergence) < 0.01;
+  const paymentRows = buildPaymentRows(closing.by_payment || []).filter((row) => row.total > 0 || row.count > 0);
+  return `
+    <div class="report-card report-cash-card">
+      <div class="report-card-title-row">
+        <div><span class="report-kicker">Caixa</span><h3>Fechamento de caixa</h3></div>
+        <span class="report-badge ${isBalanced ? 'success' : 'danger'}">${isBalanced ? 'Correto' : 'Divergência'}</span>
+      </div>
+      <strong class="report-main-number">${money(closing.expected_revenue || 0)}</strong>
+      <p class="report-card-summary">Resumo financeiro do período selecionado.</p>
+      <div class="report-finance-grid">
+        ${reportFinanceItem('Recebido', closing.completed_revenue, 'positive')}
+        ${reportFinanceItem('Pendente', closing.pending_revenue, 'pending')}
+        ${reportFinanceItem('Taxas', closing.delivery_fees, 'neutral')}
+        ${reportFinanceItem('Descontos', closing.discounts, 'danger')}
+        ${reportFinanceItem('Cupons', closing.coupons, 'neutral', false)}
+        ${reportFinanceItem('Divergência', divergence, isBalanced ? 'positive' : 'danger')}
+      </div>
+      <div class="report-payment-summary">
+        <span class="report-kicker">Resumo por pagamento</span>
+        ${paymentRows.length ? paymentRows.map((row) => `<p><strong>${escapeHtml(row.label)}</strong><span>${money(row.total)}</span></p>`).join('') : '<p><strong>Sem recebimentos</strong><span>R$ 0,00</span></p>'}
+      </div>
+    </div>
+  `;
+}
+
+function reportFinanceItem(label, value, tone, formatAsMoney = true) {
+  const safeValue = safeReportNumber(value);
+  return `
+    <span class="report-finance-item report-finance-${tone}">
+      <small>${escapeHtml(label)}</small>
+      <strong>${formatAsMoney ? money(safeValue) : safeValue}</strong>
+    </span>
   `;
 }
 
@@ -3694,6 +4089,7 @@ function renderAdminUsers() {
       || (roleFilter === 'inactive' ? admin.is_active === false : admin.role === roleFilter);
     return matchesSearch && matchesRole;
   });
+  pruneSelectedAdminUsers(users);
   if (!state.adminUsers.length) {
     els.adminUsersList.innerHTML = `
       <div class="empty-state account-empty-state">
@@ -3701,6 +4097,7 @@ function renderAdminUsers() {
         <span>Crie acessos separados para atendimento, cozinha, entrega ou garçom. Cada pessoa entra com o próprio login.</span>
       </div>
     `;
+    updateAdminUsersBulkActions(users);
     return;
   }
   if (!users.length) {
@@ -3710,6 +4107,7 @@ function renderAdminUsers() {
         <span>Ajuste a busca ou o filtro de funcao para visualizar outros acessos.</span>
       </div>
     `;
+    updateAdminUsersBulkActions(users);
     return;
   }
   els.adminUsersList.innerHTML = users.map((admin) => {
@@ -3717,6 +4115,9 @@ function renderAdminUsers() {
     return `
     <details class="admin-user-card">
       <summary class="admin-user-main">
+        <span class="admin-user-select-wrap" title="${canDelete ? 'Selecionar conta' : 'Você não pode selecionar sua própria conta'}">
+          <input class="admin-user-select" type="checkbox" data-admin-user-id="${escapeAttribute(admin.id)}" ${state.selectedAdminUserIds.has(String(admin.id)) ? 'checked' : ''} ${canDelete ? '' : 'disabled'} aria-label="Selecionar ${escapeAttribute(admin.name || admin.email || 'conta')}">
+        </span>
         <div class="admin-user-avatar">${escapeHtml((admin.name || admin.email || 'A').slice(0, 1).toUpperCase())}</div>
         <div class="admin-user-title">
           <strong>${escapeHtml(admin.name || 'Conta')}</strong>
@@ -3759,6 +4160,80 @@ function renderAdminUsers() {
   els.adminUsersList.querySelectorAll('.admin-user-delete-button').forEach((button) => {
     button.addEventListener('click', deleteAdminUser);
   });
+  els.adminUsersList.querySelectorAll('.admin-user-select').forEach((checkbox) => {
+    checkbox.addEventListener('click', (event) => event.stopPropagation());
+    checkbox.addEventListener('change', toggleAdminUserSelection);
+  });
+  updateAdminUsersBulkActions(users);
+}
+
+function selectableAdminUsers(users = visibleAdminUsers()) {
+  return users.filter((admin) => String(state.admin?.id || '') !== String(admin.id || ''));
+}
+
+function visibleAdminUsers() {
+  const search = normalizeSearch(els.adminUserSearch?.value || '');
+  const roleFilter = els.adminUserRoleFilter?.value || 'all';
+  return state.adminUsers.filter((admin) => {
+    const matchesSearch = !search || normalizeSearch(`${admin.name || ''} ${admin.email || ''}`).includes(search);
+    const matchesRole = roleFilter === 'all'
+      || (roleFilter === 'inactive' ? admin.is_active === false : admin.role === roleFilter);
+    return matchesSearch && matchesRole;
+  });
+}
+
+function pruneSelectedAdminUsers(visibleUsers = visibleAdminUsers()) {
+  const visibleIds = new Set(visibleUsers.map((admin) => String(admin.id)));
+  for (const id of [...state.selectedAdminUserIds]) {
+    if (!visibleIds.has(id) || String(state.admin?.id || '') === id) {
+      state.selectedAdminUserIds.delete(id);
+    }
+  }
+}
+
+function updateAdminUsersBulkActions(visibleUsers = visibleAdminUsers()) {
+  if (!els.adminUsersBulkActions) return;
+  const selectable = selectableAdminUsers(visibleUsers);
+  const selectableIds = selectable.map((admin) => String(admin.id));
+  const selectedCount = selectableIds.filter((id) => state.selectedAdminUserIds.has(id)).length;
+  els.adminUsersBulkActions.hidden = !state.adminUsers.length;
+  if (els.selectedAdminUsersCount) {
+    els.selectedAdminUsersCount.textContent = `${selectedCount} selecionada${selectedCount === 1 ? '' : 's'}`;
+  }
+  if (els.deleteSelectedAdminUsersButton) {
+    els.deleteSelectedAdminUsersButton.disabled = selectedCount === 0;
+  }
+  if (els.selectAllAdminUsers) {
+    els.selectAllAdminUsers.disabled = selectable.length === 0;
+    els.selectAllAdminUsers.checked = selectable.length > 0 && selectedCount === selectable.length;
+    els.selectAllAdminUsers.indeterminate = selectedCount > 0 && selectedCount < selectable.length;
+  }
+}
+
+function toggleAdminUserSelection(event) {
+  const checkbox = event.currentTarget;
+  const id = String(checkbox.dataset.adminUserId || '');
+  if (!id) return;
+  if (checkbox.checked) {
+    state.selectedAdminUserIds.add(id);
+  } else {
+    state.selectedAdminUserIds.delete(id);
+  }
+  updateAdminUsersBulkActions();
+}
+
+function toggleVisibleAdminUsersSelection(event) {
+  const checked = event.currentTarget.checked;
+  const selectable = selectableAdminUsers();
+  for (const admin of selectable) {
+    const id = String(admin.id);
+    if (checked) {
+      state.selectedAdminUserIds.add(id);
+    } else {
+      state.selectedAdminUserIds.delete(id);
+    }
+  }
+  renderAdminUsers();
 }
 
 function renderAdminRoleOverview() {
@@ -4172,6 +4647,7 @@ async function deleteAdminUser(event) {
   try {
     await request(`/api/admin/users/${userId}`, { method: 'DELETE' });
     state.adminUsers = state.adminUsers.filter((admin) => admin.id !== userId);
+    state.selectedAdminUserIds.delete(String(userId));
     renderAdminUsers();
     toast('Conta excluida.');
   } catch (error) {
@@ -4179,6 +4655,40 @@ async function deleteAdminUser(event) {
   } finally {
     button.disabled = false;
   }
+}
+
+async function deleteSelectedAdminUsers() {
+  const selectedIds = [...state.selectedAdminUserIds].filter((id) => String(state.admin?.id || '') !== String(id));
+  if (!selectedIds.length) return;
+  const selectedUsers = state.adminUsers.filter((admin) => selectedIds.includes(String(admin.id)));
+  const confirmed = confirm(`Excluir ${selectedUsers.length} conta(s) selecionada(s)?\n\nEssas pessoas perderão o acesso ao painel.`);
+  if (!confirmed) return;
+  if (els.deleteSelectedAdminUsersButton) {
+    els.deleteSelectedAdminUsersButton.disabled = true;
+    els.deleteSelectedAdminUsersButton.textContent = 'Excluindo...';
+  }
+  let deleted = 0;
+  const failures = [];
+  for (const admin of selectedUsers) {
+    try {
+      await request(`/api/admin/users/${admin.id}`, { method: 'DELETE' });
+      deleted += 1;
+      state.selectedAdminUserIds.delete(String(admin.id));
+      state.adminUsers = state.adminUsers.filter((item) => String(item.id) !== String(admin.id));
+    } catch (error) {
+      failures.push({
+        name: admin.name || admin.email || 'Conta',
+        message: error.message || 'Falha ao excluir.'
+      });
+    }
+  }
+  renderAdminUsers();
+  if (els.deleteSelectedAdminUsersButton) {
+    els.deleteSelectedAdminUsersButton.textContent = 'Excluir selecionadas';
+  }
+  toast(failures.length
+    ? `${deleted} conta(s) excluída(s). ${failures.length} falharam: ${failures.slice(0, 2).map((item) => `${item.name}: ${item.message}`).join(' | ')}${failures.length > 2 ? '...' : ''}`
+    : `${deleted} conta(s) excluída(s).`);
 }
 
 function adminRoleOptions(selectedRole) {
@@ -4189,9 +4699,7 @@ function adminRoleOptions(selectedRole) {
     ['delivery', roleDefinition('delivery').label],
     ['kitchen', roleDefinition('kitchen').label]
   ];
-  if (state.admin?.role === 'superadmin' || selectedRole === 'superadmin') {
-    options.unshift(['superadmin', roleDefinition('superadmin').label]);
-  }
+  if (selectedRole === 'superadmin') options.unshift(['superadmin', roleDefinition('superadmin').label]);
   return options.map(([value, label]) => `<option value="${value}" ${value === selectedRole ? 'selected' : ''}>${label}</option>`).join('');
 }
 
@@ -5701,12 +6209,12 @@ function activateAdminTab(tab) {
     menu: 'Cardápio',
     reports: 'Relatórios',
     tables: 'Mesas e comandas',
-    promotions: 'Promoções',
     customers: 'Clientes',
-    store: 'Loja',
+    promotions: 'Cupons e Campanhas',
+    store: 'Configurações da Loja',
     integrations: 'Integrações',
-    plan: 'Meu plano',
-    account: 'Conta'
+    plan: 'Plano',
+    account: 'Conta e usuários'
   };
   state.activeAdminTab = tab;
   els.adminTitle.textContent = titles[tab] || 'Painel';
@@ -5949,6 +6457,14 @@ function fillAccountForm() {
   if (!state.admin) return;
   setValue(els.accountForm.elements.name, state.admin.name);
   setValue(els.accountForm.elements.email, state.admin.email);
+  const name = state.admin.name || 'Administrador';
+  const email = state.admin.email || '';
+  const storeName = state.admin.active_store?.name || state.store?.name || 'Loja atual';
+  if (els.accountProfileAvatar) els.accountProfileAvatar.textContent = name.slice(0, 1).toUpperCase();
+  if (els.accountProfileName) els.accountProfileName.textContent = name;
+  if (els.accountProfileEmail) els.accountProfileEmail.textContent = email;
+  if (els.accountProfileRole) els.accountProfileRole.textContent = state.admin.role_label || adminRoleLabel(state.admin.role);
+  if (els.accountProfileStore) els.accountProfileStore.textContent = storeName;
 }
 
 function detectNewOrders(previousIds, orders, options = {}) {

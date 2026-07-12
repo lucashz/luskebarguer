@@ -27,12 +27,14 @@ const client = new pg.Client({
 
 let serverProcess = null;
 let companyId = null;
+let fixtureEmails = [];
 
 try {
   await client.connect();
   await prepareDelayedBackup();
   const fixture = await createFixture();
   companyId = fixture.companyId;
+  fixtureEmails = [fixture.superEmail, fixture.adminEmail];
 
   serverProcess = await startServer();
 
@@ -73,8 +75,14 @@ try {
 
   console.log('Saude operacional da plataforma validada com sucesso.');
 } finally {
+  if (fixtureEmails.length) {
+    await cleanupAdminsByEmail(fixtureEmails).catch(() => {});
+  }
   if (companyId) {
     await client.query('delete from public.companies where id = $1', [companyId]).catch(() => {});
+  }
+  if (fixtureEmails.length) {
+    await cleanupAdminsByEmail(fixtureEmails).catch(() => {});
   }
   await client.end().catch(() => {});
   if (serverProcess) {
@@ -82,6 +90,13 @@ try {
     await new Promise((resolve) => serverProcess.once('exit', resolve));
   }
   await rm(new URL(`../.tmp/platform-health-${suffix}/`, import.meta.url), { recursive: true, force: true }).catch(() => {});
+}
+
+async function cleanupAdminsByEmail(emails) {
+  await client.query(`
+    delete from public.admin_users
+    where email = any($1::text[])
+  `, [emails]);
 }
 
 async function createFixture() {

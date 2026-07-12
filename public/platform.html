@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Plataforma - Cardápio</title>
-    <link rel="stylesheet" href="/styles.css?v=20260709-platform-clarity">
+    <link rel="stylesheet" href="/styles.css?v=20260712-platform-client-dropdown">
   </head>
   <body class="admin-page platform-page">
     <main class="platform-shell">
@@ -27,7 +27,61 @@
       </section>
 
       <section id="platformContent" hidden>
-        <section class="panel platform-health-panel">
+        <nav class="platform-tabs" aria-label="Áreas da plataforma">
+          <button class="active" data-platform-view="overview" type="button">Visão executiva</button>
+          <button data-platform-view="health" type="button">Saúde operacional</button>
+          <button data-platform-view="setup" type="button">Cadastros</button>
+          <button data-platform-view="clients" type="button">Clientes</button>
+          <button data-platform-view="audit" type="button">Auditoria</button>
+          <button data-platform-view="backups" type="button">Backups</button>
+        </nav>
+
+        <section class="panel platform-executive-panel" data-platform-section="overview">
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Visão executiva</p>
+              <h2>Resumo comercial do SaaS</h2>
+              <p class="muted">Clientes, pedidos, faturamento, MRR estimado e sinais de atenção da operação.</p>
+            </div>
+            <div class="row-actions">
+              <select class="compact-date" id="analyticsPeriodSelect">
+                <option value="7d">7 dias</option>
+                <option value="15d">15 dias</option>
+                <option value="30d" selected>30 dias</option>
+              </select>
+              <button class="ghost-button compact" id="refreshAnalyticsButton" type="button">Atualizar métricas</button>
+            </div>
+          </div>
+          <section class="platform-kpi-grid" id="platformKpiGrid"></section>
+          <section class="platform-analytics-grid">
+            <article class="platform-chart-card">
+              <div>
+                <h3>Pedidos e faturamento por dia</h3>
+                <p class="muted">Pedidos e receita bruta das lojas no período selecionado.</p>
+              </div>
+              <div class="platform-daily-chart" id="platformDailyChart"></div>
+            </article>
+            <article class="platform-chart-card">
+              <div>
+                <h3>Lojas com mais pedidos</h3>
+                <p class="muted">Ranking por volume, com faturamento do período.</p>
+              </div>
+              <div class="platform-ranking-list" id="platformStoreRanking"></div>
+            </article>
+          </section>
+          <section class="platform-analytics-grid">
+            <article class="platform-chart-card">
+              <h3>Métricas comerciais</h3>
+              <div class="platform-billing-grid" id="platformBillingMetrics"></div>
+            </article>
+            <article class="platform-chart-card">
+              <h3>Alertas comerciais</h3>
+              <div class="platform-commercial-alerts" id="platformCommercialAlerts"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="panel platform-health-panel" data-platform-section="health" hidden>
           <div class="section-actions">
             <div>
               <p class="eyebrow">Saúde operacional</p>
@@ -86,79 +140,81 @@
           </section>
         </section>
 
-        <section class="platform-context-strip">
-          <article class="platform-explain-card">
-            <strong>Empresas</strong>
-            <p>Representam o cliente contratante do SaaS. Aqui ficam plano, cobrança, status comercial e permissões.</p>
-          </article>
-          <article class="platform-explain-card">
-            <strong>Lojas</strong>
-            <p>São os cardápios públicos de uma empresa. Uma empresa pode ter uma ou mais lojas/unidades.</p>
-          </article>
-          <article class="platform-explain-card">
-            <strong>Auditoria e backup</strong>
-            <p>Servem para suporte interno: investigar eventos, conferir rotina de banco e acompanhar operação.</p>
-          </article>
+        <section class="platform-view-stack" data-platform-section="setup" hidden>
+          <section class="platform-context-strip">
+            <article class="platform-explain-card">
+              <strong>Empresas</strong>
+              <p>Representam o cliente contratante do SaaS. Aqui ficam plano, cobrança, status comercial e permissões.</p>
+            </article>
+            <article class="platform-explain-card">
+              <strong>Lojas</strong>
+              <p>São os cardápios públicos de uma empresa. Uma empresa pode ter uma ou mais lojas/unidades.</p>
+            </article>
+            <article class="platform-explain-card">
+              <strong>Auditoria e backup</strong>
+              <p>Servem para suporte interno: investigar eventos, conferir rotina de banco e acompanhar operação.</p>
+            </article>
+          </section>
+
+          <div class="management-grid platform-management-grid">
+            <form class="panel stack-form" id="companyForm">
+              <p class="eyebrow">Uso interno</p>
+              <h2>Cadastrar cliente manualmente</h2>
+              <p class="muted">Cria uma conta de empresa no SaaS sem passar pelo fluxo público de cadastro. Use para suporte, implantação assistida ou clientes cadastrados pela equipe comercial.</p>
+              <div class="platform-help-box">
+                <strong>Quando usar?</strong>
+                <span>Somente quando você, Admin Master, precisar criar o cliente por ele. Se o cliente se cadastrou em /cadastro, esta etapa não é necessária.</span>
+              </div>
+              <label class="platform-field">
+                <span>Nome do cliente/empresa</span>
+                <input name="name" required placeholder="Ex: Hamburgueria Central LTDA">
+              </label>
+              <label class="platform-field">
+                <span>E-mail financeiro</span>
+                <input name="billing_email" type="email" placeholder="financeiro@empresa.com.br">
+              </label>
+              <label class="platform-field">
+                <span>Telefone</span>
+                <input name="phone" inputmode="tel" placeholder="(11) 99999-9999">
+              </label>
+              <label class="platform-field">
+                <span>Plano inicial</span>
+                <select name="plan_code" id="companyPlanSelect"></select>
+              </label>
+              <button class="primary-button">Criar empresa</button>
+            </form>
+
+            <form class="panel stack-form" id="storeForm">
+              <p class="eyebrow">Cardápio do cliente</p>
+              <h2>Criar cardápio ou unidade</h2>
+              <p class="muted">Cria o endereço público do cardápio para uma empresa já cadastrada. Uma mesma empresa pode ter várias lojas/unidades.</p>
+              <div class="platform-help-box">
+                <strong>Exemplo prático</strong>
+                <span>Empresa: “Central Burger”. Loja/cardápio: “Central Burger Centro” com link público /central-burger-centro.</span>
+              </div>
+              <label class="platform-field">
+                <span>Empresa dona da loja</span>
+                <select name="company_id" id="storeCompanySelect" required></select>
+              </label>
+              <label class="platform-field">
+                <span>Nome da loja</span>
+                <input name="name" required placeholder="Ex: Central Burger - Unidade Centro">
+              </label>
+              <label class="platform-field">
+                <span>Endereço público</span>
+                <input name="slug" placeholder="Ex: central-burger">
+                <small>Esse texto vira o link público: /central-burger.</small>
+              </label>
+              <label class="platform-field">
+                <span>WhatsApp da loja</span>
+                <input name="whatsapp_number" inputmode="tel" placeholder="5511999999999">
+              </label>
+              <button class="primary-button">Criar cardápio</button>
+            </form>
+          </div>
         </section>
 
-        <div class="management-grid platform-management-grid">
-          <form class="panel stack-form" id="companyForm">
-            <p class="eyebrow">Uso interno</p>
-            <h2>Cadastrar cliente manualmente</h2>
-            <p class="muted">Cria uma conta de empresa no SaaS sem passar pelo fluxo público de cadastro. Use para suporte, implantação assistida ou clientes cadastrados pela equipe comercial.</p>
-            <div class="platform-help-box">
-              <strong>Quando usar?</strong>
-              <span>Somente quando você, Admin Master, precisar criar o cliente por ele. Se o cliente se cadastrou em /cadastro, esta etapa não é necessária.</span>
-            </div>
-            <label class="platform-field">
-              <span>Nome do cliente/empresa</span>
-              <input name="name" required placeholder="Ex: Hamburgueria Central LTDA">
-            </label>
-            <label class="platform-field">
-              <span>E-mail financeiro</span>
-              <input name="billing_email" type="email" placeholder="financeiro@empresa.com.br">
-            </label>
-            <label class="platform-field">
-              <span>Telefone</span>
-              <input name="phone" inputmode="tel" placeholder="(11) 99999-9999">
-            </label>
-            <label class="platform-field">
-              <span>Plano inicial</span>
-              <select name="plan_code" id="companyPlanSelect"></select>
-            </label>
-            <button class="primary-button">Criar empresa</button>
-          </form>
-
-          <form class="panel stack-form" id="storeForm">
-            <p class="eyebrow">Cardápio do cliente</p>
-            <h2>Criar cardápio ou unidade</h2>
-            <p class="muted">Cria o endereço público do cardápio para uma empresa já cadastrada. Uma mesma empresa pode ter várias lojas/unidades.</p>
-            <div class="platform-help-box">
-              <strong>Exemplo prático</strong>
-              <span>Empresa: “Central Burger”. Loja/cardápio: “Central Burger Centro” com link público /central-burger-centro.</span>
-            </div>
-            <label class="platform-field">
-              <span>Empresa dona da loja</span>
-              <select name="company_id" id="storeCompanySelect" required></select>
-            </label>
-            <label class="platform-field">
-              <span>Nome da loja</span>
-              <input name="name" required placeholder="Ex: Central Burger - Unidade Centro">
-            </label>
-            <label class="platform-field">
-              <span>Endereço público</span>
-              <input name="slug" placeholder="Ex: central-burger">
-              <small>Esse texto vira o link público: /central-burger.</small>
-            </label>
-            <label class="platform-field">
-              <span>WhatsApp da loja</span>
-              <input name="whatsapp_number" inputmode="tel" placeholder="5511999999999">
-            </label>
-            <button class="primary-button">Criar cardápio</button>
-          </form>
-        </div>
-
-        <section class="panel">
+        <section class="panel" data-platform-section="clients" hidden>
           <div class="section-actions">
             <div>
               <p class="eyebrow">Empresas</p>
@@ -167,10 +223,35 @@
             </div>
             <button class="ghost-button compact" id="refreshPlatformButton" type="button">Atualizar</button>
           </div>
+          <form class="platform-client-filters" id="clientFilterForm">
+            <input name="search" type="search" placeholder="Buscar cliente, e-mail, telefone ou slug">
+            <select name="status">
+              <option value="">Todos status</option>
+              <option value="trial">Em teste</option>
+              <option value="active">Ativos</option>
+              <option value="delinquent">Inadimplentes</option>
+              <option value="suspended">Suspensos</option>
+              <option value="cancelled">Cancelados</option>
+            </select>
+            <select name="plan" id="clientPlanFilter">
+              <option value="">Todos planos</option>
+            </select>
+            <select name="activity">
+              <option value="">Todos</option>
+              <option value="with_orders">Com pedidos</option>
+              <option value="without_orders">Sem pedidos</option>
+              <option value="trial_ending">Trial vencendo</option>
+              <option value="payment_due">Pagamento pendente</option>
+              <option value="unpublished_store">Loja não publicada</option>
+              <option value="no_whatsapp">Sem WhatsApp</option>
+              <option value="needs_attention">Com atenção</option>
+            </select>
+          </form>
+          <section class="platform-attention-panel" id="platformAttentionPanel"></section>
           <div class="platform-company-list" id="companyList"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-platform-section="audit" hidden>
           <div class="section-actions">
             <div>
               <p class="eyebrow">Auditoria</p>
@@ -193,7 +274,7 @@
           <div class="audit-list" id="auditList"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-platform-section="backups" hidden>
           <div class="section-actions">
             <div>
               <p class="eyebrow">Backups</p>
@@ -206,7 +287,7 @@
       </section>
     </main>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260709-platform-clarity"></script>
+    <script src="/platform.js?v=20260712-platform-client-dropdown"></script>
   </body>
 </html>
 
