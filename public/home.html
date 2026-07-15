@@ -3,18 +3,18 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cardápio digital para restaurante vender melhor</title>
-    <meta name="description" content="Crie um cardápio digital para receber pedidos, organizar delivery, mesas e comandas. Simples para o restaurante e fácil para o cliente.">
-    <meta property="og:title" content="Cardápio digital para restaurante vender melhor">
-    <meta property="og:description" content="Pedidos pelo celular, cardápio sempre atualizado e painel para organizar a operação do restaurante.">
+    <title>Cardápio digital para restaurantes venderem melhor</title>
+    <meta name="description" content="Crie um cardápio digital com pedidos online, adicionais, mesas, comandas, pagamentos e painel administrativo simples para restaurantes.">
+    <meta property="og:title" content="Cardápio digital para restaurantes venderem melhor">
+    <meta property="og:description" content="Cardápio online, pedidos organizados e painel administrativo para delivery, retirada e salão.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="/">
-    <meta property="og:image" content="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=1200&q=80">
+    <meta property="og:image" content="/assets/sistema-cardapio-preview.png">
     <link rel="canonical" href="/">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23080a0f'/%3E%3Cpath d='M16 20h32v6H16zm0 12h32v6H16zm0 12h22v6H16z' fill='%23ef2332'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/styles.css?v=20260710-home-clean">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111827'/%3E%3Cpath d='M16 20h32v6H16zm0 12h32v6H16zm0 12h22v6H16z' fill='%23e9252f'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/styles.css?v=20260713-home-suporte-v3">
   </head>
-  <body class="portal-page commercial-home clean-home">
+  <body class="portal-page commercial-home clean-home support-style-home">
     <header class="clean-topbar">
       <a class="clean-brand" href="/" aria-label="Início">
         <span>CD</span>
@@ -23,9 +23,10 @@
       <button class="clean-menu-button" id="homeMenuButton" type="button" aria-expanded="false" aria-controls="homeNav">Menu</button>
       <nav class="clean-nav" id="homeNav" aria-label="Navegação principal">
         <a href="#recursos">Recursos</a>
-        <a href="#como-funciona">Como funciona</a>
-        <a href="#demo">Demonstração</a>
         <a href="#planos">Planos</a>
+        <a href="#comparativo">Comparativo</a>
+        <a href="#faq">FAQ</a>
+        <span class="clean-lang" aria-label="Idiomas disponíveis"><b>PT</b><em>EN</em><em>ES</em></span>
         <a href="/entrar">Entrar</a>
         <a class="clean-nav-cta" href="/cadastro">Criar meu cardápio</a>
       </nav>
@@ -34,170 +35,66 @@
     <main>
       <section class="clean-hero">
         <div class="clean-hero-copy">
-          <p class="clean-eyebrow">Para delivery, retirada e salão</p>
-          <h1>Seu cardápio vendendo. Sua cozinha no controle.</h1>
-          <p>Pedidos claros, adicionais organizados e acompanhamento em tempo real para o restaurante vender melhor sem depender de conversa perdida.</p>
+          <p class="clean-eyebrow">Cardápio digital para delivery, retirada e salão</p>
+          <h1>Seu cardápio sempre online e seus pedidos sempre organizados.</h1>
+          <p>Pedidos pelo celular, adicionais claros, mesas com QR Code e painel administrativo para o restaurante vender sem depender de conversa perdida.</p>
           <div class="clean-actions">
             <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
-            <a class="clean-button ghost" href="/cardapio">Ver demonstração</a>
           </div>
-          <p class="clean-hero-note">Teste grátis para configurar sua loja e ver o fluxo funcionando.</p>
-          <div class="clean-proof">
-            <span>Sem aplicativo</span>
-            <span>Funciona no celular</span>
-            <span>Pedidos organizados</span>
-            <span>Suporte em português</span>
+          <p class="clean-hero-note">Teste grátis para montar sua loja antes de contratar um plano.</p>
+          <div class="clean-proof" id="recursos" aria-label="Destaques do sistema">
+            <span>Pedido sem confusão</span>
+            <span>Cardápio sempre online</span>
+            <span>QR Code para mesa</span>
+            <span>Sem fidelidade</span>
           </div>
         </div>
+      </section>
 
-        <section class="clean-preview clean-system-carousel" aria-label="Imagens do sistema em funcionamento">
+      <div class="clean-divider" aria-hidden="true"></div>
+
+      <section class="clean-section clean-home-demo" id="demonstracao">
+        <div>
+          <p class="clean-eyebrow">Demonstração</p>
+          <h2>Veja o sistema funcionando por dentro.</h2>
+        </div>
+        <section class="clean-preview clean-system-carousel" aria-label="Prévia do sistema">
           <div class="clean-carousel-track">
             <figure class="clean-system-shot is-active" data-home-slide>
-              <img src="/assets/sistema-cardapio-preview.png" alt="Tela do cardápio digital com loja demonstração, categorias, produtos e sacola" width="1440" height="980" fetchpriority="high" decoding="async">
-              <figcaption>Cardápio público com produtos, categorias e sacola.</figcaption>
+              <img src="/assets/sistema-cardapio-preview.png" alt="Cardápio público com categorias, produtos e sacola" width="1440" height="980" fetchpriority="high" decoding="async">
+              <figcaption>Cardápio público com produtos, adicionais e sacola.</figcaption>
             </figure>
-            <figure class="clean-system-shot" data-home-slide>
-              <img src="/assets/sistema-admin-pedidos-preview.png" alt="Tela do painel administrativo com cards de pedidos por status" width="1440" height="980" decoding="async">
-              <figcaption>Administração com cards de pedidos em tempo real.</figcaption>
+            <figure class="clean-system-shot crop-pedidos-admin" data-home-slide>
+              <img src="/assets/sistema-admin-pedidos-original.png" alt="Painel administrativo com cards de pedidos por status" width="1920" height="1470" decoding="async">
+              <figcaption>Painel administrativo com pedidos organizados por status.</figcaption>
             </figure>
-          </div>
-          <div class="clean-carousel-controls" aria-label="Selecionar imagem do sistema">
-            <button class="is-active" type="button" data-home-slide-control="0" aria-label="Ver cardápio público"></button>
-            <button type="button" data-home-slide-control="1" aria-label="Ver cards de pedidos no admin"></button>
+            <figure class="clean-system-shot crop-produtos-admin" data-home-slide>
+              <img src="/assets/sistema-admin-produtos-original.png" alt="Tela do admin com gestão de produtos, filtros e lista de produtos" width="1920" height="1662" decoding="async">
+              <figcaption>Admin com produtos, preços, disponibilidade e edição rápida.</figcaption>
+            </figure>
+            <figure class="clean-system-shot crop-admin" data-home-slide>
+              <img src="/assets/sistema-admin-operacao-original.jpg" alt="Tela do admin com operação da loja, status, métricas e ações rápidas" width="1920" height="927" decoding="async">
+              <figcaption>Painel de operação com loja aberta, métricas e ações rápidas.</figcaption>
+            </figure>
           </div>
         </section>
-      </section>
-
-      <section class="clean-benefits" id="recursos">
-        <article>
-          <strong>Menos erros nos pedidos</strong>
-          <p>Produto, adicional, observação e pagamento chegam claros.</p>
-        </article>
-        <article>
-          <strong>Atendimento mais rápido</strong>
-          <p>O cliente escolhe no celular e o pedido entra no painel.</p>
-        </article>
-        <article>
-          <strong>Cardápio sempre atualizado</strong>
-          <p>Altere preços, fotos e disponibilidade sem reimprimir cardápio.</p>
-        </article>
-        <article>
-          <strong>Pedidos mais organizados</strong>
-          <p>Acompanhe novo, preparando, pronto e finalizado.</p>
-        </article>
-        <article>
-          <strong>Imagem mais profissional</strong>
-          <p>Seu cliente abre um cardápio bonito e fácil de usar.</p>
-        </article>
-      </section>
-
-      <section class="clean-cta-strip" aria-label="Ação rápida">
-        <strong>Quer ver como seu cliente faria o pedido?</strong>
-        <div>
-          <a class="clean-button" href="/cardapio">Abrir demonstração</a>
-          <a class="clean-button ghost" href="/cadastro">Criar meu cardápio</a>
+        <div class="clean-carousel-controls" aria-label="Selecionar prévia">
+          <button class="is-active" type="button" data-home-slide-control="0">Cardápio</button>
+          <button type="button" data-home-slide-control="1">Pedidos</button>
+          <button type="button" data-home-slide-control="2">Produtos</button>
+          <button type="button" data-home-slide-control="3">Painel</button>
+        </div>
+        <div class="clean-demo-action">
+          <a class="clean-button ghost" href="/cardapio">Abrir demonstração completa</a>
         </div>
       </section>
 
-      <section class="clean-section clean-story">
-        <div>
-          <p class="clean-eyebrow">Problemas reais</p>
-          <h2>Quando o movimento aperta, cada detalhe do pedido importa.</h2>
-          <p>Preço antigo, adicional esquecido, mesa esperando e cozinha perguntando de novo. A plataforma organiza o pedido antes dele chegar na equipe.</p>
-        </div>
-        <div class="clean-story-board" aria-label="Problemas resolvidos">
-          <article><span>WhatsApp</span><strong>Menos conversa repetida</strong><p>Cliente escolhe produto, adicional, entrega e pagamento.</p></article>
-          <article><span>Cozinha</span><strong>Pedido pronto para preparar</strong><p>Itens, extras e observações aparecem no painel.</p></article>
-          <article><span>Salão</span><strong>Mesas e comandas no controle</strong><p>QR Code por mesa e status do pedido para acompanhar.</p></article>
-        </div>
-      </section>
-
-      <section class="clean-section clean-showcase">
-        <div>
-          <p class="clean-eyebrow">Recursos</p>
-          <h2>Recursos que o restaurante usa no dia a dia.</h2>
-          <p>Sem tela complicada: cardápio, pedidos, produtos, mesas e pagamentos em uma rotina fácil de entender.</p>
-        </div>
-        <div class="clean-feature-list">
-          <span>Cardápio digital</span>
-          <span>Entrega</span>
-          <span>Retirada</span>
-          <span>Pedidos por mesa</span>
-          <span>Comandas</span>
-          <span>Adicionais</span>
-          <span>Painel de pedidos</span>
-          <span>Categorias</span>
-          <span>Disponibilidade</span>
-          <span>Impressão</span>
-          <span>WhatsApp</span>
-          <span>Relatórios</span>
-          <span>Pagamentos</span>
-        </div>
-      </section>
-
-      <section class="clean-section clean-split" id="demo">
-        <div>
-          <p class="clean-eyebrow">Demonstração pública</p>
-          <h2>Teste o cardápio como seu cliente testaria.</h2>
-          <p>Escolha produto, adicional, sacola e checkout em uma loja demonstração com dados realistas.</p>
-          <a class="clean-button" href="/cardapio">Abrir cardápio demonstração</a>
-        </div>
-        <div class="clean-demo-card">
-          <img src="https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80" alt="Hambúrguer artesanal com batatas" loading="lazy" decoding="async">
-          <div>
-            <strong>Vitrine Gourmet</strong>
-            <span>Loja demonstração aberta para teste</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="clean-section" id="como-funciona">
-        <p class="clean-eyebrow">Como funciona</p>
-        <h2>Comece sem depender de ajuda técnica.</h2>
-        <div class="clean-steps">
-          <article><span>1</span><strong>Crie sua conta</strong><p>Informe os dados básicos da loja.</p></article>
-          <article><span>2</span><strong>Configure a operação</strong><p>Entrega, retirada, mesa, horários e pagamentos.</p></article>
-          <article><span>3</span><strong>Monte o cardápio</strong><p>Categorias, produtos, fotos e adicionais.</p></article>
-          <article><span>4</span><strong>Compartilhe o link</strong><p>Receba pedidos no painel administrativo.</p></article>
-        </div>
-      </section>
-
-      <section class="clean-section clean-segments">
-        <p class="clean-eyebrow">Para vários tipos de negócio</p>
-        <h2>Feito para atendimento corrido e cliente com pressa.</h2>
-        <div>
-          <span>Hamburguerias</span>
-          <span>Pizzarias</span>
-          <span>Restaurantes</span>
-          <span>Bares</span>
-          <span>Lancherias</span>
-          <span>Cafés</span>
-          <span>Marmitarias</span>
-          <span>Food trucks</span>
-        </div>
-      </section>
-
-      <section class="clean-section clean-panel-section">
-        <div class="clean-admin-card">
-          <div><span>Exemplo</span><strong>Loja aberta</strong></div>
-          <div><span>Painel</span><strong>Pedidos do dia</strong></div>
-          <div><span>Salão</span><strong>Mesas em uso</strong></div>
-        </div>
-        <div>
-          <p class="clean-eyebrow">Painel inicial</p>
-          <h2>Um painel para saber o que está acontecendo.</h2>
-          <p>Veja pedidos, status, mesas, link do cardápio e atalhos para manter a operação andando.</p>
-          <div class="clean-actions">
-            <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
-            <a class="clean-button ghost dark" href="/cardapio">Ver demonstração</a>
-          </div>
-        </div>
-      </section>
+      <div class="clean-divider" aria-hidden="true"></div>
 
       <section class="clean-section" id="planos">
         <p class="clean-eyebrow">Planos</p>
-        <h2>Planos para começar simples e crescer com a loja.</h2>
-        <p class="clean-section-lead">A Home mostra apenas planos pagos. O teste grátis aparece no cadastro para você experimentar antes de contratar.</p>
+        <h2>Escolha o nível ideal para a sua operação.</h2>
+        <p class="clean-section-lead">Todo cadastro começa com teste grátis. Depois, você escolhe o plano certo para publicar, vender e acompanhar a rotina da loja.</p>
         <div class="clean-plans" id="homePlans">
           <article>
             <span>Carregando</span>
@@ -207,31 +104,58 @@
         </div>
       </section>
 
-      <section class="clean-section clean-faq">
+      <div class="clean-divider" aria-hidden="true"></div>
+
+      <section class="clean-section clean-comparison" id="comparativo">
         <div>
-          <p class="clean-eyebrow">Dúvidas frequentes</p>
-          <h2>Respostas diretas antes de começar.</h2>
+          <p class="clean-eyebrow">Comparativo</p>
+          <h2>Compare os recursos antes de começar.</h2>
+          <p>Comece simples e evolua para uma operação mais completa quando fizer sentido para o restaurante.</p>
         </div>
-        <div>
-          <details><summary>Preciso instalar aplicativo?</summary><p>Não. Cliente, equipe e dono usam pelo navegador.</p></details>
-          <details><summary>Funciona no celular?</summary><p>Sim. A experiência é pensada primeiro para celular.</p></details>
-          <details><summary>Posso receber pedidos pelo WhatsApp?</summary><p>Sim. O WhatsApp pode ser usado conforme a configuração da loja e o plano contratado.</p></details>
-          <details><summary>Posso alterar preços quando quiser?</summary><p>Sim. Produtos, preços e disponibilidade são editados no painel.</p></details>
-          <details><summary>Funciona para mesas e comandas?</summary><p>Sim. O sistema tem QR Code por mesa e comandas.</p></details>
-          <details><summary>Posso imprimir pedidos?</summary><p>Sim. A impressão para operação e cozinha depende do plano e da configuração.</p></details>
-          <details><summary>Preciso entender de tecnologia?</summary><p>Não. O onboarding guia a configuração inicial.</p></details>
-          <details><summary>Existe suporte?</summary><p>Sim. O atendimento é em português para ajudar na configuração e no uso do sistema.</p></details>
-          <details><summary>Posso cancelar o plano?</summary><p>Sim. O plano pode ser alterado ou cancelado conforme as regras comerciais da assinatura.</p></details>
-          <details><summary>Meus dados ficam seguros?</summary><p>O sistema usa autenticação, permissões e isolamento por loja.</p></details>
+        <div class="clean-compare-table" role="table" aria-label="Comparativo de recursos">
+          <div role="row" class="compare-head">
+            <span role="columnheader">Recurso</span>
+            <span role="columnheader">Essencial</span>
+            <span role="columnheader">Profissional</span>
+            <span role="columnheader">Premium</span>
+          </div>
+          <div role="row"><span role="cell">Produtos</span><strong role="cell">25</strong><strong role="cell">100</strong><strong role="cell">Ilimitado</strong></div>
+          <div role="row"><span role="cell">Pedidos</span><strong role="cell">150/mês</strong><strong role="cell">Ilimitado</strong><strong role="cell">Ilimitado</strong></div>
+          <div role="row"><span role="cell">Usuários</span><strong role="cell">1</strong><strong role="cell">5</strong><strong role="cell">10</strong></div>
+          <div role="row"><span role="cell">Mesas e QR Code</span><strong role="cell">Básico</strong><strong role="cell">Completo</strong><strong role="cell">Completo</strong></div>
+          <div role="row"><span role="cell">Cupons e campanhas</span><strong role="cell">-</strong><strong role="cell">Sim</strong><strong role="cell">Sim</strong></div>
+          <div role="row"><span role="cell">KDS, impressão e relatórios</span><strong role="cell">-</strong><strong role="cell">Sim</strong><strong role="cell">Sim</strong></div>
+          <div role="row"><span role="cell">Automação, fidelidade e domínio</span><strong role="cell">-</strong><strong role="cell">-</strong><strong role="cell">Sim</strong></div>
         </div>
       </section>
 
+      <div class="clean-divider" aria-hidden="true"></div>
+
+      <section class="clean-section clean-faq" id="faq">
+        <div>
+          <p class="clean-eyebrow">Dúvidas</p>
+          <h2>Dúvidas frequentes</h2>
+          <p>Tudo sobre criação da loja, cardápio, pedidos e recursos antes de começar.</p>
+        </div>
+        <div>
+          <details><summary>Preciso instalar aplicativo?</summary><p>Não. O cliente e a equipe usam tudo pelo navegador.</p></details>
+          <details><summary>O cliente consegue pedir pelo celular?</summary><p>Sim. A experiência é pensada para celular, com produtos, adicionais, sacola e checkout.</p></details>
+          <details><summary>Posso usar no salão com QR Code?</summary><p>Sim. O sistema tem mesas, comandas e QR Code conforme o plano e a configuração da loja.</p></details>
+          <details><summary>Consigo alterar preços e disponibilidade?</summary><p>Sim. Você edita produtos, categorias, fotos, preços e disponibilidade pelo painel administrativo.</p></details>
+          <details><summary>O pedido chega no WhatsApp?</summary><p>A loja pode configurar o WhatsApp para atendimento e comunicação conforme os recursos disponíveis no plano.</p></details>
+          <details><summary>Existe teste grátis?</summary><p>Sim. Você pode criar a conta, configurar a loja e testar o fluxo antes de contratar.</p></details>
+        </div>
+      </section>
+
+      <div class="clean-divider" aria-hidden="true"></div>
+
       <section class="clean-final">
-        <h2>Seu próximo pedido pode chegar mais organizado.</h2>
-        <p>Crie seu cardápio digital, teste a demonstração e publique sua loja quando estiver pronto.</p>
+        <p class="clean-eyebrow">Vamos montar sua loja</p>
+        <h2>Crie seu cardápio digital e veja o pedido chegando organizado.</h2>
+        <p>Em dúvida sobre qual plano escolher? Comece pelo teste grátis, veja o fluxo funcionando e publique quando estiver pronto.</p>
         <div class="clean-actions">
           <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
-          <a class="clean-button ghost dark" href="https://wa.me/5511999999999?text=Quero%20conhecer%20o%20Card%C3%A1pio%20Digital" target="_blank" rel="noopener">Falar pelo WhatsApp</a>
+          <a class="clean-button ghost dark" href="/cardapio">Ver demonstração</a>
         </div>
       </section>
     </main>
@@ -243,17 +167,17 @@
       </div>
       <nav>
         <a href="#recursos">Recursos</a>
-        <a href="/planos">Planos</a>
+        <a href="#planos">Planos</a>
+        <a href="#comparativo">Comparativo</a>
+        <a href="#faq">FAQ</a>
         <a href="/cardapio">Demonstração</a>
         <a href="/entrar">Login</a>
         <a href="/cadastro">Criar conta</a>
         <a href="/termos">Termos de uso</a>
         <a href="/privacidade">Política de privacidade</a>
-        <a href="mailto:suporte@cardapio.local">Contato</a>
-        <a href="/platform">Status do sistema</a>
       </nav>
     </footer>
 
-    <script src="/home.js?v=20260710-commercial-flow" defer></script>
+    <script src="/home.js?v=20260713-home-suporte-v3" defer></script>
   </body>
 </html>

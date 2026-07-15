@@ -4,15 +4,20 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Plataforma - Cardápio</title>
-    <link rel="stylesheet" href="/styles.css?v=20260712-platform-client-dropdown">
+    <link rel="stylesheet" href="/styles.css?v=20260713-platform-tech">
   </head>
   <body class="admin-page platform-page">
     <main class="platform-shell">
       <header class="admin-header">
         <div>
           <p class="eyebrow" id="platformUser">Plataforma</p>
-          <h1>Painel interno</h1>
-          <p class="muted">Empresas, lojas, planos e auditoria do ambiente multiempresa.</p>
+          <h1>Platform</h1>
+          <p class="muted">Gestão central do SaaS: clientes, receita, operação técnica, suporte e auditoria.</p>
+          <div class="platform-header-status" aria-label="Resumo rápido da plataforma">
+            <span>Admin Master</span>
+            <span>Ambiente SaaS</span>
+            <span>Últimas 24h</span>
+          </div>
         </div>
         <div class="admin-header-actions">
           <a class="ghost-button compact" href="/admin">Voltar ao admin</a>
@@ -28,20 +33,22 @@
 
       <section id="platformContent" hidden>
         <nav class="platform-tabs" aria-label="Áreas da plataforma">
-          <button class="active" data-platform-view="overview" type="button">Visão executiva</button>
-          <button data-platform-view="health" type="button">Saúde operacional</button>
-          <button data-platform-view="setup" type="button">Cadastros</button>
+          <button class="active" data-platform-view="overview" type="button">Visão Geral</button>
           <button data-platform-view="clients" type="button">Clientes</button>
+          <button data-platform-view="setup" type="button">Cadastros</button>
+          <button data-platform-view="billing" type="button">Billing</button>
+          <button data-platform-view="health" type="button">Saúde e Serviços</button>
           <button data-platform-view="audit" type="button">Auditoria</button>
-          <button data-platform-view="backups" type="button">Backups</button>
+          <button data-platform-view="support" type="button">Suporte</button>
+          <button data-platform-view="communication" type="button">Comunicação</button>
         </nav>
 
         <section class="panel platform-executive-panel" data-platform-section="overview">
           <div class="section-actions">
             <div>
-              <p class="eyebrow">Visão executiva</p>
-              <h2>Resumo comercial do SaaS</h2>
-              <p class="muted">Clientes, pedidos, faturamento, MRR estimado e sinais de atenção da operação.</p>
+              <p class="eyebrow">Visão Geral</p>
+              <h2>Pulso comercial e operacional</h2>
+              <p class="muted">Clientes, receita, pedidos, alertas comerciais e sinais técnicos em uma única leitura.</p>
             </div>
             <div class="row-actions">
               <select class="compact-date" id="analyticsPeriodSelect">
@@ -69,14 +76,36 @@
               <div class="platform-ranking-list" id="platformStoreRanking"></div>
             </article>
           </section>
-          <section class="platform-analytics-grid">
+          <section class="platform-analytics-grid platform-overview-alert-grid">
             <article class="platform-chart-card">
               <h3>Métricas comerciais</h3>
               <div class="platform-billing-grid" id="platformBillingMetrics"></div>
             </article>
             <article class="platform-chart-card">
               <h3>Alertas comerciais</h3>
+              <p class="muted">Riscos de receita, ativação e relacionamento com clientes.</p>
               <div class="platform-commercial-alerts" id="platformCommercialAlerts"></div>
+            </article>
+            <article class="platform-chart-card">
+              <h3>Alertas operacionais</h3>
+              <p class="muted">Backups, webhooks, SMTP, banco, API e serviços críticos.</p>
+              <div class="platform-commercial-alerts" id="platformOperationalOverviewAlerts"></div>
+            </article>
+          </section>
+          <section class="platform-analytics-grid">
+            <article class="platform-chart-card">
+              <div>
+                <h3>MRR por plano</h3>
+                <p class="muted">Receita recorrente estimada por faixa comercial.</p>
+              </div>
+              <div class="platform-plan-mrr" id="platformPlanMrr"></div>
+            </article>
+            <article class="platform-chart-card">
+              <div>
+                <h3>Conversão e churn</h3>
+                <p class="muted">Trials, upgrades, cancelamentos e novos clientes no período.</p>
+              </div>
+              <div class="platform-conversion-grid" id="platformConversionGrid"></div>
             </article>
           </section>
         </section>
@@ -84,9 +113,9 @@
         <section class="panel platform-health-panel" data-platform-section="health" hidden>
           <div class="section-actions">
             <div>
-              <p class="eyebrow">Saúde operacional</p>
-              <h2>Status da plataforma</h2>
-              <p class="muted">Visão central de API, banco, billing, webhooks, backup, storage, configurações críticas e alertas.</p>
+              <p class="eyebrow">Saúde e Serviços</p>
+              <h2>Operação técnica</h2>
+              <p class="muted">API, banco, backups, webhooks, SMTP, storage, jobs, logs das últimas 24h e ações protegidas.</p>
             </div>
             <div class="row-actions">
               <select class="compact-date" id="healthPeriodSelect">
@@ -99,6 +128,38 @@
           </div>
           <div class="platform-health-meta" id="healthMeta">Carregando status operacional...</div>
           <section class="platform-status-grid" id="platformStatusGrid"></section>
+          <div class="platform-health-meta" id="servicesMeta">Carregando detalhes operacionais...</div>
+          <section class="platform-services-grid" id="platformServicesGrid"></section>
+          <section class="platform-services-actions">
+            <article class="platform-service-card">
+              <p class="eyebrow">Backups</p>
+              <h3>Banco de dados</h3>
+              <p>Gere um backup manual e registre a execução na auditoria.</p>
+              <button class="primary-button compact" data-critical-action="backup" type="button">Fazer backup agora</button>
+            </article>
+            <article class="platform-service-card">
+              <p class="eyebrow">Jobs</p>
+              <h3>Trials inativos</h3>
+              <p>Executa a rotina que remove empresas em teste sem acesso recente.</p>
+              <button class="ghost-button compact" data-critical-action="trial-cleanup" type="button">Executar limpeza</button>
+            </article>
+            <article class="platform-service-card">
+              <p class="eyebrow">Retenção</p>
+              <h3>Logs e auditoria</h3>
+              <p>Simule ou execute a limpeza de sessões expiradas, auditorias antigas, temporários e backups fora da retenção.</p>
+              <div class="row-actions">
+                <button class="ghost-button compact" id="previewLogCleanupButton" type="button">Simular limpeza</button>
+                <button class="danger-button compact" data-critical-action="log-cleanup" type="button">Executar limpeza</button>
+              </div>
+              <div class="platform-cleanup-result" id="logCleanupResult"></div>
+            </article>
+            <article class="platform-service-card danger-service-card">
+              <p class="eyebrow">Zona de risco</p>
+              <h3>Aplicação</h3>
+              <p>Agenda o restart do serviço da aplicação quando o ambiente permitir controle operacional.</p>
+              <button class="danger-button compact" data-critical-action="restart-app" type="button">Reiniciar aplicação</button>
+            </article>
+          </section>
           <section class="platform-health-grid">
             <article>
               <h3>Métricas de latência</h3>
@@ -122,7 +183,12 @@
                     <option value="">Todos</option>
                     <option value="webhook">Webhooks</option>
                     <option value="backup">Backups</option>
+                    <option value="job">Jobs</option>
                     <option value="billing">Billing</option>
+                    <option value="auth">Auth</option>
+                    <option value="critical_error">Erro crítico</option>
+                    <option value="superadmin_action">Ação superadmin</option>
+                    <option value="service">Serviço</option>
                     <option value="deploy">Deploy/migration</option>
                     <option value="integration">Integrações</option>
                     <option value="system">Sistema</option>
@@ -133,14 +199,61 @@
                     <option value="attention">Atenção</option>
                     <option value="info">Info</option>
                   </select>
+                  <select class="compact-date" id="operationalLogSeverityFilter">
+                    <option value="">Todas severidades</option>
+                    <option value="critical">Crítica</option>
+                    <option value="warning">Aviso</option>
+                    <option value="info">Info</option>
+                    <option value="debug">Debug</option>
+                  </select>
+                  <select class="compact-date" id="operationalLogServiceFilter">
+                    <option value="">Todos serviços</option>
+                    <option value="application">Aplicação</option>
+                    <option value="billing">Billing</option>
+                    <option value="backup">Backup</option>
+                    <option value="jobs">Jobs</option>
+                    <option value="auth">Auth</option>
+                    <option value="deploy">Deploy</option>
+                    <option value="system">Sistema</option>
+                  </select>
+                  <select class="compact-date" id="operationalLogCompanyFilter">
+                    <option value="">Todos clientes</option>
+                  </select>
+                  <select class="compact-date" id="operationalLogStoreFilter">
+                    <option value="">Todas lojas</option>
+                  </select>
                 </div>
               </div>
               <div class="platform-log-list" id="platformOperationalLogs"></div>
             </article>
           </section>
+          <section class="platform-health-grid">
+            <article>
+              <h3>Logs recentes de serviços</h3>
+              <div class="platform-log-list" id="platformServiceLogs"></div>
+            </article>
+            <article>
+              <h3>Zona de risco</h3>
+              <div class="platform-checklist" id="platformRiskZone"></div>
+            </article>
+          </section>
         </section>
 
         <section class="platform-view-stack" data-platform-section="setup" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Cadastros</p>
+              <h2>Implantação assistida de clientes</h2>
+              <p class="muted">Crie empresa, loja, plano inicial e prepare o acesso do cliente com menos risco de duplicidade.</p>
+            </div>
+          </div>
+          <section class="platform-setup-flow" aria-label="Fluxo recomendado de cadastro">
+            <article class="is-active"><span>1</span><strong>Empresa</strong><small>Dados comerciais e cobrança</small></article>
+            <article><span>2</span><strong>Responsável</strong><small>Admin vinculado ao cliente</small></article>
+            <article><span>3</span><strong>Loja</strong><small>Cardápio público e WhatsApp</small></article>
+            <article><span>4</span><strong>Plano</strong><small>Limites, trial e permissões</small></article>
+            <article><span>5</span><strong>Revisão</strong><small>Publicação e acompanhamento</small></article>
+          </section>
           <section class="platform-context-strip">
             <article class="platform-explain-card">
               <strong>Empresas</strong>
@@ -214,6 +327,174 @@
           </div>
         </section>
 
+        <section class="panel platform-billing-panel" data-platform-section="billing" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Billing</p>
+              <h2>Receita, assinaturas e risco financeiro</h2>
+              <p class="muted">MRR, inadimplência, planos, eventos financeiros e ações seguras por cliente.</p>
+            </div>
+            <div class="row-actions">
+              <select class="compact-date" id="billingPeriodSelect">
+                <option value="7d">7 dias</option>
+                <option value="15d">15 dias</option>
+                <option value="30d" selected>30 dias</option>
+              </select>
+              <select class="compact-date" id="billingStatusFilter">
+                <option value="">Todos status</option>
+                <option value="trial">Trial</option>
+                <option value="active">Ativo</option>
+                <option value="grace_period">Grace period</option>
+                <option value="past_due">Vencido</option>
+                <option value="blocked">Bloqueado</option>
+                <option value="cancelled">Cancelado</option>
+              </select>
+              <select class="compact-date" id="billingPlanFilter">
+                <option value="">Todos planos</option>
+              </select>
+              <button class="ghost-button compact" id="refreshBillingButton" type="button">Atualizar billing</button>
+            </div>
+          </div>
+          <section class="platform-billing-summary-grid" id="platformBillingSummaryGrid"></section>
+          <section class="platform-analytics-grid">
+            <article class="platform-chart-card">
+              <div>
+                <h3>Assinaturas</h3>
+                <p class="muted">Cliente, plano, status, valor, trial, próxima cobrança, provedor e ações.</p>
+              </div>
+              <div class="platform-subscription-list" id="platformSubscriptionList"></div>
+            </article>
+            <article class="platform-chart-card">
+              <div>
+                <h3>MRR por plano</h3>
+                <p class="muted">Clientes ativos e receita recorrente por plano.</p>
+              </div>
+              <div class="platform-billing-plan-list" id="platformBillingPlanList"></div>
+            </article>
+          </section>
+          <section class="platform-analytics-grid">
+            <article class="platform-chart-card">
+              <div>
+                <h3>Eventos financeiros</h3>
+                <p class="muted">Pagamentos, webhooks, alterações de plano, cancelamentos e reativações.</p>
+              </div>
+              <div class="platform-billing-event-list" id="platformBillingEventList"></div>
+            </article>
+            <article class="platform-chart-card">
+              <div>
+                <h3>Alertas de cobrança</h3>
+                <p class="muted">Sinais de risco para conversão, inadimplência e grace period.</p>
+              </div>
+              <div class="platform-billing-alert-list" id="platformBillingAlertList"></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="panel platform-communication-panel" data-platform-section="communication" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Comunicação</p>
+              <h2>SMTP e templates</h2>
+              <p class="muted">Configuração global de envio de e-mails e mensagens usadas pelo SaaS.</p>
+            </div>
+            <button class="ghost-button compact" id="refreshCommunicationButton" type="button">Atualizar comunicação</button>
+          </div>
+          <section class="platform-health-grid">
+            <form class="platform-service-card stack-form" id="platformSmtpForm">
+              <p class="eyebrow">SMTP global</p>
+              <h3>Configuração de envio</h3>
+              <div class="two-cols">
+                <label>Host<input name="host" placeholder="smtp.seudominio.com"></label>
+                <label>Porta<input name="port" type="number" min="1" max="65535" value="587"></label>
+              </div>
+              <div class="two-cols">
+                <label>Usuário<input name="username" autocomplete="off" placeholder="usuario@dominio.com"></label>
+                <label>Senha/token<input name="password" type="password" autocomplete="new-password" placeholder="Preencha apenas para alterar"></label>
+              </div>
+              <div class="two-cols">
+                <label>Remetente padrão<input name="from_email" type="email" placeholder="suporte@dominio.com"></label>
+                <label>Nome do remetente<input name="from_name" placeholder="Cardápio Digital"></label>
+              </div>
+              <label>E-mail de resposta<input name="reply_to" type="email" placeholder="responder@dominio.com"></label>
+              <div class="payment-options">
+                <label class="payment-option"><input name="use_tls" type="checkbox" checked> TLS/SSL</label>
+                <label class="payment-option"><input name="is_active" type="checkbox"> SMTP ativo</label>
+              </div>
+              <p class="muted" id="smtpStatusText">Senha/token nunca é exibido após salvar.</p>
+              <div class="row-actions">
+                <button class="primary-button compact">Salvar SMTP</button>
+              </div>
+            </form>
+            <form class="platform-service-card stack-form" id="platformSmtpTestForm">
+              <p class="eyebrow">Teste de envio</p>
+              <h3>Enviar e-mail de teste</h3>
+              <p class="muted">Use o e-mail do Admin Master ou informe outro endereço para validar a configuração.</p>
+              <label>Enviar para<input name="email" type="email" placeholder="voce@dominio.com"></label>
+              <button class="ghost-button compact">Enviar e-mail de teste</button>
+            </form>
+          </section>
+          <section class="platform-chart-card">
+            <div>
+              <h3>Templates de e-mail</h3>
+              <p class="muted">Variáveis disponíveis: {{store_name}}, {{company_name}}, {{customer_name}}, {{plan_name}}, {{due_date}}, {{dashboard_url}}, {{payment_url}}.</p>
+            </div>
+            <div class="platform-template-list" id="platformEmailTemplateList"></div>
+          </section>
+        </section>
+
+        <section class="panel platform-support-panel" data-platform-section="support" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Suporte</p>
+              <h2>Central de atendimento</h2>
+              <p class="muted">Chamados, prioridades, tempo de resposta, notas internas e contexto comercial do cliente.</p>
+            </div>
+            <button class="ghost-button compact" id="refreshSupportButton" type="button">Atualizar chamados</button>
+          </div>
+          <section class="platform-support-summary-grid" id="platformSupportSummaryGrid"></section>
+          <section class="platform-health-grid">
+            <form class="platform-service-card stack-form" id="platformSupportCreateForm">
+              <p class="eyebrow">Novo chamado</p>
+              <h3>Criar chamado manual</h3>
+              <label>Empresa<select name="company_id" id="supportCompanySelect"></select></label>
+              <label>Loja<select name="store_id" id="supportStoreSelect"></select></label>
+              <label>Assunto<input name="subject" required placeholder="Ex: Ajuda para configurar domínio"></label>
+              <div class="two-cols">
+                <label>Categoria<input name="category" placeholder="configuração"></label>
+                <label>Prioridade<select name="priority"><option value="low">Baixa</option><option value="medium" selected>Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label>
+              </div>
+              <label>Mensagem<textarea name="message" rows="4" placeholder="Descreva o contexto do chamado"></textarea></label>
+              <button class="primary-button compact">Criar chamado</button>
+            </form>
+            <article class="platform-service-card">
+              <p class="eyebrow">Filtros</p>
+              <h3>Fila de atendimento</h3>
+              <div class="stack-form">
+                <input id="supportSearchFilter" type="search" placeholder="Buscar assunto, cliente, loja ou mensagem">
+                <select id="supportStatusFilter"><option value="">Todos status</option><option value="open">Aberto</option><option value="waiting_customer">Aguardando cliente</option><option value="in_review">Em análise</option><option value="resolved">Resolvido</option><option value="closed">Fechado</option></select>
+                <select id="supportPriorityFilter"><option value="">Todas prioridades</option><option value="low">Baixa</option><option value="medium">Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select>
+                <select id="supportSlaFilter"><option value="">Todos SLA</option><option value="overdue">SLA vencido</option><option value="due_soon">Perto de vencer</option><option value="unanswered">Sem resposta</option></select>
+                <select id="supportPlanFilter"><option value="">Todos planos</option></select>
+              </div>
+            </article>
+          </section>
+          <section class="platform-support-workbench">
+            <article class="platform-support-templates">
+              <div>
+                <p class="eyebrow">Respostas rápidas</p>
+                <h3>Templates de atendimento</h3>
+              </div>
+              <div id="supportQuickReplies"></div>
+            </article>
+            <article class="platform-support-queue-info">
+              <p class="eyebrow">SLA simples</p>
+              <h3>Ordem da fila</h3>
+              <p>Crítico primeiro, depois SLA vencido, prioridade e última atualização. Use as respostas rápidas para acelerar o atendimento.</p>
+            </article>
+          </section>
+          <div class="platform-support-list" id="platformSupportTicketList"></div>
+        </section>
+
         <section class="panel" data-platform-section="clients" hidden>
           <div class="section-actions">
             <div>
@@ -244,6 +525,7 @@
               <option value="payment_due">Pagamento pendente</option>
               <option value="unpublished_store">Loja não publicada</option>
               <option value="no_whatsapp">Sem WhatsApp</option>
+              <option value="no_products">Sem produto</option>
               <option value="needs_attention">Com atenção</option>
             </select>
           </form>
@@ -286,8 +568,27 @@
         </section>
       </section>
     </main>
+    <div class="platform-confirm-backdrop" id="platformConfirmBackdrop" hidden>
+      <form class="platform-confirm-dialog" id="platformConfirmForm">
+        <p class="eyebrow">Confirmação segura</p>
+        <h2 id="platformConfirmTitle">Confirmar ação</h2>
+        <p id="platformConfirmMessage">Esta ação exige confirmação do Admin Master.</p>
+        <label>
+          Digite CONFIRMAR
+          <input name="confirmation" autocomplete="off" required>
+        </label>
+        <label>
+          Sua senha
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <div class="row-actions">
+          <button class="ghost-button compact" id="platformConfirmCancel" type="button">Cancelar</button>
+          <button class="danger-button compact" id="platformConfirmSubmit" type="submit">Confirmar</button>
+        </div>
+      </form>
+    </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260712-platform-client-dropdown"></script>
+    <script src="/platform.js?v=20260713-platform-tech"></script>
   </body>
 </html>
 

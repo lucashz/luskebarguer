@@ -1,9 +1,14 @@
 ﻿import { createServer } from 'node:http';
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { spawn, spawnSync } from 'node:child_process';
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
+import os from 'node:os';
+import net from 'node:net';
+import tls from 'node:tls';
+import pg from 'pg';
 import { localPostgrestRequest } from './src/lib/local-postgrest-adapter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -385,6 +390,20 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/admin/support/tickets') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await listAdminSupportTickets(admin));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/support/tickets') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 201, { ticket: await createAdminSupportTicket(req, admin, await readJson(req)) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/plan') {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
@@ -436,58 +455,131 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/plans') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await listPlatformPlans());
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/companies') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
-    json(res, 200, await listPlatformCompanies());
+    json(res, 200, await listPlatformCompanies(url.searchParams));
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/summary') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await platformCommercialSummary());
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/analytics') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await platformCommercialAnalytics(url.searchParams));
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/platform/alerts') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformExecutiveAlerts(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/revenue') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformExecutiveRevenue(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/conversion') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformExecutiveConversion(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/billing/summary') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await platformBillingSummary(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/billing/plans') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await platformBillingPlans());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/billing/events') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await platformBillingEvents(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/billing/subscriptions') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await platformBillingSubscriptions(url.searchParams));
+    return;
+  }
+
   const platformCompanyDetailMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/detail$/i);
   if (platformCompanyDetailMatch && method === 'GET') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await getPlatformCompanyDetail(platformCompanyDetailMatch[1]));
     return;
   }
 
+  const platformCompanyScoreMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/score$/i);
+  if (platformCompanyScoreMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await getPlatformCompanyScore(platformCompanyScoreMatch[1]));
+    return;
+  }
+
+  const platformCompanyTimelineMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/timeline$/i);
+  if (platformCompanyTimelineMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await getPlatformCompanyTimelineAdvanced(platformCompanyTimelineMatch[1]));
+    return;
+  }
+
+  const platformCompanyInternalStatusMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/internal-status$/i);
+  if (platformCompanyInternalStatusMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, { status: await updatePlatformCompanyInternalStatus(req, platformCompanyInternalStatusMatch[1], await readJson(req), admin) });
+    return;
+  }
+
   const platformCompanyNoteMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/notes$/i);
   if (platformCompanyNoteMatch && method === 'POST') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 201, { note: await createPlatformCompanyNote(platformCompanyNoteMatch[1], await readJson(req), admin, req) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/platform/companies') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 201, { company: await createPlatformCompany(await readJson(req), admin) });
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/platform/stores') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 201, { store: await createPlatformStore(await readJson(req), admin) });
     return;
@@ -495,7 +587,7 @@ async function handleApi(req, res, url) {
 
   const platformCompanyMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)$/i);
   if (platformCompanyMatch && (method === 'PUT' || method === 'PATCH')) {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, { company: await updatePlatformCompany(platformCompanyMatch[1], await readJson(req), admin) });
     return;
@@ -503,23 +595,79 @@ async function handleApi(req, res, url) {
 
   const platformCompanyStatusMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/status$/i);
   if (platformCompanyStatusMatch && method === 'POST') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.customer.suspend');
     if (!admin) return;
-    json(res, 200, { company: await setPlatformCompanyStatus(platformCompanyStatusMatch[1], await readJson(req), admin) });
+    json(res, 200, { company: await setPlatformCompanyStatus(req, platformCompanyStatusMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanySuspendMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/suspend$/i);
+  if (platformCompanySuspendMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.customer.suspend');
+    if (!admin) return;
+    json(res, 200, { company: await suspendPlatformCompany(req, platformCompanySuspendMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyActivateMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/activate$/i);
+  if (platformCompanyActivateMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.customer.suspend');
+    if (!admin) return;
+    json(res, 200, { company: await activatePlatformCompany(req, platformCompanyActivateMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyReopenOnboardingMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/reopen-onboarding$/i);
+  if (platformCompanyReopenOnboardingMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.customer.suspend');
+    if (!admin) return;
+    json(res, 200, await reopenPlatformCompanyOnboarding(req, platformCompanyReopenOnboardingMatch[1], await readJson(req), admin));
+    return;
+  }
+
+  const platformCompanyResendBillingMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/resend-billing$/i);
+  if (platformCompanyResendBillingMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await resendPlatformCompanyBilling(req, platformCompanyResendBillingMatch[1], await readJson(req), admin));
     return;
   }
 
   const platformCompanyPlanMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/plan$/i);
   if (platformCompanyPlanMatch && method === 'POST') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
     if (!admin) return;
     json(res, 200, { subscription: await changePlatformCompanyPlan(platformCompanyPlanMatch[1], await readJson(req), admin) });
     return;
   }
 
+  const platformCompanyChangePlanMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/change-plan$/i);
+  if (platformCompanyChangePlanMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, { subscription: await changePlatformCompanyPlanSecure(req, platformCompanyChangePlanMatch[1], await readJson(req), admin) });
+    return;
+  }
+
+  const platformCompanyCancelSubscriptionMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/cancel-subscription$/i);
+  if (platformCompanyCancelSubscriptionMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await cancelPlatformCompanySubscription(req, platformCompanyCancelSubscriptionMatch[1], await readJson(req), admin));
+    return;
+  }
+
+  const platformCompanyReactivateSubscriptionMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/reactivate-subscription$/i);
+  if (platformCompanyReactivateSubscriptionMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await reactivatePlatformCompanySubscription(req, platformCompanyReactivateSubscriptionMatch[1], await readJson(req), admin));
+    return;
+  }
+
   const platformCompanyOverrideMatch = url.pathname.match(/^\/api\/platform\/companies\/([a-f0-9-]+)\/overrides$/i);
   if (platformCompanyOverrideMatch && method === 'POST') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 201, { override: await createCompanyFeatureOverride(platformCompanyOverrideMatch[1], await readJson(req), admin) });
     return;
@@ -527,7 +675,7 @@ async function handleApi(req, res, url) {
 
   const platformOverrideMatch = url.pathname.match(/^\/api\/platform\/overrides\/([a-f0-9-]+)$/i);
   if (platformOverrideMatch && method === 'DELETE') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     await deleteCompanyFeatureOverride(platformOverrideMatch[1], admin);
     json(res, 200, { ok: true });
@@ -536,7 +684,7 @@ async function handleApi(req, res, url) {
 
   const platformStoreMatch = url.pathname.match(/^\/api\/platform\/stores\/([a-f0-9-]+)$/i);
   if (platformStoreMatch && (method === 'PUT' || method === 'PATCH')) {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, { store: await updatePlatformStore(platformStoreMatch[1], await readJson(req), admin) });
     return;
@@ -544,30 +692,182 @@ async function handleApi(req, res, url) {
 
   const platformStoreStatusMatch = url.pathname.match(/^\/api\/platform\/stores\/([a-f0-9-]+)\/status$/i);
   if (platformStoreStatusMatch && method === 'POST') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, { store: await setPlatformStoreStatus(platformStoreStatusMatch[1], await readJson(req), admin) });
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/audit') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.audit.view');
     if (!admin) return;
     json(res, 200, await listAuditLogs(url.searchParams));
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/health') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await platformOperationalHealth(url.searchParams));
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/platform/logs') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.audit.view');
+    if (!admin) return;
+    json(res, 200, await platformOperationalLogs(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/metrics') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformOperationalMetrics(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/alerts/operational') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformOperationalAlertsEndpoint(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/smtp') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, { smtp: await getPlatformSmtpSettings() });
+    return;
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/platform/smtp') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, { smtp: await updatePlatformSmtpSettings(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/smtp/test') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await sendPlatformSmtpTest(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/email-templates') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, await listPlatformEmailTemplates());
+    return;
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/platform/email-templates') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await updatePlatformEmailTemplates(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/support/tickets') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await listPlatformSupportTickets(url.searchParams));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/support/tickets') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 201, { ticket: await createPlatformSupportTicket(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/support/impersonate') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const result = await startPlatformSupportImpersonation(req, admin, await readJson(req));
+    json(res, 200, { ok: true, admin: publicAdmin(result.admin), expires_at: result.expires_at }, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.token) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/support/impersonate/end') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    const result = await endPlatformSupportImpersonation(req, admin);
+    const headers = { 'Set-Cookie': result.restore_token ? sessionCookie(ADMIN_COOKIE, result.restore_token) : clearCookie(ADMIN_COOKIE) };
+    json(res, 200, { ok: true, restored: Boolean(result.restore_token) }, headers);
+    return;
+  }
+
+  const platformSupportMessageMatch = url.pathname.match(/^\/api\/platform\/support\/tickets\/([a-f0-9-]+)\/messages$/i);
+  if (platformSupportMessageMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 201, { message: await createPlatformSupportMessage(req, admin, platformSupportMessageMatch[1], await readJson(req)) });
+    return;
+  }
+
+  const platformSupportTicketMatch = url.pathname.match(/^\/api\/platform\/support\/tickets\/([a-f0-9-]+)$/i);
+  if (platformSupportTicketMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, { ticket: await updatePlatformSupportTicket(req, admin, platformSupportTicketMatch[1], await readJson(req)) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/platform/backups') {
-    const admin = await requirePlatformAdmin(req, res);
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
     if (!admin) return;
     json(res, 200, await platformBackupStatus());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/services/status') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, await platformServicesStatus());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/services/logs') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, await platformServicesLogs(url.searchParams));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/services/backup') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await runPlatformBackup(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/services/jobs/trial-cleanup') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await runPlatformTrialCleanup(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/services/log-cleanup/preview') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, await runPlatformLogCleanup(req, admin, { apply: false }));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/services/log-cleanup') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await runPlatformLogCleanup(req, admin, { ...(await readJson(req)), apply: true }));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/services/app/restart') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 202, await restartPlatformApplication(req, admin, await readJson(req)));
     return;
   }
 
@@ -2035,12 +2335,18 @@ async function switchAdminStore(req, data, admin) {
   return publicAdmin(nextAdmin);
 }
 
-async function listPlatformCompanies() {
-  const [companies, stores, domains, admins, subscriptions, features, overrides] = await Promise.all([
+async function listPlatformCompanies(params = new URLSearchParams()) {
+  const page = Math.max(1, Number.parseInt(params.get?.('page') || '1', 10) || 1);
+  const perPage = clampNumber(Number(params.get?.('per_page') || 200), 25, 300);
+  const offset = (page - 1) * perPage;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [companies, stores, domains, admins, subscriptions, features, overrides, orders, products, settings] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
       order: 'created_at.desc',
-      limit: '200'
+      limit: String(perPage),
+      offset: String(offset)
     }),
     dbRequest('GET', 'stores', {
       select: '*',
@@ -2071,7 +2377,21 @@ async function listPlatformCompanies() {
       select: '*',
       order: 'created_at.desc',
       limit: '1000'
-    })
+    }),
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,created_at',
+      created_at: `gte.${monthStart.toISOString()}`,
+      order: 'created_at.desc',
+      limit: '10000'
+    }).catch(() => []),
+    dbRequest('GET', 'menu_items', {
+      select: 'id,store_id,is_active',
+      limit: '10000'
+    }).catch(() => []),
+    dbRequest('GET', 'store_settings', {
+      select: 'store_id,whatsapp_number,onboarding_completed,is_open',
+      limit: '2000'
+    }).catch(() => [])
   ]);
   const featureById = new Map(features.map((feature) => [feature.id, feature]));
   const domainsByStore = new Map();
@@ -2080,7 +2400,9 @@ async function listPlatformCompanies() {
     domainsByStore.get(domain.store_id).push(domain);
   }
   const storesByCompany = new Map();
+  const storeCompanyById = new Map();
   for (const store of stores) {
+    storeCompanyById.set(store.id, store.company_id);
     if (!storesByCompany.has(store.company_id)) storesByCompany.set(store.company_id, []);
     storesByCompany.get(store.company_id).push({
       ...publicStoreRef(store),
@@ -2113,15 +2435,61 @@ async function listPlatformCompanies() {
       created_at: admin.created_at
     });
   }
+  const ordersByCompany = new Map();
+  for (const order of orders) {
+    const companyId = storeCompanyById.get(order.store_id);
+    if (!companyId) continue;
+    if (!ordersByCompany.has(companyId)) ordersByCompany.set(companyId, []);
+    ordersByCompany.get(companyId).push(order);
+  }
+  const productsByCompany = new Map();
+  for (const product of products) {
+    const companyId = storeCompanyById.get(product.store_id);
+    if (!companyId) continue;
+    if (!productsByCompany.has(companyId)) productsByCompany.set(companyId, []);
+    productsByCompany.get(companyId).push(product);
+  }
+  const settingsByStore = new Map(settings.map((setting) => [setting.store_id, setting]));
   return {
+    pagination: {
+      page,
+      per_page: perPage,
+      returned: companies.length,
+      has_more: companies.length === perPage
+    },
     features,
-    companies: companies.map((company) => ({
-      ...company,
-      stores: storesByCompany.get(company.id) || [],
-      admins: adminsByCompany.get(company.id) || [],
-      subscription: subscriptionByCompany.get(company.id) || null,
-      overrides: overridesByCompany.get(company.id) || []
-    }))
+    companies: companies.map((company) => {
+      const companyStores = storesByCompany.get(company.id) || [];
+      const companyAdmins = adminsByCompany.get(company.id) || [];
+      const companyOrders = ordersByCompany.get(company.id) || [];
+      const billableOrders = companyOrders.filter((order) => order.status !== 'cancelled');
+      const companyProducts = productsByCompany.get(company.id) || [];
+      const lastOrder = companyOrders[0] || null;
+      const lastAccessAt = companyAdmins
+        .map((admin) => admin.last_login_at)
+        .filter(Boolean)
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+      return {
+        ...company,
+        stores: companyStores,
+        admins: companyAdmins,
+        subscription: subscriptionByCompany.get(company.id) || null,
+        overrides: overridesByCompany.get(company.id) || [],
+        metrics: {
+          stores_count: companyStores.length,
+          unpublished_stores_count: companyStores.filter((store) => store.is_active === false).length,
+          orders_month: billableOrders.length,
+          revenue_month: roundMoney(billableOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+          revenue_month_cents: moneyToCents(billableOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+          last_order_at: lastOrder?.created_at || null,
+          last_access_at: lastAccessAt,
+          products_count: companyProducts.length,
+          active_products_count: companyProducts.filter((item) => item.is_active !== false).length,
+          stores_without_whatsapp_count: companyStores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number).length,
+          incomplete_onboarding_count: companyStores.filter((store) => settingsByStore.get(store.id)?.onboarding_completed === false).length
+        }
+      };
+    })
   };
 }
 
@@ -2173,7 +2541,7 @@ async function getPlatformCompanyDetail(companyId) {
       limit: '2000'
     }).catch(() => []),
     dbRequest('GET', 'store_settings', {
-      select: 'store_id,whatsapp_number,onboarding_completed,is_open',
+      select: 'store_id,whatsapp_number,onboarding_completed,is_open,updated_at',
       store_id: uuidInFilter(storeIds),
       limit: '200'
     }).catch(() => []),
@@ -2246,9 +2614,24 @@ async function getPlatformCompanyDetail(companyId) {
       revenue_30d: roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
       average_ticket_30d: orders30.length ? roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0) / orders30.length) : 0,
       last_order_at: lastOrder?.created_at || null,
-      mrr: moneyNumber(plan?.monthly_price || 0)
+      last_access_at: admins.map((admin) => admin.last_login_at).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0] || null,
+      mrr: moneyNumber(plan?.monthly_price || 0),
+      mrr_cents: moneyToCents(plan?.monthly_price || 0)
     },
+    recent_orders: orders.slice(0, 8).map((order) => ({
+      id: order.id,
+      store_id: order.store_id,
+      total: moneyNumber(order.total),
+      total_cents: moneyToCents(order.total),
+      status: order.status,
+      financial_status: order.financial_status,
+      payment_method: order.payment_method,
+      fulfillment_method: order.fulfillment_method,
+      created_at: order.created_at
+    })),
     attention,
+    score: await getPlatformCompanyScore(resolvedCompanyId),
+    internal_status: latestPlatformInternalStatus(auditLogs),
     timeline,
     audit_logs: auditLogs.slice(0, 30)
   };
@@ -2264,7 +2647,9 @@ async function createPlatformCompanyNote(companyId, data, admin, req) {
     note: text.slice(0, 1000),
     support_status: status || null,
     next_contact_at: nextContactAt && !Number.isNaN(nextContactAt.getTime()) ? nextContactAt.toISOString() : null,
-    responsible: cleanText(data.responsible || admin?.name || '').slice(0, 120) || null
+    responsible: cleanText(data.responsible || admin?.name || '').slice(0, 120) || null,
+    priority: supportPriority(data.priority || 'medium'),
+    tags: cleanSupportTags(data.tags || data.tag || '')
   };
   await audit('platform.client.note', {
     req,
@@ -2282,12 +2667,308 @@ async function createPlatformCompanyNote(companyId, data, admin, req) {
   };
 }
 
+async function updatePlatformCompanyInternalStatus(req, companyId, data, admin) {
+  const resolvedCompanyId = cleanUuid(companyId, 'empresa');
+  await getCompanyById(resolvedCompanyId);
+  const note = cleanText(data.note || data.text || '').slice(0, 1000);
+  const nextContactAt = data.next_contact_at ? new Date(data.next_contact_at) : null;
+  const payload = {
+    support_status: cleanText(data.status || data.support_status || '').slice(0, 80) || null,
+    responsible: cleanText(data.responsible || admin?.name || '').slice(0, 120) || null,
+    next_contact_at: nextContactAt && !Number.isNaN(nextContactAt.getTime()) ? nextContactAt.toISOString() : null,
+    priority: supportPriority(data.priority || 'medium'),
+    tags: cleanSupportTags(data.tags || data.tag || ''),
+    note: note || null
+  };
+  await audit('platform.client.internal_status', {
+    req,
+    company_id: resolvedCompanyId,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: resolvedCompanyId,
+    severity: payload.priority === 'critical' || payload.priority === 'critica' ? 'warning' : 'info',
+    after_data: payload
+  });
+  return {
+    ...payload,
+    created_at: new Date().toISOString(),
+    actor_admin_id: admin.id
+  };
+}
+
+function latestPlatformInternalStatus(auditLogs = []) {
+  const log = auditLogs.find((entry) => ['platform.client.internal_status', 'platform.client.note'].includes(entry.action));
+  if (!log) return null;
+  return {
+    ...(log.after_data || {}),
+    action: log.action,
+    created_at: log.created_at,
+    actor_admin_id: log.actor_admin_id || null
+  };
+}
+
+function cleanSupportTags(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return source
+    .map((item) => cleanSlug(item).slice(0, 40))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+async function getPlatformCompanyScore(companyId) {
+  const detail = await getPlatformCompanyScoreContext(companyId);
+  const { company, stores, settings, products, orders, admins, subscription, plan, tickets } = detail;
+  const billableOrders = orders.filter((order) => order.status !== 'cancelled');
+  const now = Date.now();
+  const orders7 = billableOrders.filter((order) => now - new Date(order.created_at).getTime() <= 7 * 86400000);
+  const orders30 = billableOrders.filter((order) => now - new Date(order.created_at).getTime() <= 30 * 86400000);
+  const revenue30 = roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0));
+  const lastAccessAt = admins.map((admin) => admin.last_login_at).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0] || null;
+  const lastOrderAt = orders[0]?.created_at || null;
+  const incompleteOnboarding = stores.some((store) => settings.get(store.id)?.onboarding_completed === false);
+  const hasWhatsapp = stores.some((store) => settings.get(store.id)?.whatsapp_number);
+  const openTickets = tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status));
+  const subscriptionStatus = subscription?.status || company.status || '';
+  const planCode = plan?.code || '';
+  const reasons = [];
+  const recommendations = [];
+  let points = 55;
+
+  if (['past_due', 'payment_pending', 'grace_period', 'blocked', 'suspended'].includes(subscriptionStatus)) {
+    points -= 30;
+    reasons.push('Pagamento ou assinatura exige atenção.');
+    recommendations.push(platformRecommendation('cobrar_pendencia', 'Cobrar pendência', 'Validar pagamento, webhook e orientar regularização.'));
+  }
+  if (!stores.length || incompleteOnboarding || !products.length) {
+    points -= 25;
+    reasons.push('Ativação inicial incompleta.');
+    recommendations.push(platformRecommendation('ajudar_onboarding', 'Ajudar onboarding', 'Guiar o cliente até loja, WhatsApp e primeiro produto.'));
+  }
+  if (!hasWhatsapp && stores.length) {
+    points -= 10;
+    reasons.push('WhatsApp da loja não configurado.');
+    recommendations.push(platformRecommendation('ativar_whatsapp', 'Ativar WhatsApp', 'Completar o WhatsApp para reduzir abandono de pedidos.'));
+  }
+  if (!orders30.length && stores.length) {
+    points -= 20;
+    reasons.push('Sem pedidos nos últimos 30 dias.');
+    recommendations.push(platformRecommendation('verificar_sem_pedidos', 'Verificar loja sem pedidos', 'Conferir loja aberta, cardápio publicado e divulgação.'));
+  } else {
+    points += Math.min(25, orders30.length);
+  }
+  if (lastAccessAt && now - new Date(lastAccessAt).getTime() > 5 * 86400000) {
+    points -= 12;
+    reasons.push('Admin sem acesso recente.');
+    recommendations.push(platformRecommendation('ligar_cliente', 'Ligar para cliente', 'Entender bloqueios e oferecer ajuda prática.'));
+  }
+  if (openTickets.length) {
+    points -= Math.min(18, openTickets.length * 6);
+    reasons.push(`${openTickets.length} chamado(s) aberto(s).`);
+  }
+  if (revenue30 >= 3000 || orders30.length >= 60) {
+    points += 18;
+    reasons.push('Uso forte nos últimos 30 dias.');
+    if (['trial', 'free', 'essential'].includes(planCode)) {
+      recommendations.push(platformRecommendation('oferecer_upgrade', 'Oferecer upgrade', 'Cliente tem volume para recursos de planos superiores.'));
+    }
+  }
+  if (products.length && orders30.length) {
+    recommendations.push(platformRecommendation('revisar_cardapio', 'Revisar cardápio', 'Sugerir fotos, combos, adicionais e produtos campeões.'));
+  }
+
+  points = Math.max(0, Math.min(100, Math.round(points)));
+  const score = platformScoreBucket({ points, subscriptionStatus, stores, products, orders30, revenue30, planCode, incompleteOnboarding });
+  return {
+    company_id: company.id,
+    score: score.key,
+    label: score.label,
+    tone: score.tone,
+    points,
+    reasons: reasons.length ? reasons : ['Cliente sem sinais críticos no momento.'],
+    recommendations: dedupeRecommendations(recommendations),
+    metrics: {
+      plan_name: plan?.name || 'Sem plano',
+      plan_code: planCode || null,
+      subscription_status: subscriptionStatus || null,
+      orders_7d: orders7.length,
+      orders_30d: orders30.length,
+      revenue_30d: revenue30,
+      revenue_30d_cents: moneyToCents(revenue30),
+      last_access_at: lastAccessAt,
+      last_order_at: lastOrderAt,
+      stores_count: stores.length,
+      products_count: products.length,
+      open_tickets: openTickets.length,
+      onboarding_completed: stores.length ? !incompleteOnboarding : false
+    }
+  };
+}
+
+async function getPlatformCompanyScoreContext(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId, 'empresa');
+  const [company] = await dbRequest('GET', 'companies', { select: '*', id: `eq.${resolvedCompanyId}`, limit: '1' });
+  if (!company) throw httpError(404, 'Cliente não encontrado.');
+  const [stores, admins, subscriptions, plans, tickets] = await Promise.all([
+    dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', company_id: `eq.${resolvedCompanyId}`, limit: '200' }).catch(() => []),
+    dbRequest('GET', 'admin_users', { select: 'id,name,email,role,is_active,last_login_at,created_at', company_id: `eq.${resolvedCompanyId}`, limit: '200' }).catch(() => []),
+    listCompanySubscriptions(resolvedCompanyId, 50),
+    dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }).catch(() => []),
+    dbRequest('GET', 'support_tickets', { select: 'id,status,priority,created_at,resolved_at', company_id: `eq.${resolvedCompanyId}`, limit: '500' }).catch(() => [])
+  ]);
+  const storeIds = cleanUuidArray(stores.map((store) => store.id));
+  const [orders, settingsRows, products] = storeIds.length ? await Promise.all([
+    dbRequest('GET', 'orders', { select: 'id,store_id,total,status,created_at', store_id: uuidInFilter(storeIds), order: 'created_at.desc', limit: '5000' }).catch(() => []),
+    dbRequest('GET', 'store_settings', { select: 'store_id,whatsapp_number,onboarding_completed,is_open', store_id: uuidInFilter(storeIds), limit: '200' }).catch(() => []),
+    dbRequest('GET', 'menu_items', { select: 'id,store_id,is_active,created_at', store_id: uuidInFilter(storeIds), limit: '5000' }).catch(() => [])
+  ]) : [[], [], []];
+  const subscription = pickCurrentCompanySubscription(subscriptions);
+  const plan = subscription?.plan_id ? plans.find((entry) => entry.id === subscription.plan_id) || null : null;
+  return {
+    company,
+    stores,
+    admins,
+    subscription,
+    plan,
+    tickets,
+    orders,
+    products,
+    settings: new Map(settingsRows.map((row) => [row.store_id, row]))
+  };
+}
+
+function platformScoreBucket(context) {
+  if (['past_due', 'payment_pending', 'grace_period', 'blocked', 'suspended'].includes(context.subscriptionStatus)) {
+    return { key: 'inadimplente', label: 'Inadimplente', tone: 'danger' };
+  }
+  if (!context.stores.length || !context.products.length || context.incompleteOnboarding) {
+    return { key: 'sem_ativacao', label: 'Sem ativação', tone: 'warning' };
+  }
+  if (context.orders30.length >= 80 || context.revenue30 >= 5000) {
+    return { key: 'cliente_campeao', label: 'Cliente campeão', tone: 'success' };
+  }
+  if (['trial', 'free', 'essential'].includes(context.planCode) && (context.orders30.length >= 30 || context.revenue30 >= 2000)) {
+    return { key: 'potencial_upgrade', label: 'Potencial upgrade', tone: 'info' };
+  }
+  if (context.points < 55 || !context.orders30.length) {
+    return { key: 'em_risco', label: 'Em risco', tone: 'warning' };
+  }
+  return { key: 'saudavel', label: 'Saudável', tone: 'success' };
+}
+
+function platformRecommendation(key, title, action) {
+  return { key, title, action };
+}
+
+function dedupeRecommendations(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    if (!item?.key || seen.has(item.key)) return false;
+    seen.add(item.key);
+    return true;
+  }).slice(0, 6);
+}
+
+async function getPlatformCompanyTimelineAdvanced(companyId) {
+  const resolvedCompanyId = cleanUuid(companyId, 'empresa');
+  const detail = await getPlatformCompanyDetail(resolvedCompanyId);
+  const storeIds = cleanUuidArray((detail.stores || []).map((store) => store.id));
+  const [products, tickets, ticketMessages, auditLogs] = await Promise.all([
+    storeIds.length ? dbRequest('GET', 'menu_items', {
+      select: 'id,store_id,name,created_at',
+      store_id: uuidInFilter(storeIds),
+      order: 'created_at.asc',
+      limit: '50'
+    }).catch(() => []) : Promise.resolve([]),
+    dbRequest('GET', 'support_tickets', {
+      select: 'id,subject,status,priority,created_at,resolved_at',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'created_at.desc',
+      limit: '100'
+    }).catch(() => []),
+    dbRequest('GET', 'support_ticket_messages', {
+      select: 'id,ticket_id,author_type,created_at',
+      order: 'created_at.desc',
+      limit: '200'
+    }).catch(() => []),
+    dbRequest('GET', 'audit_logs', {
+      select: 'id,action,severity,entity_type,entity_id,store_id,actor_admin_id,after_data,created_at',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'created_at.desc',
+      limit: '120'
+    }).catch(() => [])
+  ]);
+  const events = [...(detail.timeline || [])];
+  const firstProduct = products[0];
+  if (firstProduct?.created_at) {
+    events.push({
+      type: 'menu',
+      title: 'Primeiro produto',
+      description: firstProduct.name || 'Produto cadastrado',
+      created_at: firstProduct.created_at
+    });
+  }
+  for (const store of detail.stores || []) {
+    if (store.settings?.onboarding_completed) {
+      events.push({
+        type: 'onboarding',
+        title: 'Onboarding concluído',
+        description: store.name,
+        created_at: store.settings.updated_at || store.created_at || new Date().toISOString()
+      });
+    }
+  }
+  for (const ticket of tickets) {
+    events.push({
+      type: 'support',
+      title: `Chamado ${subscriptionEventLabel(ticket.status)}`,
+      description: ticket.subject || 'Chamado de suporte',
+      created_at: ticket.resolved_at || ticket.created_at
+    });
+  }
+  const ticketIds = new Set(tickets.map((ticket) => ticket.id));
+  for (const message of ticketMessages.filter((entry) => ticketIds.has(entry.ticket_id)).slice(0, 30)) {
+    events.push({
+      type: 'support',
+      title: message.author_type === 'platform' ? 'Suporte respondeu' : 'Cliente respondeu',
+      description: 'Mensagem registrada no chamado.',
+      created_at: message.created_at
+    });
+  }
+  for (const log of auditLogs) {
+    if (!/support|impersonate|suspend|activate|billing|subscription|onboarding|note|internal_status/i.test(log.action || '')) continue;
+    events.push({
+      type: String(log.action || '').includes('support') ? 'support' : 'audit',
+      title: auditActionLabel(log.action),
+      description: platformTimelineDescription(log),
+      created_at: log.created_at
+    });
+  }
+  return {
+    company_id: resolvedCompanyId,
+    timeline: uniqueTimelineEvents(events)
+  };
+}
+
+function uniqueTimelineEvents(events = []) {
+  const seen = new Set();
+  return events
+    .filter((event) => event.created_at)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .filter((event) => {
+      const key = `${event.type}:${event.title}:${event.created_at}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 60);
+}
+
 async function platformCommercialSummary() {
   const now = new Date();
   const todayStart = startOfLocalDay(now);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
-  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents] = await Promise.all([
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, backup, operationalLogs] = await Promise.all([
     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
@@ -2305,36 +2986,57 @@ async function platformCommercialSummary() {
       select: 'id,company_id,event_type,created_at,metadata',
       created_at: `gte.${thirtyDaysAgo.toISOString()}`,
       limit: '1000'
-    }).catch(() => [])
+    }).catch(() => []),
+    dbRequest('GET', 'menu_items', {
+      select: 'id,store_id,is_active',
+      limit: '10000'
+    }).catch(() => []),
+    platformBackupStatus().catch(() => ({ status: 'unknown' })),
+    listOperationalLogs(thirtyDaysAgo).catch(() => [])
   ]);
-  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings });
+  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
   const todayOrders = orders.filter((order) => new Date(order.created_at) >= todayStart && order.status !== 'cancelled');
   const monthOrders = orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
   const activeStatuses = new Set(['active']);
   const trialStatuses = new Set(['trial']);
-  const delinquentStatuses = new Set(['payment_pending', 'grace_period', 'past_due', 'suspended']);
+  const delinquentStatuses = new Set(['payment_pending', 'grace_period', 'past_due']);
   const churnStatuses = new Set(['cancelled', 'archived']);
+  const suspendedStatuses = new Set(['suspended']);
+  const alerts = platformCommercialAlerts(companies, stores, context, { backup, operationalLogs });
+  const delayedBackups = alerts.filter((alert) => alert.type === 'backup').length;
+  const webhookErrors = alerts.filter((alert) => alert.type === 'webhook').length;
+  const trialsEnding = alerts.filter((alert) => alert.type === 'trial').length;
+  const revenueToday = roundMoney(todayOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0));
+  const mrrEstimated = platformEstimatedMrr(companies, context.subscriptionByCompany, context.planById);
   const cards = {
     active_clients: companies.filter((company) => activeStatuses.has(company.status)).length,
     trial_clients: companies.filter((company) => trialStatuses.has(company.status)).length,
     delinquent_clients: companies.filter((company) => delinquentStatuses.has(company.status)).length,
+    suspended_clients: companies.filter((company) => suspendedStatuses.has(company.status)).length,
     published_stores: stores.filter((store) => store.is_active !== false).length,
+    unpublished_stores: stores.filter((store) => store.is_active === false).length,
     orders_today: todayOrders.length,
-    revenue_today: roundMoney(todayOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
-    mrr_estimated: platformEstimatedMrr(companies, context.subscriptionByCompany, context.planById),
-    churn_clients: companies.filter((company) => churnStatuses.has(company.status)).length
+    revenue_today: revenueToday,
+    revenue_today_cents: moneyToCents(revenueToday),
+    mrr_estimated: mrrEstimated,
+    mrr_estimated_cents: moneyToCents(mrrEstimated),
+    trials_ending: trialsEnding,
+    webhook_errors: webhookErrors,
+    delayed_backups: delayedBackups,
+    churn_clients: companies.filter((company) => churnStatuses.has(company.status)).length,
+    generated_without_nan: true
   };
   return {
     generated_at: new Date().toISOString(),
     cards,
     billing: platformBillingMetrics({ companies, subscriptions, plans, subscriptionEvents, monthOrders }),
-    alerts: platformCommercialAlerts(companies, stores, context)
+    alerts
   };
 }
 
 async function platformCommercialAnalytics(params = new URLSearchParams()) {
   const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
-  const [companies, stores, subscriptions, plans, orders, settings] = await Promise.all([
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products] = await Promise.all([
     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
@@ -2347,9 +3049,20 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
     dbRequest('GET', 'store_settings', {
       select: 'store_id,whatsapp_number,onboarding_completed,is_open',
       limit: '2000'
+    }).catch(() => []),
+    dbRequest('GET', 'subscription_events', {
+      select: 'id,company_id,event_type,created_at,metadata',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '2000'
+    }).catch(() => []),
+    dbRequest('GET', 'menu_items', {
+      select: 'id,store_id,is_active',
+      limit: '10000'
     }).catch(() => [])
   ]);
-  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings });
+  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
+  const revenue = platformRevenueSnapshot({ companies, subscriptions, plans, orders, period });
+  const conversion = platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
@@ -2358,14 +3071,23 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
     by_payment: platformGroupOrders(orders.filter((order) => order.status !== 'cancelled'), 'payment_method'),
     by_status: platformGroupOrders(orders, 'status'),
     company_metrics: platformCompanyMetrics(companies, context),
-    comparison: platformAnalyticsComparison(orders, period)
+    comparison: platformAnalyticsComparison(orders, period),
+    revenue,
+    conversion,
+    new_clients_daily: platformNewClientsDaily(companies, period),
+    mrr_by_plan: revenue.mrr_by_plan
   };
 }
 
-function platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings }) {
+function platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products = [] }) {
   const storeById = new Map(stores.map((store) => [store.id, store]));
   const settingsByStore = new Map(settings.map((row) => [row.store_id, row]));
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const productsByStore = new Map();
+  for (const product of products || []) {
+    if (!productsByStore.has(product.store_id)) productsByStore.set(product.store_id, []);
+    productsByStore.get(product.store_id).push(product);
+  }
   const subscriptionByCompany = new Map();
   for (const subscription of subscriptions) {
     if (!subscriptionByCompany.has(subscription.company_id)) subscriptionByCompany.set(subscription.company_id, subscription);
@@ -2382,7 +3104,322 @@ function platformAnalyticsContext({ companies, stores, subscriptions, plans, ord
     if (!ordersByCompany.has(store.company_id)) ordersByCompany.set(store.company_id, []);
     ordersByCompany.get(store.company_id).push(order);
   }
-  return { storeById, settingsByStore, planById, subscriptionByCompany, storesByCompany, ordersByCompany };
+  return { storeById, settingsByStore, productsByStore, planById, subscriptionByCompany, storesByCompany, ordersByCompany };
+}
+
+async function platformExecutiveAlerts(params = new URLSearchParams()) {
+  const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
+  const [companies, stores, subscriptions, plans, orders, settings, products, backup, operationalLogs] = await Promise.all([
+    dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
+    dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+    dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
+    dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }),
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '8000'
+    }).catch(() => []),
+    dbRequest('GET', 'store_settings', { select: 'store_id,whatsapp_number,onboarding_completed,is_open', limit: '2000' }).catch(() => []),
+    dbRequest('GET', 'menu_items', { select: 'id,store_id,is_active', limit: '10000' }).catch(() => []),
+    platformBackupStatus().catch(() => ({ status: 'unknown' })),
+    listOperationalLogs(period.since).catch(() => [])
+  ]);
+  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
+  return {
+    period: period.label,
+    generated_at: new Date().toISOString(),
+    alerts: platformCommercialAlerts(companies, stores, context, { backup, operationalLogs })
+  };
+}
+
+async function platformExecutiveRevenue(params = new URLSearchParams()) {
+  const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
+  const [companies, subscriptions, plans, orders] = await Promise.all([
+    dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
+    dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
+    dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }),
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '8000'
+    }).catch(() => [])
+  ]);
+  return {
+    period: period.label,
+    generated_at: new Date().toISOString(),
+    ...platformRevenueSnapshot({ companies, subscriptions, plans, orders, period })
+  };
+}
+
+async function platformExecutiveConversion(params = new URLSearchParams()) {
+  const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
+  const [companies, subscriptions, subscriptionEvents] = await Promise.all([
+    dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
+    dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
+    dbRequest('GET', 'subscription_events', {
+      select: 'id,company_id,event_type,created_at,metadata',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '2000'
+    }).catch(() => [])
+  ]);
+  return {
+    period: period.label,
+    generated_at: new Date().toISOString(),
+    ...platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period })
+  };
+}
+
+async function platformBillingDataset(params = new URLSearchParams()) {
+  const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
+  const since = period.since.toISOString();
+  const [companies, subscriptions, plans, events, stores, orders] = await Promise.all([
+    dbRequest('GET', 'companies', { select: '*', limit: '1500' }),
+    dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '2000' }).catch(() => []),
+    dbRequest('GET', 'subscription_plans', { select: '*', order: 'sort_order.asc', limit: '200' }).catch(() => []),
+    dbRequest('GET', 'subscription_events', {
+      select: '*',
+      created_at: `gte.${since}`,
+      order: 'created_at.desc',
+      limit: '2000'
+    }).catch(() => []),
+    dbRequest('GET', 'stores', { select: 'id,company_id', limit: '3000' }).catch(() => []),
+    dbRequest('GET', 'orders', {
+      select: 'id,store_id,total,status,created_at',
+      created_at: `gte.${since}`,
+      limit: '10000'
+    }).catch(() => [])
+  ]);
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const subscriptionsByCompany = new Map();
+  for (const subscription of subscriptions) {
+    if (!subscriptionsByCompany.has(subscription.company_id)) subscriptionsByCompany.set(subscription.company_id, []);
+    subscriptionsByCompany.get(subscription.company_id).push(subscription);
+  }
+  const subscriptionById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]));
+  const storeCompanyById = new Map(stores.map((store) => [store.id, store.company_id]));
+  const billableOrders = orders.filter((order) => order.status !== 'cancelled');
+  return {
+    period,
+    companies,
+    subscriptions,
+    plans,
+    events,
+    stores,
+    orders,
+    billableOrders,
+    planById,
+    companyById,
+    subscriptionsByCompany,
+    subscriptionById,
+    storeCompanyById
+  };
+}
+
+async function platformBillingSummary(params = new URLSearchParams()) {
+  const data = await platformBillingDataset(params);
+  const rows = data.companies.map((company) => {
+    const subscription = pickCurrentCompanySubscription(data.subscriptionsByCompany.get(company.id) || []);
+    const plan = subscription?.plan_id ? data.planById.get(subscription.plan_id) || null : null;
+    return { company, subscription, plan, status: platformSubscriptionStatus(subscription, company), price_cents: moneyToCents(plan?.monthly_price || 0) };
+  });
+  const activeRows = rows.filter((row) => ['active', 'trial', 'grace_period', 'payment_pending', 'past_due'].includes(row.status));
+  const riskRows = rows.filter((row) => ['trial', 'grace_period', 'payment_pending', 'past_due'].includes(row.status));
+  const lostRows = rows.filter((row) => ['cancelled', 'expired', 'suspended', 'blocked', 'archived'].includes(row.status));
+  const pendingRows = rows.filter((row) => ['payment_pending', 'grace_period', 'past_due'].includes(row.status));
+  const orderRevenueCents = data.billableOrders.reduce((sum, order) => sum + moneyToCents(order.total), 0);
+  const payingClients = rows.filter((row) => ['active', 'grace_period', 'payment_pending', 'past_due'].includes(row.status) && row.price_cents > 0);
+  const eventCounts = billingEventCounts(data.events);
+  const statusCounts = rows.reduce((acc, row) => {
+    const key = billingDisplayStatus(row.status);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  return {
+    period: data.period.label,
+    generated_at: new Date().toISOString(),
+    mrr_total_cents: activeRows.reduce((sum, row) => sum + row.price_cents, 0),
+    mrr_active_cents: rows.filter((row) => row.status === 'active').reduce((sum, row) => sum + row.price_cents, 0),
+    mrr_at_risk_cents: riskRows.reduce((sum, row) => sum + row.price_cents, 0),
+    pending_revenue_cents: pendingRows.reduce((sum, row) => sum + row.price_cents, 0),
+    lost_revenue_cents: lostRows.reduce((sum, row) => sum + row.price_cents, 0),
+    delinquency: {
+      clients: pendingRows.length,
+      rate: rows.length ? Number(((pendingRows.length / rows.length) * 100).toFixed(1)) : 0
+    },
+    average_ticket_per_client_cents: payingClients.length ? Math.round(orderRevenueCents / payingClients.length) : 0,
+    order_revenue_cents: orderRevenueCents,
+    subscriptions_by_status: statusCounts,
+    events: eventCounts,
+    alerts: platformBillingAlerts(rows)
+  };
+}
+
+async function platformBillingPlans() {
+  const data = await platformBillingDataset(new URLSearchParams('period=30d'));
+  const rows = data.plans.map((plan) => {
+    const subscriptions = data.subscriptions.filter((subscription) => subscription.plan_id === plan.id);
+    const current = subscriptions.filter((subscription) => ['active', 'trial', 'grace_period', 'payment_pending', 'past_due'].includes(subscription.status));
+    return {
+      id: plan.id,
+      code: plan.code,
+      name: plan.name,
+      description: plan.description,
+      monthly_price: moneyNumber(plan.monthly_price || 0),
+      monthly_price_cents: moneyToCents(plan.monthly_price || 0),
+      is_active: plan.is_active !== false,
+      sort_order: Number(plan.sort_order || 0),
+      active_subscriptions: current.length,
+      mrr_cents: current.length * moneyToCents(plan.monthly_price || 0)
+    };
+  });
+  return { plans: rows };
+}
+
+async function platformBillingEvents(params = new URLSearchParams()) {
+  const data = await platformBillingDataset(params);
+  const statusFilter = cleanSlug(params.get?.('status') || '');
+  const planFilter = cleanSlug(params.get?.('plan') || '');
+  const events = data.events.map((event) => {
+    const subscription = event.subscription_id ? data.subscriptionById.get(event.subscription_id) || null : null;
+    const company = data.companyById.get(event.company_id) || null;
+    const plan = subscription?.plan_id ? data.planById.get(subscription.plan_id) || null : null;
+    const metadata = event.metadata || {};
+    return {
+      id: event.id,
+      company_id: event.company_id,
+      company_name: company?.name || 'Cliente',
+      subscription_id: event.subscription_id,
+      event_type: event.event_type,
+      label: billingEventLabel(event.event_type),
+      status: cleanSlug(metadata.status || event.event_type || ''),
+      amount_cents: Number(metadata.amount_cents || metadata.price_cents || 0),
+      provider: metadata.provider || subscription?.billing_provider || 'manual',
+      external_reference: metadata.provider_event_id || metadata.external_reference || subscription?.external_subscription_id || null,
+      plan_code: metadata.plan_code || plan?.code || null,
+      plan_name: metadata.plan_name || plan?.name || null,
+      description: event.description || '',
+      created_at: event.created_at
+    };
+  }).filter((event) => {
+    if (statusFilter && !String(event.status || event.event_type || '').includes(statusFilter)) return false;
+    if (planFilter && event.plan_code !== planFilter) return false;
+    return true;
+  });
+  return { events };
+}
+
+async function platformBillingSubscriptions(params = new URLSearchParams()) {
+  const data = await platformBillingDataset(params);
+  const statusFilter = cleanSlug(params.get?.('status') || '');
+  const planFilter = cleanSlug(params.get?.('plan') || '');
+  const rows = data.companies.map((company) => {
+    const subscription = pickCurrentCompanySubscription(data.subscriptionsByCompany.get(company.id) || []);
+    const plan = subscription?.plan_id ? data.planById.get(subscription.plan_id) || null : null;
+    const status = platformSubscriptionStatus(subscription, company);
+    return {
+      company_id: company.id,
+      company_name: company.name,
+      company_status: company.status,
+      billing_email: company.billing_email || null,
+      phone: company.phone || null,
+      subscription_id: subscription?.id || null,
+      status,
+      display_status: billingDisplayStatus(status),
+      plan_id: plan?.id || null,
+      plan_code: plan?.code || null,
+      plan_name: plan?.name || 'Sem plano',
+      started_at: subscription?.current_period_starts_at || subscription?.created_at || company.created_at || null,
+      trial_ends_at: subscription?.trial_ends_at || null,
+      current_period_ends_at: subscription?.current_period_ends_at || null,
+      next_renewal_at: subscription?.next_renewal_at || null,
+      payment_due_at: subscription?.payment_due_at || null,
+      cancelled_at: subscription?.cancelled_at || null,
+      value_cents: moneyToCents(plan?.monthly_price || 0),
+      provider: subscription?.billing_provider || 'manual',
+      external_reference: subscription?.external_subscription_id || null,
+      metadata: sanitizeBillingMetadata(subscription?.metadata || {})
+    };
+  }).filter((row) => {
+    if (statusFilter && row.status !== statusFilter && row.display_status !== statusFilter) return false;
+    if (planFilter && row.plan_code !== planFilter) return false;
+    return true;
+  });
+  return { subscriptions: rows };
+}
+
+function platformSubscriptionStatus(subscription, company) {
+  const raw = cleanSlug(subscription?.status || company?.status || 'unknown');
+  if (raw === 'suspended') return 'blocked';
+  if (raw === 'payment_pending') return 'past_due';
+  return raw || 'unknown';
+}
+
+function billingDisplayStatus(status) {
+  const value = cleanSlug(status || '');
+  if (value === 'suspended') return 'blocked';
+  return value;
+}
+
+function billingEventCounts(events = []) {
+  const count = (patterns) => events.filter((event) => patterns.some((pattern) => pattern.test(String(event.event_type || '')))).length;
+  return {
+    payment_approved: count([/paid/i, /payment_approved/i, /billing\.active/i, /subscription_reactivated/i]),
+    payment_refused: count([/refused/i, /rejected/i, /failed/i, /webhook_failed/i]),
+    webhook_received: count([/billing\./i, /webhook/i]),
+    webhook_error: count([/webhook_failed/i, /failed/i]),
+    plan_changed: count([/plan/i, /change/i]),
+    upgrades: count([/upgrade/i]),
+    downgrades: count([/downgrade/i]),
+    cancellations: count([/cancel/i]),
+    reactivations: count([/reactivat/i])
+  };
+}
+
+function platformBillingAlerts(rows = []) {
+  const alerts = [];
+  const now = Date.now();
+  const graceExpired = rows.filter((row) => {
+    const due = row.subscription?.payment_due_at || row.subscription?.current_period_ends_at;
+    return row.status === 'grace_period' && due && new Date(due).getTime() < now;
+  });
+  const pastDue = rows.filter((row) => ['past_due', 'payment_pending'].includes(row.status));
+  const trialsEnding = rows.filter((row) => {
+    if (row.status !== 'trial' || !row.subscription?.trial_ends_at) return false;
+    const days = Math.ceil((new Date(row.subscription.trial_ends_at).getTime() - now) / 86400000);
+    return days >= 0 && days <= 3;
+  });
+  if (graceExpired.length) alerts.push({ type: 'grace_period', severity: 'critical', title: `${graceExpired.length} cliente(s) passaram do grace period`, action: 'Bloquear recursos pagos ou reativar após pagamento.' });
+  if (pastDue.length) alerts.push({ type: 'past_due', severity: 'warning', title: `${pastDue.length} cobrança(s) pendente(s)`, action: 'Conferir Abacate Pay e reenviar cobrança.' });
+  if (trialsEnding.length) alerts.push({ type: 'trial', severity: 'attention', title: `${trialsEnding.length} trial(s) perto do fim`, action: 'Acionar comercial para conversão.' });
+  return alerts;
+}
+
+function billingEventLabel(type) {
+  const value = String(type || '');
+  const labels = {
+    'checkout_created': 'Checkout criado',
+    'billing.active': 'Pagamento aprovado',
+    'billing.past_due': 'Pagamento vencido',
+    'billing.payment_pending': 'Pagamento pendente',
+    'billing.webhook_failed': 'Webhook com erro',
+    'platform.upgrade': 'Upgrade',
+    'platform.downgrade': 'Downgrade',
+    'platform.same_plan': 'Plano mantido',
+    'platform.subscription_cancelled': 'Cancelamento',
+    'platform.subscription_reactivated': 'Reativação',
+    'billing.resend_requested': 'Reenvio solicitado'
+  };
+  return labels[value] || subscriptionEventLabel(value || 'Evento financeiro');
+}
+
+function sanitizeBillingMetadata(metadata = {}) {
+  const allowed = {};
+  for (const key of ['source', 'plan_code', 'plan_name', 'change_type', 'amount_cents', 'status', 'provider']) {
+    if (metadata[key] !== undefined) allowed[key] = metadata[key];
+  }
+  if (Array.isArray(metadata.downgrade_warnings)) allowed.downgrade_warnings = metadata.downgrade_warnings;
+  return allowed;
 }
 
 function platformCompanyMetrics(companies, context) {
@@ -2393,19 +3430,30 @@ function platformCompanyMetrics(companies, context) {
     const plan = subscription?.plan_id ? context.planById.get(subscription.plan_id) : null;
     const stores = context.storesByCompany.get(company.id) || [];
     const orders = context.ordersByCompany.get(company.id) || [];
+    const products = stores.flatMap((store) => context.productsByStore?.get(store.id) || []);
+    const settings = stores.map((store) => context.settingsByStore?.get(store.id)).filter(Boolean);
     const monthOrders = orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
     const lastOrder = orders.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+    const lastAccessAt = company.last_login_at || null;
     return {
       company_id: company.id,
       stores_count: stores.length,
       active_stores_count: stores.filter((store) => store.is_active !== false).length,
+      unpublished_stores_count: stores.filter((store) => store.is_active === false).length,
       plan_name: plan?.name || 'Sem plano',
       plan_code: plan?.code || '',
       subscription_status: subscription?.status || company.status || 'unknown',
       mrr: moneyNumber(plan?.monthly_price || 0),
+      mrr_cents: moneyToCents(plan?.monthly_price || 0),
       orders_month: monthOrders.length,
       revenue_month: roundMoney(monthOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+      revenue_month_cents: moneyToCents(monthOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
       last_order_at: lastOrder?.created_at || null,
+      last_access_at: lastAccessAt,
+      products_count: products.length,
+      active_products_count: products.filter((item) => item.is_active !== false).length,
+      stores_without_whatsapp_count: stores.length - settings.filter((setting) => setting.whatsapp_number).length,
+      incomplete_onboarding_count: settings.filter((setting) => setting.onboarding_completed === false).length,
       has_orders: orders.length > 0
     };
   });
@@ -2414,7 +3462,7 @@ function platformCompanyMetrics(companies, context) {
 function platformDailySeries(orders, period) {
   const days = [];
   for (let cursor = new Date(period.start); cursor <= period.end; cursor.setDate(cursor.getDate() + 1)) {
-    days.push({ date: cursor.toISOString().slice(0, 10), orders: 0, revenue: 0 });
+    days.push({ date: cursor.toISOString().slice(0, 10), orders: 0, revenue: 0, revenue_cents: 0 });
   }
   const byDate = new Map(days.map((day) => [day.date, day]));
   for (const order of orders) {
@@ -2422,7 +3470,10 @@ function platformDailySeries(orders, period) {
     const row = byDate.get(key);
     if (!row) continue;
     row.orders += 1;
-    if (order.status !== 'cancelled') row.revenue = roundMoney(row.revenue + moneyNumber(order.total));
+    if (order.status !== 'cancelled') {
+      row.revenue = roundMoney(row.revenue + moneyNumber(order.total));
+      row.revenue_cents = moneyToCents(row.revenue);
+    }
   }
   return days;
 }
@@ -2437,10 +3488,14 @@ function platformStoreRanking(orders, storeById) {
       store_name: store.name || store.slug || 'Loja',
       slug: store.slug || '',
       orders: 0,
-      revenue: 0
+      revenue: 0,
+      revenue_cents: 0
     };
     current.orders += 1;
-    if (order.status !== 'cancelled') current.revenue = roundMoney(current.revenue + moneyNumber(order.total));
+    if (order.status !== 'cancelled') {
+      current.revenue = roundMoney(current.revenue + moneyNumber(order.total));
+      current.revenue_cents = moneyToCents(current.revenue);
+    }
     grouped.set(order.store_id, current);
   }
   return [...grouped.values()].sort((a, b) => b.orders - a.orders || b.revenue - a.revenue);
@@ -2450,9 +3505,10 @@ function platformGroupOrders(orders, field) {
   const grouped = new Map();
   for (const order of orders) {
     const key = order[field] || 'Não informado';
-    const current = grouped.get(key) || { key, count: 0, revenue: 0 };
+    const current = grouped.get(key) || { key, count: 0, revenue: 0, revenue_cents: 0 };
     current.count += 1;
     current.revenue = roundMoney(current.revenue + moneyNumber(order.total));
+    current.revenue_cents = moneyToCents(current.revenue);
     grouped.set(key, current);
   }
   return [...grouped.values()].sort((a, b) => b.count - a.count || b.revenue - a.revenue);
@@ -2464,7 +3520,8 @@ function platformAnalyticsComparison(orders, period) {
   const current = orders.filter((order) => new Date(order.created_at) >= midpoint);
   const totals = (rows) => ({
     orders: rows.length,
-    revenue: roundMoney(rows.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + moneyNumber(order.total), 0))
+    revenue: roundMoney(rows.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    revenue_cents: moneyToCents(rows.filter((order) => order.status !== 'cancelled').reduce((sum, order) => sum + moneyNumber(order.total), 0))
   });
   return { previous: totals(previous), current: totals(current) };
 }
@@ -2488,15 +3545,90 @@ function platformBillingMetrics({ companies, subscriptions, plans, subscriptionE
   const eventCount = (patterns) => subscriptionEvents.filter((event) => patterns.some((pattern) => String(event.event_type || '').includes(pattern))).length;
   return {
     mrr: roundMoney(mrr),
+    mrr_cents: moneyToCents(mrr),
     monthly_order_revenue: roundMoney(monthOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
+    monthly_order_revenue_cents: moneyToCents(monthOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
     trials_started: eventCount(['trial']),
     upgrades: eventCount(['upgrade']),
     downgrades: eventCount(['downgrade']),
     cancellations: eventCount(['cancel']),
     paid_events: eventCount(['paid', 'payment_approved']),
     refused_events: eventCount(['failed', 'refused', 'rejected']),
-    revenue_by_plan: [...revenueByPlan.entries()].map(([plan, revenue]) => ({ plan, revenue }))
+    revenue_by_plan: [...revenueByPlan.entries()].map(([plan, revenue]) => ({ plan, revenue, revenue_cents: moneyToCents(revenue) }))
   };
+}
+
+function platformRevenueSnapshot({ companies, subscriptions, plans, orders, period }) {
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const subscriptionByCompany = new Map();
+  for (const subscription of subscriptions) {
+    if (!subscriptionByCompany.has(subscription.company_id)) subscriptionByCompany.set(subscription.company_id, subscription);
+  }
+  const mrrByPlan = new Map();
+  let mrr = 0;
+  for (const company of companies) {
+    const subscription = subscriptionByCompany.get(company.id);
+    const plan = subscription?.plan_id ? planById.get(subscription.plan_id) : null;
+    const status = subscription?.status || company.status || '';
+    if (!['active', 'trial', 'grace_period', 'payment_pending'].includes(status)) continue;
+    const price = moneyNumber(plan?.monthly_price || 0);
+    mrr += price;
+    const key = plan?.name || 'Sem plano';
+    const current = mrrByPlan.get(key) || { plan: key, clients: 0, mrr: 0, mrr_cents: 0 };
+    current.clients += 1;
+    current.mrr = roundMoney(current.mrr + price);
+    current.mrr_cents = moneyToCents(current.mrr);
+    mrrByPlan.set(key, current);
+  }
+  const billableOrders = orders.filter((order) => order.status !== 'cancelled');
+  const orderRevenue = roundMoney(billableOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0));
+  return {
+    mrr: roundMoney(mrr),
+    mrr_cents: moneyToCents(mrr),
+    order_revenue: orderRevenue,
+    order_revenue_cents: moneyToCents(orderRevenue),
+    average_daily_revenue_cents: moneyToCents(orderRevenue / Math.max(1, period.days || 1)),
+    mrr_by_plan: [...mrrByPlan.values()].sort((a, b) => b.mrr_cents - a.mrr_cents)
+  };
+}
+
+function platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period }) {
+  const subscriptionByCompany = new Map();
+  for (const subscription of subscriptions) {
+    if (!subscriptionByCompany.has(subscription.company_id)) subscriptionByCompany.set(subscription.company_id, subscription);
+  }
+  const since = period.since.getTime();
+  const companiesInPeriod = companies.filter((company) => new Date(company.created_at || 0).getTime() >= since);
+  const trialsStarted = companiesInPeriod.filter((company) => (subscriptionByCompany.get(company.id)?.status || company.status) === 'trial').length
+    + subscriptionEvents.filter((event) => /trial/i.test(event.event_type || '')).length;
+  const converted = subscriptionEvents.filter((event) => /(paid|payment_approved|upgrade|activate|active)/i.test(event.event_type || '')).length;
+  const churn = companies.filter((company) => ['cancelled', 'archived'].includes(company.status)).length
+    + subscriptionEvents.filter((event) => /(cancel|churn)/i.test(event.event_type || '')).length;
+  const upgrades = subscriptionEvents.filter((event) => /upgrade/i.test(event.event_type || '')).length;
+  const downgrades = subscriptionEvents.filter((event) => /downgrade/i.test(event.event_type || '')).length;
+  return {
+    new_clients: companiesInPeriod.length,
+    trials_started: trialsStarted,
+    trials_converted: converted,
+    conversion_rate: trialsStarted ? Number(((converted / trialsStarted) * 100).toFixed(1)) : 0,
+    churn,
+    upgrades,
+    downgrades
+  };
+}
+
+function platformNewClientsDaily(companies, period) {
+  const days = [];
+  for (let cursor = new Date(period.start); cursor <= period.end; cursor.setDate(cursor.getDate() + 1)) {
+    days.push({ date: cursor.toISOString().slice(0, 10), clients: 0 });
+  }
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  for (const company of companies) {
+    const key = new Date(company.created_at || 0).toISOString().slice(0, 10);
+    const row = byDate.get(key);
+    if (row) row.clients += 1;
+  }
+  return days;
 }
 
 function platformEstimatedMrr(companies, subscriptionByCompany, planById) {
@@ -2508,9 +3640,24 @@ function platformEstimatedMrr(companies, subscriptionByCompany, planById) {
   }, 0));
 }
 
-function platformCommercialAlerts(companies, stores, context) {
+function platformCommercialAlerts(companies, stores, context, options = {}) {
   const alerts = [];
   const now = Date.now();
+  const backup = options.backup || {};
+  const operationalLogs = options.operationalLogs || [];
+  if (backup.latest?.created_at && (now - new Date(backup.latest.created_at).getTime()) > 86400000) {
+    alerts.push({ type: 'backup', severity: 'critical', title: 'Backup atrasado', action: 'Executar backup manual e conferir agendamento.' });
+  } else if (!backup.latest?.created_at) {
+    alerts.push({ type: 'backup', severity: 'warning', title: 'Backup sem registro recente', action: 'Validar diretório e rotina de backup.' });
+  }
+  const webhookFailures = operationalLogs.filter((log) => log.type === 'webhook' && ['failed', 'attention'].includes(log.status));
+  if (webhookFailures.length) {
+    alerts.push({ type: 'webhook', severity: 'critical', title: `${webhookFailures.length} falha(s) recente(s) de webhook`, action: 'Conferir provedor, assinatura e logs.' });
+  }
+  const apiMetric = platformMetricsSnapshot(platformHealthPeriod('24h')).api;
+  if (Number(apiMetric?.p95_ms || 0) > 1200) {
+    alerts.push({ type: 'performance', severity: 'warning', title: 'API com latência alta', action: 'Verificar banco, logs e tráfego recente.' });
+  }
   for (const company of companies) {
     const subscription = context.subscriptionByCompany.get(company.id);
     const companyStores = context.storesByCompany.get(company.id) || [];
@@ -2525,8 +3672,10 @@ function platformCommercialAlerts(companies, stores, context) {
     if (!orders.length && companyStores.length) alerts.push({ type: 'sales', severity: 'attention', company_id: company.id, title: `${company.name}: sem pedidos recentes`, action: 'Acompanhar onboarding e divulgação.' });
     for (const store of companyStores) {
       const setting = context.settingsByStore.get(store.id);
+      const products = context.productsByStore?.get(store.id) || [];
       if (setting && !setting.whatsapp_number) alerts.push({ type: 'setup', severity: 'warning', company_id: company.id, store_id: store.id, title: `${store.name}: WhatsApp não configurado`, action: 'Completar configurações da loja.' });
       if (setting && setting.onboarding_completed === false) alerts.push({ type: 'setup', severity: 'attention', company_id: company.id, store_id: store.id, title: `${store.name}: onboarding incompleto`, action: 'Reabrir onboarding ou orientar cliente.' });
+      if (!products.length) alerts.push({ type: 'menu', severity: 'critical', company_id: company.id, store_id: store.id, title: `${store.name}: sem produtos`, action: 'Ajudar o cliente a cadastrar o cardápio.' });
       if (store.is_active === false) alerts.push({ type: 'store', severity: 'attention', company_id: company.id, store_id: store.id, title: `${store.name}: loja suspensa/inativa`, action: 'Validar se foi bloqueio comercial.' });
     }
   }
@@ -2644,6 +3793,10 @@ function subscriptionEventLabel(type) {
 function auditActionLabel(action) {
   const labels = {
     'platform.client.note': 'Nota interna',
+    'platform.client.internal_status': 'Acompanhamento atualizado',
+    'platform.support.impersonate.start': 'Acesso suporte iniciado',
+    'platform.support.impersonate.end': 'Acesso suporte encerrado',
+    'platform.support.impersonate.expired': 'Acesso suporte expirou',
     'platform.company.update': 'Cliente atualizado',
     'platform.company.status': 'Status alterado',
     'platform.company.plan': 'Plano alterado',
@@ -3281,8 +4434,109 @@ async function updatePlatformCompany(id, data, admin) {
   return company;
 }
 
-async function setPlatformCompanyStatus(id, data, admin) {
-  return updatePlatformCompany(id, { status: data.status }, admin);
+async function setPlatformCompanyStatus(req, id, data, admin) {
+  const status = sanitizeCompanyStatus(data.status);
+  if (['suspended', 'cancelled', 'archived'].includes(status)) {
+    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  }
+  return updatePlatformCompany(id, { status }, admin);
+}
+
+async function suspendPlatformCompany(req, id, data, admin) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const company = await updatePlatformCompany(id, { status: 'suspended' }, admin);
+  await audit('platform.company.suspend', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: company.id,
+    severity: 'warning',
+    after_data: { status: 'suspended', reason: cleanText(data.reason || '') || null }
+  });
+  return company;
+}
+
+async function activatePlatformCompany(req, id, data, admin) {
+  const company = await updatePlatformCompany(id, { status: 'active' }, admin);
+  await audit('platform.company.activate', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: company.id,
+    severity: 'info',
+    after_data: { status: 'active', reason: cleanText(data.reason || '') || null }
+  });
+  return company;
+}
+
+async function reopenPlatformCompanyOnboarding(req, id, data, admin) {
+  const companyId = cleanUuid(id, 'empresa');
+  const company = await getCompanyById(companyId);
+  const stores = await dbRequest('GET', 'stores', {
+    select: 'id,name,slug',
+    company_id: `eq.${companyId}`,
+    limit: '200'
+  }).catch(() => []);
+  for (const store of stores) {
+    await dbRequest('PATCH', 'store_settings', { store_id: `eq.${store.id}` }, {
+      onboarding_completed: false
+    }, ['Prefer: return=minimal']).catch(() => {});
+    clearStoreSettingsCache(store.id);
+    clearPublicBootstrapCache(store.id);
+  }
+  await audit('platform.company.reopen_onboarding', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: company.id,
+    severity: 'warning',
+    after_data: {
+      stores: stores.map((store) => ({ id: store.id, slug: store.slug })),
+      reason: cleanText(data.reason || '') || null
+    }
+  });
+  return { ok: true, stores_updated: stores.length };
+}
+
+async function resendPlatformCompanyBilling(req, id, data, admin) {
+  const companyId = cleanUuid(id, 'empresa');
+  const company = await getCompanyById(companyId);
+  const subscriptions = await listCompanySubscriptions(companyId, 10);
+  const subscription = pickCurrentCompanySubscription(subscriptions);
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: company.id,
+    subscription_id: subscription?.id || null,
+    event_type: 'billing.resend_requested',
+    description: 'Reenvio de cobrança solicitado pelo Admin Master.',
+    created_by: admin.id,
+    metadata: {
+      status: 'pending',
+      provider: PLATFORM_BILLING_PROVIDER || 'manual',
+      requested_by: admin.id,
+      target_email: company.billing_email || null,
+      note: cleanText(data.note || data.reason || '').slice(0, 300) || null
+    }
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('platform.company.resend_billing', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company',
+    entity_id: company.id,
+    severity: 'info',
+    after_data: {
+      status: 'requested',
+      provider: PLATFORM_BILLING_PROVIDER || 'manual',
+      target_email: company.billing_email || null
+    }
+  });
+  return {
+    ok: true,
+    message: 'Solicitação de reenvio de cobrança registrada para o suporte financeiro.'
+  };
 }
 
 async function changePlatformCompanyPlan(id, data, admin) {
@@ -3306,6 +4560,7 @@ async function changePlatformCompanyPlan(id, data, admin) {
     current_period_starts_at: startsAt,
     current_period_ends_at: endsAt,
     next_renewal_at: endsAt,
+    billing_provider: 'manual',
     metadata: { source: 'platform_plan_change', changed_by: admin.id }
   };
   await dbRequest('PATCH', 'company_subscriptions', {
@@ -3321,6 +4576,175 @@ async function changePlatformCompanyPlan(id, data, admin) {
     after_data: { plan_code: plan.code, status: payload.status }
   });
   return { ...subscription, plan };
+}
+
+async function changePlatformCompanyPlanSecure(req, id, data, admin) {
+  const companyId = cleanUuid(id, 'empresa');
+  const planCode = cleanSlug(data.plan_code || data.code || '');
+  if (!planCode) throw httpError(422, 'Informe o plano.');
+  const company = await getCompanyById(companyId);
+  const [plan] = await dbRequest('GET', 'subscription_plans', {
+    select: '*',
+    code: `eq.${planCode}`,
+    is_active: 'eq.true',
+    limit: '1'
+  });
+  if (!plan) throw httpError(404, 'Plano não encontrado.');
+  const currentSubscription = pickCurrentCompanySubscription(await listCompanySubscriptions(companyId, 100));
+  const currentPlan = currentSubscription?.plan_id
+    ? (await dbRequest('GET', 'subscription_plans', { select: '*', id: `eq.${currentSubscription.plan_id}`, limit: '1' }).catch(() => []))[0] || null
+    : null;
+  const changeType = billingPlanChangeType(currentPlan, plan);
+  if (['downgrade'].includes(changeType) || data.require_confirmation === true) {
+    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  }
+  const warnings = await planLimitWarnings(companyId, null, plan).catch(() => []);
+  const subscription = await changePlatformCompanyPlan(companyId, {
+    plan_code: plan.code,
+    status: data.status || 'active',
+    current_period_ends_at: data.current_period_ends_at
+  }, admin);
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: company.id,
+    subscription_id: subscription.id,
+    event_type: `platform.${changeType}`,
+    description: `Plano alterado no Platform para ${plan.name}.`,
+    created_by: admin.id,
+    metadata: {
+      provider: 'manual',
+      plan_code: plan.code,
+      plan_name: plan.name,
+      previous_plan_code: currentPlan?.code || null,
+      amount_cents: moneyToCents(plan.monthly_price || 0),
+      change_type: changeType,
+      downgrade_warnings: warnings
+    }
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('platform.billing.change_plan', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company_subscription',
+    entity_id: subscription.id,
+    severity: changeType === 'downgrade' ? 'warning' : 'info',
+    after_data: { plan_code: plan.code, previous_plan_code: currentPlan?.code || null, change_type: changeType, warnings }
+  });
+  return { ...subscription, plan, change_type: changeType, downgrade_warnings: warnings };
+}
+
+async function cancelPlatformCompanySubscription(req, id, data, admin) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const companyId = cleanUuid(id, 'empresa');
+  const company = await getCompanyById(companyId);
+  const current = pickCurrentCompanySubscription(await listCompanySubscriptions(companyId, 100));
+  if (!current) throw httpError(404, 'Assinatura não encontrada para este cliente.');
+  const now = new Date().toISOString();
+  const [subscription] = await dbRequest('PATCH', 'company_subscriptions', { id: `eq.${current.id}` }, {
+    status: 'cancelled',
+    cancelled_at: now,
+    metadata: { ...(current.metadata || {}), cancelled_by: admin.id, cancelled_reason: cleanText(data.reason || '').slice(0, 300) || null }
+  }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'companies', { id: `eq.${companyId}` }, { status: 'cancelled' }, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: companyId,
+    subscription_id: subscription.id,
+    event_type: 'platform.subscription_cancelled',
+    description: 'Assinatura cancelada manualmente pelo Admin Master.',
+    created_by: admin.id,
+    metadata: {
+      provider: subscription.billing_provider || 'manual',
+      status: 'cancelled',
+      external_reference: subscription.external_subscription_id || null,
+      reason: cleanText(data.reason || '').slice(0, 300) || null
+    }
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('platform.billing.cancel_subscription', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company_subscription',
+    entity_id: subscription.id,
+    severity: 'warning',
+    after_data: { status: 'cancelled', reason: cleanText(data.reason || '') || null }
+  });
+  return { ok: true, subscription };
+}
+
+async function reactivatePlatformCompanySubscription(req, id, data, admin) {
+  const companyId = cleanUuid(id, 'empresa');
+  const company = await getCompanyById(companyId);
+  const subscriptions = await listCompanySubscriptions(companyId, 100);
+  let current = pickCurrentCompanySubscription(subscriptions);
+  let plan = null;
+  const planCode = cleanSlug(data.plan_code || data.code || '');
+  if (planCode) {
+    [plan] = await dbRequest('GET', 'subscription_plans', {
+      select: '*',
+      code: `eq.${planCode}`,
+      is_active: 'eq.true',
+      limit: '1'
+    });
+  } else if (current?.plan_id) {
+    [plan] = await dbRequest('GET', 'subscription_plans', {
+      select: '*',
+      id: `eq.${current.plan_id}`,
+      limit: '1'
+    }).catch(() => []);
+  }
+  if (!plan) throw httpError(422, 'Informe um plano ativo para reativar a assinatura.');
+  const now = new Date();
+  const periodEnd = new Date(now.getTime() + 30 * 86400000).toISOString();
+  if (!current || current.status === 'expired') {
+    const [created] = await dbRequest('POST', 'company_subscriptions', {}, {
+      company_id: companyId,
+      plan_id: plan.id,
+      status: 'active',
+      current_period_starts_at: now.toISOString(),
+      current_period_ends_at: periodEnd,
+      next_renewal_at: periodEnd,
+      billing_provider: 'manual',
+      last_payment_at: now.toISOString(),
+      metadata: { source: 'platform_reactivation', reactivated_by: admin.id, amount_cents: moneyToCents(plan.monthly_price || 0) }
+    }, ['Prefer: return=representation']);
+    current = created;
+  } else {
+    [current] = await dbRequest('PATCH', 'company_subscriptions', { id: `eq.${current.id}` }, {
+      plan_id: plan.id,
+      status: 'active',
+      current_period_starts_at: now.toISOString(),
+      current_period_ends_at: periodEnd,
+      next_renewal_at: periodEnd,
+      last_payment_at: now.toISOString(),
+      payment_due_at: null,
+      cancelled_at: null,
+      suspended_at: null,
+      metadata: { ...(current.metadata || {}), reactivated_by: admin.id, amount_cents: moneyToCents(plan.monthly_price || 0) }
+    }, ['Prefer: return=representation']);
+  }
+  await dbRequest('PATCH', 'companies', { id: `eq.${companyId}` }, { status: 'active' }, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('POST', 'subscription_events', {}, {
+    company_id: companyId,
+    subscription_id: current.id,
+    event_type: 'platform.subscription_reactivated',
+    description: `Assinatura reativada no plano ${plan.name}.`,
+    created_by: admin.id,
+    metadata: {
+      provider: current.billing_provider || 'manual',
+      status: 'active',
+      plan_code: plan.code,
+      plan_name: plan.name,
+      amount_cents: moneyToCents(plan.monthly_price || 0)
+    }
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('platform.billing.reactivate_subscription', {
+    req,
+    company_id: company.id,
+    actor_admin_id: admin.id,
+    entity_type: 'company_subscription',
+    entity_id: current.id,
+    after_data: { status: 'active', plan_code: plan.code }
+  });
+  return { ok: true, subscription: current, plan };
 }
 
 async function updatePlatformStore(id, data, admin) {
@@ -4008,24 +5432,492 @@ async function platformBackupStatus() {
   };
 }
 
+async function platformServicesStatus() {
+  const [database, backup, git, storageUsage] = await Promise.all([
+    checkDatabaseHealth(),
+    platformBackupStatus(),
+    getGitRuntimeInfo(),
+    platformStorageUsage()
+  ]);
+  const serviceName = cleanText(process.env.PLATFORM_SERVICE_NAME || 'cardapio.service');
+  return {
+    checked_at: new Date().toISOString(),
+    permissions: {
+      service_control_enabled: parseBoolean(process.env.PLATFORM_ALLOW_SERVICE_CONTROL, false),
+      backup_enabled: true,
+      jobs_enabled: true
+    },
+    application: {
+      status: 'healthy',
+      service_name: serviceName,
+      uptime_seconds: Math.floor(process.uptime()),
+      started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      memory: process.memoryUsage(),
+      pid: process.pid,
+      node: process.version
+    },
+    database: {
+      status: database.status,
+      message: database.message,
+      latency_ms: database.latency_ms
+    },
+    backups: backup,
+    webhooks: await platformWebhookServiceStatus(),
+    jobs: {
+      trial_cleanup: {
+        status: 'ready',
+        command: 'maintenance:trial-cleanup:apply',
+        description: 'Remove empresas em teste sem acesso recente conforme regra operacional.'
+      },
+      log_cleanup: {
+        status: 'ready',
+        command: 'maintenance:logs:apply',
+        description: 'Remove auditoria antiga, sessões expiradas, eventos técnicos, temporários e backups fora da retenção.'
+      },
+      backup: {
+        status: backup.status || 'unknown',
+        command: 'db:backup'
+      }
+    },
+    deploy: git,
+    storage_usage: storageUsage,
+    retention: platformRetentionSettings(),
+    risk_zone: {
+      restart_requires_confirmation: true,
+      database_stop_available: false,
+      database_stop_reason: 'Parada de banco não foi habilitada nesta fase por segurança.'
+    }
+  };
+}
+
+function platformRetentionSettings() {
+  return {
+    audit_log_days: envInt('AUDIT_LOG_RETENTION_DAYS', envInt('LOG_RETENTION_DAYS', 180)),
+    operational_log_days: envInt('OPERATIONAL_LOG_RETENTION_DAYS', 90),
+    session_days: envInt('SESSION_RETENTION_DAYS', 7),
+    subscription_event_days: envInt('SUBSCRIPTION_EVENT_RETENTION_DAYS', 365),
+    billing_event_days: envInt('BILLING_EVENT_RETENTION_DAYS', 1825),
+    support_message_days: envInt('SUPPORT_MESSAGE_RETENTION_DAYS', 730),
+    backup_days: envInt('BACKUP_RETENTION_DAYS', 14),
+    tmp_days: envInt('TMP_RETENTION_DAYS', 7)
+  };
+}
+
+async function platformStorageUsage() {
+  const [database, backups, uploads, tmp, cleanupRows] = await Promise.all([
+    platformDatabaseStorageStats().catch((error) => ({ error: error.message || 'indisponível' })),
+    directoryUsage(BACKUP_DIR).catch(() => ({ bytes: 0, files: 0 })),
+    directoryUsage(UPLOAD_DIR).catch(() => ({ bytes: 0, files: 0 })),
+    directoryUsage(path.resolve(__dirname, process.env.TMP_DIR || '.tmp')).catch(() => ({ bytes: 0, files: 0 })),
+    dbRequest('GET', 'audit_logs', {
+      select: 'id,after_data,created_at',
+      action: 'eq.platform.logs.cleanup',
+      order: 'created_at.desc',
+      limit: '1'
+    }).catch(() => [])
+  ]);
+  return {
+    database,
+    backups,
+    uploads,
+    tmp,
+    latest_cleanup: cleanupRows[0] ? {
+      created_at: cleanupRows[0].created_at,
+      summary: cleanupRows[0].after_data || {}
+    } : null
+  };
+}
+
+async function platformDatabaseStorageStats() {
+  if (!DATABASE_URL) return { bytes: 0, pretty: '0 B', tables: [] };
+  const client = new pg.Client({
+    connectionString: DATABASE_URL,
+    ssl: process.env.DB_SSL === 'true' || /sslmode=require/i.test(DATABASE_URL) ? { rejectUnauthorized: false } : false
+  });
+  await client.connect();
+  try {
+    const db = await client.query('select pg_database_size(current_database())::bigint as bytes');
+    const tables = await client.query(`
+      select relname as table_name,
+             n_live_tup::bigint as estimated_rows,
+             pg_total_relation_size(relid)::bigint as bytes
+      from pg_stat_user_tables
+      where relname in (
+        'audit_logs',
+        'app_sessions',
+        'subscription_events',
+        'support_tickets',
+        'support_ticket_messages',
+        'orders',
+        'order_items',
+        'customers',
+        'menu_items'
+      )
+      order by pg_total_relation_size(relid) desc
+    `);
+    return {
+      bytes: Number(db.rows[0]?.bytes || 0),
+      tables: tables.rows.map((row) => ({
+        table_name: row.table_name,
+        estimated_rows: Number(row.estimated_rows || 0),
+        bytes: Number(row.bytes || 0)
+      }))
+    };
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+async function directoryUsage(directory) {
+  let bytes = 0;
+  let files = 0;
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const fullPath = path.join(directory, entry.name);
+    const info = await stat(fullPath).catch(() => null);
+    if (!info) continue;
+    if (entry.isDirectory()) {
+      const nested = await directoryUsage(fullPath);
+      bytes += nested.bytes;
+      files += nested.files;
+    } else {
+      bytes += info.size;
+      files += 1;
+    }
+  }
+  return { bytes, files };
+}
+
+function envInt(key, fallback) {
+  const value = Number.parseInt(process.env[key] || '', 10);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+async function platformServicesLogs(params = new URLSearchParams()) {
+  const limit = clampNumber(Number(params.get?.('limit') || 80), 1, 200);
+  const since = new Date(Date.now() - 86400000).toISOString();
+  const actions = [
+    'platform.service.backup',
+    'platform.service.backup.failed',
+    'platform.service.trial_cleanup',
+    'platform.service.trial_cleanup.failed',
+    'platform.logs.cleanup',
+    'platform.logs.cleanup.failed',
+    'platform.service.app.restart',
+    'platform.service.app.restart.failed',
+    'platform.service.confirmation.failed',
+    'platform.service.password.failed',
+    'platform.subscription.change',
+    'platform.company.update',
+    'platform.company.status'
+  ];
+  const rows = await dbRequest('GET', 'audit_logs', {
+    select: 'id,action,severity,entity_type,entity_id,actor_admin_id,ip_address,after_data,created_at',
+    action: `in.(${actions.join(',')})`,
+    created_at: `gte.${since}`,
+    order: 'created_at.desc',
+    limit: String(limit)
+  }).catch(() => []);
+  return {
+    logs: rows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      severity: row.severity,
+      status: row.after_data?.status || (row.severity === 'critical' ? 'failed' : 'info'),
+      message: cleanText(row.after_data?.message || row.after_data?.summary || '').slice(0, 500),
+      actor_admin_id: row.actor_admin_id || null,
+      ip_address: row.ip_address || null,
+      created_at: row.created_at
+    }))
+  };
+}
+
+async function runPlatformBackup(req, admin, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const startedAt = Date.now();
+  try {
+    await writeBackupStatus({ status: 'running', started_at: new Date().toISOString(), output: 'manual-platform-backup' });
+    const result = await runNodeScript('scripts/backup-postgres.mjs', [], { timeoutMs: 120000 });
+    const status = await platformBackupStatus();
+    await auditPlatformService(req, admin, 'platform.service.backup', 'info', {
+      status: 'success',
+      duration_ms: Date.now() - startedAt,
+      message: safeCommandOutput(result.stdout || 'Backup manual concluído.'),
+      backup: status.latest ? { file: status.latest.file, size_bytes: status.latest.size_bytes } : null
+    });
+    return { ok: true, status, output: safeCommandOutput(result.stdout) };
+  } catch (error) {
+    await writeBackupStatus({ status: 'failed', finished_at: new Date().toISOString(), output: 'manual-platform-backup', error: error.message || String(error) }).catch(() => {});
+    await auditPlatformService(req, admin, 'platform.service.backup.failed', 'critical', {
+      status: 'failed',
+      duration_ms: Date.now() - startedAt,
+      message: safeCommandOutput(error.message || String(error))
+    });
+    throw httpError(500, 'Não foi possível executar o backup manual.');
+  }
+}
+
+async function runPlatformTrialCleanup(req, admin, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const startedAt = Date.now();
+  try {
+    const result = await runNodeScript('scripts/cleanup-inactive-trials.mjs', ['--apply'], { timeoutMs: 120000 });
+    await auditPlatformService(req, admin, 'platform.service.trial_cleanup', 'warning', {
+      status: 'success',
+      duration_ms: Date.now() - startedAt,
+      message: safeCommandOutput(result.stdout || 'Limpeza de trials concluída.')
+    });
+    return { ok: true, output: safeCommandOutput(result.stdout) };
+  } catch (error) {
+    await auditPlatformService(req, admin, 'platform.service.trial_cleanup.failed', 'critical', {
+      status: 'failed',
+      duration_ms: Date.now() - startedAt,
+      message: safeCommandOutput(error.message || String(error))
+    });
+    throw httpError(500, 'Não foi possível executar a limpeza de trials inativos.');
+  }
+}
+
+async function runPlatformLogCleanup(req, admin, data = {}) {
+  const applyCleanup = data.apply === true;
+  if (applyCleanup) {
+    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  }
+  const startedAt = Date.now();
+  try {
+    const args = ['--json'];
+    if (applyCleanup) args.unshift('--apply');
+    const result = await runNodeScript('scripts/cleanup-logs.mjs', args, {
+      timeoutMs: 120000,
+      env: {
+        CLEANUP_ACTOR_ADMIN_ID: admin.id || '',
+        CLEANUP_REQUEST_SOURCE: 'platform'
+      }
+    });
+    const parsed = parseJsonOutput(result.stdout);
+    return {
+      ok: parsed.ok !== false,
+      mode: parsed.mode || (applyCleanup ? 'apply' : 'dry_run'),
+      duration_ms: parsed.duration_ms ?? Date.now() - startedAt,
+      result: parsed
+    };
+  } catch (error) {
+    await auditPlatformService(req, admin, 'platform.logs.cleanup.failed', 'critical', {
+      status: 'failed',
+      mode: applyCleanup ? 'apply' : 'dry_run',
+      duration_ms: Date.now() - startedAt,
+      message: safeCommandOutput(error.message || String(error))
+    });
+    throw httpError(500, 'Não foi possível executar a limpeza de logs.');
+  }
+}
+
+function parseJsonOutput(output) {
+  const lines = String(output || '').trim().split(/\r?\n/).filter(Boolean);
+  const jsonLine = [...lines].reverse().find((line) => line.trim().startsWith('{'));
+  if (!jsonLine) throw new Error('Comando não retornou JSON válido.');
+  return JSON.parse(jsonLine);
+}
+
+async function restartPlatformApplication(req, admin, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const serviceName = cleanText(process.env.PLATFORM_SERVICE_NAME || 'cardapio.service');
+  if (!parseBoolean(process.env.PLATFORM_ALLOW_SERVICE_CONTROL, false)) {
+    await auditPlatformService(req, admin, 'platform.service.app.restart', 'warning', {
+      status: 'blocked',
+      message: 'Restart solicitado, mas PLATFORM_ALLOW_SERVICE_CONTROL não está habilitado.',
+      service_name: serviceName
+    });
+    throw httpError(403, 'Controle de serviço não habilitado neste ambiente. Configure PLATFORM_ALLOW_SERVICE_CONTROL=true para liberar.');
+  }
+  await auditPlatformService(req, admin, 'platform.service.app.restart', 'warning', {
+    status: 'scheduled',
+    message: 'Restart da aplicação agendado.',
+    service_name: serviceName
+  });
+  setTimeout(() => {
+    const child = spawn('systemctl', ['restart', serviceName], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+  }, 500).unref?.();
+  return { ok: true, scheduled: true, service_name: serviceName };
+}
+
+async function platformWebhookServiceStatus() {
+  const rows = await dbRequest('GET', 'audit_logs', {
+    select: 'id,action,severity,created_at',
+    order: 'created_at.desc',
+    limit: '200'
+  }).catch(() => []);
+  const webhookRows = rows.filter((row) => /webhook/i.test(row.action || '')).slice(0, 50);
+  const failures = webhookRows.filter((row) => row.severity === 'critical' || /fail|erro|failed/i.test(row.action || ''));
+  return {
+    status: failures.length ? 'attention' : 'healthy',
+    recent_events: webhookRows.length,
+    recent_failures: failures.length,
+    last_event_at: webhookRows[0]?.created_at || null
+  };
+}
+
+async function getGitRuntimeInfo() {
+  const [commit, branch] = await Promise.all([
+    runCommand('git', ['rev-parse', '--short', 'HEAD'], { timeoutMs: 5000 }).catch(() => ({ stdout: '' })),
+    runCommand('git', ['branch', '--show-current'], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))
+  ]);
+  return {
+    commit: cleanText(commit.stdout || '').slice(0, 40) || 'indisponível',
+    branch: cleanText(branch.stdout || '').slice(0, 80) || 'indisponível',
+    deployed_at: null
+  };
+}
+
+async function assertPlatformDangerConfirmation(req, admin, data = {}, expected = 'CONFIRMAR') {
+  if (cleanText(data.confirmation || data.confirm || '') !== expected) {
+    await auditPlatformService(req, admin, 'platform.service.confirmation.failed', 'warning', {
+      status: 'failed',
+      message: 'Texto de confirmação inválido.'
+    });
+    throw httpError(422, `Digite ${expected} para confirmar esta ação.`);
+  }
+  const password = String(data.password || '');
+  if (!password) {
+    await auditPlatformService(req, admin, 'platform.service.password.failed', 'warning', {
+      status: 'failed',
+      message: 'Senha do superadmin ausente.'
+    });
+    throw httpError(401, 'Informe sua senha para confirmar esta ação.');
+  }
+  const [current] = await dbRequest('GET', 'admin_users', {
+    select: 'id,password_hash,role,is_active,email',
+    id: `eq.${cleanUuid(admin.id)}`,
+    limit: '1'
+  });
+  if (!current || current.is_active === false || normalizeAdminRole(current.role) !== 'superadmin' || !verifyPassword(password, current.password_hash)) {
+    await auditPlatformService(req, admin, 'platform.service.password.failed', 'critical', {
+      status: 'failed',
+      message: 'Senha do superadmin inválida.'
+    });
+    throw httpError(403, 'Senha inválida para executar esta ação.');
+  }
+  return true;
+}
+
+async function auditPlatformService(req, admin, action, severity, payload = {}) {
+  await audit(action, {
+    req,
+    actor_admin_id: admin?.id || null,
+    company_id: admin?.company_id || null,
+    entity_type: 'platform_service',
+    severity,
+    after_data: {
+      ...payload,
+      actor_email: admin?.email || null
+    }
+  });
+}
+
+function runNodeScript(scriptPath, args = [], options = {}) {
+  return runCommand(process.execPath, [path.join(__dirname, scriptPath), ...args], options);
+}
+
+function runCommand(command, args = [], options = {}) {
+  const timeoutMs = options.timeoutMs || 30000;
+  return new Promise((resolve, reject) => {
+    const child = spawn(resolveExecutable(command), args, {
+      cwd: __dirname,
+      env: { ...process.env, ...(options.env || {}) },
+      shell: false
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('Tempo esgotado ao executar comando operacional.'));
+    }, timeoutMs);
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+      if (stdout.length > 12000) stdout = stdout.slice(-12000);
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 12000) stderr = stderr.slice(-12000);
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      const result = { code: code || 0, stdout, stderr };
+      if (code && code !== 0) {
+        reject(new Error(safeCommandOutput(stderr || stdout || `Comando finalizou com código ${code}.`)));
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
+function resolveExecutable(command) {
+  if (process.platform !== 'win32' || path.isAbsolute(command) || command.includes(path.sep)) {
+    return command;
+  }
+  const lookup = spawnSync('where.exe', [command], { encoding: 'utf8', shell: false });
+  const first = String(lookup.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return first || command;
+}
+
+function safeCommandOutput(value) {
+  return maskSensitiveText(String(value || '').replace(/\r/g, '').trim()).slice(0, 2000);
+}
+
+function maskSensitiveText(value) {
+  let output = String(value || '');
+  const secrets = [
+    DATABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.COOKIE_SECRET,
+    PLATFORM_BILLING_API_KEY,
+    PLATFORM_BILLING_WEBHOOK_SECRET
+  ].filter(Boolean);
+  for (const secret of secrets) {
+    if (secret && output.includes(secret)) output = output.split(secret).join('[redacted]');
+  }
+  output = output.replace(/(postgres(?:ql)?:\/\/)[^\s]+/gi, '$1[redacted]');
+  output = output.replace(/(password|secret|token|api[_-]?key)=([^\s&]+)/gi, '$1=[redacted]');
+  return output;
+}
+
+async function writeBackupStatus(data) {
+  await mkdir(BACKUP_DIR, { recursive: true });
+  await writeFile(path.join(BACKUP_DIR, 'backup-status.json'), JSON.stringify({
+    ...data,
+    updated_at: new Date().toISOString()
+  }, null, 2));
+}
+
 async function platformOperationalHealth(params = new URLSearchParams()) {
   const period = platformHealthPeriod(params.get?.('period') || '24h');
   const [database, backup, operationalLogs] = await Promise.all([
     checkDatabaseHealth(),
     platformBackupStatus(),
-    listOperationalLogs(period.since)
+    listOperationalLogs(period.since, params)
   ]);
-  const metrics = platformMetricsSnapshot(period);
+  const metrics = await platformTechnicalMetrics(period, database, backup);
   const config = await platformConfigChecklist();
   const statuses = [
-    platformStatus('api', 'Aplicação/API', 'healthy', `Servidor ativo desde ${new Date(Date.now() - process.uptime() * 1000).toLocaleString('pt-BR')}.`, null),
+    apiHealthStatus(metrics),
     database,
     platformStatus('auth', 'Autenticação', config.items.find((item) => item.key === 'cookie_secret')?.ok === false ? 'attention' : 'healthy', 'Sessões administrativas e cookies operando.', null),
     billingHealthStatus(),
     webhookHealthStatus(operationalLogs),
     backupHealthStatus(backup),
-    platformStatus('jobs', 'Filas/jobs', 'unknown', 'Nenhuma fila dedicada configurada neste projeto.', null),
-    await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads')
+    jobsHealthStatus(),
+    await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads'),
+    sslDomainHealthStatus(),
+    smtpHealthStatus()
   ];
   const alerts = platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs });
   return normalizePortuguesePayload({
@@ -4037,6 +5929,56 @@ async function platformOperationalHealth(params = new URLSearchParams()) {
     config,
     alerts,
     logs: operationalLogs
+  });
+}
+
+async function platformOperationalMetrics(params = new URLSearchParams()) {
+  const period = platformHealthPeriod(params.get?.('period') || '24h');
+  const [database, backup] = await Promise.all([
+    checkDatabaseHealth(),
+    platformBackupStatus()
+  ]);
+  return normalizePortuguesePayload({
+    generated_at: new Date().toISOString(),
+    period: period.label,
+    metrics: await platformTechnicalMetrics(period, database, backup)
+  });
+}
+
+async function platformOperationalAlertsEndpoint(params = new URLSearchParams()) {
+  const period = platformHealthPeriod(params.get?.('period') || '24h');
+  const [database, backup, operationalLogs] = await Promise.all([
+    checkDatabaseHealth(),
+    platformBackupStatus(),
+    listOperationalLogs(period.since, params)
+  ]);
+  const metrics = await platformTechnicalMetrics(period, database, backup);
+  const config = await platformConfigChecklist();
+  const statuses = [
+    apiHealthStatus(metrics),
+    database,
+    platformStatus('auth', 'Autenticação', config.items.find((item) => item.key === 'cookie_secret')?.ok === false ? 'attention' : 'healthy', 'Sessões administrativas e cookies operando.', null),
+    billingHealthStatus(),
+    webhookHealthStatus(operationalLogs),
+    backupHealthStatus(backup),
+    jobsHealthStatus(),
+    await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads'),
+    sslDomainHealthStatus(),
+    smtpHealthStatus()
+  ];
+  return normalizePortuguesePayload({
+    generated_at: new Date().toISOString(),
+    period: period.label,
+    alerts: platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs })
+  });
+}
+
+async function platformOperationalLogs(params = new URLSearchParams()) {
+  const period = platformHealthPeriod(params.get?.('period') || '24h');
+  return normalizePortuguesePayload({
+    generated_at: new Date().toISOString(),
+    period: period.label,
+    logs: await listOperationalLogs(period.since, params)
   });
 }
 
@@ -4067,11 +6009,104 @@ function platformMetricsSnapshot(period) {
   const stats = (entries) => latencyStats(entries.map((entry) => entry.duration_ms));
   return {
     period: period.label,
-    api: { ...stats(apiRows), requests: apiRows.length, errors_5xx: apiRows.filter((entry) => entry.status >= 500).length },
+    api: {
+      ...stats(apiRows),
+      requests: apiRows.length,
+      errors_5xx: apiRows.filter((entry) => entry.status >= 500).length,
+      requests_per_minute: requestsPerMinute(apiRows, period)
+    },
     database: { average_ms: null, p95_ms: null, p99_ms: null, source: 'verificação atual no card de banco' },
     checkout: { ...stats(checkoutRows), requests: checkoutRows.length },
     order_mutations: { ...stats(orderMutationRows), requests: orderMutationRows.length }
   };
+}
+
+async function platformTechnicalMetrics(period, databaseStatus = null, backup = null) {
+  const metrics = platformMetricsSnapshot(period);
+  const [uploadsDisk, backupsDisk] = await Promise.all([
+    diskUsageForPath(UPLOAD_DIR).catch(() => null),
+    diskUsageForPath(BACKUP_DIR).catch(() => null)
+  ]);
+  metrics.database = {
+    average_ms: databaseStatus?.latency_ms ?? null,
+    p95_ms: databaseStatus?.latency_ms ?? null,
+    p99_ms: databaseStatus?.latency_ms ?? null,
+    status: databaseStatus?.status || 'unknown',
+    source: 'verificação atual'
+  };
+  metrics.system = {
+    memory: memorySnapshot(),
+    cpu: cpuSnapshot(),
+    disk: {
+      uploads: uploadsDisk,
+      backups: backupsDisk,
+      lowest_free_percent: lowestFreePercent([uploadsDisk, backupsDisk])
+    },
+    uptime_seconds: Math.floor(process.uptime()),
+    node: process.version
+  };
+  metrics.storage = {
+    uploads_dir: safeDirectoryLabel(UPLOAD_DIR),
+    backups_dir: safeDirectoryLabel(BACKUP_DIR),
+    backup_latest_size_bytes: backup?.latest?.size_bytes || 0,
+    upload_free_bytes: uploadsDisk?.free_bytes ?? null,
+    backup_free_bytes: backupsDisk?.free_bytes ?? null
+  };
+  return metrics;
+}
+
+function requestsPerMinute(rows, period) {
+  const minutes = Math.max(1, Math.ceil((Date.now() - period.since) / 60000));
+  return Number((rows.length / minutes).toFixed(2));
+}
+
+function memorySnapshot() {
+  const memory = process.memoryUsage();
+  return {
+    rss_bytes: memory.rss,
+    heap_used_bytes: memory.heapUsed,
+    heap_total_bytes: memory.heapTotal,
+    external_bytes: memory.external,
+    system_total_bytes: os.totalmem(),
+    system_free_bytes: os.freemem(),
+    system_used_percent: os.totalmem() ? Number((((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(1)) : null
+  };
+}
+
+function cpuSnapshot() {
+  const cpus = os.cpus() || [];
+  const load = os.loadavg?.() || [0, 0, 0];
+  const cores = cpus.length || 1;
+  return {
+    cores,
+    load_1m: Number(load[0] || 0),
+    load_5m: Number(load[1] || 0),
+    load_15m: Number(load[2] || 0),
+    load_percent: load[0] ? Number(Math.min(100, (load[0] / cores) * 100).toFixed(1)) : null
+  };
+}
+
+async function diskUsageForPath(directory) {
+  await mkdir(directory, { recursive: true });
+  const info = await statfs(directory);
+  const total = Number(info.blocks || 0) * Number(info.bsize || 0);
+  const free = Number(info.bavail || info.bfree || 0) * Number(info.bsize || 0);
+  return {
+    path: safeDirectoryLabel(directory),
+    total_bytes: total || null,
+    free_bytes: free || null,
+    used_bytes: total && free !== null ? total - free : null,
+    free_percent: total ? Number(((free / total) * 100).toFixed(1)) : null
+  };
+}
+
+function lowestFreePercent(rows = []) {
+  const values = rows.map((row) => row?.free_percent).filter((value) => Number.isFinite(value));
+  return values.length ? Math.min(...values) : null;
+}
+
+function safeDirectoryLabel(directory) {
+  return path.basename(directory) ? `.../${path.basename(directory)}` : 'configurado';
 }
 
 function latencyStats(values = []) {
@@ -4089,6 +6124,13 @@ function percentile(values, ratio) {
   if (!values.length) return null;
   const index = Math.min(values.length - 1, Math.ceil(values.length * ratio) - 1);
   return Math.round(values[index]);
+}
+
+function apiHealthStatus(metrics) {
+  const api = metrics?.api || {};
+  if (Number(api.errors_5xx || 0) >= 5) return platformStatus('api', 'Aplicação/API', 'error', `${Number(api.errors_5xx || 0)} erro(s) 5xx no período.`, api.average_ms);
+  if (Number(api.p95_ms || 0) > 1500) return platformStatus('api', 'Aplicação/API', 'attention', `P95 alto: ${api.p95_ms} ms.`, api.average_ms);
+  return platformStatus('api', 'Aplicação/API', 'healthy', `Servidor ativo desde ${new Date(Date.now() - process.uptime() * 1000).toLocaleString('pt-BR')}.`, api.average_ms);
 }
 
 async function checkDatabaseHealth() {
@@ -4122,6 +6164,673 @@ function billingHealthStatus() {
     configured ? 'Provider e API key configurados.' : 'API key de billing não configurada; ativações podem ficar em modo manual/mock.',
     null
   );
+}
+
+function jobsHealthStatus() {
+  const backupScript = existsSync(path.join(__dirname, 'scripts', 'backup-postgres.mjs'));
+  const cleanupScript = existsSync(path.join(__dirname, 'scripts', 'cleanup-inactive-trials.mjs'));
+  if (!backupScript || !cleanupScript) return platformStatus('jobs', 'Jobs/rotinas', 'attention', 'Alguma rotina operacional não foi encontrada.', null);
+  return platformStatus('jobs', 'Jobs/rotinas', 'healthy', 'Rotinas de backup e limpeza de trials disponíveis.', null);
+}
+
+function sslDomainHealthStatus() {
+  const appUrl = process.env.PUBLIC_APP_URL || process.env.APP_URL || '';
+  if (!appUrl) return platformStatus('ssl', 'SSL/domínio', 'unknown', 'APP_URL/PUBLIC_APP_URL não configurada.', null);
+  try {
+    const parsed = new URL(appUrl);
+    if (parsed.protocol !== 'https:') return platformStatus('ssl', 'SSL/domínio', 'attention', 'URL pública não está em HTTPS.', null);
+    return platformStatus('ssl', 'SSL/domínio', 'healthy', `HTTPS configurado para ${parsed.hostname}.`, null);
+  } catch {
+    return platformStatus('ssl', 'SSL/domínio', 'attention', 'URL pública inválida.', null);
+  }
+}
+
+function smtpHealthStatus() {
+  const configured = Boolean(process.env.SMTP_URL || process.env.SMTP_HOST);
+  return platformStatus(
+    'smtp',
+    'SMTP/e-mail',
+    configured ? 'healthy' : 'unknown',
+    configured ? 'Configuração SMTP encontrada.' : 'SMTP não configurado neste ambiente.',
+    null
+  );
+}
+
+async function getPlatformSmtpSettings() {
+  const rows = await dbRequest('GET', 'platform_smtp_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const row = rows[0] || null;
+  if (!row) {
+    return publicSmtpSettings({
+      host: process.env.SMTP_HOST || '',
+      port: Number(process.env.SMTP_PORT || 587),
+      username: process.env.SMTP_USER || '',
+      password_token: process.env.SMTP_PASS || process.env.SMTP_TOKEN || '',
+      from_email: process.env.SMTP_FROM_EMAIL || '',
+      from_name: process.env.SMTP_FROM_NAME || '',
+      reply_to: process.env.SMTP_REPLY_TO || '',
+      use_tls: parseBoolean(process.env.SMTP_TLS, true),
+      is_active: Boolean(process.env.SMTP_HOST || process.env.SMTP_URL),
+      source: process.env.SMTP_HOST || process.env.SMTP_URL ? 'env' : 'empty'
+    });
+  }
+  return publicSmtpSettings(row);
+}
+
+async function updatePlatformSmtpSettings(req, admin, data = {}) {
+  const currentRows = await dbRequest('GET', 'platform_smtp_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch((error) => {
+    throw httpError(500, 'Tabela de SMTP não encontrada. Execute as migrations antes de configurar SMTP.', { cause: error.message });
+  });
+  const current = currentRows[0] || null;
+  const password = String(data.password_token || data.password || '').trim();
+  const payload = {
+    host: cleanText(data.host || '').slice(0, 255) || null,
+    port: clampNumber(Number(data.port || 587), 1, 65535),
+    username: cleanText(data.username || '').slice(0, 255) || null,
+    ...(password ? { password_token: password } : {}),
+    from_email: cleanEmail(data.from_email || '') || null,
+    from_name: cleanText(data.from_name || '').slice(0, 180) || null,
+    reply_to: cleanEmail(data.reply_to || '') || null,
+    use_tls: data.use_tls !== false,
+    is_active: data.is_active === true || data.is_active === 'true',
+    metadata: { updated_by: admin.id },
+    updated_at: new Date().toISOString()
+  };
+  if (!payload.host) throw httpError(422, 'Informe o host SMTP.');
+  if (!payload.from_email) throw httpError(422, 'Informe o remetente padrão.');
+  const [saved] = current
+    ? await dbRequest('PATCH', 'platform_smtp_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
+    : await dbRequest('POST', 'platform_smtp_settings', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await audit('platform.smtp.update', {
+    req,
+    actor_admin_id: admin.id,
+    entity_type: 'platform_smtp_settings',
+    entity_id: saved.id,
+    severity: 'warning',
+    before_data: current ? publicSmtpSettings(current) : null,
+    after_data: publicSmtpSettings(saved)
+  });
+  return publicSmtpSettings(saved);
+}
+
+function publicSmtpSettings(row = {}) {
+  return {
+    id: row.id || null,
+    host: row.host || '',
+    port: Number(row.port || 587),
+    username: row.username ? maskEmailOrToken(row.username) : '',
+    has_password: Boolean(row.password_token),
+    from_email: row.from_email || '',
+    from_name: row.from_name || '',
+    reply_to: row.reply_to || '',
+    use_tls: row.use_tls !== false,
+    is_active: row.is_active === true,
+    last_test_status: row.last_test_status || null,
+    last_test_at: row.last_test_at || null,
+    source: row.source || 'database',
+    updated_at: row.updated_at || null
+  };
+}
+
+function privateSmtpSettings(row = {}) {
+  return {
+    host: row.host || process.env.SMTP_HOST || '',
+    port: Number(row.port || process.env.SMTP_PORT || 587),
+    username: row.username || process.env.SMTP_USER || '',
+    password: row.password_token || process.env.SMTP_PASS || process.env.SMTP_TOKEN || '',
+    from_email: row.from_email || process.env.SMTP_FROM_EMAIL || '',
+    from_name: row.from_name || process.env.SMTP_FROM_NAME || '',
+    reply_to: row.reply_to || process.env.SMTP_REPLY_TO || '',
+    use_tls: row.use_tls !== false,
+    is_active: row.is_active === true || Boolean(process.env.SMTP_HOST || process.env.SMTP_URL)
+  };
+}
+
+function maskEmailOrToken(value = '') {
+  const text = String(value || '');
+  if (!text) return '';
+  if (text.includes('@')) {
+    const [name, domain] = text.split('@');
+    return `${name.slice(0, 2)}***@${domain}`;
+  }
+  return text.length <= 4 ? '****' : `${text.slice(0, 2)}***${text.slice(-2)}`;
+}
+
+async function sendPlatformSmtpTest(req, admin, data = {}) {
+  const target = cleanEmail(data.email || admin.email || '');
+  if (!target) throw httpError(422, 'Informe um e-mail válido para teste.');
+  try {
+    await sendPlatformEmail({
+      to: target,
+      subject: 'Teste de envio do Cardápio Digital',
+      body: `Olá ${admin.name || 'Admin Master'}, este é um teste de SMTP do Platform.`
+    });
+    await markSmtpTest('success');
+    await audit('platform.smtp.test', {
+      req,
+      actor_admin_id: admin.id,
+      entity_type: 'platform_smtp_settings',
+      severity: 'info',
+      after_data: { status: 'success', target_email: maskEmailOrToken(target) }
+    });
+    return { ok: true, message: 'E-mail de teste enviado com sucesso.' };
+  } catch (error) {
+    await markSmtpTest('failed').catch(() => {});
+    await audit('platform.smtp.test', {
+      req,
+      actor_admin_id: admin.id,
+      entity_type: 'platform_smtp_settings',
+      severity: 'warning',
+      after_data: { status: 'failed', target_email: maskEmailOrToken(target), message: error.message || 'Falha SMTP' }
+    });
+    throw httpError(502, 'Não foi possível enviar o e-mail de teste. Verifique host, porta, TLS, usuário e senha.');
+  }
+}
+
+async function markSmtpTest(status) {
+  const rows = await dbRequest('GET', 'platform_smtp_settings', { select: 'id', order: 'created_at.desc', limit: '1' }).catch(() => []);
+  if (!rows[0]) return;
+  await dbRequest('PATCH', 'platform_smtp_settings', { id: `eq.${rows[0].id}` }, {
+    last_test_status: status,
+    last_test_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']).catch(() => {});
+}
+
+async function sendPlatformEmail({ to, subject, body }) {
+  const rows = await dbRequest('GET', 'platform_smtp_settings', { select: '*', order: 'created_at.desc', limit: '1' }).catch(() => []);
+  const settings = privateSmtpSettings(rows[0] || {});
+  if (!settings.is_active || !settings.host || !settings.from_email) throw new Error('SMTP não configurado.');
+  const message = buildSmtpMessage({ to, subject, body, settings });
+  await smtpSend(settings, message, to);
+}
+
+function buildSmtpMessage({ to, subject, body, settings }) {
+  const fromName = settings.from_name || 'Cardápio Digital';
+  const headers = [
+    `From: ${encodeMailAddress(fromName, settings.from_email)}`,
+    `To: ${to}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    `Reply-To: ${settings.reply_to || settings.from_email}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: 8bit'
+  ];
+  return `${headers.join('\r\n')}\r\n\r\n${body}\r\n`;
+}
+
+function encodeMailAddress(name, email) {
+  return `${encodeMimeHeader(name)} <${email}>`;
+}
+
+function encodeMimeHeader(value) {
+  const text = String(value || '');
+  return /[^\x20-\x7E]/.test(text) ? `=?UTF-8?B?${Buffer.from(text).toString('base64')}?=` : text;
+}
+
+function smtpSend(settings, message, to) {
+  const useTls = settings.use_tls === true || Number(settings.port) === 465;
+  return new Promise((resolve, reject) => {
+    const socket = useTls
+      ? tls.connect({ host: settings.host, port: settings.port, servername: settings.host, rejectUnauthorized: false })
+      : net.connect({ host: settings.host, port: settings.port });
+    let buffer = '';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('Tempo esgotado no SMTP.'));
+    }, 15000);
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve(true);
+    };
+    const read = (expected) => new Promise((res, rej) => {
+      const onData = (chunk) => {
+        buffer += chunk.toString('utf8');
+        const lines = buffer.split(/\r?\n/).filter(Boolean);
+        const last = lines[lines.length - 1] || '';
+        if (/^\d{3} /.test(last)) {
+          socket.off('data', onData);
+          const code = Number(last.slice(0, 3));
+          if (!expected.includes(code)) rej(new Error(`SMTP respondeu ${code}.`));
+          else {
+            buffer = '';
+            res(last);
+          }
+        }
+      };
+      socket.on('data', onData);
+      socket.once('error', rej);
+    });
+    const write = (line) => socket.write(`${line}\r\n`);
+    socket.once('error', (error) => {
+      finish(error);
+    });
+    socket.once('connect', async () => {
+      try {
+        await read([220]);
+        write(`EHLO ${process.env.SMTP_EHLO_DOMAIN || 'localhost'}`);
+        await read([250]);
+        if (settings.username && settings.password) {
+          write('AUTH LOGIN');
+          await read([334]);
+          write(Buffer.from(settings.username).toString('base64'));
+          await read([334]);
+          write(Buffer.from(settings.password).toString('base64'));
+          await read([235]);
+        }
+        write(`MAIL FROM:<${settings.from_email}>`);
+        await read([250]);
+        write(`RCPT TO:<${to}>`);
+        await read([250, 251]);
+        write('DATA');
+        await read([354]);
+        socket.write(`${message.replace(/\r?\n\./g, '\r\n..')}\r\n.\r\n`);
+        await read([250]);
+        write('QUIT');
+        await read([221, 250]).catch(() => {});
+        finish();
+      } catch (error) {
+        finish(error);
+      }
+    });
+  });
+}
+
+const EMAIL_TEMPLATE_DEFINITIONS = [
+  { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}}, seja bem-vindo ao {{store_name}}. Acesse {{dashboard_url}} para começar.' },
+  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha', body: 'Olá {{customer_name}}, use o link {{dashboard_url}} para recuperar sua senha.' },
+  { key: 'trial_ending', name: 'Trial acabando', subject: 'Seu teste termina em breve', body: 'Olá {{company_name}}, seu teste do plano {{plan_name}} termina em {{due_date}}.' },
+  { key: 'payment_pending', name: 'Pagamento pendente', subject: 'Pagamento pendente do plano {{plan_name}}', body: 'Olá {{company_name}}, regularize o pagamento até {{due_date}} em {{payment_url}}.' },
+  { key: 'payment_approved', name: 'Pagamento aprovado', subject: 'Pagamento aprovado', body: 'Olá {{company_name}}, o pagamento do plano {{plan_name}} foi aprovado.' },
+  { key: 'account_suspended', name: 'Conta suspensa', subject: 'Sua conta foi suspensa', body: 'Olá {{company_name}}, sua conta foi suspensa. Acesse {{payment_url}} ou fale com o suporte.' },
+  { key: 'support_replied', name: 'Suporte respondeu', subject: 'O suporte respondeu seu chamado', body: 'Olá {{customer_name}}, respondemos seu chamado. Acesse {{dashboard_url}} para acompanhar.' }
+];
+
+const EMAIL_TEMPLATE_VARIABLES = ['store_name', 'company_name', 'customer_name', 'plan_name', 'due_date', 'dashboard_url', 'payment_url'];
+
+async function listPlatformEmailTemplates() {
+  const rows = await dbRequest('GET', 'email_templates', {
+    select: '*',
+    order: 'template_key.asc',
+    limit: '100'
+  }).catch(() => []);
+  const byKey = new Map(rows.map((row) => [row.template_key, row]));
+  return {
+    variables: EMAIL_TEMPLATE_VARIABLES,
+    templates: EMAIL_TEMPLATE_DEFINITIONS.map((definition) => publicEmailTemplate(byKey.get(definition.key) || {
+      template_key: definition.key,
+      name: definition.name,
+      subject: definition.subject,
+      body: definition.body,
+      variables: EMAIL_TEMPLATE_VARIABLES,
+      is_active: true
+    }))
+  };
+}
+
+async function updatePlatformEmailTemplates(req, admin, data = {}) {
+  const templates = Array.isArray(data.templates) ? data.templates : [data];
+  const saved = [];
+  for (const template of templates) {
+    const key = cleanTemplateKey(template.template_key || template.key || '');
+    if (!EMAIL_TEMPLATE_DEFINITIONS.some((entry) => entry.key === key)) throw httpError(422, 'Template de e-mail inválido.');
+    const definition = EMAIL_TEMPLATE_DEFINITIONS.find((entry) => entry.key === key);
+    const payload = {
+      template_key: key,
+      name: definition.name,
+      subject: cleanText(template.subject || '').slice(0, 240) || definition.subject,
+      body: cleanText(template.body || '').slice(0, 6000) || definition.body,
+      variables: EMAIL_TEMPLATE_VARIABLES,
+      is_active: template.is_active !== false,
+      updated_by: admin.id,
+      updated_at: new Date().toISOString()
+    };
+    const existing = await dbRequest('GET', 'email_templates', { select: 'id', template_key: `eq.${key}`, limit: '1' }).catch(() => {
+      throw httpError(500, 'Tabela de templates não encontrada. Execute as migrations antes de salvar templates.');
+    });
+    const [row] = existing[0]
+      ? await dbRequest('PATCH', 'email_templates', { id: `eq.${existing[0].id}` }, payload, ['Prefer: return=representation'])
+      : await dbRequest('POST', 'email_templates', {}, payload, ['Prefer: return=representation']);
+    saved.push(publicEmailTemplate(row));
+  }
+  await audit('platform.email_templates.update', {
+    req,
+    actor_admin_id: admin.id,
+    entity_type: 'email_template',
+    severity: 'warning',
+    after_data: { templates: saved.map((template) => template.template_key) }
+  });
+  return { templates: saved };
+}
+
+function cleanTemplateKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').replaceAll('-', '_');
+}
+
+function publicEmailTemplate(row = {}) {
+  return {
+    id: row.id || null,
+    template_key: row.template_key || row.key || '',
+    name: row.name || '',
+    subject: row.subject || '',
+    body: row.body || '',
+    variables: Array.isArray(row.variables) ? row.variables : EMAIL_TEMPLATE_VARIABLES,
+    is_active: row.is_active !== false,
+    updated_at: row.updated_at || null
+  };
+}
+
+async function listPlatformSupportTickets(params = new URLSearchParams()) {
+  const query = {
+    select: '*',
+    order: 'updated_at.desc',
+    limit: String(clampNumber(Number(params.get?.('limit') || 100), 1, 300))
+  };
+  const status = cleanSlug(params.get?.('status') || '');
+  const priority = cleanSlug(params.get?.('priority') || '');
+  const companyId = cleanOptionalUuid(params.get?.('company_id') || '');
+  if (status) query.status = `eq.${supportStatus(status)}`;
+  if (priority) query.priority = `eq.${supportPriority(priority)}`;
+  if (companyId) query.company_id = `eq.${companyId}`;
+  const tickets = await dbRequest('GET', 'support_tickets', query).catch(() => []);
+  return enrichSupportTickets(tickets, true);
+}
+
+async function listAdminSupportTickets(admin) {
+  const companyId = cleanUuid(admin.company_id);
+  const storeId = cleanUuid(admin.store_id);
+  const tickets = companyId ? await dbRequest('GET', 'support_tickets', {
+    select: '*',
+    company_id: `eq.${companyId}`,
+    ...(storeId ? { store_id: `eq.${storeId}` } : {}),
+    order: 'updated_at.desc',
+    limit: '100'
+  }).catch(() => []) : [];
+  return enrichSupportTickets(tickets, false);
+}
+
+async function enrichSupportTickets(tickets, includeInternal = false) {
+  const ids = cleanUuidArray(tickets.map((ticket) => ticket.id));
+  const companyIds = cleanUuidArray(tickets.map((ticket) => ticket.company_id));
+  const storeIds = cleanUuidArray(tickets.map((ticket) => ticket.store_id));
+  const [messages, companies, stores, admins] = await Promise.all([
+    ids.length ? dbRequest('GET', 'support_ticket_messages', {
+      select: '*',
+      ticket_id: uuidInFilter(ids),
+      order: 'created_at.asc',
+      limit: '1000'
+    }).catch(() => []) : [],
+    companyIds.length ? dbRequest('GET', 'companies', { select: 'id,name,billing_email,phone', id: uuidInFilter(companyIds), limit: '300' }).catch(() => []) : [],
+    storeIds.length ? dbRequest('GET', 'stores', { select: 'id,name,slug', id: uuidInFilter(storeIds), limit: '300' }).catch(() => []) : [],
+    dbRequest('GET', 'admin_users', { select: 'id,name,email', limit: '1000' }).catch(() => [])
+  ]);
+  const messagesByTicket = new Map();
+  for (const message of messages) {
+    if (!includeInternal && message.is_internal) continue;
+    if (!messagesByTicket.has(message.ticket_id)) messagesByTicket.set(message.ticket_id, []);
+    messagesByTicket.get(message.ticket_id).push(publicSupportMessage(message, admins));
+  }
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const storeById = new Map(stores.map((store) => [store.id, store]));
+  const adminById = new Map(admins.map((admin) => [admin.id, admin]));
+  return {
+    tickets: tickets.map((ticket) => publicSupportTicket(ticket, {
+      company: companyById.get(ticket.company_id),
+      store: storeById.get(ticket.store_id),
+      assignedAdmin: adminById.get(ticket.assigned_to_admin_id),
+      messages: messagesByTicket.get(ticket.id) || []
+    }))
+  };
+}
+
+function publicSupportTicket(ticket = {}, extra = {}) {
+  return {
+    id: ticket.id,
+    company_id: ticket.company_id || null,
+    company_name: extra.company?.name || null,
+    store_id: ticket.store_id || null,
+    store_name: extra.store?.name || null,
+    admin_user_id: ticket.admin_user_id || null,
+    assigned_to_admin_id: ticket.assigned_to_admin_id || null,
+    assigned_to_admin_name: extra.assignedAdmin?.name || null,
+    assigned_to_admin_email: extra.assignedAdmin?.email || null,
+    subject: ticket.subject || '',
+    category: ticket.category || '',
+    status: ticket.status || 'open',
+    priority: ticket.priority || 'medium',
+    source: ticket.source || 'admin',
+    last_message_at: ticket.last_message_at || null,
+    created_at: ticket.created_at,
+    updated_at: ticket.updated_at,
+    messages: extra.messages || []
+  };
+}
+
+function publicSupportMessage(message = {}, admins = []) {
+  const admin = admins.find((entry) => entry.id === message.author_admin_id);
+  return {
+    id: message.id,
+    ticket_id: message.ticket_id,
+    author_type: message.author_type || 'admin',
+    author_name: admin?.name || (message.author_type === 'support' ? 'Suporte' : 'Cliente'),
+    message: message.message || '',
+    is_internal: message.is_internal === true,
+    created_at: message.created_at
+  };
+}
+
+async function createAdminSupportTicket(req, admin, data = {}) {
+  const subject = cleanText(data.subject || '').slice(0, 180);
+  const message = cleanText(data.message || '').slice(0, 5000);
+  if (!subject) throw httpError(422, 'Informe o assunto do chamado.');
+  if (!message) throw httpError(422, 'Informe a mensagem do chamado.');
+  const [ticket] = await dbRequest('POST', 'support_tickets', {}, {
+    company_id: cleanOptionalUuid(admin.company_id || '') || null,
+    store_id: cleanOptionalUuid(admin.store_id || '') || null,
+    admin_user_id: admin.id,
+    created_by_admin_id: admin.id,
+    subject,
+    category: cleanText(data.category || '').slice(0, 80) || null,
+    priority: supportPriority(data.priority || 'medium'),
+    status: 'open',
+    source: 'admin',
+    last_message_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  await dbRequest('POST', 'support_ticket_messages', {}, {
+    ticket_id: ticket.id,
+    author_admin_id: admin.id,
+    author_type: 'admin',
+    message,
+    is_internal: false
+  }, ['Prefer: return=minimal']);
+  await audit('admin.support.ticket.create', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id,
+    after_data: { subject, priority: ticket.priority }
+  });
+  return publicSupportTicket(ticket, { messages: [{ message, author_type: 'admin', created_at: new Date().toISOString() }] });
+}
+
+async function createPlatformSupportTicket(req, admin, data = {}) {
+  const subject = cleanText(data.subject || '').slice(0, 180);
+  const message = cleanText(data.message || '').slice(0, 5000);
+  if (!subject) throw httpError(422, 'Informe o assunto do chamado.');
+  const companyId = cleanOptionalUuid(data.company_id || '');
+  const storeId = cleanOptionalUuid(data.store_id || '');
+  const [ticket] = await dbRequest('POST', 'support_tickets', {}, {
+    company_id: companyId || null,
+    store_id: storeId || null,
+    admin_user_id: cleanOptionalUuid(data.admin_user_id || '') || null,
+    created_by_admin_id: admin.id,
+    assigned_to_admin_id: admin.id,
+    subject,
+    category: cleanText(data.category || '').slice(0, 80) || null,
+    status: supportStatus(data.status || 'open'),
+    priority: supportPriority(data.priority || 'medium'),
+    source: 'platform',
+    last_message_at: message ? new Date().toISOString() : null
+  }, ['Prefer: return=representation']);
+  if (message) {
+    await dbRequest('POST', 'support_ticket_messages', {}, {
+      ticket_id: ticket.id,
+      author_admin_id: admin.id,
+      author_type: 'support',
+      message,
+      is_internal: data.is_internal === true
+    }, ['Prefer: return=minimal']);
+  }
+  await audit('platform.support.ticket.create', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId || null,
+    store_id: storeId || null,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id,
+    after_data: { subject, priority: ticket.priority, status: ticket.status }
+  });
+  return publicSupportTicket(ticket);
+}
+
+async function createPlatformSupportMessage(req, admin, ticketId, data = {}) {
+  const ticket = await getSupportTicket(ticketId);
+  const messageText = cleanText(data.message || '').slice(0, 5000);
+  if (!messageText) throw httpError(422, 'Informe a mensagem.');
+  const isInternal = data.is_internal === true;
+  const [message] = await dbRequest('POST', 'support_ticket_messages', {}, {
+    ticket_id: ticket.id,
+    author_admin_id: admin.id,
+    author_type: isInternal ? 'internal' : 'support',
+    message: messageText,
+    is_internal: isInternal
+  }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'support_tickets', { id: `eq.${ticket.id}` }, {
+    status: isInternal ? ticket.status : 'waiting_customer',
+    last_message_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('platform.support.ticket.message', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: ticket.company_id,
+    store_id: ticket.store_id,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id,
+    after_data: { is_internal: isInternal }
+  });
+  if (!isInternal) await notifySupportTicket(ticket, 'support_replied').catch(() => {});
+  return publicSupportMessage(message, [admin]);
+}
+
+async function updatePlatformSupportTicket(req, admin, ticketId, data = {}) {
+  const ticket = await getSupportTicket(ticketId);
+  const payload = {};
+  if ('status' in data) payload.status = supportStatus(data.status);
+  if ('priority' in data) payload.priority = supportPriority(data.priority);
+  if ('assigned_to_admin_id' in data) payload.assigned_to_admin_id = cleanOptionalUuid(data.assigned_to_admin_id || '') || null;
+  if ('company_id' in data) payload.company_id = cleanOptionalUuid(data.company_id || '') || null;
+  if ('store_id' in data) payload.store_id = cleanOptionalUuid(data.store_id || '') || null;
+  if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
+  payload.updated_at = new Date().toISOString();
+  const [updated] = await dbRequest('PATCH', 'support_tickets', { id: `eq.${ticket.id}` }, payload, ['Prefer: return=representation']);
+  await audit('platform.support.ticket.update', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: updated.company_id,
+    store_id: updated.store_id,
+    entity_type: 'support_ticket',
+    entity_id: updated.id,
+    before_data: { status: ticket.status, priority: ticket.priority },
+    after_data: payload
+  });
+  if (payload.status && payload.status !== ticket.status) await notifySupportTicket(updated, 'support_replied').catch(() => {});
+  return publicSupportTicket(updated);
+}
+
+async function getSupportTicket(ticketId) {
+  const id = cleanUuid(ticketId, 'chamado');
+  const [ticket] = await dbRequest('GET', 'support_tickets', { select: '*', id: `eq.${id}`, limit: '1' });
+  if (!ticket) throw httpError(404, 'Chamado não encontrado.');
+  return ticket;
+}
+
+function supportStatus(value) {
+  const status = cleanSlug(value || '');
+  const map = {
+    open: 'open',
+    aberto: 'open',
+    waiting_customer: 'waiting_customer',
+    'waiting-customer': 'waiting_customer',
+    aguardando_cliente: 'waiting_customer',
+    'aguardando-cliente': 'waiting_customer',
+    in_review: 'in_review',
+    'in-review': 'in_review',
+    em_analise: 'in_review',
+    'em-analise': 'in_review',
+    resolved: 'resolved',
+    resolvido: 'resolved',
+    closed: 'closed',
+    fechado: 'closed'
+  };
+  if (map[status]) return map[status];
+  throw httpError(422, 'Status de chamado inválido.');
+}
+
+function supportPriority(value) {
+  const priority = cleanSlug(value || 'medium');
+  const map = {
+    low: 'low',
+    baixa: 'low',
+    medium: 'medium',
+    media: 'medium',
+    high: 'high',
+    alta: 'high',
+    critical: 'critical',
+    critica: 'critical'
+  };
+  if (map[priority]) return map[priority];
+  throw httpError(422, 'Prioridade de chamado inválida.');
+}
+
+async function notifySupportTicket(ticket, templateKey) {
+  const [company] = ticket.company_id ? await dbRequest('GET', 'companies', { select: 'name,billing_email', id: `eq.${ticket.company_id}`, limit: '1' }).catch(() => []) : [];
+  const [admin] = ticket.admin_user_id ? await dbRequest('GET', 'admin_users', { select: 'name,email', id: `eq.${ticket.admin_user_id}`, limit: '1' }).catch(() => []) : [];
+  const to = cleanEmail(admin?.email || company?.billing_email || '');
+  if (!to) return;
+  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === templateKey);
+  if (!template?.is_active) return;
+  const variables = {
+    store_name: '',
+    company_name: company?.name || '',
+    customer_name: admin?.name || company?.name || 'cliente',
+    plan_name: '',
+    due_date: '',
+    dashboard_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin`,
+    payment_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin`
+  };
+  await sendPlatformEmail({
+    to,
+    subject: renderEmailTemplate(template.subject, variables),
+    body: renderEmailTemplate(template.body, variables)
+  });
+}
+
+function renderEmailTemplate(text, variables = {}) {
+  return String(text || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => cleanText(variables[key] ?? ''));
 }
 
 function webhookHealthStatus(logs = []) {
@@ -4243,6 +6952,18 @@ function platformHealthAlerts({ statuses, metrics, config, backup, operationalLo
   if (metrics.api.errors_5xx >= 5) {
     add('api_5xx', 'critical', 'Erros 5xx frequentes', `${metrics.api.errors_5xx} erro(s) 5xx no período em memória.`, 'Verifique logs e rotas com falha.');
   }
+  if (Number(metrics.database?.average_ms || 0) > 800) {
+    add('database_slow', 'warning', 'Banco lento', `Banco respondeu em ${metrics.database.average_ms} ms.`, 'Verifique carga, índices e conexão PostgreSQL.');
+  }
+  if (Number(metrics.system?.disk?.lowest_free_percent ?? 100) < 15) {
+    add('disk_low', 'critical', 'Espaço em disco baixo', `Menos de ${metrics.system.disk.lowest_free_percent}% livre em uploads/backups.`, 'Limpe arquivos antigos ou aumente o volume.');
+  }
+  if (!PLATFORM_BILLING_API_KEY) {
+    add('abacatepay_missing', 'warning', 'Abacate Pay desconfigurado', 'API key de billing não encontrada.', 'Configure ABACATEPAY_API_KEY no servidor.');
+  }
+  if (!(process.env.SMTP_URL || process.env.SMTP_HOST)) {
+    add('smtp_missing', 'attention', 'SMTP não configurado', 'Envio de e-mails operacionais não está disponível.', 'Configure SMTP_URL ou SMTP_HOST quando habilitar e-mails.');
+  }
   if (metrics.api.p95_ms && metrics.api.p95_ms > 1500) {
     add('latency', 'warning', 'Latência alta', `P95 da API em ${metrics.api.p95_ms} ms.`, 'Verifique banco, integrações e servidor.');
   }
@@ -4253,55 +6974,97 @@ function platformHealthAlerts({ statuses, metrics, config, backup, operationalLo
   return alerts;
 }
 
-async function listOperationalLogs(sinceMs) {
-  const since = new Date(sinceMs).toISOString();
-  const [auditRows, events] = await Promise.all([
+async function listOperationalLogs(sinceMs, params = new URLSearchParams()) {
+  const last24h = Date.now() - 86400000;
+  const since = new Date(Math.max(Number(sinceMs || 0), last24h)).toISOString();
+  const companyId = cleanOptionalUuid(params.get?.('company_id') || params.get?.('tenant') || '');
+  const storeId = cleanOptionalUuid(params.get?.('store_id') || '');
+  const [auditRows, events, companies, stores] = await Promise.all([
     dbRequest('GET', 'audit_logs', {
-      select: 'id,company_id,store_id,action,severity,entity_type,created_at',
+      select: 'id,company_id,store_id,action,severity,entity_type,actor_admin_id,ip_address,after_data,created_at',
       created_at: `gte.${since}`,
+      ...(companyId ? { company_id: `eq.${companyId}` } : {}),
+      ...(storeId ? { store_id: `eq.${storeId}` } : {}),
       order: 'created_at.desc',
-      limit: '80'
+      limit: '200'
     }).catch(() => []),
     dbRequest('GET', 'subscription_events', {
-      select: 'id,company_id,event_type,description,created_at',
+      select: 'id,company_id,event_type,description,metadata,created_at',
       created_at: `gte.${since}`,
+      ...(companyId ? { company_id: `eq.${companyId}` } : {}),
       order: 'created_at.desc',
-      limit: '80'
-    }).catch(() => [])
+      limit: '200'
+    }).catch(() => []),
+    dbRequest('GET', 'companies', { select: 'id,name', limit: '1500' }).catch(() => []),
+    dbRequest('GET', 'stores', { select: 'id,name,slug', limit: '3000' }).catch(() => [])
   ]);
+  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const storeById = new Map(stores.map((store) => [store.id, store]));
   const auditLogs = auditRows
-    .filter((row) => ['critical', 'warning'].includes(row.severity) || /(webhook|backup|billing|migration|deploy|integration)/i.test(row.action || ''))
+    .filter((row) => ['critical', 'warning'].includes(row.severity) || /(webhook|backup|billing|subscription|migration|deploy|integration|auth|login|platform\.service|superadmin|password)/i.test(row.action || ''))
     .map((row) => ({
       id: row.id,
       type: operationalLogType(row.action),
       status: row.severity === 'critical' ? 'failed' : row.severity === 'warning' ? 'attention' : 'info',
+      severity: row.severity || 'info',
+      service: operationalLogService(row.action),
       action: row.action,
       company_id: row.company_id || null,
+      company_name: companyById.get(row.company_id)?.name || null,
       store_id: row.store_id || null,
-      message: row.entity_type || row.action,
+      store_name: storeById.get(row.store_id)?.name || null,
+      message: maskSensitiveText(cleanText(row.after_data?.message || row.after_data?.summary || row.entity_type || row.action).slice(0, 500)),
       created_at: row.created_at
     }));
   const eventLogs = events.map((event) => ({
     id: event.id,
     type: operationalLogType(event.event_type),
     status: /failed|past_due|suspended|cancelled/i.test(event.event_type || '') ? 'failed' : 'info',
+    severity: /failed|past_due|suspended|cancelled/i.test(event.event_type || '') ? 'warning' : 'info',
+    service: 'billing',
     action: event.event_type,
     company_id: event.company_id || null,
+    company_name: companyById.get(event.company_id)?.name || null,
     store_id: null,
-    message: event.description || event.event_type,
+    store_name: null,
+    message: maskSensitiveText(cleanText(event.description || event.event_type).slice(0, 500)),
     created_at: event.created_at
   }));
+  const type = cleanSlug(params.get?.('type') || '');
+  const status = cleanSlug(params.get?.('status') || '');
+  const severity = cleanSlug(params.get?.('severity') || '');
+  const service = cleanSlug(params.get?.('service') || '');
+  const limit = clampNumber(Number(params.get?.('limit') || 100), 1, 300);
   return [...auditLogs, ...eventLogs]
+    .filter((entry) => !type || entry.type === type)
+    .filter((entry) => !status || entry.status === status)
+    .filter((entry) => !severity || entry.severity === severity)
+    .filter((entry) => !service || entry.service === service)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 100);
+    .slice(0, limit);
 }
 
 function operationalLogType(action = '') {
   if (/webhook/i.test(action)) return 'webhook';
   if (/backup/i.test(action)) return 'backup';
+  if (/trial_cleanup|job|maintenance/i.test(action)) return 'job';
   if (/billing|subscription|payment/i.test(action)) return 'billing';
+  if (/auth|login|password|session/i.test(action)) return 'auth';
+  if (/critical|fatal|error|failed/i.test(action)) return 'critical_error';
+  if (/platform\.service|restart|systemctl/i.test(action)) return 'service';
+  if (/superadmin|platform\.company|platform\.billing/i.test(action)) return 'superadmin_action';
   if (/deploy|migration/i.test(action)) return 'deploy';
   if (/integration/i.test(action)) return 'integration';
+  return 'system';
+}
+
+function operationalLogService(action = '') {
+  if (/abacate|billing|subscription|payment|webhook/i.test(action)) return 'billing';
+  if (/backup/i.test(action)) return 'backup';
+  if (/trial|job|maintenance/i.test(action)) return 'jobs';
+  if (/auth|login|password|session/i.test(action)) return 'auth';
+  if (/service|restart|systemctl/i.test(action)) return 'application';
+  if (/deploy|migration/i.test(action)) return 'deploy';
   return 'system';
 }
 
@@ -4565,6 +7328,23 @@ async function requireAdmin(req, res) {
     json(res, 401, { error: 'Faça login para acessar o admin.' });
     return null;
   }
+  if (isSupportModeExpired(session.data)) {
+    await audit('platform.support.impersonate.expired', {
+      req,
+      actor_admin_id: session.data?.support_mode?.original_admin_id || session.data?.id || null,
+      company_id: session.data?.company_id || null,
+      store_id: session.data?.store_id || null,
+      entity_type: 'support_session',
+      severity: 'warning',
+      after_data: {
+        target_store_id: session.data?.store_id || null,
+        original_admin_email: session.data?.support_mode?.original_admin_email || null
+      }
+    }).catch(() => {});
+    await deleteSession(token);
+    json(res, 401, { error: 'Sessão de suporte expirada. Entre novamente.' }, { 'Set-Cookie': clearCookie(ADMIN_COOKIE) });
+    return null;
+  }
   if (session.data?.session_version !== 2 || !session.data?.store_id) {
     session.data = await enrichAdminSessionData(session.data);
     if (token) {
@@ -4602,6 +7382,17 @@ async function requireAdminPermission(req, res, permission) {
     json(res, 403, { error: 'Sua conta não tem permissão para acessar esta área.' });
     return null;
   }
+  if (isSupportModeAdmin(admin) && supportModeRestrictedPermission(permission)) {
+    json(res, 403, { error: 'Modo suporte não permite executar esta ação sensível.' });
+    return null;
+  }
+  if (isSupportModeAdmin(admin) && !['account', 'plan', 'platform'].includes(permission)) {
+    if (!admin.store_id || cleanUuid(admin.store_id) !== cleanUuid(admin.support_mode?.target_store_id)) {
+      json(res, 403, { error: 'Sessão de suporte sem loja alvo válida.' });
+      return null;
+    }
+    return admin;
+  }
   if (!['account', 'plan', 'platform'].includes(permission)) {
     if (!admin.store_id) {
       json(res, 403, { error: 'Sua conta não possui uma loja ativa vinculada.' });
@@ -4632,20 +7423,47 @@ async function requireAdminPermission(req, res, permission) {
   return admin;
 }
 
-async function requirePlatformAdmin(req, res) {
+async function requirePlatformAdmin(req, res, permission = 'platform.view') {
   const admin = await requireAdmin(req, res);
   if (!admin) return null;
-  if (!isPlatformAdmin(admin)) {
+  if (!isPlatformAdmin(admin) || !platformAdminCan(admin, permission)) {
     json(res, 403, { error: 'Sua conta não tem acesso ao painel da plataforma.' });
     return null;
   }
   return admin;
 }
 
+const PLATFORM_PERMISSION_GROUPS = Object.freeze({
+  view: ['platform.view', 'platform.audit.view', 'platform.services.view'],
+  billing: ['platform.billing.manage'],
+  customer: ['platform.customer.suspend'],
+  services: ['platform.services.manage']
+});
+
+function platformPermissions(admin) {
+  if (normalizeAdminRole(admin?.role) !== 'superadmin') return [];
+  return [
+    'platform.view',
+    'platform.audit.view',
+    'platform.billing.manage',
+    'platform.customer.suspend',
+    'platform.services.view',
+    'platform.services.manage'
+  ];
+}
+
+function platformAdminCan(admin, permission) {
+  if (!permission) return isPlatformAdmin(admin);
+  return platformPermissions(admin).includes(permission);
+}
+
 function adminPermissions(admin) {
+  if (isSupportModeAdmin(admin)) {
+    return ['operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'integrations'];
+  }
   const role = normalizeAdminRole(admin?.role);
   if (role === 'superadmin') {
-    return ['platform', 'operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account', 'admin_users'];
+    return ['platform', ...platformPermissions(admin), 'operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account', 'admin_users'];
   }
   if (role === 'admin') {
     return ['operation', 'orders', 'menu', 'reports', 'tables', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account', 'admin_users'];
@@ -4688,14 +7506,18 @@ function adminPlanFeatureCodes() {
     'manual_whatsapp',
     'automatic_whatsapp',
     'print_kitchen',
-    'custom_domain'
+    'loyalty',
+    'reorder',
+    'cart_suggestions',
+    'custom_domain',
+    'priority_support'
   ];
 }
 
 function featureBlockedMessage(featureCode) {
   return ({
-    tables: 'Mesas e comandas não estão disponíveis no plano atual.',
-    promotions: 'Promoções e cupons não estão disponíveis no plano atual.',
+    tables: 'Mesas e comandas avançadas estão disponíveis a partir do Profissional.',
+    promotions: 'Cupons e campanhas estão disponíveis a partir do Profissional.',
     customers: 'Clientes não estão disponíveis no plano atual.',
     basic_reports: 'Relatórios não estão disponíveis no plano atual.',
     digital_menu: 'Cardápio não está disponível no plano atual.',
@@ -4704,9 +7526,13 @@ function featureBlockedMessage(featureCode) {
     store_settings: 'Configurações da loja não estão disponíveis no plano atual.',
     admin_users: 'Usuários da equipe não estão disponíveis no plano atual.',
     manual_whatsapp: 'WhatsApp manual não está disponível no plano atual.',
-    automatic_whatsapp: 'Automação de WhatsApp não está disponível no plano atual.',
-    print_kitchen: 'Impressão e cozinha não estão disponíveis no plano atual.',
-    custom_domain: 'Domínio personalizado não está disponível no plano atual.'
+    automatic_whatsapp: 'Automação de WhatsApp está disponível no Premium.',
+    print_kitchen: 'KDS, impressão e reimpressão estão disponíveis a partir do Profissional.',
+    loyalty: 'Fidelidade e recompensas estão disponíveis no Premium.',
+    reorder: 'Peça novamente está disponível a partir do Profissional.',
+    cart_suggestions: 'Sugestões no carrinho estão disponíveis no Premium.',
+    custom_domain: 'Domínio personalizado está disponível no Premium.',
+    priority_support: 'Suporte prioritário está disponível no Premium.'
   })[featureCode] || 'Recurso não disponível no plano atual.';
 }
 
@@ -4865,9 +7691,13 @@ async function currentUsageForKey(admin, usageKey) {
   };
   const table = tableByUsage[usageKey];
   if (!table || !scopedFilter) return 0;
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
   return (await dbRequest('GET', table, {
     select: 'id',
     store_id: scopedFilter,
+    ...(usageKey === 'orders' ? { created_at: `gte.${monthStart.toISOString()}` } : {}),
     limit: '1000'
   }).catch(() => [])).length;
 }
@@ -4978,7 +7808,8 @@ function usageLabel(usageKey) {
     menu_items: 'produtos',
     dining_tables: 'mesas',
     promotions: 'promoções',
-    customers: 'clientes'
+    customers: 'clientes',
+    orders: 'pedidos no mês'
   })[usageKey] || usageKey;
 }
 
@@ -4994,7 +7825,7 @@ function isFullAdminRole(role) {
 }
 
 function isPlatformAdmin(admin) {
-  return normalizeAdminRole(admin?.role) === 'superadmin' || adminCan(admin, 'platform');
+  return normalizeAdminRole(admin?.role) === 'superadmin';
 }
 
 async function registerCustomer(data, storeId, options = {}) {
@@ -6438,6 +9269,90 @@ async function deleteSession(token) {
   if (!token) return;
   clearSessionCacheToken(token);
   await dbRequest('DELETE', 'app_sessions', { token: `eq.${token}` }, undefined, ['Prefer: return=minimal']);
+}
+
+async function startPlatformSupportImpersonation(req, admin, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const storeId = cleanUuid(data.store_id || data.storeId, 'loja');
+  const [store] = await dbRequest('GET', 'stores', {
+    select: '*',
+    id: `eq.${storeId}`,
+    limit: '1'
+  });
+  if (!store) throw httpError(404, 'Loja alvo não encontrada.');
+  const company = await getCompanyById(store.company_id);
+  const ttlSeconds = clampNumber(Number(data.ttl_seconds || data.ttlSeconds || 30 * 60), 1, 60 * 60);
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  const originalToken = parseCookies(req)[ADMIN_COOKIE] || '';
+  const accessStore = publicStoreRef(store);
+  const supportSession = {
+    id: admin.id,
+    name: admin.name,
+    email: admin.email,
+    role: 'admin',
+    company_id: company.id,
+    store_id: store.id,
+    session_version: 2,
+    active_store: accessStore,
+    stores: [accessStore],
+    plan_access: await getCompanyPlanAccess(company.id).catch(() => ({})),
+    support_mode: {
+      active: true,
+      started_at: new Date().toISOString(),
+      expires_at: expiresAt,
+      original_admin_id: admin.id,
+      original_admin_email: admin.email,
+      original_session_token: originalToken,
+      target_company_id: company.id,
+      target_company_name: company.name,
+      target_store_id: store.id,
+      target_store_name: store.name,
+      target_store_slug: store.slug
+    }
+  };
+  const token = await createPersistentSession('admin', admin.id, supportSession);
+  await audit('platform.support.impersonate.start', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: company.id,
+    store_id: store.id,
+    entity_type: 'support_session',
+    severity: 'warning',
+    after_data: {
+      target_company_id: company.id,
+      target_company_name: company.name,
+      target_store_id: store.id,
+      target_store_slug: store.slug,
+      expires_at: expiresAt
+    }
+  });
+  return { token, admin: supportSession, expires_at: expiresAt };
+}
+
+async function endPlatformSupportImpersonation(req, admin) {
+  if (!isSupportModeAdmin(admin)) {
+    throw httpError(422, 'Nenhum modo suporte ativo nesta sessão.');
+  }
+  const cookies = parseCookies(req);
+  const supportToken = cookies[ADMIN_COOKIE] || '';
+  const restoreToken = admin.support_mode?.original_session_token || '';
+  const restoreSession = restoreToken ? await readPersistentSession(restoreToken, 'admin').catch(() => null) : null;
+  await audit('platform.support.impersonate.end', {
+    req,
+    actor_admin_id: admin.support_mode?.original_admin_id || admin.id,
+    company_id: admin.company_id || null,
+    store_id: admin.store_id || null,
+    entity_type: 'support_session',
+    severity: 'info',
+    after_data: {
+      target_company_id: admin.support_mode?.target_company_id || admin.company_id || null,
+      target_store_id: admin.support_mode?.target_store_id || admin.store_id || null,
+      original_admin_email: admin.support_mode?.original_admin_email || null,
+      ended_at: new Date().toISOString()
+    }
+  });
+  await deleteSession(supportToken);
+  return { restore_token: restoreSession ? restoreToken : '' };
 }
 
 function clearSessionCacheToken(token) {
@@ -9333,8 +12248,39 @@ function publicAdmin(admin) {
     plan_access: admin.plan_access || {},
     is_active: admin.is_active !== false,
     last_login_at: admin.last_login_at || null,
-    created_at: admin.created_at || null
+    created_at: admin.created_at || null,
+    support_mode: publicSupportMode(admin.support_mode)
   };
+}
+
+function publicSupportMode(supportMode) {
+  if (!supportMode?.active) return null;
+  return {
+    active: true,
+    started_at: supportMode.started_at || null,
+    expires_at: supportMode.expires_at || null,
+    original_admin_id: supportMode.original_admin_id || null,
+    original_admin_email: supportMode.original_admin_email || null,
+    target_company_id: supportMode.target_company_id || null,
+    target_company_name: supportMode.target_company_name || null,
+    target_store_id: supportMode.target_store_id || null,
+    target_store_name: supportMode.target_store_name || null,
+    target_store_slug: supportMode.target_store_slug || null
+  };
+}
+
+function isSupportModeAdmin(admin) {
+  return Boolean(admin?.support_mode?.active);
+}
+
+function isSupportModeExpired(admin) {
+  if (!isSupportModeAdmin(admin)) return false;
+  const expiresAt = new Date(admin.support_mode.expires_at || 0).getTime();
+  return !expiresAt || expiresAt <= Date.now();
+}
+
+function supportModeRestrictedPermission(permission) {
+  return ['account', 'admin_users', 'plan', 'platform'].includes(permission);
 }
 
 function publicStoreRef(store) {
@@ -9589,6 +12535,10 @@ function clampInteger(value, min, max) {
 
 function moneyNumber(value) {
   return roundMoney(Number(value || 0));
+}
+
+function moneyToCents(value) {
+  return Math.round(moneyNumber(value) * 100);
 }
 
 function parseMoneyInput(value) {

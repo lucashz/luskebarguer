@@ -47,7 +47,8 @@
   activeAdminTab: 'operation',
   loadedAdminTabs: new Set(),
   loadingAdminTabs: new Set(),
-  selectedAdminUserIds: new Set()
+  selectedAdminUserIds: new Set(),
+  supportTickets: []
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
@@ -191,6 +192,9 @@ const els = {
   adminLoginMessage: document.querySelector('#adminLoginMessage'),
   logoutButton: document.querySelector('#logoutButton'),
   adminHeaderLogoutButton: document.querySelector('#adminHeaderLogoutButton'),
+  supportModeBanner: document.querySelector('#supportModeBanner'),
+  supportModeText: document.querySelector('#supportModeText'),
+  endSupportModeButton: document.querySelector('#endSupportModeButton'),
   onboardingPanel: document.querySelector('#onboardingPanel'),
   onboardingStepText: document.querySelector('#onboardingStepText'),
   onboardingProgressBar: document.querySelector('#onboardingProgressBar'),
@@ -338,6 +342,9 @@ const els = {
   planFeatures: document.querySelector('#planFeatures'),
   planCompare: document.querySelector('#planCompare'),
   planHistory: document.querySelector('#planHistory'),
+  adminSupportTicketForm: document.querySelector('#adminSupportTicketForm'),
+  adminSupportTicketList: document.querySelector('#adminSupportTicketList'),
+  refreshSupportTicketsButton: document.querySelector('#refreshSupportTicketsButton'),
   promotionForm: document.querySelector('#promotionForm'),
   promotionList: document.querySelector('#promotionList'),
   promotionFormTitle: document.querySelector('#promotionFormTitle'),
@@ -373,6 +380,7 @@ els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
 els.logoutButton?.addEventListener('click', logout);
 els.adminHeaderLogoutButton.addEventListener('click', logout);
+els.endSupportModeButton?.addEventListener('click', endSupportMode);
 els.storeSwitcher?.addEventListener('change', switchStore);
 els.refreshPlanButton?.addEventListener('click', () => loadPlanData({ force: true }));
 els.onboardingBackButton?.addEventListener('click', previousOnboardingStep);
@@ -489,6 +497,8 @@ els.adminUserSearch?.addEventListener('input', renderAdminUsers);
 els.adminUserRoleFilter?.addEventListener('change', renderAdminUsers);
 els.selectAllAdminUsers?.addEventListener('change', toggleVisibleAdminUsersSelection);
 els.deleteSelectedAdminUsersButton?.addEventListener('click', deleteSelectedAdminUsers);
+els.adminSupportTicketForm?.addEventListener('submit', submitAdminSupportTicket);
+els.refreshSupportTicketsButton?.addEventListener('click', () => loadSupportTickets({ force: true }));
 els.inviteAdminButton?.addEventListener('click', submitAdminInvitation);
 els.promotionForm?.addEventListener('submit', submitPromotion);
 els.cancelPromotionEditButton?.addEventListener('click', resetPromotionForm);
@@ -633,6 +643,28 @@ async function logout() {
   showAuth();
 }
 
+async function endSupportMode() {
+  if (!state.admin?.support_mode?.active) return;
+  if (els.endSupportModeButton) {
+    els.endSupportModeButton.disabled = true;
+    els.endSupportModeButton.textContent = 'Encerrando...';
+  }
+  try {
+    const result = await request('/api/platform/support/impersonate/end', { method: 'POST' });
+    clearAdminCache();
+    stopOrderPolling();
+    toast('Modo suporte encerrado.');
+    window.location.href = result.restored ? '/platform' : '/admin';
+  } catch (error) {
+    toast(error.message || 'Não foi possível encerrar o modo suporte.');
+  } finally {
+    if (els.endSupportModeButton) {
+      els.endSupportModeButton.disabled = false;
+      els.endSupportModeButton.textContent = 'Encerrar modo suporte';
+    }
+  }
+}
+
 async function switchStore(event) {
   const storeId = event.target.value;
   if (!storeId || storeId === state.admin?.store_id) return;
@@ -767,6 +799,10 @@ async function loadAdminTabData(tab, options = {}) {
       await loadPlanData(options);
       return;
     }
+    if (tab === 'support') {
+      await loadSupportTickets(options);
+      return;
+    }
     if (tab === 'account') {
       await loadAdminUsersData(options);
       return;
@@ -892,6 +928,7 @@ async function loadPlanData(options = {}) {
 
 function render() {
   els.adminUser.textContent = state.admin ? `${state.admin.name} - ${state.admin.email}` : 'Painel';
+  renderSupportModeBanner();
   renderStoreSwitcher();
   renderOperation();
   renderOrderMetrics();
@@ -915,6 +952,18 @@ function render() {
   fillAccountForm();
   renderOnboarding();
   renderSoundButton();
+}
+
+function renderSupportModeBanner() {
+  if (!els.supportModeBanner) return;
+  const supportMode = state.admin?.support_mode;
+  els.supportModeBanner.hidden = !supportMode?.active;
+  if (!supportMode?.active) return;
+  const storeName = supportMode.target_store_name || state.admin?.active_store?.name || 'loja';
+  const expires = supportMode.expires_at ? new Date(supportMode.expires_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'em breve';
+  if (els.supportModeText) {
+    els.supportModeText.textContent = `Loja: ${storeName}. Sessão expira às ${expires}. Ações sensíveis ficam bloqueadas.`;
+  }
 }
 
 function adminStoreHomeUrl() {
@@ -3972,6 +4021,59 @@ function renderMenu() {
   renderModifierProductPicker();
 }
 
+async function loadSupportTickets(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('support')) return;
+  const data = await request('/api/admin/support/tickets');
+  state.supportTickets = data.tickets || [];
+  state.loadedAdminTabs.add('support');
+  renderSupportTickets();
+}
+
+async function submitAdminSupportTicket(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await request('/api/admin/support/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    form.reset();
+    toast('Chamado aberto com sucesso.');
+    state.loadedAdminTabs.delete('support');
+    await loadSupportTickets({ force: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível abrir o chamado.');
+  }
+}
+
+function renderSupportTickets() {
+  if (!els.adminSupportTicketList) return;
+  const tickets = state.supportTickets || [];
+  els.adminSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => `
+    <article class="support-ticket-card">
+      <div class="section-actions compact-section-actions">
+        <div>
+          <strong>${escapeHtml(ticket.subject)}</strong>
+          <small>${formatDateTime(ticket.created_at)} · ${escapeHtml(ticket.category || 'sem categoria')}</small>
+        </div>
+        <span class="pill ${ticket.priority === 'critical' || ticket.priority === 'high' ? 'pill-danger' : 'pill-muted'}">${escapeHtml(priorityLabel(ticket.priority))}</span>
+        <span class="pill ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+      </div>
+      <div class="support-ticket-messages">
+        ${(ticket.messages || []).map((message) => `
+          <div>
+            <strong>${escapeHtml(message.author_name || message.author_type)}</strong>
+            <small>${formatDateTime(message.created_at)}</small>
+            <p>${escapeHtml(message.message)}</p>
+          </div>
+        `).join('') || '<p class="empty-state">Sem mensagens.</p>'}
+      </div>
+    </article>
+  `).join('') : '<p class="empty-state">Você ainda não abriu chamados de suporte.</p>';
+}
+
 async function submitAccount(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(els.accountForm));
@@ -4531,23 +4633,46 @@ function featureStatusLabel(entry) {
 
 function comparePlanCard(plan, currentCode) {
   const isCurrent = plan.code === currentCode;
-  const features = Array.isArray(plan.features) ? plan.features.slice(0, 5) : [];
+  const featured = /professional|profissional/i.test(`${plan.code || ''} ${plan.name || ''}`);
+  const features = billingPlanHighlights(plan);
+  const daily = billingPlanDailyPrice(plan);
   return `
-    <article class="plan-compare-card ${isCurrent ? 'current' : ''}">
+    <article class="plan-compare-card ${isCurrent ? 'current' : ''} ${featured ? 'featured' : ''}">
       <div>
-        <span class="plan-status ${isCurrent ? 'ok' : 'muted'}">${isCurrent ? 'Plano atual' : 'Disponível'}</span>
+        <span class="plan-status ${isCurrent ? 'ok' : featured ? 'warn' : 'muted'}">${isCurrent ? 'Plano atual' : featured ? 'Mais escolhido' : 'Disponível'}</span>
         <h3>${escapeHtml(plan.name || 'Plano')}</h3>
         <p>${escapeHtml(plan.description || '')}</p>
       </div>
       <strong>${money(plan.monthly_price || 0)} / mês</strong>
+      ${daily ? `<small class="muted">${escapeHtml(daily)}</small>` : ''}
       <ul>
-        ${features.map((entry) => `<li>${escapeHtml(entry.name || entry.code || 'Recurso')}${entry.limit_value ? ` · até ${Number(entry.limit_value)}` : ''}</li>`).join('')}
+        ${features.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
       </ul>
       ${isCurrent
         ? '<button class="ghost-button compact" type="button" disabled>Plano atual</button>'
         : `<button class="primary-button compact" type="button" data-plan-code="${escapeAttribute(plan.code)}">Mudar para este plano</button>`}
     </article>
   `;
+}
+
+function billingPlanHighlights(plan) {
+  const code = String(plan?.code || '').toLowerCase();
+  if (code.includes('trial')) return ['Até 10 produtos', 'Até 3 categorias', 'Até 30 pedidos', '1 usuário'];
+  if (code.includes('essential')) return ['Até 25 produtos', 'Até 5 categorias', 'Até 150 pedidos/mês', 'WhatsApp manual'];
+  if (code.includes('professional')) return ['Até 100 produtos', 'Pedidos ilimitados', 'Até 5 usuários', 'Mesas, cupons, KDS e relatórios'];
+  if (code.includes('premium')) return ['Produtos ilimitados', 'Automação WhatsApp', 'Fidelidade e sugestões', 'Domínio próprio e suporte prioritário'];
+  return (Array.isArray(plan.features) ? plan.features : []).slice(0, 5).map((entry) => {
+    const limit = entry.limit_value ? ` · até ${Number(entry.limit_value)}` : '';
+    return `${entry.name || entry.code || 'Recurso'}${limit}`;
+  });
+}
+
+function billingPlanDailyPrice(plan) {
+  const code = String(plan?.code || '').toLowerCase();
+  if (code.includes('essential')) return 'Menos de R$ 1,70 por dia';
+  if (code.includes('professional')) return 'Menos de R$ 3 por dia';
+  if (code.includes('premium')) return 'Menos de R$ 5 por dia';
+  return '';
 }
 
 function billingHistoryRow(event) {
@@ -6214,6 +6339,7 @@ function activateAdminTab(tab) {
     store: 'Configurações da Loja',
     integrations: 'Integrações',
     plan: 'Plano',
+    support: 'Suporte',
     account: 'Conta e usuários'
   };
   state.activeAdminTab = tab;
@@ -6247,18 +6373,18 @@ function renderPermissionedNavigation() {
 }
 
 function firstAllowedAdminTab() {
-  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'plan', 'account']
+  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'plan', 'support', 'account']
     .find((tab) => canAccessTab(tab)) || 'account';
 }
 
 function canAccessTab(tab) {
-  if (tab === 'account') return true;
+  if (tab === 'account' || tab === 'support') return true;
   if (!hasRoleAccessToTab(tab)) return false;
   return isTabAvailableInPlan(tab);
 }
 
 function hasRoleAccessToTab(tab) {
-  if (tab === 'account') return true;
+  if (tab === 'account' || tab === 'support') return true;
   const permission = ({
     operation: 'operation',
     orders: 'orders',
@@ -6269,7 +6395,8 @@ function hasRoleAccessToTab(tab) {
     customers: 'customers',
     store: 'store',
     integrations: 'store',
-    plan: 'plan'
+    plan: 'plan',
+    support: null
   })[tab];
   return !permission || hasPermission(permission);
 }
@@ -6286,7 +6413,7 @@ function isTabAvailableInPlan(tab) {
     store: 'store_settings',
     integrations: 'store_settings'
   })[tab];
-  if (!feature || tab === 'plan' || tab === 'account') return true;
+  if (!feature || tab === 'plan' || tab === 'account' || tab === 'support') return true;
   const access = state.admin?.plan_access?.[feature];
   return access ? access.enabled !== false : true;
 }
@@ -6995,6 +7122,32 @@ function toast(message) {
 
 function money(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('pt-BR');
+}
+
+function ticketStatusLabel(status) {
+  return ({
+    open: 'Aberto',
+    waiting_customer: 'Aguardando cliente',
+    in_review: 'Em análise',
+    resolved: 'Resolvido',
+    closed: 'Fechado'
+  })[status] || status || 'Aberto';
+}
+
+function priorityLabel(priority) {
+  return ({
+    low: 'Baixa',
+    medium: 'Média',
+    high: 'Alta',
+    critical: 'Crítica'
+  })[priority] || priority || 'Média';
 }
 
 function escapeHtml(value) {

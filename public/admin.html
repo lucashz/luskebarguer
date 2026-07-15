@@ -21,6 +21,7 @@
           <button data-admin-tab="store" type="button">Configurações da Loja</button>
           <button data-admin-tab="integrations" type="button">Integrações</button>
           <button data-admin-tab="plan" type="button">Plano</button>
+          <button data-admin-tab="support" type="button">Suporte</button>
           <button data-admin-tab="account" type="button">Conta e usuários</button>
         </nav>
       </aside>
@@ -72,6 +73,15 @@
               <button class="ghost-button compact" id="adminHeaderLogoutButton" type="button">Sair</button>
             </div>
           </header>
+
+          <section class="support-mode-banner" id="supportModeBanner" hidden>
+            <div>
+              <p class="eyebrow">Modo suporte ativo</p>
+              <strong>Você está acessando esta loja como suporte.</strong>
+              <span id="supportModeText">Sessão temporária auditada.</span>
+            </div>
+            <button class="ghost-button compact" id="endSupportModeButton" type="button">Encerrar modo suporte</button>
+          </section>
 
           <section class="onboarding-panel panel" id="onboardingPanel" hidden>
             <div class="onboarding-head">
@@ -1001,6 +1011,37 @@
               </div>
             </section>
 
+          </section>
+
+          <section class="admin-section" data-admin-section="support">
+            <section class="panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Suporte</p>
+                  <h2>Chamados de suporte</h2>
+                  <p class="muted">Abra chamados para a equipe da plataforma e acompanhe respostas.</p>
+                </div>
+                <button class="ghost-button compact" id="refreshSupportTicketsButton" type="button">Atualizar chamados</button>
+              </div>
+              <form id="adminSupportTicketForm" class="stack-form">
+                <label>Assunto<input name="subject" required placeholder="Ex: Preciso de ajuda com domínio"></label>
+                <div class="two-cols">
+                  <label>Categoria<input name="category" placeholder="configuração, cobrança, dúvida"></label>
+                  <label>Prioridade<select name="priority"><option value="low">Baixa</option><option value="medium" selected>Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label>
+                </div>
+                <label>Mensagem<textarea name="message" required rows="4" placeholder="Descreva o que está acontecendo"></textarea></label>
+                <button class="primary-button compact">Abrir chamado</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h2>Meus chamados</h2>
+                </div>
+              </div>
+              <div class="support-ticket-list" id="adminSupportTicketList"></div>
+            </section>
           </section>
 
           <section class="admin-section" data-admin-section="account">

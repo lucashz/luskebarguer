@@ -372,30 +372,46 @@ function renderPlan(plan, index) {
   const params = new URLSearchParams(location.search);
   const selected = params.get('plan') || '';
   const checked = selected ? selected === plan.code : index === 0;
-  const features = (plan.features || []).slice(0, 7).map((feature) => {
-    const limit = feature.limit_value === null || feature.limit_value === undefined ? '' : ` (${feature.limit_value})`;
-    return `<li>${escapeHtml(feature.name || feature.code)}${escapeHtml(limit)}</li>`;
-  }).join('');
+  const features = portalPlanHighlights(plan).map((feature) => `<li>${escapeHtml(feature)}</li>`).join('');
+  const isTrial = isTrialPlan(plan);
   if (document.querySelector('#signupPlanOptions')) {
     return `
       <label class="signup-plan-card">
         <input type="radio" name="plan_code" value="${escapeAttribute(plan.code)}"${checked ? ' checked' : ''}>
         <strong>${escapeHtml(plan.name)}</strong>
-        <span>${price > 0 ? formatMoney(price) + '/mês' : 'Sob consulta'}</span>
+        <span>${price > 0 ? formatMoney(price) + '/mês' : 'Teste grátis'}</span>
         <small>${escapeHtml(plan.description || '')}</small>
       </label>
     `;
   }
   return `
     <article class="portal-plan-card">
-      <p class="eyebrow">${index === 0 ? 'Para começar' : 'Plano'}</p>
+      <p class="eyebrow">${isTrial ? 'Teste grátis' : /professional|profissional/i.test(`${plan.code} ${plan.name}`) ? 'Mais escolhido' : 'Plano'}</p>
       <h3>${escapeHtml(plan.name)}</h3>
-      <strong>${price > 0 ? formatMoney(price) + '/mês' : 'Sob consulta'}</strong>
+      <strong>${price > 0 ? formatMoney(price) + '/mês' : 'R$ 0 no teste'}</strong>
       <p>${escapeHtml(plan.description || '')}</p>
       <ul>${features}</ul>
       <a class="portal-button small" href="/cadastro?plan=${encodeURIComponent(plan.code)}">Começar teste</a>
     </article>
   `;
+}
+
+function isTrialPlan(plan) {
+  const code = String(plan?.code || '').toLowerCase();
+  const name = String(plan?.name || '').toLowerCase();
+  return Number(plan?.monthly_price || 0) <= 0 || code.includes('trial') || name.includes('teste');
+}
+
+function portalPlanHighlights(plan) {
+  const code = String(plan?.code || '').toLowerCase();
+  if (code.includes('trial')) return ['Até 10 produtos', 'Até 3 categorias', 'Até 30 pedidos', '1 usuário'];
+  if (code.includes('essential')) return ['Até 25 produtos', 'Até 150 pedidos/mês', '1 usuário', 'WhatsApp manual'];
+  if (code.includes('professional')) return ['Até 100 produtos', 'Pedidos ilimitados', 'Até 5 usuários', 'Mesas, cupons, KDS e relatórios'];
+  if (code.includes('premium')) return ['Produtos ilimitados', 'Automação WhatsApp', 'Fidelidade e domínio próprio', 'Suporte prioritário'];
+  return (plan.features || []).slice(0, 4).map((feature) => {
+    const limit = feature.limit_value === null || feature.limit_value === undefined ? '' : ` até ${feature.limit_value}`;
+    return `${feature.name || feature.code}${limit}`;
+  });
 }
 
 async function request(path, options = {}) {

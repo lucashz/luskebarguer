@@ -101,30 +101,70 @@ function isFreeTrialPlan(plan) {
 
 function renderHomePlan(plan, index) {
   const price = Number(plan.monthly_price || 0);
-  const features = (plan.features || []).slice(0, 4).map((feature) => {
-    const limit = feature.limit_value === null || feature.limit_value === undefined ? '' : ` (${feature.limit_value})`;
-    return `<li>${escapeHtml(feature.name || feature.code)}${escapeHtml(limit)}</li>`;
-  }).join('');
-  const featured = index === 1 || /essencial|profissional/i.test(plan.name || '');
+  const features = homePlanHighlights(plan).map((feature) => `<li>${escapeHtml(feature)}</li>`).join('');
+  const featured = /professional|profissional/i.test(`${plan.code || ''} ${plan.name || ''}`);
   const audience = planAudience(plan, index);
+  const daily = planDailyPrice(plan);
   return `
     <article class="${featured ? 'featured' : ''}">
-      <span>${featured ? 'Recomendado' : 'Plano'}</span>
+      <span>${featured ? 'Mais escolhido' : 'Plano'}</span>
       <strong>${escapeHtml(plan.name || 'Plano')}</strong>
       <p class="clean-plan-price">${price > 0 ? formatMoney(price) + '/mês' : 'Sob consulta'}</p>
       <p class="clean-plan-audience">${escapeHtml(audience)}</p>
       <p>${escapeHtml(plan.description || 'Para publicar o cardápio, receber pedidos e organizar a operação.')}</p>
+      ${daily ? `<p class="clean-plan-daily">${escapeHtml(daily)}</p>` : ''}
       <ul>${features || '<li>Cardápio digital</li><li>Painel administrativo</li>'}</ul>
+      <small class="clean-plan-commission">Sem comissão por pedido</small>
       <a href="/cadastro?plan=${encodeURIComponent(plan.code || '')}">Contratar</a>
     </article>
   `;
+}
+
+function homePlanHighlights(plan) {
+  const code = String(plan?.code || '').toLowerCase();
+  if (code.includes('premium')) {
+    return [
+      'Produtos e pedidos ilimitados',
+      'Automação WhatsApp',
+      'Fidelidade e sugestões no carrinho',
+      'Domínio personalizado e suporte prioritário'
+    ];
+  }
+  if (code.includes('professional')) {
+    return [
+      'Até 100 produtos',
+      'Pedidos ilimitados',
+      'Mesas, comandas e QR Code',
+      'Cupons, KDS e relatórios completos'
+    ];
+  }
+  if (code.includes('essential')) {
+    return [
+      'Até 25 produtos',
+      'Até 150 pedidos/mês',
+      '1 usuário administrativo',
+      'Cardápio, pedidos e WhatsApp manual'
+    ];
+  }
+  return (plan.features || []).slice(0, 4).map((feature) => {
+    const limit = feature.limit_value === null || feature.limit_value === undefined ? '' : ` até ${feature.limit_value}`;
+    return `${feature.name || feature.code}${limit}`;
+  });
+}
+
+function planDailyPrice(plan) {
+  const code = String(plan?.code || '').toLowerCase();
+  if (code.includes('essential')) return 'Menos de R$ 1,70 por dia';
+  if (code.includes('professional')) return 'Menos de R$ 3 por dia';
+  if (code.includes('premium')) return 'Menos de R$ 5 por dia';
+  return '';
 }
 
 function planAudience(plan, index) {
   const text = `${plan?.name || ''} ${plan?.code || ''}`.toLowerCase();
   if (text.includes('premium')) return 'Para operação avançada e crescimento.';
   if (text.includes('prof')) return 'Para salão, equipe e rotina completa.';
-  if (text.includes('essencial')) return 'Para começar a vender com organização.';
+  if (text.includes('essencial')) return 'Para começar enxuto, com controle.';
   return index === 0 ? 'Para publicar seu primeiro cardápio.' : 'Para restaurantes em crescimento.';
 }
 

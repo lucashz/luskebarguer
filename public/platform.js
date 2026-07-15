@@ -8,6 +8,31 @@
   health: null,
   summary: null,
   analytics: null,
+  services: null,
+  serviceLogs: [],
+  billing: null,
+  billingPlans: [],
+  billingEvents: [],
+  billingSubscriptions: [],
+  billingLoading: false,
+  billingLoaded: false,
+  billingError: '',
+  smtp: null,
+  emailTemplates: [],
+  supportTickets: [],
+  baseLoaded: false,
+  baseLoading: false,
+  healthLoaded: false,
+  servicesLoaded: false,
+  auditLoaded: false,
+  backupLoaded: false,
+  communicationLoaded: false,
+  supportLoaded: false,
+  companyPage: 1,
+  companyPerPage: 100,
+  companyPagination: null,
+  communicationLoading: false,
+  supportLoading: false,
   companyDetails: {},
   commercialLoading: false,
   commercialLoaded: false,
@@ -34,6 +59,9 @@ const els = {
   platformStoreRanking: document.querySelector('#platformStoreRanking'),
   platformBillingMetrics: document.querySelector('#platformBillingMetrics'),
   platformCommercialAlerts: document.querySelector('#platformCommercialAlerts'),
+  platformOperationalOverviewAlerts: document.querySelector('#platformOperationalOverviewAlerts'),
+  platformPlanMrr: document.querySelector('#platformPlanMrr'),
+  platformConversionGrid: document.querySelector('#platformConversionGrid'),
   clientFilterForm: document.querySelector('#clientFilterForm'),
   clientPlanFilter: document.querySelector('#clientPlanFilter'),
   platformAttentionPanel: document.querySelector('#platformAttentionPanel'),
@@ -52,26 +80,97 @@ const els = {
   platformAlerts: document.querySelector('#platformAlerts'),
   operationalLogTypeFilter: document.querySelector('#operationalLogTypeFilter'),
   operationalLogStatusFilter: document.querySelector('#operationalLogStatusFilter'),
+  operationalLogSeverityFilter: document.querySelector('#operationalLogSeverityFilter'),
+  operationalLogServiceFilter: document.querySelector('#operationalLogServiceFilter'),
+  operationalLogCompanyFilter: document.querySelector('#operationalLogCompanyFilter'),
+  operationalLogStoreFilter: document.querySelector('#operationalLogStoreFilter'),
   platformOperationalLogs: document.querySelector('#platformOperationalLogs'),
+  refreshServicesButton: document.querySelector('#refreshServicesButton'),
+  servicesMeta: document.querySelector('#servicesMeta'),
+  platformServicesGrid: document.querySelector('#platformServicesGrid'),
+  platformServiceLogs: document.querySelector('#platformServiceLogs'),
+  platformRiskZone: document.querySelector('#platformRiskZone'),
+  previewLogCleanupButton: document.querySelector('#previewLogCleanupButton'),
+  logCleanupResult: document.querySelector('#logCleanupResult'),
+  billingPeriodSelect: document.querySelector('#billingPeriodSelect'),
+  billingStatusFilter: document.querySelector('#billingStatusFilter'),
+  billingPlanFilter: document.querySelector('#billingPlanFilter'),
+  refreshBillingButton: document.querySelector('#refreshBillingButton'),
+  platformBillingSummaryGrid: document.querySelector('#platformBillingSummaryGrid'),
+  platformSubscriptionList: document.querySelector('#platformSubscriptionList'),
+  platformBillingPlanList: document.querySelector('#platformBillingPlanList'),
+  platformBillingEventList: document.querySelector('#platformBillingEventList'),
+  platformBillingAlertList: document.querySelector('#platformBillingAlertList'),
+  refreshCommunicationButton: document.querySelector('#refreshCommunicationButton'),
+  platformSmtpForm: document.querySelector('#platformSmtpForm'),
+  platformSmtpTestForm: document.querySelector('#platformSmtpTestForm'),
+  smtpStatusText: document.querySelector('#smtpStatusText'),
+  platformEmailTemplateList: document.querySelector('#platformEmailTemplateList'),
+  refreshSupportButton: document.querySelector('#refreshSupportButton'),
+  platformSupportCreateForm: document.querySelector('#platformSupportCreateForm'),
+  platformSupportSummaryGrid: document.querySelector('#platformSupportSummaryGrid'),
+  supportSearchFilter: document.querySelector('#supportSearchFilter'),
+  supportCompanySelect: document.querySelector('#supportCompanySelect'),
+  supportStoreSelect: document.querySelector('#supportStoreSelect'),
+  supportStatusFilter: document.querySelector('#supportStatusFilter'),
+  supportPriorityFilter: document.querySelector('#supportPriorityFilter'),
+  supportSlaFilter: document.querySelector('#supportSlaFilter'),
+  supportPlanFilter: document.querySelector('#supportPlanFilter'),
+  supportQuickReplies: document.querySelector('#supportQuickReplies'),
+  platformSupportTicketList: document.querySelector('#platformSupportTicketList'),
+  platformConfirmBackdrop: document.querySelector('#platformConfirmBackdrop'),
+  platformConfirmForm: document.querySelector('#platformConfirmForm'),
+  platformConfirmTitle: document.querySelector('#platformConfirmTitle'),
+  platformConfirmMessage: document.querySelector('#platformConfirmMessage'),
+  platformConfirmCancel: document.querySelector('#platformConfirmCancel'),
+  platformConfirmSubmit: document.querySelector('#platformConfirmSubmit'),
   toast: document.querySelector('#toast')
 };
 
 els.platformLogoutButton.addEventListener('click', logout);
-els.refreshPlatformButton.addEventListener('click', loadPlatform);
+els.refreshPlatformButton.addEventListener('click', () => loadPlatform({ force: true }));
 els.companyForm.addEventListener('submit', submitCompany);
 els.storeForm.addEventListener('submit', submitStore);
 els.auditFilterForm?.addEventListener('submit', submitAuditFilters);
 els.refreshHealthButton?.addEventListener('click', loadHealth);
 els.healthPeriodSelect?.addEventListener('change', loadHealth);
 els.refreshAnalyticsButton?.addEventListener('click', loadCommercialAnalytics);
+els.refreshServicesButton?.addEventListener('click', loadServices);
+els.previewLogCleanupButton?.addEventListener('click', previewLogCleanup);
+els.refreshBillingButton?.addEventListener('click', loadBilling);
+els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
+els.refreshSupportButton?.addEventListener('click', loadSupport);
+els.platformSmtpForm?.addEventListener('submit', submitSmtpSettings);
+els.platformSmtpTestForm?.addEventListener('submit', submitSmtpTest);
+els.platformSupportCreateForm?.addEventListener('submit', submitPlatformSupportTicket);
+els.supportStatusFilter?.addEventListener('change', loadSupport);
+els.supportPriorityFilter?.addEventListener('change', loadSupport);
+els.supportSlaFilter?.addEventListener('change', renderSupport);
+els.supportPlanFilter?.addEventListener('change', renderSupport);
+els.supportSearchFilter?.addEventListener('input', renderSupport);
 els.analyticsPeriodSelect?.addEventListener('change', loadCommercialAnalytics);
+els.billingPeriodSelect?.addEventListener('change', loadBilling);
+els.billingStatusFilter?.addEventListener('change', loadBilling);
+els.billingPlanFilter?.addEventListener('change', loadBilling);
 els.clientFilterForm?.addEventListener('input', renderCompanies);
 els.clientFilterForm?.addEventListener('change', renderCompanies);
-els.operationalLogTypeFilter?.addEventListener('change', renderOperationalLogs);
-els.operationalLogStatusFilter?.addEventListener('change', renderOperationalLogs);
+els.operationalLogTypeFilter?.addEventListener('change', loadHealth);
+els.operationalLogStatusFilter?.addEventListener('change', loadHealth);
+els.operationalLogSeverityFilter?.addEventListener('change', loadHealth);
+els.operationalLogServiceFilter?.addEventListener('change', loadHealth);
+els.operationalLogCompanyFilter?.addEventListener('change', loadHealth);
+els.operationalLogStoreFilter?.addEventListener('change', loadHealth);
 els.platformTabs.forEach((button) => {
-  button.addEventListener('click', () => activatePlatformView(button.dataset.platformView));
+  button.addEventListener('click', () => activatePlatformView(button.dataset.platformView, { load: true }));
 });
+document.querySelectorAll('[data-critical-action]').forEach((button) => {
+  button.addEventListener('click', () => openCriticalAction(button.dataset.criticalAction));
+});
+els.platformConfirmCancel?.addEventListener('click', closeCriticalDialog);
+els.platformConfirmBackdrop?.addEventListener('click', (event) => {
+  if (event.target === els.platformConfirmBackdrop) closeCriticalDialog();
+});
+els.platformConfirmForm?.addEventListener('submit', submitCriticalAction);
 
 init().catch((error) => {
   toast(error.message || 'Não foi possível carregar a plataforma.');
@@ -89,36 +188,112 @@ async function init() {
   await loadPlatform();
 }
 
-async function loadPlatform() {
-  state.commercialLoading = true;
+async function loadPlatform(options = {}) {
+  state.baseLoading = true;
   state.commercialError = '';
-  renderCommercialDashboard();
+  if (!state.baseLoaded) render();
   try {
-    const [companies, plans, audit, backup, health, commercial] = await Promise.all([
-      request('/api/platform/companies'),
-      request('/api/platform/plans'),
-      request(`/api/platform/audit${auditQueryString()}`),
-      request('/api/platform/backups').catch(() => ({ status: 'unknown', recent: [] })),
-      request(healthUrl()).catch((error) => ({ error: error.message || 'Não foi possível carregar saúde operacional.' })),
-      loadCommercialSnapshot()
+    if (options.resetPage !== false) state.companyPage = 1;
+    const [companies, plans] = await Promise.all([
+      request(companiesUrl()),
+      request('/api/platform/plans')
     ]);
     state.companies = companies.companies || [];
+    state.companyPagination = companies.pagination || null;
     state.features = companies.features || [];
     state.plans = plans.plans || [];
-    state.logs = audit.logs || [];
-    state.backup = backup;
-    state.health = health;
-    state.summary = commercial.summary || null;
-    state.analytics = commercial.analytics || null;
-    state.commercialLoaded = !commercial.error;
-    state.commercialError = commercial.error || '';
+    state.baseLoaded = true;
+    render();
+    await ensurePlatformViewData(state.activeView, { force: options.force === true });
   } catch (error) {
-    state.commercialLoaded = false;
+    state.baseLoaded = false;
     state.commercialError = error.message || 'Não foi possível carregar a plataforma.';
     toast(state.commercialError);
   } finally {
-    state.commercialLoading = false;
+    state.baseLoading = false;
     render();
+  }
+}
+
+function companiesUrl() {
+  const params = new URLSearchParams();
+  params.set('page', String(state.companyPage || 1));
+  params.set('per_page', String(state.companyPerPage || 100));
+  return `/api/platform/companies?${params.toString()}`;
+}
+
+async function loadMoreCompanies() {
+  const nextPage = Number(state.companyPagination?.page || state.companyPage || 1) + 1;
+  const button = els.companyList?.querySelector('[data-load-more-companies]');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Carregando...';
+  }
+  try {
+    state.companyPage = nextPage;
+    const companies = await request(companiesUrl());
+    const existingIds = new Set(state.companies.map((company) => company.id));
+    state.companies = [
+      ...state.companies,
+      ...(companies.companies || []).filter((company) => !existingIds.has(company.id))
+    ];
+    state.companyPagination = companies.pagination || null;
+    render();
+  } catch (error) {
+    state.companyPage = Math.max(1, nextPage - 1);
+    toast(error.message || 'Não foi possível carregar mais clientes.');
+    renderCompanies();
+  }
+}
+
+async function ensurePlatformViewData(view, options = {}) {
+  const force = options.force === true;
+  if (view === 'overview' && (force || !state.commercialLoaded)) {
+    await loadCommercialAnalytics({ silent: true, renderBefore: true, renderAfter: true });
+    if (force || !state.healthLoaded) await loadHealth({ silent: true });
+  } else if (view === 'health' && (force || !state.healthLoaded)) {
+    await loadHealth({ silent: true });
+  } else if (view === 'billing' && (force || !state.billingLoaded)) {
+    await loadBilling({ silent: true });
+  } else if (view === 'communication' && (force || !state.communicationLoaded)) {
+    await loadCommunication({ silent: true });
+  } else if (view === 'support' && (force || !state.supportLoaded)) {
+    await loadSupport({ silent: true });
+  } else if (view === 'audit' && (force || !state.auditLoaded)) {
+    await loadAudit({ silent: true });
+  } else if (view === 'backups' && (force || !state.backupLoaded)) {
+    await loadBackup({ silent: true });
+  }
+}
+
+async function loadServicesSnapshot() {
+  try {
+    const [status, logs] = await Promise.all([
+      request('/api/platform/services/status'),
+      request('/api/platform/services/logs?period=24h')
+    ]);
+    return { status, logs: logs.logs || [] };
+  } catch (error) {
+    return { status: { error: error.message || 'Não foi possível carregar serviços.' }, logs: [] };
+  }
+}
+
+async function loadServices(options = {}) {
+  if (els.refreshServicesButton) els.refreshServicesButton.disabled = true;
+  try {
+    const data = await loadServicesSnapshot();
+    state.services = data.status;
+    state.serviceLogs = data.logs || [];
+    state.servicesLoaded = !data.status?.error;
+    renderServices();
+    if (!options.silent) toast('Serviços atualizados.');
+  } catch (error) {
+    state.services = { error: error.message || 'Não foi possível carregar serviços.' };
+    state.servicesLoaded = false;
+    renderServices();
+    if (!options.silent) toast(error.message || 'Não foi possível carregar serviços.');
+  } finally {
+    if (els.refreshServicesButton) els.refreshServicesButton.disabled = false;
   }
 }
 
@@ -161,18 +336,137 @@ async function loadCommercialSnapshot() {
   }
 }
 
+async function loadBillingSnapshot() {
+  try {
+    const [summary, plans, events, subscriptions] = await Promise.all([
+      request(billingUrl('/api/platform/billing/summary')),
+      request('/api/platform/billing/plans'),
+      request(billingUrl('/api/platform/billing/events')),
+      request(billingUrl('/api/platform/billing/subscriptions'))
+    ]);
+    return {
+      summary,
+      plans: plans.plans || [],
+      events: events.events || [],
+      subscriptions: subscriptions.subscriptions || []
+    };
+  } catch (error) {
+    return { error: error.message || 'Não foi possível carregar billing.' };
+  }
+}
+
+async function loadBilling(options = {}) {
+  state.billingLoading = true;
+  if (els.refreshBillingButton) els.refreshBillingButton.disabled = true;
+  if (options.renderBefore !== false) renderBilling();
+  try {
+    const data = await loadBillingSnapshot();
+    state.billing = data.summary || null;
+    state.billingPlans = data.plans || [];
+    state.billingEvents = data.events || [];
+    state.billingSubscriptions = data.subscriptions || [];
+    state.billingLoaded = !data.error;
+    state.billingError = data.error || '';
+    if (state.billingError && !options.silent) toast(state.billingError);
+  } finally {
+    state.billingLoading = false;
+    if (els.refreshBillingButton) els.refreshBillingButton.disabled = false;
+    renderBilling();
+  }
+}
+
+async function loadCommunicationSnapshot() {
+  try {
+    const [smtp, templates] = await Promise.all([
+      request('/api/platform/smtp'),
+      request('/api/platform/email-templates')
+    ]);
+    return { smtp: smtp.smtp || null, templates: templates.templates || [] };
+  } catch (error) {
+    return { error: error.message || 'Não foi possível carregar comunicação.', smtp: null, templates: [] };
+  }
+}
+
+async function loadCommunication(options = {}) {
+  state.communicationLoading = true;
+  try {
+    const data = await loadCommunicationSnapshot();
+    state.smtp = data.smtp || null;
+    state.emailTemplates = data.templates || [];
+    state.communicationLoaded = !data.error;
+    renderCommunication();
+    if (!options.silent && !data.error) toast('Comunicação atualizada.');
+    if (data.error && !options.silent) toast(data.error);
+  } finally {
+    state.communicationLoading = false;
+    renderCommunication();
+  }
+}
+
+async function loadSupportSnapshot() {
+  try {
+    const data = await request(supportUrl());
+    return { tickets: data.tickets || [] };
+  } catch (error) {
+    return { error: error.message || 'Não foi possível carregar chamados.', tickets: [] };
+  }
+}
+
+async function loadSupport(options = {}) {
+  state.supportLoading = true;
+  try {
+    const data = await loadSupportSnapshot();
+    state.supportTickets = data.tickets || [];
+    state.supportLoaded = !data.error;
+    renderSupport();
+    if (!options.silent && !data.error) toast('Chamados atualizados.');
+    if (data.error && !options.silent) toast(data.error);
+  } finally {
+    state.supportLoading = false;
+    renderSupport();
+  }
+}
+
+function supportUrl() {
+  const params = new URLSearchParams();
+  if (els.supportStatusFilter?.value) params.set('status', els.supportStatusFilter.value);
+  if (els.supportPriorityFilter?.value) params.set('priority', els.supportPriorityFilter.value);
+  const query = params.toString();
+  return `/api/platform/support/tickets${query ? `?${query}` : ''}`;
+}
+
 function analyticsUrl() {
   const period = els.analyticsPeriodSelect?.value || '30d';
   return `/api/platform/analytics?period=${encodeURIComponent(period)}`;
 }
 
+function billingUrl(base) {
+  const params = new URLSearchParams();
+  params.set('period', els.billingPeriodSelect?.value || '30d');
+  const status = els.billingStatusFilter?.value || '';
+  const plan = els.billingPlanFilter?.value || '';
+  if (status) params.set('status', status);
+  if (plan) params.set('plan', plan);
+  return `${base}?${params.toString()}`;
+}
+
 async function loadHealth(options = {}) {
   if (els.refreshHealthButton) els.refreshHealthButton.disabled = true;
   try {
-    state.health = await request(healthUrl());
+    const [health, services] = await Promise.all([
+      request(healthUrl()),
+      loadServicesSnapshot()
+    ]);
+    state.health = health;
+    state.services = services.status;
+    state.serviceLogs = services.logs || [];
+    state.healthLoaded = true;
+    state.servicesLoaded = !services.status?.error;
     renderHealth();
+    renderCommercialDashboard();
   } catch (error) {
     state.health = { error: error.message || 'Não foi possível carregar saúde operacional.' };
+    state.healthLoaded = false;
     renderHealth();
     if (!options.silent) toast(error.message || 'Não foi possível carregar saúde operacional.');
   } finally {
@@ -180,9 +474,50 @@ async function loadHealth(options = {}) {
   }
 }
 
+async function loadAudit(options = {}) {
+  try {
+    const audit = await request(`/api/platform/audit${auditQueryString()}`);
+    state.logs = audit.logs || [];
+    state.auditLoaded = true;
+    renderAudit();
+    if (!options.silent) toast('Auditoria atualizada.');
+  } catch (error) {
+    state.logs = [];
+    state.auditLoaded = false;
+    renderAudit();
+    if (!options.silent) toast(error.message || 'Não foi possível carregar auditoria.');
+  }
+}
+
+async function loadBackup(options = {}) {
+  try {
+    state.backup = await request('/api/platform/backups');
+    state.backupLoaded = true;
+    renderBackupStatus();
+    if (!options.silent) toast('Backups atualizados.');
+  } catch (error) {
+    state.backup = { status: 'unknown', error: error.message || 'Não foi possível carregar backup.', recent: [] };
+    state.backupLoaded = false;
+    renderBackupStatus();
+    if (!options.silent) toast(state.backup.error);
+  }
+}
+
 function healthUrl() {
-  const period = els.healthPeriodSelect?.value || '24h';
-  return `/api/platform/health?period=${encodeURIComponent(period)}`;
+  const params = new URLSearchParams();
+  params.set('period', els.healthPeriodSelect?.value || '24h');
+  const filters = [
+    ['type', els.operationalLogTypeFilter?.value || ''],
+    ['status', els.operationalLogStatusFilter?.value || ''],
+    ['severity', els.operationalLogSeverityFilter?.value || ''],
+    ['service', els.operationalLogServiceFilter?.value || ''],
+    ['company_id', els.operationalLogCompanyFilter?.value || ''],
+    ['store_id', els.operationalLogStoreFilter?.value || '']
+  ];
+  for (const [key, value] of filters) {
+    if (value) params.set(key, value);
+  }
+  return `/api/platform/health?${params.toString()}`;
 }
 
 function render() {
@@ -193,10 +528,14 @@ function render() {
   renderAudit();
   renderBackupStatus();
   renderHealth();
+  renderServices();
+  renderBilling();
+  renderCommunication();
+  renderSupport();
   activatePlatformView(state.activeView);
 }
 
-function activatePlatformView(view = 'overview') {
+async function activatePlatformView(view = 'overview', options = {}) {
   state.activeView = view || 'overview';
   els.platformTabs.forEach((button) => {
     button.classList.toggle('active', button.dataset.platformView === state.activeView);
@@ -205,6 +544,7 @@ function activatePlatformView(view = 'overview') {
   els.platformSections.forEach((section) => {
     section.hidden = section.dataset.platformSection !== state.activeView;
   });
+  if (options.load) await ensurePlatformViewData(state.activeView);
 }
 
 function renderSelects() {
@@ -215,16 +555,48 @@ function renderSelects() {
     els.clientPlanFilter.innerHTML = `<option value="">Todos planos</option>${planOptions}`;
     els.clientPlanFilter.value = selected;
   }
+  if (els.billingPlanFilter) {
+    const selected = els.billingPlanFilter.value;
+    els.billingPlanFilter.innerHTML = `<option value="">Todos planos</option>${planOptions}`;
+    els.billingPlanFilter.value = selected;
+  }
+  if (els.supportPlanFilter) {
+    const selected = els.supportPlanFilter.value;
+    els.supportPlanFilter.innerHTML = `<option value="">Todos planos</option>${planOptions}`;
+    els.supportPlanFilter.value = selected;
+  }
+  renderSupportQuickReplies();
   const companyOptions = state.companies
     .map((company) => `<option value="${escapeAttribute(company.id)}">${escapeHtml(company.name)}</option>`)
     .join('');
   els.storeCompanySelect.innerHTML = `<option value="">Selecione a empresa</option>${companyOptions}`;
   els.storeCompanySelect.disabled = !state.companies.length;
+  if (els.supportCompanySelect) {
+    const selected = els.supportCompanySelect.value;
+    els.supportCompanySelect.innerHTML = `<option value="">Sem empresa vinculada</option>${companyOptions}`;
+    els.supportCompanySelect.value = selected;
+  }
   els.auditCompanySelect.innerHTML = `<option value="">Todas empresas</option>${companyOptions}`;
+  if (els.operationalLogCompanyFilter) {
+    const selected = els.operationalLogCompanyFilter.value;
+    els.operationalLogCompanyFilter.innerHTML = `<option value="">Todos clientes</option>${companyOptions}`;
+    els.operationalLogCompanyFilter.value = selected;
+  }
   const stores = state.companies.flatMap((company) => (company.stores || []).map((store) => ({ ...store, company_name: company.name })));
-  els.auditStoreSelect.innerHTML = '<option value="">Todas lojas</option>' + stores
+  const storeOptions = stores
     .map((store) => `<option value="${escapeAttribute(store.id)}">${escapeHtml(store.name)} - ${escapeHtml(store.company_name)}</option>`)
     .join('');
+  els.auditStoreSelect.innerHTML = '<option value="">Todas lojas</option>' + storeOptions;
+  if (els.supportStoreSelect) {
+    const selected = els.supportStoreSelect.value;
+    els.supportStoreSelect.innerHTML = '<option value="">Sem loja vinculada</option>' + storeOptions;
+    els.supportStoreSelect.value = selected;
+  }
+  if (els.operationalLogStoreFilter) {
+    const selected = els.operationalLogStoreFilter.value;
+    els.operationalLogStoreFilter.innerHTML = '<option value="">Todas lojas</option>' + storeOptions;
+    els.operationalLogStoreFilter.value = selected;
+  }
 }
 
 function renderCommercialDashboard() {
@@ -233,12 +605,15 @@ function renderCommercialDashboard() {
   renderStoreRanking();
   renderBillingMetrics();
   renderCommercialAlerts();
+  renderOperationalOverviewAlerts();
+  renderPlanMrr();
+  renderConversion();
 }
 
 function renderKpis() {
   if (!els.platformKpiGrid) return;
   if (state.commercialLoading && !state.commercialLoaded) {
-    els.platformKpiGrid.innerHTML = Array.from({ length: 8 }).map(() => `
+    els.platformKpiGrid.innerHTML = Array.from({ length: 12 }).map(() => `
       <article class="platform-kpi-card platform-loading-card">
         <span>Carregando</span>
         <strong>...</strong>
@@ -253,17 +628,23 @@ function renderKpis() {
   }
   const cards = state.summary?.cards || {};
   const items = [
-    ['Clientes ativos', cards.active_clients, 'Empresas em status ativo'],
-    ['Clientes em teste', cards.trial_clients, 'Trials em andamento'],
-    ['Inadimplentes', cards.delinquent_clients, 'Pendente, vencido ou suspenso'],
-    ['Lojas publicadas', cards.published_stores, 'Cardápios ativos'],
-    ['Pedidos hoje', cards.orders_today, 'Pedidos recebidos hoje'],
-    ['Faturamento hoje', money(cards.revenue_today), 'Receita bruta de pedidos'],
-    ['MRR estimado', money(cards.mrr_estimated), 'Com base nos planos atuais'],
-    ['Churn/cancelados', cards.churn_clients, 'Cancelados ou arquivados']
+    ['Clientes ativos', cards.active_clients, 'Empresas em status ativo', 'success'],
+    ['Clientes em teste', cards.trial_clients, 'Trials em andamento', 'info'],
+    ['Inadimplentes', cards.delinquent_clients, 'Pendente, vencido ou grace period', Number(cards.delinquent_clients || 0) ? 'danger' : 'neutral'],
+    ['Suspensos', cards.suspended_clients, 'Clientes sem acesso comercial', Number(cards.suspended_clients || 0) ? 'danger' : 'neutral'],
+    ['Lojas publicadas', cards.published_stores, 'Cardápios ativos', 'success'],
+    ['Lojas não publicadas', cards.unpublished_stores, 'Cardápios inativos', Number(cards.unpublished_stores || 0) ? 'warning' : 'neutral'],
+    ['Pedidos hoje', cards.orders_today, 'Pedidos recebidos hoje', Number(cards.orders_today || 0) ? 'success' : 'neutral'],
+    ['Faturamento hoje', moneyCents(cards.revenue_today_cents, cards.revenue_today), 'Receita bruta de pedidos', Number(cards.revenue_today_cents || cards.revenue_today || 0) ? 'success' : 'neutral'],
+    ['MRR estimado', moneyCents(cards.mrr_estimated_cents, cards.mrr_estimated), 'Com base nos planos atuais', 'finance'],
+    ['Trials vencendo', cards.trials_ending, 'Precisam de contato', Number(cards.trials_ending || 0) ? 'warning' : 'neutral'],
+    ['Webhooks com erro', cards.webhook_errors, 'Falhas recentes', Number(cards.webhook_errors || 0) ? 'danger' : 'neutral'],
+    ['Backups atrasados', cards.delayed_backups, 'Rotina de segurança', Number(cards.delayed_backups || 0) ? 'warning' : 'neutral'],
+    ['Chamados abertos', cards.open_support_tickets ?? cards.support_open ?? 0, 'Atendimento e suporte', Number(cards.open_support_tickets ?? cards.support_open ?? 0) ? 'support' : 'neutral'],
+    ['Churn/cancelados', cards.churn_clients, 'Cancelados ou arquivados', Number(cards.churn_clients || 0) ? 'danger' : 'neutral']
   ];
-  els.platformKpiGrid.innerHTML = items.map(([label, value, hint]) => `
-    <article class="platform-kpi-card">
+  els.platformKpiGrid.innerHTML = items.map(([label, value, hint, tone]) => `
+    <article class="platform-kpi-card tone-${escapeAttribute(tone || 'neutral')}">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value ?? 0)}</strong>
       <p>${escapeHtml(hint)}</p>
@@ -287,13 +668,14 @@ function renderDailyChart() {
     return;
   }
   const maxOrders = Math.max(1, ...rows.map((row) => Number(row.orders || 0)));
-  const maxRevenue = Math.max(1, ...rows.map((row) => Number(row.revenue || 0)));
+  const maxRevenue = Math.max(1, ...rows.map((row) => Number(row.revenue_cents ?? row.revenue ?? 0)));
   els.platformDailyChart.innerHTML = rows.map((row) => {
     const orderHeight = Math.max(5, Math.round((Number(row.orders || 0) / maxOrders) * 92));
-    const revenueHeight = Math.max(5, Math.round((Number(row.revenue || 0) / maxRevenue) * 92));
+    const revenueValue = Number(row.revenue_cents ?? row.revenue ?? 0);
+    const revenueHeight = Math.max(5, Math.round((revenueValue / maxRevenue) * 92));
     const label = row.date.slice(5).split('-').reverse().join('/');
     return `
-      <button class="platform-day-bar" type="button" title="${escapeAttribute(label)}: ${Number(row.orders || 0)} pedido(s), ${money(row.revenue)}">
+      <button class="platform-day-bar" type="button" title="${escapeAttribute(label)}: ${Number(row.orders || 0)} pedido(s), ${moneyCents(row.revenue_cents, row.revenue)}">
         <span class="orders" style="height:${orderHeight}%"></span>
         <span class="revenue" style="height:${revenueHeight}%"></span>
         <small>${escapeHtml(label)}</small>
@@ -321,7 +703,7 @@ function renderStoreRanking() {
         <small>/${escapeHtml(row.slug || '')}</small>
       </div>
       <span>${Number(row.orders || 0)} pedido(s)</span>
-      <em>${money(row.revenue)}</em>
+      <em>${moneyCents(row.revenue_cents, row.revenue)}</em>
       <i style="width:${Math.max(8, (Number(row.orders || 0) / max) * 100)}%"></i>
     </article>
   `).join('') : '<p class="empty-state">Nenhuma loja com pedidos no período.</p>';
@@ -339,8 +721,8 @@ function renderBillingMetrics() {
   }
   const billing = state.summary?.billing || {};
   const rows = [
-    ['MRR', money(billing.mrr)],
-    ['Receita pedidos/mês', money(billing.monthly_order_revenue)],
+    ['MRR', moneyCents(billing.mrr_cents, billing.mrr)],
+    ['Receita pedidos/mês', moneyCents(billing.monthly_order_revenue_cents, billing.monthly_order_revenue)],
     ['Trials iniciados', billing.trials_started || 0],
     ['Upgrades', billing.upgrades || 0],
     ['Downgrades', billing.downgrades || 0],
@@ -352,7 +734,7 @@ function renderBillingMetrics() {
   els.platformBillingMetrics.innerHTML = `
     ${rows.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join('')}
     <div class="platform-plan-revenue">
-      ${revenueByPlan.map((entry) => `<span>${escapeHtml(entry.plan)} <strong>${money(entry.revenue)}</strong></span>`).join('') || '<span>Sem receita por plano.</span>'}
+      ${revenueByPlan.map((entry) => `<span>${escapeHtml(entry.plan)} <strong>${moneyCents(entry.revenue_cents, entry.revenue)}</strong></span>`).join('') || '<span>Sem receita por plano.</span>'}
     </div>
   `;
 }
@@ -368,12 +750,104 @@ function renderCommercialAlerts() {
     return;
   }
   const alerts = state.summary?.alerts || [];
-  els.platformCommercialAlerts.innerHTML = alerts.length ? alerts.map((alert) => `
+  els.platformCommercialAlerts.innerHTML = renderOverviewAlertList(alerts, {
+    empty: 'Nenhum alerta comercial crítico no momento.',
+    moreLabel: 'Ver todos os alertas comerciais'
+  });
+}
+
+function renderOperationalOverviewAlerts() {
+  if (!els.platformOperationalOverviewAlerts) return;
+  if (!state.healthLoaded && !state.health?.error) {
+    els.platformOperationalOverviewAlerts.innerHTML = '<p class="empty-state">Carregando sinais operacionais...</p>';
+    return;
+  }
+  if (state.health?.error) {
+    els.platformOperationalOverviewAlerts.innerHTML = `<p class="empty-state">${escapeHtml(state.health.error)}</p>`;
+    return;
+  }
+  const alerts = state.health?.alerts || [];
+  els.platformOperationalOverviewAlerts.innerHTML = renderOverviewAlertList(alerts, {
+    empty: 'Nenhum alerta operacional crítico no momento.',
+    moreLabel: 'Ver todos os alertas operacionais',
+    fallbackText: 'message'
+  });
+}
+
+function renderOverviewAlertList(alerts = [], options = {}) {
+  if (!alerts.length) return `<p class="empty-state">${escapeHtml(options.empty || 'Nenhum alerta no momento.')}</p>`;
+  const visible = alerts.slice(0, 5);
+  const hidden = alerts.slice(5);
+  const renderAlert = (alert) => `
     <article class="platform-commercial-alert severity-${escapeAttribute(alert.severity)}">
       <strong>${escapeHtml(alert.title)}</strong>
-      <small>${escapeHtml(alert.action || '')}</small>
+      <small>${escapeHtml(alert.action || (options.fallbackText === 'message' ? alert.message : '') || '')}</small>
     </article>
-  `).join('') : '<p class="empty-state">Nenhum alerta comercial no momento.</p>';
+  `;
+  return `
+    ${visible.map(renderAlert).join('')}
+    ${hidden.length ? `
+      <details class="platform-alert-expand">
+        <summary>
+          <strong>${escapeHtml(options.moreLabel || 'Ver todos os alertas')}</strong>
+          <span>+${hidden.length}</span>
+        </summary>
+        <div>${hidden.map(renderAlert).join('')}</div>
+      </details>
+    ` : ''}
+  `;
+}
+
+function renderPlanMrr() {
+  if (!els.platformPlanMrr) return;
+  if (state.commercialLoading && !state.commercialLoaded) {
+    els.platformPlanMrr.innerHTML = '<p class="empty-state">Carregando MRR por plano...</p>';
+    return;
+  }
+  if (state.commercialError && !state.commercialLoaded) {
+    els.platformPlanMrr.innerHTML = `<p class="empty-state">${escapeHtml(state.commercialError)}</p>`;
+    return;
+  }
+  const rows = state.analytics?.mrr_by_plan || state.analytics?.revenue?.mrr_by_plan || [];
+  const max = Math.max(1, ...rows.map((row) => Number(row.mrr_cents || 0)));
+  els.platformPlanMrr.innerHTML = rows.length ? rows.map((row) => `
+    <article class="platform-plan-mrr-row">
+      <div>
+        <strong>${escapeHtml(row.plan || 'Sem plano')}</strong>
+        <small>${Number(row.clients || 0)} cliente(s)</small>
+      </div>
+      <span>${moneyCents(row.mrr_cents, row.mrr)}</span>
+      <i style="width:${Math.max(8, (Number(row.mrr_cents || 0) / max) * 100)}%"></i>
+    </article>
+  `).join('') : '<p class="empty-state">Sem MRR por plano no período.</p>';
+}
+
+function renderConversion() {
+  if (!els.platformConversionGrid) return;
+  if (state.commercialLoading && !state.commercialLoaded) {
+    els.platformConversionGrid.innerHTML = '<p class="empty-state">Carregando conversão...</p>';
+    return;
+  }
+  if (state.commercialError && !state.commercialLoaded) {
+    els.platformConversionGrid.innerHTML = `<p class="empty-state">${escapeHtml(state.commercialError)}</p>`;
+    return;
+  }
+  const conversion = state.analytics?.conversion || {};
+  const items = [
+    ['Novos clientes', conversion.new_clients],
+    ['Trials iniciados', conversion.trials_started],
+    ['Trials convertidos', conversion.trials_converted],
+    ['Conversão', `${Number(conversion.conversion_rate || 0)}%`],
+    ['Upgrades', conversion.upgrades],
+    ['Downgrades', conversion.downgrades],
+    ['Churn', conversion.churn]
+  ];
+  els.platformConversionGrid.innerHTML = items.map(([label, value]) => `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value ?? 0)}</strong>
+    </article>
+  `).join('');
 }
 
 function renderAttentionPanel() {
@@ -417,7 +891,7 @@ function renderCompanies() {
     els.companyList.innerHTML = '<p class="empty-state">Nenhum cliente encontrado para os filtros.</p>';
     return;
   }
-  els.companyList.innerHTML = companies.map((company) => {
+  const cardsHtml = companies.map((company) => {
     const subscription = company.subscription || {};
     const plan = state.plans.find((item) => item.id === subscription.plan_id);
     const stores = company.stores || [];
@@ -436,7 +910,7 @@ function renderCompanies() {
           <div class="platform-company-summary-metrics">
             <span>${escapeHtml(metrics.plan_name || plan?.name || 'Sem plano')}</span>
             <span>${Number(metrics.orders_month || 0)} pedido(s)/mês</span>
-            <span>${money(metrics.revenue_month)}</span>
+            <span>${moneyCents(metrics.revenue_month_cents, metrics.revenue_month)}</span>
             <span>${Number(metrics.stores_count || stores.length || 0)} loja(s)</span>
           </div>
           <div class="platform-company-summary-status">
@@ -450,9 +924,10 @@ function renderCompanies() {
             <article><span>Lojas</span><strong>${Number(metrics.stores_count || stores.length || 0)}</strong></article>
             <article><span>Plano</span><strong>${escapeHtml(metrics.plan_name || plan?.name || 'Sem plano')}</strong></article>
             <article><span>Pedidos/mês</span><strong>${Number(metrics.orders_month || 0)}</strong></article>
-            <article><span>Faturamento/mês</span><strong>${money(metrics.revenue_month)}</strong></article>
-            <article><span>MRR</span><strong>${money(metrics.mrr)}</strong></article>
+            <article><span>Faturamento/mês</span><strong>${moneyCents(metrics.revenue_month_cents, metrics.revenue_month)}</strong></article>
+            <article><span>MRR</span><strong>${moneyCents(metrics.mrr_cents, metrics.mrr)}</strong></article>
             <article><span>Último pedido</span><strong>${metrics.last_order_at ? new Date(metrics.last_order_at).toLocaleDateString('pt-BR') : 'Sem pedidos'}</strong></article>
+            <article><span>Último acesso</span><strong>${metrics.last_access_at ? new Date(metrics.last_access_at).toLocaleDateString('pt-BR') : 'Sem acesso'}</strong></article>
             <article><span>Responsável</span><strong>${escapeHtml(responsible?.name || 'Sem responsável')}</strong></article>
             <article><span>Cadastro</span><strong>${company.created_at ? new Date(company.created_at).toLocaleDateString('pt-BR') : '-'}</strong></article>
           </section>
@@ -474,6 +949,15 @@ function renderCompanies() {
               </select>
               <button class="ghost-button compact" data-action="save-status" type="submit">Salvar cliente</button>
             </form>
+            <div class="platform-client-quick-actions" data-company-id="${escapeAttribute(company.id)}">
+              ${stores[0]?.slug ? `<a class="ghost-button compact" href="/${escapeAttribute(stores[0].slug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
+              <a class="ghost-button compact" href="/admin" target="_blank" rel="noopener">Abrir admin</a>
+              ${stores[0]?.id ? `<button class="ghost-button compact" data-company-action="impersonate" data-store-id="${escapeAttribute(stores[0].id)}" type="button">Entrar como suporte</button>` : ''}
+              <button class="ghost-button compact" data-company-action="activate" type="button">Liberar cliente</button>
+              <button class="danger-button compact" data-company-action="suspend" type="button">Suspender</button>
+              <button class="ghost-button compact" data-company-action="reopen-onboarding" type="button">Reabrir onboarding</button>
+              <button class="ghost-button compact" data-company-action="resend-billing" type="button">Reenviar cobrança</button>
+            </div>
             <div class="store-mini-list">
               ${stores.length ? stores.map((store) => `
                 <form class="store-mini-row" data-store-id="${escapeAttribute(store.id)}">
@@ -541,6 +1025,13 @@ function renderCompanies() {
       </details>
     `;
   }).join('');
+  const loadMoreHtml = state.companyPagination?.has_more ? `
+    <div class="platform-load-more">
+      <button class="ghost-button compact" data-load-more-companies type="button">Carregar mais clientes</button>
+      <small>Mostrando ${Number(state.companies.length || 0)} cliente(s).</small>
+    </div>
+  ` : '';
+  els.companyList.innerHTML = cardsHtml + loadMoreHtml;
   els.companyList.querySelectorAll('.platform-company-actions').forEach((form) => {
     form.addEventListener('submit', submitCompanyManagement);
   });
@@ -556,6 +1047,10 @@ function renderCompanies() {
   els.companyList.querySelectorAll('[data-load-company-detail]').forEach((button) => {
     button.addEventListener('click', () => loadCompanyDetail(button.dataset.loadCompanyDetail));
   });
+  els.companyList.querySelectorAll('[data-company-action]').forEach((button) => {
+    button.addEventListener('click', submitCompanyQuickAction);
+  });
+  els.companyList.querySelector('[data-load-more-companies]')?.addEventListener('click', loadMoreCompanies);
   els.companyList.querySelectorAll('.platform-note-form').forEach((form) => {
     form.addEventListener('submit', submitCompanyNote);
   });
@@ -592,8 +1087,9 @@ function filteredCompanies() {
     if (activity === 'without_orders' && metrics.has_orders) return false;
     if (activity === 'payment_due' && !delinquent.has(metrics.subscription_status || company.status)) return false;
     if (activity === 'trial_ending' && !trialEndingSoon(company.subscription)) return false;
-    if (activity === 'unpublished_store' && !stores.some((store) => store.is_active === false)) return false;
-    if (activity === 'no_whatsapp' && !clientAlertsForCompany(company, metrics).some((alert) => alert.type === 'setup')) return false;
+    if (activity === 'unpublished_store' && !(stores.some((store) => store.is_active === false) || Number(metrics.unpublished_stores_count || 0) > 0)) return false;
+    if (activity === 'no_whatsapp' && !(Number(metrics.stores_without_whatsapp_count || 0) > 0)) return false;
+    if (activity === 'no_products' && !(Number(metrics.products_count || 0) === 0 && stores.length)) return false;
     if (activity === 'needs_attention' && !clientAlertsForCompany(company, metrics).length) return false;
     return true;
   });
@@ -616,6 +1112,9 @@ function clientAlertsForCompany(company, metrics = {}) {
   if (delinquent.has(metrics.subscription_status || subscription.status || company.status)) alerts.push({ type: 'billing', severity: 'critical', title: 'Cobrança pendente', action: 'Verificar pagamento e webhook.' });
   if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar cardápio ou unidade.' });
   if (stores.some((store) => store.is_active === false)) alerts.push({ type: 'store', severity: 'attention', title: 'Loja não publicada ou suspensa', action: 'Validar status da loja.' });
+  if (Number(metrics.stores_without_whatsapp_count || 0) > 0) alerts.push({ type: 'whatsapp', severity: 'warning', title: 'Loja sem WhatsApp', action: 'Completar configuração de atendimento.' });
+  if (stores.length && Number(metrics.products_count || 0) === 0) alerts.push({ type: 'menu', severity: 'critical', title: 'Sem produto cadastrado', action: 'Ajudar o cliente a montar o cardápio.' });
+  if (Number(metrics.incomplete_onboarding_count || 0) > 0) alerts.push({ type: 'onboarding', severity: 'attention', title: 'Onboarding incompleto', action: 'Reabrir onboarding ou orientar cliente.' });
   if (!metrics.has_orders && stores.length) alerts.push({ type: 'sales', severity: 'attention', title: 'Sem pedidos no período', action: 'Acompanhar ativação do cliente.' });
   return alerts;
 }
@@ -625,7 +1124,10 @@ function severityWeight(value) {
 }
 
 function companyMetrics(companyId) {
-  return (state.analytics?.company_metrics || []).find((entry) => entry.company_id === companyId) || {};
+  const company = state.companies.find((entry) => entry.id === companyId) || {};
+  const listMetrics = company.metrics || {};
+  const analyticsMetrics = (state.analytics?.company_metrics || []).find((entry) => entry.company_id === companyId) || {};
+  return { ...listMetrics, ...analyticsMetrics, last_access_at: analyticsMetrics.last_access_at || listMetrics.last_access_at };
 }
 
 function trialEndingSoon(subscription) {
@@ -639,8 +1141,16 @@ async function loadCompanyDetail(companyId) {
   state.companyDetails[companyId] = { loading: true };
   renderCompanies();
   try {
-    const detail = await request(`/api/platform/companies/${companyId}/detail`);
-    state.companyDetails[companyId] = detail;
+    const [detail, score, timeline] = await Promise.all([
+      request(`/api/platform/companies/${companyId}/detail`),
+      request(`/api/platform/companies/${companyId}/score`),
+      request(`/api/platform/companies/${companyId}/timeline`)
+    ]);
+    state.companyDetails[companyId] = {
+      ...detail,
+      score,
+      timeline: timeline.timeline || detail.timeline || []
+    };
   } catch (error) {
     state.companyDetails[companyId] = { error: error.message || 'Não foi possível carregar o cliente.' };
   }
@@ -658,8 +1168,28 @@ function renderCompanyDetail(detail) {
   const billing = detail.billing_history || [];
   const timeline = detail.timeline || [];
   const attention = detail.attention || [];
+  const recentOrders = detail.recent_orders || [];
+  const usageCounters = detail.usage_counters || [];
+  const score = detail.score || {};
+  const internalStatus = detail.internal_status || {};
   return `
     <section class="platform-detail-section">
+      <div class="platform-score-panel score-${escapeAttribute(score.tone || 'neutral')}">
+        <div>
+          <p class="eyebrow">Score do cliente</p>
+          <h4>${escapeHtml(score.label || 'Sem score')}</h4>
+          <p>${escapeHtml((score.reasons || ['Sem sinais suficientes para classificar.'])[0])}</p>
+        </div>
+        <strong>${Number(score.points || 0)}<small>/100</small></strong>
+      </div>
+      ${(score.recommendations || []).length ? `<div class="platform-recommendation-list">
+        ${score.recommendations.map((item) => `
+          <article>
+            <strong>${escapeHtml(item.title)}</strong>
+            <small>${escapeHtml(item.action)}</small>
+          </article>
+        `).join('')}
+      </div>` : ''}
       <div class="platform-detail-metrics">
         <article><span>Pedidos 7 dias</span><strong>${Number(metrics.orders_7d || 0)}</strong></article>
         <article><span>Faturamento 7 dias</span><strong>${money(metrics.revenue_7d)}</strong></article>
@@ -701,6 +1231,32 @@ function renderCompanyDetail(detail) {
       </div>
       <div class="platform-detail-columns">
         <article>
+          <h4>Uso do plano</h4>
+          ${usageCounters.length ? usageCounters.slice(0, 8).map((entry) => `
+            <div class="platform-detail-row">
+              <div>
+                <strong>${escapeHtml(entry.usage_key || entry.feature_code || 'Uso')}</strong>
+                <small>${entry.updated_at ? new Date(entry.updated_at).toLocaleString('pt-BR') : '-'}</small>
+              </div>
+              <span>${Number(entry.quantity || entry.used || 0)}</span>
+            </div>
+          `).join('') : '<p class="empty-state">Sem contadores de uso registrados.</p>'}
+        </article>
+        <article>
+          <h4>Últimos pedidos</h4>
+          ${recentOrders.length ? recentOrders.map((order) => `
+            <div class="platform-detail-row">
+              <div>
+                <strong>${escapeHtml(order.status || 'Pedido')}</strong>
+                <small>${order.created_at ? new Date(order.created_at).toLocaleString('pt-BR') : '-'}</small>
+              </div>
+              <span>${moneyCents(order.total_cents, order.total)}</span>
+            </div>
+          `).join('') : '<p class="empty-state">Nenhum pedido registrado.</p>'}
+        </article>
+      </div>
+      <div class="platform-detail-columns">
+        <article>
           <h4>Histórico de cobrança</h4>
           ${billing.length ? billing.slice(0, 6).map((entry) => `
             <div class="platform-detail-row">
@@ -727,12 +1283,20 @@ function renderCompanyDetail(detail) {
         </article>
       </div>
       <form class="platform-note-form" data-company-id="${escapeAttribute(detail.company?.id || '')}">
-        <h4>Nota interna</h4>
+        <h4>Acompanhamento interno</h4>
+        ${internalStatus?.created_at ? `<p class="muted">Último registro: ${new Date(internalStatus.created_at).toLocaleString('pt-BR')}</p>` : ''}
         <textarea name="note" rows="3" placeholder="Registre comentário, combinado ou pendência comercial"></textarea>
         <div class="platform-note-grid">
-          <input name="status" placeholder="Status. Ex: Aguardando retorno">
-          <input name="responsible" placeholder="Responsável interno">
-          <input name="next_contact_at" type="date">
+          <input name="status" placeholder="Status. Ex: Aguardando retorno" value="${escapeAttribute(internalStatus.support_status || '')}">
+          <input name="responsible" placeholder="Responsável interno" value="${escapeAttribute(internalStatus.responsible || '')}">
+          <select name="priority">
+            <option value="medium" ${internalStatus.priority === 'medium' ? 'selected' : ''}>Prioridade média</option>
+            <option value="low" ${internalStatus.priority === 'low' ? 'selected' : ''}>Prioridade baixa</option>
+            <option value="high" ${internalStatus.priority === 'high' ? 'selected' : ''}>Prioridade alta</option>
+            <option value="critical" ${internalStatus.priority === 'critical' ? 'selected' : ''}>Prioridade crítica</option>
+          </select>
+          <input name="tags" placeholder="Tags. Ex: onboarding, upgrade" value="${escapeAttribute((internalStatus.tags || []).join(', '))}">
+          <input name="next_contact_at" type="date" value="${internalStatus.next_contact_at ? escapeAttribute(String(internalStatus.next_contact_at).slice(0, 10)) : ''}">
           <button class="primary-button compact">Salvar nota</button>
         </div>
       </form>
@@ -745,29 +1309,52 @@ async function submitCompanyNote(event) {
   const form = event.currentTarget;
   const companyId = form.dataset.companyId;
   const data = Object.fromEntries(new FormData(form));
-  await request(`/api/platform/companies/${companyId}/notes`, {
-    method: 'POST',
+  await request(`/api/platform/companies/${companyId}/internal-status`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  toast('Nota interna registrada.');
+  toast('Acompanhamento interno registrado.');
   await loadCompanyDetail(companyId);
 }
 
 function renderAudit() {
+  if (!state.auditLoaded && !state.logs.length) {
+    els.auditList.innerHTML = '<p class="empty-state">A auditoria será carregada ao abrir esta aba ou ao aplicar filtros.</p>';
+    return;
+  }
   els.auditList.innerHTML = state.logs.length ? state.logs.map((log) => `
-    <article class="audit-row">
-      <div>
-        <strong>${escapeHtml(log.action)}</strong>
-        <small>${new Date(log.created_at).toLocaleString('pt-BR')} ${log.severity ? `- ${escapeHtml(log.severity)}` : ''}</small>
+    <details class="audit-row platform-audit-detail severity-${escapeAttribute(log.severity || 'info')}">
+      <summary>
+        <div>
+          <strong>${escapeHtml(log.action)}</strong>
+          <small>${new Date(log.created_at).toLocaleString('pt-BR')} ${log.severity ? `- ${escapeHtml(log.severity)}` : ''}</small>
+        </div>
+        <span>${escapeHtml(log.entity_type || 'plataforma')}</span>
+      </summary>
+      <div class="platform-audit-body">
+        <article><span>Usuário</span><strong>${escapeHtml(log.actor_admin_email || log.actor_admin_id || '-')}</strong></article>
+        <article><span>Cliente</span><strong>${escapeHtml(log.company_name || log.company_id || '-')}</strong></article>
+        <article><span>Loja</span><strong>${escapeHtml(log.store_name || log.store_id || '-')}</strong></article>
+        <article><span>IP</span><strong>${escapeHtml(log.ip_address || '-')}</strong></article>
+        <article><span>Resultado</span><strong>${escapeHtml(log.status || log.after_data?.status || log.severity || '-')}</strong></article>
+        <article><span>Mensagem</span><strong>${escapeHtml(log.message || log.after_data?.message || log.after_data?.summary || '-')}</strong></article>
       </div>
-      <span>${escapeHtml(log.entity_type || 'plataforma')}</span>
-    </article>
+    </details>
   `).join('') : '<p class="empty-state">Nenhum evento recente.</p>';
 }
 
 function renderHealth() {
   const health = state.health || {};
+  if (!state.healthLoaded && !health.error) {
+    if (els.healthMeta) els.healthMeta.textContent = 'Abra esta aba para carregar a saúde operacional.';
+    if (els.platformStatusGrid) els.platformStatusGrid.innerHTML = '<p class="empty-state">Status operacional ainda não carregado.</p>';
+    if (els.platformMetrics) els.platformMetrics.innerHTML = '';
+    if (els.platformConfigChecklist) els.platformConfigChecklist.innerHTML = '';
+    if (els.platformAlerts) els.platformAlerts.innerHTML = '';
+    if (els.platformOperationalLogs) els.platformOperationalLogs.innerHTML = '';
+    return;
+  }
   if (health.error) {
     if (els.healthMeta) els.healthMeta.textContent = health.error;
     if (els.platformStatusGrid) els.platformStatusGrid.innerHTML = '<p class="empty-state">Não foi possível carregar os checks operacionais.</p>';
@@ -783,6 +1370,7 @@ function renderHealth() {
   renderPlatformChecklist(health.config?.items || []);
   renderPlatformAlerts(health.alerts || []);
   renderOperationalLogs();
+  renderServices();
 }
 
 function renderPlatformStatuses(statuses) {
@@ -800,20 +1388,45 @@ function renderPlatformStatuses(statuses) {
 function renderPlatformMetrics(metrics) {
   if (!els.platformMetrics) return;
   const rows = [
-    ['API', metrics.api],
-    ['Banco', metrics.database],
-    ['Checkout', metrics.checkout],
-    ['Pedidos', metrics.order_mutations]
+    ['API', metrics.api, `${Number(metrics.api?.requests_per_minute || 0)} req/min · ${Number(metrics.api?.errors_5xx || 0)} erro(s) 5xx`],
+    ['Banco', metrics.database, metrics.database?.status ? statusLabelHealth(metrics.database.status) : 'Verificação atual'],
+    ['Checkout', metrics.checkout, `${Number(metrics.checkout?.requests || 0)} requisição(ões)`],
+    ['Pedidos', metrics.order_mutations, `${Number(metrics.order_mutations?.requests || 0)} mutação(ões)`]
   ];
-  els.platformMetrics.innerHTML = rows.map(([label, data = {}]) => `
+  const system = metrics.system || {};
+  const disk = system.disk || {};
+  const memory = system.memory || {};
+  const cpu = system.cpu || {};
+  els.platformMetrics.innerHTML = `
+    ${rows.map(([label, data = {}, detail = '']) => `
     <div class="platform-metric-row">
       <strong>${escapeHtml(label)}</strong>
       <span>Média: ${metricMs(data.average_ms)}</span>
       <span>P95: ${metricMs(data.p95_ms)}</span>
       <span>P99: ${metricMs(data.p99_ms)}</span>
       ${data.requests !== undefined ? `<small>${Number(data.requests || 0)} req.</small>` : ''}
+      ${detail ? `<small>${escapeHtml(detail)}</small>` : ''}
     </div>
-  `).join('');
+    `).join('')}
+    <div class="platform-metric-row platform-system-metric">
+      <strong>Memória</strong>
+      <span>Processo: ${formatBytes(memory.rss_bytes || 0)}</span>
+      <span>Heap: ${formatBytes(memory.heap_used_bytes || 0)} / ${formatBytes(memory.heap_total_bytes || 0)}</span>
+      <small>Sistema usado: ${memory.system_used_percent ?? '-'}%</small>
+    </div>
+    <div class="platform-metric-row platform-system-metric">
+      <strong>CPU</strong>
+      <span>Cores: ${Number(cpu.cores || 0)}</span>
+      <span>Carga 1m: ${cpu.load_1m ?? '-'}</span>
+      <small>Uso estimado: ${cpu.load_percent ?? '-'}%</small>
+    </div>
+    <div class="platform-metric-row platform-system-metric">
+      <strong>Disco</strong>
+      <span>Uploads livres: ${formatBytes(metrics.storage?.upload_free_bytes || 0)}</span>
+      <span>Backups livres: ${formatBytes(metrics.storage?.backup_free_bytes || 0)}</span>
+      <small>Menor espaço livre: ${disk.lowest_free_percent ?? '-'}%</small>
+    </div>
+  `;
 }
 
 function renderPlatformChecklist(items) {
@@ -844,18 +1457,42 @@ function renderOperationalLogs() {
   if (!els.platformOperationalLogs) return;
   const type = els.operationalLogTypeFilter?.value || '';
   const status = els.operationalLogStatusFilter?.value || '';
+  const severity = els.operationalLogSeverityFilter?.value || '';
+  const service = els.operationalLogServiceFilter?.value || '';
   const logs = (state.health?.logs || [])
     .filter((entry) => !type || entry.type === type)
-    .filter((entry) => !status || entry.status === status);
-  els.platformOperationalLogs.innerHTML = logs.length ? logs.map((entry) => `
-    <article class="platform-log-row status-${escapeAttribute(entry.status)}">
-      <div>
-        <strong>${escapeHtml(entry.action || entry.type)}</strong>
-        <small>${entry.created_at ? new Date(entry.created_at).toLocaleString('pt-BR') : '-'} - ${escapeHtml(entry.type || 'system')}</small>
+    .filter((entry) => !status || entry.status === status)
+    .filter((entry) => !severity || entry.severity === severity)
+    .filter((entry) => !service || entry.service === service);
+  const list = logs.map((entry) => `
+    <details class="platform-log-row platform-log-detail status-${escapeAttribute(entry.status)}">
+      <summary>
+        <div>
+          <strong>${escapeHtml(entry.action || entry.type)}</strong>
+          <small>${entry.created_at ? new Date(entry.created_at).toLocaleString('pt-BR') : '-'} · ${escapeHtml(entry.type || 'system')}</small>
+        </div>
+        <span>${escapeHtml(entry.severity || entry.status || 'info')}</span>
+      </summary>
+      <div class="platform-log-body">
+        <article><span>Serviço</span><strong>${escapeHtml(entry.service || 'system')}</strong></article>
+        <article><span>Status</span><strong>${escapeHtml(entry.status || 'info')}</strong></article>
+        <article><span>Cliente/loja</span><strong>${escapeHtml([entry.company_name, entry.store_name].filter(Boolean).join(' · ') || '-')}</strong></article>
+        <article class="is-wide"><span>Mensagem</span><strong>${escapeHtml(entry.message || 'Evento operacional registrado.')}</strong></article>
       </div>
-      <p>${escapeHtml(entry.message || '')}</p>
-    </article>
-  `).join('') : '<p class="empty-state">Nenhum log operacional para os filtros.</p>';
+    </details>
+  `).join('');
+  els.platformOperationalLogs.innerHTML = logs.length ? `
+    <details class="platform-log-group">
+      <summary>
+        <div>
+          <strong>Ver logs operacionais</strong>
+          <small>Últimas 24h conforme filtros selecionados.</small>
+        </div>
+        <span>${logs.length} log(s)</span>
+      </summary>
+      <div class="platform-log-group-body">${list}</div>
+    </details>
+  ` : '<p class="empty-state">Nenhum log operacional para os filtros.</p>';
 }
 
 function statusLabelHealth(status) {
@@ -871,8 +1508,833 @@ function metricMs(value) {
   return value === null || value === undefined ? '-' : `${Number(value)} ms`;
 }
 
+function renderServices() {
+  const services = state.services || {};
+  if (!state.servicesLoaded && !services.error) {
+    if (els.servicesMeta) els.servicesMeta.textContent = 'Abra esta aba para verificar detalhes operacionais.';
+    if (els.platformServicesGrid) els.platformServicesGrid.innerHTML = '<p class="empty-state">Detalhes operacionais ainda não verificados.</p>';
+    if (els.platformServiceLogs) els.platformServiceLogs.innerHTML = '';
+    if (els.platformRiskZone) els.platformRiskZone.innerHTML = '';
+    return;
+  }
+  if (services.error) {
+    if (els.servicesMeta) els.servicesMeta.textContent = services.error;
+    if (els.platformServicesGrid) els.platformServicesGrid.innerHTML = '<p class="empty-state">Não foi possível carregar os detalhes operacionais.</p>';
+    return;
+  }
+  if (els.servicesMeta) {
+    els.servicesMeta.textContent = services.checked_at
+      ? `Detalhes operacionais: ${new Date(services.checked_at).toLocaleString('pt-BR')}`
+      : 'Detalhes operacionais ainda não verificados.';
+  }
+  renderServiceCards(services);
+  renderServiceLogs();
+  renderRiskZone(services.risk_zone || {});
+}
+
+function renderBilling() {
+  renderBillingSummary();
+  renderBillingSubscriptions();
+  renderBillingPlans();
+  renderBillingEvents();
+  renderBillingAlerts();
+}
+
+function renderBillingSummary() {
+  if (!els.platformBillingSummaryGrid) return;
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    els.platformBillingSummaryGrid.innerHTML = '<p class="empty-state">Abra esta aba para carregar métricas financeiras.</p>';
+    return;
+  }
+  if (state.billingLoading && !state.billingLoaded) {
+    els.platformBillingSummaryGrid.innerHTML = Array.from({ length: 8 }).map(() => `
+      <article class="platform-kpi-card platform-loading-card">
+        <span>Billing</span>
+        <strong>...</strong>
+        <p>Carregando métricas financeiras.</p>
+      </article>
+    `).join('');
+    return;
+  }
+  if (state.billingError && !state.billingLoaded) {
+    els.platformBillingSummaryGrid.innerHTML = `<article class="platform-kpi-card platform-error-card"><span>Billing</span><strong>Erro</strong><p>${escapeHtml(state.billingError)}</p></article>`;
+    return;
+  }
+  const billing = state.billing || {};
+  const delinquency = billing.delinquency || {};
+  const events = billing.events || {};
+  const items = [
+    ['MRR total', moneyCents(billing.mrr_total_cents), 'Receita recorrente ativa e em risco', Number(billing.mrr_total_cents || 0) ? 'finance' : 'neutral'],
+    ['MRR ativo', moneyCents(billing.mrr_active_cents), 'Assinaturas ativas', Number(billing.mrr_active_cents || 0) ? 'success' : 'neutral'],
+    ['MRR em risco', moneyCents(billing.mrr_at_risk_cents), 'Trial, vencido ou grace period', Number(billing.mrr_at_risk_cents || 0) ? 'warning' : 'neutral'],
+    ['Receita pendente', moneyCents(billing.pending_revenue_cents), 'Cobranças abertas', Number(billing.pending_revenue_cents || 0) ? 'warning' : 'neutral'],
+    ['Receita perdida', moneyCents(billing.lost_revenue_cents), 'Cancelados ou bloqueados', Number(billing.lost_revenue_cents || 0) ? 'danger' : 'neutral'],
+    ['Inadimplência', `${Number(delinquency.rate || 0)}%`, `${Number(delinquency.clients || 0)} cliente(s)`, Number(delinquency.clients || delinquency.rate || 0) ? 'danger' : 'neutral'],
+    ['Ticket por cliente', moneyCents(billing.average_ticket_per_client_cents), 'Faturamento de pedidos / clientes pagantes', Number(billing.average_ticket_per_client_cents || 0) ? 'success' : 'neutral'],
+    ['Pagamentos aprovados', events.payment_approved || 0, 'Eventos financeiros no período', Number(events.payment_approved || 0) ? 'success' : 'neutral'],
+    ['Pagamentos recusados', events.payment_refused || 0, 'Falhas ou recusas', Number(events.payment_refused || 0) ? 'danger' : 'neutral'],
+    ['Webhooks com erro', events.webhook_error || 0, 'Eventos que precisam revisão', Number(events.webhook_error || 0) ? 'danger' : 'neutral']
+  ];
+  els.platformBillingSummaryGrid.innerHTML = items.map(([label, value, hint, tone]) => `
+    <article class="platform-kpi-card tone-${escapeAttribute(tone || 'neutral')}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value ?? 0)}</strong>
+      <p>${escapeHtml(hint)}</p>
+    </article>
+  `).join('');
+}
+
+function renderBillingSubscriptions() {
+  if (!els.platformSubscriptionList) return;
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    els.platformSubscriptionList.innerHTML = '<p class="empty-state">Assinaturas serão carregadas ao abrir a aba Billing.</p>';
+    return;
+  }
+  if (state.billingLoading && !state.billingLoaded) {
+    els.platformSubscriptionList.innerHTML = '<p class="empty-state">Carregando assinaturas...</p>';
+    return;
+  }
+  if (state.billingError && !state.billingLoaded) {
+    els.platformSubscriptionList.innerHTML = `<p class="empty-state">${escapeHtml(state.billingError)}</p>`;
+    return;
+  }
+  const rows = state.billingSubscriptions || [];
+  els.platformSubscriptionList.innerHTML = rows.length ? rows.map((row) => `
+    <article class="platform-subscription-row status-${escapeAttribute(row.display_status || row.status || 'unknown')}">
+      <div class="platform-subscription-main">
+        <div>
+          <strong>${escapeHtml(row.company_name)}</strong>
+          <small>${escapeHtml(row.billing_email || row.phone || 'Sem contato financeiro')}</small>
+        </div>
+        <span class="pill ${billingStatusPill(row.display_status || row.status)}">${escapeHtml(subscriptionStatusLabel(row.display_status || row.status))}</span>
+      </div>
+      <div class="platform-subscription-meta">
+        <span><b>Plano</b>${escapeHtml(row.plan_name || 'Sem plano')}</span>
+        <span><b>Valor</b>${moneyCents(row.value_cents)}</span>
+        <span><b>Trial</b>${formatDate(row.trial_ends_at)}</span>
+        <span><b>Próxima cobrança</b>${formatDate(row.next_renewal_at || row.payment_due_at)}</span>
+        <span><b>Provedor</b>${escapeHtml(row.provider || 'manual')}</span>
+        <span><b>Referência</b>${escapeHtml(row.external_reference || '-')}</span>
+      </div>
+      <div class="platform-subscription-actions" data-company-id="${escapeAttribute(row.company_id)}">
+        <select class="compact-date" data-billing-plan-select>
+          ${state.plans.map((plan) => `<option value="${escapeAttribute(plan.code)}" ${plan.code === row.plan_code ? 'selected' : ''}>${escapeHtml(plan.name)}</option>`).join('')}
+        </select>
+        <button class="ghost-button compact" data-billing-action="change-plan" type="button">Alterar plano</button>
+        <button class="ghost-button compact" data-billing-action="reactivate" type="button">Reativar</button>
+        <button class="danger-button compact" data-billing-action="cancel" type="button">Cancelar</button>
+      </div>
+    </article>
+  `).join('') : '<p class="empty-state">Nenhuma assinatura encontrada para os filtros.</p>';
+  els.platformSubscriptionList.querySelectorAll('[data-billing-action]').forEach((button) => {
+    button.addEventListener('click', submitBillingAction);
+  });
+}
+
+function renderBillingPlans() {
+  if (!els.platformBillingPlanList) return;
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    els.platformBillingPlanList.innerHTML = '<p class="empty-state">Planos serão carregados ao abrir Billing.</p>';
+    return;
+  }
+  const rows = state.billingPlans || [];
+  const max = Math.max(1, ...rows.map((row) => Number(row.mrr_cents || 0)));
+  els.platformBillingPlanList.innerHTML = rows.length ? rows.map((row) => `
+    <article class="platform-plan-mrr-row">
+      <div>
+        <strong>${escapeHtml(row.name)}</strong>
+        <small>${Number(row.active_subscriptions || 0)} assinatura(s) · ${moneyCents(row.monthly_price_cents)}</small>
+      </div>
+      <span>${moneyCents(row.mrr_cents)}</span>
+      <i style="width:${Math.max(8, (Number(row.mrr_cents || 0) / max) * 100)}%"></i>
+    </article>
+  `).join('') : '<p class="empty-state">Nenhum plano ativo encontrado.</p>';
+}
+
+function renderBillingEvents() {
+  if (!els.platformBillingEventList) return;
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    els.platformBillingEventList.innerHTML = '<p class="empty-state">Eventos financeiros serão carregados ao abrir Billing.</p>';
+    return;
+  }
+  const rows = state.billingEvents || [];
+  els.platformBillingEventList.innerHTML = rows.length ? rows.slice(0, 40).map((row) => `
+    <article class="platform-billing-event-row">
+      <div>
+        <strong>${escapeHtml(row.label || row.event_type)}</strong>
+        <small>${escapeHtml(row.company_name || 'Cliente')} · ${formatDateTime(row.created_at)}</small>
+      </div>
+      <span>${moneyCents(row.amount_cents)}</span>
+      <em>${escapeHtml(row.provider || 'manual')}</em>
+      <small>${escapeHtml(row.external_reference || row.plan_name || '-')}</small>
+    </article>
+  `).join('') : '<p class="empty-state">Sem eventos financeiros no período.</p>';
+}
+
+function renderBillingAlerts() {
+  if (!els.platformBillingAlertList) return;
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    els.platformBillingAlertList.innerHTML = '<p class="empty-state">Alertas financeiros serão carregados ao abrir Billing.</p>';
+    return;
+  }
+  const alerts = state.billing?.alerts || [];
+  const statuses = state.billing?.subscriptions_by_status || {};
+  els.platformBillingAlertList.innerHTML = `
+    <div class="platform-billing-status-grid">
+      ${Object.entries(statuses).map(([status, count]) => `
+        <article>
+          <span>${escapeHtml(subscriptionStatusLabel(status))}</span>
+          <strong>${Number(count || 0)}</strong>
+        </article>
+      `).join('') || '<p class="empty-state">Sem status de assinatura.</p>'}
+    </div>
+    ${alerts.length ? alerts.map((alert) => `
+      <article class="platform-commercial-alert severity-${escapeAttribute(alert.severity)}">
+        <strong>${escapeHtml(alert.title)}</strong>
+        <small>${escapeHtml(alert.action || '')}</small>
+      </article>
+    `).join('') : '<p class="empty-state">Nenhum alerta financeiro crítico.</p>'}
+  `;
+}
+
+function renderCommunication() {
+  if (!state.communicationLoaded && !state.communicationLoading) {
+    if (els.smtpStatusText) els.smtpStatusText.textContent = 'Configurações SMTP ainda não carregadas.';
+    if (els.platformEmailTemplateList) els.platformEmailTemplateList.innerHTML = '<p class="empty-state">Abra esta aba para carregar templates de e-mail.</p>';
+    return;
+  }
+  renderSmtpForm();
+  renderEmailTemplates();
+}
+
+function renderSmtpForm() {
+  if (!els.platformSmtpForm) return;
+  const smtp = state.smtp || {};
+  const form = els.platformSmtpForm;
+  form.elements.host.value = smtp.host || '';
+  form.elements.port.value = smtp.port || 587;
+  form.elements.username.value = smtp.username || '';
+  form.elements.password.value = '';
+  form.elements.from_email.value = smtp.from_email || '';
+  form.elements.from_name.value = smtp.from_name || '';
+  form.elements.reply_to.value = smtp.reply_to || '';
+  form.elements.use_tls.checked = smtp.use_tls !== false;
+  form.elements.is_active.checked = smtp.is_active === true;
+  if (els.smtpStatusText) {
+    const status = smtp.last_test_status ? `Último teste: ${smtp.last_test_status}${smtp.last_test_at ? ` em ${formatDateTime(smtp.last_test_at)}` : ''}.` : 'Nenhum teste registrado.';
+    els.smtpStatusText.textContent = `${smtp.has_password ? 'Senha/token configurado. ' : 'Senha/token ausente. '}${status}`;
+  }
+}
+
+function renderEmailTemplates() {
+  if (!els.platformEmailTemplateList) return;
+  const templates = state.emailTemplates || [];
+  els.platformEmailTemplateList.innerHTML = templates.length ? templates.map((template) => `
+    <form class="platform-template-card" data-template-key="${escapeAttribute(template.template_key)}">
+      <div class="section-actions compact-section-actions">
+        <div>
+          <p class="eyebrow">${escapeHtml(template.template_key)}</p>
+          <h3>${escapeHtml(template.name)}</h3>
+        </div>
+        <label class="payment-option"><input name="is_active" type="checkbox" ${template.is_active !== false ? 'checked' : ''}> Ativo</label>
+      </div>
+      <label>Assunto<input name="subject" value="${escapeAttribute(template.subject || '')}"></label>
+      <label>Corpo<textarea name="body" rows="5">${escapeHtml(template.body || '')}</textarea></label>
+      <small class="muted">${(template.variables || []).map((item) => `{{${escapeHtml(item)}}}`).join(' ')}</small>
+      <button class="ghost-button compact">Salvar template</button>
+    </form>
+  `).join('') : '<p class="empty-state">Nenhum template disponível. Execute as migrations para criar a estrutura.</p>';
+  els.platformEmailTemplateList.querySelectorAll('.platform-template-card').forEach((form) => {
+    form.addEventListener('submit', submitEmailTemplate);
+  });
+}
+
+function renderSupport() {
+  if (!els.platformSupportTicketList) return;
+  const tickets = filteredSupportTickets();
+  renderSupportSummary(tickets);
+  if (!state.supportLoaded && !state.supportLoading) {
+    els.platformSupportTicketList.innerHTML = '<p class="empty-state">Chamados serão carregados ao abrir esta aba.</p>';
+    return;
+  }
+  if (state.supportLoading && !tickets.length) {
+    els.platformSupportTicketList.innerHTML = '<p class="empty-state">Carregando chamados...</p>';
+    return;
+  }
+  els.platformSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => {
+    const context = supportTicketContext(ticket);
+    const sla = supportSla(ticket);
+    const lastMessage = latestSupportMessage(ticket);
+    return `
+    <details class="platform-support-ticket priority-${escapeAttribute(ticket.priority)} sla-${escapeAttribute(sla.status)}">
+      <summary>
+        <div class="platform-support-ticket-title">
+          <strong>${escapeHtml(ticket.subject)}</strong>
+          <small>${escapeHtml(ticket.company_name || 'Sem empresa')} ${ticket.store_name ? `· ${escapeHtml(ticket.store_name)}` : ''} · ${escapeHtml(ticket.category || 'sem categoria')}</small>
+        </div>
+        <span class="platform-sla-pill ${escapeAttribute(sla.status)}">${escapeHtml(sla.label)}</span>
+        <span class="pill ${ticket.priority === 'critical' || ticket.priority === 'high' ? 'pill-danger' : 'pill-muted'}">${escapeHtml(priorityLabel(ticket.priority))}</span>
+        <span class="pill ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+      </summary>
+      <div class="platform-support-body">
+        <section class="platform-support-ticket-grid">
+          <article class="platform-support-context">
+            <h4>Contexto do cliente</h4>
+            <div>
+              <span>Plano</span><strong>${escapeHtml(context.planName)}</strong>
+              <span>Assinatura</span><strong>${escapeHtml(context.subscriptionStatus)}</strong>
+              <span>Lojas</span><strong>${Number(context.storesCount || 0)}</strong>
+              <span>Produtos</span><strong>${Number(context.productsCount || 0)}</strong>
+              <span>Último pedido</span><strong>${escapeHtml(context.lastOrderLabel)}</strong>
+              <span>Responsável</span><strong>${escapeHtml(ticket.assigned_to_admin_name || 'Sem responsável')}</strong>
+            </div>
+            <div class="row-actions">
+              ${context.storeSlug ? `<a class="ghost-button compact" href="/${escapeAttribute(context.storeSlug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
+              ${ticket.store_id ? `<button class="ghost-button compact" data-support-impersonate-store="${escapeAttribute(ticket.store_id)}" type="button">Entrar como suporte</button>` : ''}
+            </div>
+          </article>
+          <article class="platform-support-thread">
+            <div class="section-actions compact-section-actions">
+              <div>
+                <h4>Conversa</h4>
+                <p class="muted">Última mensagem: ${escapeHtml(lastMessage ? formatDateTime(lastMessage.created_at) : 'sem mensagens')}</p>
+              </div>
+              <span class="platform-sla-pill ${escapeAttribute(sla.status)}">${escapeHtml(sla.hint)}</span>
+            </div>
+            <div class="platform-support-messages">
+              ${(ticket.messages || []).length ? ticket.messages.map((message) => `
+                <article class="${message.is_internal ? 'is-internal' : ''}">
+                  <strong>${escapeHtml(message.author_name || message.author_type)}</strong>
+                  <small>${formatDateTime(message.created_at)}${message.is_internal ? ' · nota interna' : ''}</small>
+                  <p>${escapeHtml(message.message)}</p>
+                </article>
+              `).join('') : '<p class="empty-state">Sem mensagens carregadas.</p>'}
+            </div>
+          </article>
+        </section>
+        <section class="platform-support-actions-grid">
+          <form class="platform-support-update" data-ticket-id="${escapeAttribute(ticket.id)}">
+            <select name="status">${supportStatusOptions(ticket.status)}</select>
+            <select name="priority">${supportPriorityOptions(ticket.priority)}</select>
+            <select name="assigned_to_admin_id">
+              <option value="">Sem responsável</option>
+              ${supportAssigneeOptions(ticket.assigned_to_admin_id)}
+            </select>
+            <button class="ghost-button compact">Salvar atendimento</button>
+          </form>
+          <form class="platform-support-message-form" data-ticket-id="${escapeAttribute(ticket.id)}">
+            <textarea name="message" rows="3" required placeholder="Responder ao cliente ou registrar nota interna"></textarea>
+            <div class="row-actions">
+              <label class="payment-option"><input name="is_internal" type="checkbox"> Nota interna</label>
+              <button class="primary-button compact">Enviar</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </details>
+  `;
+  }).join('') : '<p class="empty-state">Nenhum chamado encontrado para os filtros.</p>';
+  els.platformSupportTicketList.querySelectorAll('.platform-support-update').forEach((form) => form.addEventListener('submit', submitSupportTicketUpdate));
+  els.platformSupportTicketList.querySelectorAll('.platform-support-message-form').forEach((form) => form.addEventListener('submit', submitSupportTicketMessage));
+  els.platformSupportTicketList.querySelectorAll('[data-support-impersonate-store]').forEach((button) => {
+    button.addEventListener('click', () => openSupportImpersonation(button.dataset.supportImpersonateStore));
+  });
+}
+
+function renderSupportSummary(tickets = []) {
+  if (!els.platformSupportSummaryGrid) return;
+  const open = tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).length;
+  const critical = tickets.filter((ticket) => ['critical', 'high'].includes(ticket.priority) && !['resolved', 'closed'].includes(ticket.status)).length;
+  const waiting = tickets.filter((ticket) => ticket.status === 'waiting_customer').length;
+  const inReview = tickets.filter((ticket) => ticket.status === 'in_review').length;
+  const resolvedToday = tickets.filter((ticket) => ['resolved', 'closed'].includes(ticket.status) && isToday(ticket.updated_at)).length;
+  const overdue = tickets.filter((ticket) => supportSla(ticket).status === 'overdue').length;
+  const averageFirstResponse = supportAverageFirstResponse(tickets);
+  const averageResolution = supportAverageResolution(tickets);
+  const items = [
+    ['Abertos', open, 'Chamados em andamento'],
+    ['Críticos', critical, 'Alta prioridade'],
+    ['Aguardando cliente', waiting, 'Dependem de retorno'],
+    ['Em análise', inReview, 'Com suporte interno'],
+    ['Resolvidos hoje', resolvedToday, 'Fechados ou resolvidos'],
+    ['SLA vencido', overdue, 'Precisam de ação'],
+    ['1ª resposta', averageFirstResponse, 'Tempo médio'],
+    ['Resolução', averageResolution, 'Tempo médio']
+  ];
+  els.platformSupportSummaryGrid.innerHTML = items.map(([label, value, hint]) => `
+    <article class="platform-kpi-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value ?? 0)}</strong>
+      <p>${escapeHtml(hint)}</p>
+    </article>
+  `).join('');
+}
+
+function filteredSupportTickets() {
+  const search = normalizeSearch(els.supportSearchFilter?.value || '');
+  const slaFilter = els.supportSlaFilter?.value || '';
+  const planFilter = els.supportPlanFilter?.value || '';
+  const priorityWeight = { critical: 0, high: 1, medium: 2, low: 3 };
+  return (state.supportTickets || [])
+    .filter((ticket) => {
+      if (!search) return true;
+      const haystack = normalizeSearch([
+        ticket.subject,
+        ticket.category,
+        ticket.company_name,
+        ticket.store_name,
+        ticket.assigned_to_admin_name,
+        ...(ticket.messages || []).map((message) => message.message)
+      ].join(' '));
+      return haystack.includes(search);
+    })
+    .filter((ticket) => {
+      if (!slaFilter) return true;
+      const sla = supportSla(ticket);
+      if (slaFilter === 'unanswered') return supportNeedsAnswer(ticket);
+      return sla.status === slaFilter;
+    })
+    .filter((ticket) => {
+      if (!planFilter) return true;
+      return supportTicketContext(ticket).planCode === planFilter;
+    })
+    .sort((a, b) => {
+      const aSla = supportSla(a);
+      const bSla = supportSla(b);
+      const slaWeight = { overdue: 0, due_soon: 1, ok: 2, closed: 3 };
+      return (slaWeight[aSla.status] ?? 4) - (slaWeight[bSla.status] ?? 4)
+        || (priorityWeight[a.priority] ?? 4) - (priorityWeight[b.priority] ?? 4)
+        || new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime();
+    });
+}
+
+function supportTicketContext(ticket) {
+  const company = state.companies.find((item) => item.id === ticket.company_id);
+  const stores = company?.stores || [];
+  const store = stores.find((item) => item.id === ticket.store_id) || stores[0] || null;
+  const subscription = company?.subscription || {};
+  const plan = state.plans.find((item) => item.id === subscription.plan_id || item.code === subscription.plan_code);
+  const metrics = company ? companyMetrics(company.id) : {};
+  return {
+    planCode: plan?.code || metrics.plan_code || '',
+    planName: plan?.name || metrics.plan_name || 'Sem plano',
+    subscriptionStatus: subscription.status || metrics.subscription_status || company?.status || 'sem assinatura',
+    storesCount: metrics.stores_count || stores.length || 0,
+    productsCount: metrics.products_count || 0,
+    lastOrderLabel: metrics.last_order_at ? formatDateTime(metrics.last_order_at) : 'Sem pedido',
+    storeSlug: store?.slug || ''
+  };
+}
+
+function latestSupportMessage(ticket) {
+  const messages = ticket.messages || [];
+  return messages.length ? messages[messages.length - 1] : null;
+}
+
+function supportNeedsAnswer(ticket) {
+  if (['resolved', 'closed', 'waiting_customer'].includes(ticket.status)) return false;
+  const last = latestSupportMessage(ticket);
+  if (!last) return true;
+  return last.author_type !== 'support' && !last.is_internal;
+}
+
+function supportSla(ticket) {
+  if (['resolved', 'closed'].includes(ticket.status)) return { status: 'closed', label: 'Resolvido', hint: 'Chamado encerrado' };
+  const hoursByPriority = { critical: 1, high: 4, medium: 24, low: 48 };
+  const limitHours = hoursByPriority[ticket.priority] || 24;
+  const base = new Date(ticket.last_message_at || ticket.updated_at || ticket.created_at || Date.now()).getTime();
+  const elapsedHours = Math.max(0, (Date.now() - base) / 3600000);
+  const remaining = limitHours - elapsedHours;
+  if (supportNeedsAnswer(ticket) && remaining <= 0) return { status: 'overdue', label: 'SLA vencido', hint: `${Math.ceil(Math.abs(remaining))}h atrasado` };
+  if (supportNeedsAnswer(ticket) && remaining <= Math.max(1, limitHours * 0.25)) return { status: 'due_soon', label: 'Perto de vencer', hint: `${Math.max(1, Math.ceil(remaining))}h restantes` };
+  return { status: 'ok', label: 'Dentro do prazo', hint: supportNeedsAnswer(ticket) ? `${Math.ceil(remaining)}h restantes` : 'Aguardando cliente' };
+}
+
+function supportAverageFirstResponse(tickets = []) {
+  const values = tickets.map(firstSupportResponseMs).filter((value) => value !== null);
+  if (!values.length) return '-';
+  return durationLabel(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function supportAverageResolution(tickets = []) {
+  const values = tickets
+    .filter((ticket) => ['resolved', 'closed'].includes(ticket.status))
+    .map((ticket) => new Date(ticket.updated_at || 0).getTime() - new Date(ticket.created_at || 0).getTime())
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  if (!values.length) return '-';
+  return durationLabel(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function firstSupportResponseMs(ticket) {
+  const created = new Date(ticket.created_at || 0).getTime();
+  const first = (ticket.messages || []).find((message) => message.author_type === 'support' && !message.is_internal);
+  if (!created || !first) return null;
+  return Math.max(0, new Date(first.created_at || 0).getTime() - created);
+}
+
+function isToday(value) {
+  if (!value) return false;
+  const date = new Date(value);
+  const today = new Date();
+  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+}
+
+function supportAssigneeOptions(selected = '') {
+  const admins = new Map();
+  for (const company of state.companies || []) {
+    for (const admin of company.admins || []) {
+      admins.set(admin.id, admin);
+    }
+  }
+  if (state.admin?.id) admins.set(state.admin.id, state.admin);
+  return [...admins.values()].map((admin) => `
+    <option value="${escapeAttribute(admin.id)}" ${admin.id === selected ? 'selected' : ''}>${escapeHtml(admin.name || admin.email)}</option>
+  `).join('');
+}
+
+const SUPPORT_QUICK_REPLIES = [
+  ['WhatsApp', 'Olá {{company_name}}, para configurar o WhatsApp acesse Configurações da Loja > Atendimento e pedidos, informe o número com DDI/DDD e salve. Depois faça um pedido de teste para validar.'],
+  ['Publicar cardápio', 'Olá {{company_name}}, para publicar o cardápio conclua o onboarding ou acesse Configurações da Loja, revise dados, horário, pagamentos e clique em salvar/publicar. Link: {{cardapio_url}}'],
+  ['Alterar plano', 'Olá {{company_name}}, a alteração de plano fica em Plano. Se preferir, posso revisar o plano ideal para sua operação e orientar o upgrade.'],
+  ['Pedido teste', 'Olá {{company_name}}, recomendo abrir o cardápio público, adicionar um produto, finalizar um pedido teste e conferir se ele aparece em Pedidos no painel.'],
+  ['Domínio', 'Olá {{company_name}}, para configurar domínio próprio, cadastre o domínio em Configurações da Loja > Domínio personalizado e aponte o DNS conforme instruções exibidas.'],
+  ['Pagamento', 'Olá {{company_name}}, vou verificar os eventos de cobrança e o retorno do provedor. Se houver pagamento pendente, enviarei o link seguro para regularização.']
+];
+
+function renderSupportQuickReplies() {
+  if (!els.supportQuickReplies) return;
+  els.supportQuickReplies.innerHTML = SUPPORT_QUICK_REPLIES.map(([label, text]) => `
+    <button class="ghost-button compact" type="button" data-support-template="${escapeAttribute(text)}">${escapeHtml(label)}</button>
+  `).join('');
+  els.supportQuickReplies.querySelectorAll('[data-support-template]').forEach((button) => {
+    button.addEventListener('click', () => insertSupportQuickReply(button.dataset.supportTemplate || ''));
+  });
+}
+
+function insertSupportQuickReply(template) {
+  const openTicket = els.platformSupportTicketList?.querySelector('.platform-support-ticket[open]');
+  const textarea = openTicket?.querySelector('.platform-support-message-form textarea');
+  if (!textarea) {
+    toast('Abra um chamado para inserir uma resposta rápida.');
+    return;
+  }
+  const ticketId = openTicket.querySelector('.platform-support-message-form')?.dataset.ticketId;
+  const ticket = (state.supportTickets || []).find((item) => item.id === ticketId);
+  const context = ticket ? supportTicketContext(ticket) : {};
+  const text = template
+    .replaceAll('{{company_name}}', ticket?.company_name || 'cliente')
+    .replaceAll('{{store_name}}', ticket?.store_name || 'loja')
+    .replaceAll('{{dashboard_url}}', `${window.location.origin}/admin`)
+    .replaceAll('{{cardapio_url}}', context.storeSlug ? `${window.location.origin}/${context.storeSlug}` : `${window.location.origin}/cardapio`);
+  textarea.value = textarea.value ? `${textarea.value}\n\n${text}` : text;
+  textarea.focus();
+}
+
+async function openSupportImpersonation(storeId) {
+  const confirmation = await requestDangerConfirmation(
+    'Entrar como suporte',
+    'Você vai abrir uma sessão temporária no admin desta loja. A ação será auditada.'
+  );
+  if (!confirmation) return;
+  try {
+    await request('/api/platform/support/impersonate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store_id: storeId, confirmation: confirmation.confirmation, password: confirmation.password })
+    });
+    window.location.href = '/admin';
+  } catch (error) {
+    toast(error.message || 'Não foi possível entrar como suporte.');
+  }
+}
+
+function renderServiceCards(services = {}) {
+  if (!els.platformServicesGrid) return;
+  const memory = services.application?.memory || {};
+  const storage = services.storage_usage || {};
+  const retention = services.retention || {};
+  const latestCleanup = storage.latest_cleanup;
+  const serviceControlEnabled = services.permissions?.service_control_enabled === true;
+  const rows = [
+    {
+      label: 'Runtime da aplicação',
+      status: services.application?.status || 'unknown',
+      value: services.application?.service_name || 'cardapio.service',
+      detail: `Uptime: ${durationLabel((services.application?.uptime_seconds || 0) * 1000)} · Memória: ${formatBytes(memory.rss || 0)}`
+    },
+    {
+      label: 'Armazenamento',
+      status: storage.database?.error ? 'attention' : 'healthy',
+      value: `Banco: ${formatBytes(storage.database?.bytes || 0)}`,
+      detail: `Backups: ${formatBytes(storage.backups?.bytes || 0)} · Uploads: ${formatBytes(storage.uploads?.bytes || 0)}`
+    },
+    {
+      label: 'Retenção',
+      status: latestCleanup?.created_at ? 'healthy' : 'attention',
+      value: latestCleanup?.created_at ? `Última: ${new Date(latestCleanup.created_at).toLocaleDateString('pt-BR')}` : 'Sem execução registrada',
+      detail: `Auditoria ${retention.audit_log_days || 180}d · Operacional ${retention.operational_log_days || 90}d · Backups ${retention.backup_days || 14}d`
+    },
+    {
+      label: 'Deploy',
+      status: 'healthy',
+      value: services.deploy?.commit || 'indisponível',
+      detail: `Branch: ${services.deploy?.branch || 'indisponível'}`
+    },
+    {
+      label: 'Permissões de serviço',
+      status: serviceControlEnabled ? 'healthy' : 'attention',
+      value: serviceControlEnabled ? 'Controle habilitado' : 'Controle protegido',
+      detail: serviceControlEnabled ? 'Restart real liberado por variável de ambiente.' : 'Restart real exige PLATFORM_ALLOW_SERVICE_CONTROL=true.'
+    }
+  ];
+  els.platformServicesGrid.innerHTML = rows.map((row) => `
+    <article class="platform-status-card status-${escapeAttribute(row.status)}">
+      <span>${escapeHtml(statusLabelHealth(row.status))}</span>
+      <strong>${escapeHtml(row.label)}</strong>
+      <p>${escapeHtml(row.value)}</p>
+      <small>${escapeHtml(row.detail)}</small>
+    </article>
+  `).join('');
+  renderLogCleanupResult(storage.latest_cleanup?.summary || null);
+}
+
+function renderServiceLogs() {
+  if (!els.platformServiceLogs) return;
+  const logs = state.serviceLogs || [];
+  const list = logs.map((entry) => `
+    <details class="platform-log-row platform-log-detail status-${escapeAttribute(entry.status || 'info')}">
+      <summary>
+        <div>
+          <strong>${escapeHtml(entry.action || 'Serviço')}</strong>
+          <small>${entry.created_at ? new Date(entry.created_at).toLocaleString('pt-BR') : '-'} · ${escapeHtml(entry.severity || 'info')}</small>
+        </div>
+        <span>${escapeHtml(entry.status || 'info')}</span>
+      </summary>
+      <div class="platform-log-body">
+        <article><span>Severidade</span><strong>${escapeHtml(entry.severity || 'info')}</strong></article>
+        <article><span>Ator</span><strong>${escapeHtml(entry.actor_admin_id || '-')}</strong></article>
+        <article><span>IP</span><strong>${escapeHtml(entry.ip_address || '-')}</strong></article>
+        <article class="is-wide"><span>Mensagem</span><strong>${escapeHtml(entry.message || 'Evento operacional registrado.')}</strong></article>
+      </div>
+    </details>
+  `).join('');
+  els.platformServiceLogs.innerHTML = logs.length ? `
+    <details class="platform-log-group">
+      <summary>
+        <div>
+          <strong>Ver logs de serviços</strong>
+          <small>Eventos técnicos das últimas 24h.</small>
+        </div>
+        <span>${logs.length} log(s)</span>
+      </summary>
+      <div class="platform-log-group-body">${list}</div>
+    </details>
+  ` : '<p class="empty-state">Nenhum log recente de serviços.</p>';
+}
+
+function renderRiskZone(risk = {}) {
+  if (!els.platformRiskZone) return;
+  const items = [
+    ['Restart exige confirmação', risk.restart_requires_confirmation !== false, 'Senha e texto CONFIRMAR obrigatórios.'],
+    ['Controle de banco', risk.database_stop_available === true, risk.database_stop_reason || 'Parada de banco permanece bloqueada por segurança.'],
+    ['Controle de serviço', state.services?.permissions?.service_control_enabled === true, state.services?.permissions?.service_control_enabled ? 'Habilitado por variável de ambiente.' : 'Restart real exige PLATFORM_ALLOW_SERVICE_CONTROL=true.']
+  ];
+  els.platformRiskZone.innerHTML = items.map(([label, ok, hint]) => `
+    <article class="platform-check-row ${ok ? 'ok' : 'danger'}">
+      <span>${ok ? 'OK' : '!'}</span>
+      <div>
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(hint)}</small>
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderLogCleanupResult(cleanup) {
+  if (!els.logCleanupResult) return;
+  if (!cleanup) {
+    els.logCleanupResult.innerHTML = '<small class="muted">Nenhuma limpeza executada nesta sessão.</small>';
+    return;
+  }
+  const summary = cleanup.summary || cleanup;
+  const totals = summary.totals || summary.result?.totals || {};
+  const removedRows = Number(totals.database_rows || totals.rows || 0);
+  const removedFiles = Number(totals.files || 0);
+  const removedBytes = Number(totals.bytes || 0);
+  const mode = summary.mode || cleanup.mode || 'dry_run';
+  const label = mode === 'apply' ? 'Aplicado' : 'Simulação';
+  els.logCleanupResult.innerHTML = `
+    <div class="platform-cleanup-summary">
+      <strong>${escapeHtml(label)}</strong>
+      <span>${removedRows} registro(s)</span>
+      <span>${removedFiles} arquivo(s)</span>
+      <span>${formatBytes(removedBytes)}</span>
+    </div>
+  `;
+}
+
+async function previewLogCleanup() {
+  if (!els.previewLogCleanupButton) return;
+  els.previewLogCleanupButton.disabled = true;
+  els.previewLogCleanupButton.textContent = 'Simulando...';
+  try {
+    const response = await request('/api/platform/services/log-cleanup/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      timeoutMs: 130000
+    });
+    renderLogCleanupResult(response.result || response);
+    toast('Simulação de limpeza concluída.');
+    await loadServices({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível simular a limpeza.');
+  } finally {
+    els.previewLogCleanupButton.disabled = false;
+    els.previewLogCleanupButton.textContent = 'Simular limpeza';
+  }
+}
+
+function backupHealthTone(status) {
+  if (status === 'success') return 'healthy';
+  if (status === 'failed') return 'error';
+  if (status === 'running') return 'attention';
+  return 'unknown';
+}
+
+function durationLabel(ms) {
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}min`;
+  return `${minutes}min`;
+}
+
+const criticalActions = {
+  backup: {
+    title: 'Fazer backup agora',
+    message: 'O sistema vai executar um backup manual do banco e registrar a ação na auditoria.',
+    endpoint: '/api/platform/services/backup',
+    success: 'Backup manual concluído.'
+  },
+  'trial-cleanup': {
+    title: 'Executar limpeza de trials',
+    message: 'Empresas em teste sem acesso recente poderão ser removidas conforme a regra operacional.',
+    endpoint: '/api/platform/services/jobs/trial-cleanup',
+    success: 'Limpeza de trials executada.'
+  },
+  'log-cleanup': {
+    title: 'Executar limpeza de logs',
+    message: 'O sistema vai remover registros e arquivos fora da política de retenção. Simule antes se quiser conferir o impacto.',
+    endpoint: '/api/platform/services/log-cleanup',
+    success: 'Limpeza de logs executada.'
+  },
+  'restart-app': {
+    title: 'Reiniciar aplicação',
+    message: 'A aplicação será reiniciada se o controle de serviço estiver habilitado no ambiente.',
+    endpoint: '/api/platform/services/app/restart',
+    success: 'Restart da aplicação agendado.'
+  }
+};
+
+let pendingCriticalAction = null;
+let pendingDangerResolve = null;
+
+function openCriticalAction(actionKey) {
+  const action = criticalActions[actionKey];
+  if (!action || !els.platformConfirmBackdrop || !els.platformConfirmForm) return;
+  pendingCriticalAction = actionKey;
+  if (els.platformConfirmTitle) els.platformConfirmTitle.textContent = action.title;
+  if (els.platformConfirmMessage) els.platformConfirmMessage.textContent = action.message;
+  els.platformConfirmForm.reset();
+  els.platformConfirmBackdrop.hidden = false;
+  els.platformConfirmForm.elements.confirmation?.focus();
+}
+
+function closeCriticalDialog() {
+  if (pendingDangerResolve) {
+    pendingDangerResolve(null);
+    pendingDangerResolve = null;
+  }
+  pendingCriticalAction = null;
+  if (els.platformConfirmBackdrop) els.platformConfirmBackdrop.hidden = true;
+  if (els.platformConfirmSubmit) {
+    els.platformConfirmSubmit.disabled = false;
+    els.platformConfirmSubmit.textContent = 'Confirmar';
+  }
+}
+
+async function submitCriticalAction(event) {
+  event.preventDefault();
+  if (pendingDangerResolve) {
+    const data = Object.fromEntries(new FormData(els.platformConfirmForm));
+    const resolve = pendingDangerResolve;
+    pendingDangerResolve = null;
+    pendingCriticalAction = null;
+    if (els.platformConfirmBackdrop) els.platformConfirmBackdrop.hidden = true;
+    resolve(data);
+    return;
+  }
+  const action = criticalActions[pendingCriticalAction];
+  if (!action) return;
+  const data = Object.fromEntries(new FormData(els.platformConfirmForm));
+  if (els.platformConfirmSubmit) {
+    els.platformConfirmSubmit.disabled = true;
+    els.platformConfirmSubmit.textContent = 'Executando...';
+  }
+  try {
+    const response = await request(action.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      timeoutMs: 130000
+    });
+    if (pendingCriticalAction === 'log-cleanup') {
+      renderLogCleanupResult(response.result || response);
+    }
+    closeCriticalDialog();
+    toast(action.success);
+    await loadServices({ silent: true });
+    await submitAuditRefreshSilently();
+  } catch (error) {
+    toast(error.message || 'Não foi possível executar a ação.');
+    if (els.platformConfirmSubmit) {
+      els.platformConfirmSubmit.disabled = false;
+      els.platformConfirmSubmit.textContent = 'Confirmar';
+    }
+  }
+}
+
+function requestDangerConfirmation(title, message) {
+  if (!els.platformConfirmBackdrop || !els.platformConfirmForm) return Promise.resolve(null);
+  if (els.platformConfirmTitle) els.platformConfirmTitle.textContent = title;
+  if (els.platformConfirmMessage) els.platformConfirmMessage.textContent = message;
+  els.platformConfirmForm.reset();
+  els.platformConfirmBackdrop.hidden = false;
+  els.platformConfirmForm.elements.confirmation?.focus();
+  return new Promise((resolve) => {
+    pendingDangerResolve = resolve;
+  });
+}
+
+async function submitAuditRefreshSilently() {
+  try {
+    const audit = await request(`/api/platform/audit${auditQueryString()}`);
+    state.logs = audit.logs || [];
+    renderAudit();
+  } catch {
+    // Mantém a tela atual se a auditoria não carregar.
+  }
+}
+
 function renderBackupStatus() {
   if (!els.backupStatus) return;
+  if (!state.backupLoaded && !state.backup) {
+    els.backupStatus.innerHTML = '<p class="empty-state">Status de backup será carregado ao abrir esta aba.</p>';
+    return;
+  }
   const backup = state.backup || {};
   const latest = backup.latest || {};
   const recent = Array.isArray(backup.recent) ? backup.recent : [];
@@ -919,9 +2381,7 @@ function formatBytes(value) {
 
 async function submitAuditFilters(event) {
   event.preventDefault();
-  const audit = await request(`/api/platform/audit${auditQueryString()}`);
-  state.logs = audit.logs || [];
-  renderAudit();
+  await loadAudit();
 }
 
 function auditQueryString() {
@@ -965,10 +2425,19 @@ async function submitCompanyManagement(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
+  if (['suspended', 'cancelled', 'archived'].includes(data.status)) {
+    const confirmation = await requestDangerConfirmation(
+      'Alterar status do cliente',
+      'Suspender, cancelar ou arquivar um cliente é uma ação sensível. Confirme com sua senha de Admin Master.'
+    );
+    if (!confirmation) return;
+    data.confirmation = confirmation.confirmation;
+    data.password = confirmation.password;
+  }
   await request(`/api/platform/companies/${form.dataset.companyId}/status`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: data.status })
+    body: JSON.stringify({ status: data.status, confirmation: data.confirmation, password: data.password })
   });
   await request(`/api/platform/companies/${form.dataset.companyId}/plan`, {
     method: 'POST',
@@ -977,6 +2446,250 @@ async function submitCompanyManagement(event) {
   });
   await loadPlatform();
   toast('Empresa atualizada.');
+}
+
+async function submitCompanyQuickAction(event) {
+  const button = event.currentTarget;
+  const action = button.dataset.companyAction;
+  const companyId = button.closest('[data-company-id]')?.dataset.companyId;
+  if (!companyId || !action) return;
+  const actions = {
+    suspend: {
+      endpoint: `/api/platform/companies/${companyId}/suspend`,
+      method: 'POST',
+      title: 'Suspender cliente',
+      message: 'O cliente perderá acesso operacional até ser liberado novamente.',
+      critical: true,
+      success: 'Cliente suspenso.'
+    },
+    activate: {
+      endpoint: `/api/platform/companies/${companyId}/activate`,
+      method: 'POST',
+      success: 'Cliente liberado.'
+    },
+    'reopen-onboarding': {
+      endpoint: `/api/platform/companies/${companyId}/reopen-onboarding`,
+      method: 'POST',
+      title: 'Reabrir onboarding',
+      message: 'A configuração inicial voltará a aparecer como pendente para as lojas deste cliente.',
+      critical: true,
+      success: 'Onboarding reaberto.'
+    },
+    'resend-billing': {
+      endpoint: `/api/platform/companies/${companyId}/resend-billing`,
+      method: 'POST',
+      success: 'Solicitação de reenvio registrada.'
+    },
+    impersonate: {
+      endpoint: '/api/platform/support/impersonate',
+      method: 'POST',
+      title: 'Entrar como suporte',
+      message: 'Você entrará temporariamente no admin desta loja. A sessão expira automaticamente e tudo será auditado.',
+      critical: true,
+      success: 'Modo suporte iniciado.',
+      redirect: '/admin',
+      store_id: button.dataset.storeId || ''
+    }
+  };
+  const config = actions[action];
+  if (!config) return;
+  let payload = {};
+  if (config.critical) {
+    const confirmation = await requestDangerConfirmation(config.title, config.message);
+    if (!confirmation) return;
+    payload = confirmation;
+  }
+  if (config.store_id) {
+    payload.store_id = config.store_id;
+    payload.ttl_seconds = 30 * 60;
+  }
+  button.disabled = true;
+  try {
+    await request(config.endpoint, {
+      method: config.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    toast(config.success);
+    if (config.redirect) {
+      window.location.href = config.redirect;
+      return;
+    }
+    await Promise.all([
+      loadCommercialAnalytics({ silent: true, renderBefore: false, renderAfter: false }),
+      loadPlatform()
+    ]);
+  } catch (error) {
+    toast(error.message || 'Não foi possível executar a ação.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitBillingAction(event) {
+  const button = event.currentTarget;
+  const action = button.dataset.billingAction;
+  const wrapper = button.closest('[data-company-id]');
+  const companyId = wrapper?.dataset.companyId;
+  if (!companyId || !action) return;
+  const planCode = wrapper.querySelector('[data-billing-plan-select]')?.value || '';
+  const actions = {
+    'change-plan': {
+      endpoint: `/api/platform/companies/${companyId}/change-plan`,
+      payload: { plan_code: planCode, status: 'active' },
+      success: 'Plano alterado.',
+      confirm: true,
+      title: 'Alterar plano',
+      message: 'Alterar plano pode liberar ou limitar recursos deste cliente. Confirme a ação.'
+    },
+    cancel: {
+      endpoint: `/api/platform/companies/${companyId}/cancel-subscription`,
+      payload: {},
+      success: 'Assinatura cancelada.',
+      confirm: true,
+      title: 'Cancelar assinatura',
+      message: 'O cliente será marcado como cancelado sem apagar os dados. Confirme com sua senha.'
+    },
+    reactivate: {
+      endpoint: `/api/platform/companies/${companyId}/reactivate-subscription`,
+      payload: { plan_code: planCode },
+      success: 'Assinatura reativada.'
+    }
+  };
+  const config = actions[action];
+  if (!config) return;
+  const payload = { ...config.payload };
+  if (config.confirm) {
+    const confirmation = await requestDangerConfirmation(config.title, config.message);
+    if (!confirmation) return;
+    Object.assign(payload, confirmation, { require_confirmation: true });
+  }
+  button.disabled = true;
+  try {
+    await request(config.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    toast(config.success);
+    await Promise.all([
+      loadBilling({ silent: true, renderBefore: false }),
+      loadCommercialAnalytics({ silent: true, renderBefore: false, renderAfter: false })
+    ]);
+    await loadPlatform();
+  } catch (error) {
+    toast(error.message || 'Não foi possível atualizar a assinatura.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitSmtpSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  data.use_tls = form.elements.use_tls.checked;
+  data.is_active = form.elements.is_active.checked;
+  try {
+    const response = await request('/api/platform/smtp', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    state.smtp = response.smtp;
+    renderSmtpForm();
+    toast('SMTP salvo com segurança.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar SMTP.');
+  }
+}
+
+async function submitSmtpTest(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  try {
+    const response = await request('/api/platform/smtp/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    toast(response.message || 'E-mail de teste enviado.');
+    await loadCommunication({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Falha no teste de SMTP.');
+  }
+}
+
+async function submitEmailTemplate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  data.template_key = form.dataset.templateKey;
+  data.is_active = form.elements.is_active.checked;
+  try {
+    await request('/api/platform/email-templates', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    toast('Template salvo.');
+    await loadCommunication({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar template.');
+  }
+}
+
+async function submitPlatformSupportTicket(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await request('/api/platform/support/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    form.reset();
+    toast('Chamado criado.');
+    await loadSupport({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível criar chamado.');
+  }
+}
+
+async function submitSupportTicketUpdate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await request(`/api/platform/support/tickets/${form.dataset.ticketId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    toast('Chamado atualizado.');
+    await loadSupport({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível atualizar chamado.');
+  }
+}
+
+async function submitSupportTicketMessage(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  data.is_internal = form.elements.is_internal.checked;
+  try {
+    await request(`/api/platform/support/tickets/${form.dataset.ticketId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    toast(data.is_internal ? 'Nota interna registrada.' : 'Resposta enviada.');
+    await loadSupport({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível enviar mensagem.');
+  }
 }
 
 async function submitStoreStatus(event) {
@@ -1059,9 +2772,84 @@ function statusLabel(status) {
     grace_period: 'Prazo de regularização',
     past_due: 'Pendente',
     suspended: 'Suspensa',
+    blocked: 'Bloqueada',
     cancelled: 'Cancelada',
     archived: 'Arquivada'
   })[status] || status || 'Indefinida';
+}
+
+function subscriptionStatusLabel(status) {
+  return ({
+    trial: 'Trial',
+    active: 'Ativo',
+    payment_pending: 'Pagamento pendente',
+    grace_period: 'Grace period',
+    past_due: 'Vencido',
+    blocked: 'Bloqueado',
+    suspended: 'Bloqueado',
+    cancelled: 'Cancelado',
+    expired: 'Expirado',
+    archived: 'Arquivado',
+    unknown: 'Sem status'
+  })[status] || statusLabel(status);
+}
+
+function billingStatusPill(status) {
+  if (status === 'active') return 'pill-ok';
+  if (status === 'trial' || status === 'grace_period') return 'pill-muted';
+  return 'pill-danger';
+}
+
+function formatDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('pt-BR');
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('pt-BR');
+}
+
+function ticketStatusLabel(status) {
+  return ({
+    open: 'Aberto',
+    waiting_customer: 'Aguardando cliente',
+    in_review: 'Em análise',
+    resolved: 'Resolvido',
+    closed: 'Fechado'
+  })[status] || status || 'Aberto';
+}
+
+function priorityLabel(priority) {
+  return ({
+    low: 'Baixa',
+    medium: 'Média',
+    high: 'Alta',
+    critical: 'Crítica'
+  })[priority] || priority || 'Média';
+}
+
+function supportStatusOptions(selected) {
+  return [
+    ['open', 'Aberto'],
+    ['waiting_customer', 'Aguardando cliente'],
+    ['in_review', 'Em análise'],
+    ['resolved', 'Resolvido'],
+    ['closed', 'Fechado']
+  ].map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function supportPriorityOptions(selected) {
+  return [
+    ['low', 'Baixa'],
+    ['medium', 'Média'],
+    ['high', 'Alta'],
+    ['critical', 'Crítica']
+  ].map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('');
 }
 
 function adminRoleLabel(role) {
@@ -1090,6 +2878,13 @@ function money(value) {
     style: 'currency',
     currency: 'BRL'
   });
+}
+
+function moneyCents(cents, fallbackValue = 0) {
+  const value = cents !== undefined && cents !== null
+    ? Number(cents || 0) / 100
+    : Number(fallbackValue || 0);
+  return money(value);
 }
 
 function normalizeSearch(value) {

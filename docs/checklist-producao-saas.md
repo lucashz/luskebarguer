@@ -60,7 +60,18 @@ Use antes de liberar a plataforma para clientes reais.
 ## Testes automatizados
 
 - [ ] `npm.cmd run test:syntax`.
-- [ ] `npm.cmd run test:multitenant`.
-- [ ] `npm.cmd run test:e2e:multitenant`.
+- [ ] `npm.cmd run test:local`.
+- [ ] `npm.cmd run test:flows`.
+- [ ] `npm.cmd run test:platform-health`.
 - [ ] `npm.cmd run test:security`.
 
+## Platform Admin Master
+
+- [ ] `/platform` acessa apenas com `superadmin`.
+- [ ] Admin comum recebe bloqueio em `/platform` e `/api/platform/*`.
+- [ ] Dashboard executivo carrega automaticamente sem clicar em atualizar.
+- [ ] Abas pesadas carregam sob demanda: saude, servicos, billing, comunicacao, suporte, auditoria e backups.
+- [ ] Acoes perigosas exigem `CONFIRMAR` e senha.
+- [ ] Modo suporte mostra banner, expira, bloqueia areas sensiveis e registra auditoria.
+- [ ] SMTP mascara senha/token.
+- [ ] Logs e health checks nao expoem secrets.

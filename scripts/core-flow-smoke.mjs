@@ -33,7 +33,7 @@ try {
   const signup = await request('/api/portal/signup', {
     method: 'POST',
     body: {
-      plan_code: 'trial',
+      plan_code: 'essential',
       accept_terms: true,
       owner: {
         name: 'Smoke Admin',

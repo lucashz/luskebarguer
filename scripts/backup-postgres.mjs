@@ -1,6 +1,6 @@
 import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 loadEnv(new URL('../.env', import.meta.url));
@@ -51,7 +51,7 @@ try {
 
 function runPgDump(outputFile) {
   return new Promise((resolve) => {
-    const child = spawn('pg_dump', [
+    const child = spawn(resolveExecutable('pg_dump'), [
       '--format=custom',
       '--no-owner',
       '--no-privileges',
@@ -60,11 +60,20 @@ function runPgDump(outputFile) {
       connectionString
     ], {
       stdio: 'inherit',
-      shell: process.platform === 'win32'
+      shell: false
     });
     child.on('exit', (code) => resolve(code || 0));
     child.on('error', () => resolve(1));
   });
+}
+
+function resolveExecutable(command) {
+  if (process.platform !== 'win32' || path.isAbsolute(command) || command.includes(path.sep)) {
+    return command;
+  }
+  const lookup = spawnSync('where.exe', [command], { encoding: 'utf8', shell: false });
+  const first = String(lookup.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return first || command;
 }
 
 async function writeBackupStatus(data) {
