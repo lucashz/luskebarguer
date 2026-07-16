@@ -5315,7 +5315,7 @@ async function listCompanyPlanFeatures(planId) {
 
 async function companyUsageSnapshot(companyId, storeId) {
   const resolvedCompanyId = cleanUuid(companyId);
-  const resolvedStoreId = cleanUuid(storeId);
+  const resolvedStoreId = cleanOptionalUuid(storeId);
   const stores = resolvedCompanyId ? await dbRequest('GET', 'stores', {
     select: 'id',
     company_id: `eq.${resolvedCompanyId}`,
