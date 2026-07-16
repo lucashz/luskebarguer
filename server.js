@@ -2273,7 +2273,7 @@ async function getAdminStoreAccess(adminId) {
   });
   if (admin) {
     access = access.filter((entry) => {
-      if (role === 'superadmin') return normalizeAdminRole(entry.role) !== 'superadmin';
+      if (role === 'superadmin') return true;
       return !companyId || entry.company_id === companyId;
     });
   }
