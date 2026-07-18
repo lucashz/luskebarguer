@@ -1024,7 +1024,10 @@
                 <button class="ghost-button compact" id="refreshSupportTicketsButton" type="button">Atualizar chamados</button>
               </div>
               <form id="adminSupportTicketForm" class="stack-form">
-                <label>Assunto<input name="subject" required placeholder="Ex: Preciso de ajuda com domínio"></label>
+                <div class="two-cols">
+                  <label>Nome para contato<input name="contact_name" required placeholder="Ex: Lucas Daniel"></label>
+                  <label>Assunto<input name="subject" required placeholder="Ex: Preciso de ajuda com domínio"></label>
+                </div>
                 <div class="two-cols">
                   <label>Categoria<input name="category" placeholder="configuração, cobrança, dúvida"></label>
                   <label>Prioridade<select name="priority"><option value="low">Baixa</option><option value="medium" selected>Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label>
@@ -1039,6 +1042,17 @@
                   <p class="eyebrow">Histórico</p>
                   <h2>Meus chamados</h2>
                 </div>
+              </div>
+              <div class="support-ticket-toolbar">
+                <div class="support-filter-tabs" id="adminSupportStatusFilters" aria-label="Filtrar chamados">
+                  <button class="active" type="button" data-support-filter="all">Todos</button>
+                  <button type="button" data-support-filter="open">Abertos</button>
+                  <button type="button" data-support-filter="in_review">Em análise</button>
+                  <button type="button" data-support-filter="waiting_customer">Aguardando cliente</button>
+                  <button type="button" data-support-filter="resolved">Resolvidos</button>
+                  <button type="button" data-support-filter="critical">Críticos</button>
+                </div>
+                <input id="adminSupportSearch" type="search" placeholder="Buscar por assunto ou mensagem">
               </div>
               <div class="support-ticket-list" id="adminSupportTicketList"></div>
             </section>

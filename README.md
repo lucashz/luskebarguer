@@ -63,6 +63,34 @@ npm run admin:create
 - Upload local: `uploads/`
 - Backup: `npm run db:backup`
 
+## Billing e planos
+
+O pagamento mensal dos planos usa Abacate Pay quando as chaves estiverem configuradas.
+Para validar a configuração atual:
+
+```powershell
+npm run billing:check
+```
+
+Variáveis principais:
+
+```env
+ABACATEPAY_API_KEY=sua_chave
+ABACATEPAY_WEBHOOK_SECRET=segredo_do_webhook
+APP_URL=https://seu-dominio
+PUBLIC_APP_URL=https://seu-dominio
+```
+
+Sem `ABACATEPAY_API_KEY` ou `PLATFORM_BILLING_API_KEY`, o checkout pago fica
+indisponível de propósito para evitar ativação manual acidental de plano pago.
+
+Rotina mensal de vencimento:
+
+```powershell
+npm run billing:sync
+npm run billing:sync:apply
+```
+
 O backup grava arquivos `postgres-*.dump` no diretório `BACKUP_DIR` e atualiza
 `backup-status.json` com sucesso/falha. O painel `/platform` mostra esse status
 para contas superadmin. Para agendar no Linux, use o script existente:

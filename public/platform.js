@@ -20,6 +20,8 @@
   smtp: null,
   emailTemplates: [],
   supportTickets: [],
+  supportActiveTab: 'queue',
+  selectedSupportTicketId: null,
   baseLoaded: false,
   baseLoading: false,
   healthLoaded: false,
@@ -48,10 +50,6 @@ const els = {
   platformSections: [...document.querySelectorAll('[data-platform-section]')],
   platformLogoutButton: document.querySelector('#platformLogoutButton'),
   refreshPlatformButton: document.querySelector('#refreshPlatformButton'),
-  companyForm: document.querySelector('#companyForm'),
-  storeForm: document.querySelector('#storeForm'),
-  companyPlanSelect: document.querySelector('#companyPlanSelect'),
-  storeCompanySelect: document.querySelector('#storeCompanySelect'),
   analyticsPeriodSelect: document.querySelector('#analyticsPeriodSelect'),
   refreshAnalyticsButton: document.querySelector('#refreshAnalyticsButton'),
   platformKpiGrid: document.querySelector('#platformKpiGrid'),
@@ -107,17 +105,18 @@ const els = {
   smtpStatusText: document.querySelector('#smtpStatusText'),
   platformEmailTemplateList: document.querySelector('#platformEmailTemplateList'),
   refreshSupportButton: document.querySelector('#refreshSupportButton'),
-  platformSupportCreateForm: document.querySelector('#platformSupportCreateForm'),
   platformSupportSummaryGrid: document.querySelector('#platformSupportSummaryGrid'),
+  platformSupportInsights: document.querySelector('#platformSupportInsights'),
+  platformSupportTabs: [...document.querySelectorAll('[data-support-tab]')],
+  platformSupportPanels: [...document.querySelectorAll('[data-support-panel]')],
   supportSearchFilter: document.querySelector('#supportSearchFilter'),
-  supportCompanySelect: document.querySelector('#supportCompanySelect'),
-  supportStoreSelect: document.querySelector('#supportStoreSelect'),
   supportStatusFilter: document.querySelector('#supportStatusFilter'),
   supportPriorityFilter: document.querySelector('#supportPriorityFilter'),
   supportSlaFilter: document.querySelector('#supportSlaFilter'),
   supportPlanFilter: document.querySelector('#supportPlanFilter'),
   supportQuickReplies: document.querySelector('#supportQuickReplies'),
   platformSupportTicketList: document.querySelector('#platformSupportTicketList'),
+  platformSupportDetail: document.querySelector('#platformSupportDetail'),
   platformConfirmBackdrop: document.querySelector('#platformConfirmBackdrop'),
   platformConfirmForm: document.querySelector('#platformConfirmForm'),
   platformConfirmTitle: document.querySelector('#platformConfirmTitle'),
@@ -127,10 +126,8 @@ const els = {
   toast: document.querySelector('#toast')
 };
 
-els.platformLogoutButton.addEventListener('click', logout);
-els.refreshPlatformButton.addEventListener('click', () => loadPlatform({ force: true }));
-els.companyForm.addEventListener('submit', submitCompany);
-els.storeForm.addEventListener('submit', submitStore);
+els.platformLogoutButton?.addEventListener('click', logout);
+els.refreshPlatformButton?.addEventListener('click', () => loadPlatform({ force: true }));
 els.auditFilterForm?.addEventListener('submit', submitAuditFilters);
 els.refreshHealthButton?.addEventListener('click', loadHealth);
 els.healthPeriodSelect?.addEventListener('change', loadHealth);
@@ -142,12 +139,19 @@ els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshSupportButton?.addEventListener('click', loadSupport);
 els.platformSmtpForm?.addEventListener('submit', submitSmtpSettings);
 els.platformSmtpTestForm?.addEventListener('submit', submitSmtpTest);
-els.platformSupportCreateForm?.addEventListener('submit', submitPlatformSupportTicket);
+document.addEventListener('submit', (event) => {
+  if (event.target?.matches?.('.platform-support-message-form')) {
+    submitSupportTicketMessage(event);
+  }
+});
 els.supportStatusFilter?.addEventListener('change', loadSupport);
 els.supportPriorityFilter?.addEventListener('change', loadSupport);
 els.supportSlaFilter?.addEventListener('change', renderSupport);
 els.supportPlanFilter?.addEventListener('change', renderSupport);
 els.supportSearchFilter?.addEventListener('input', renderSupport);
+els.platformSupportTabs.forEach((button) => {
+  button.addEventListener('click', () => activateSupportTab(button.dataset.supportTab || 'queue'));
+});
 els.analyticsPeriodSelect?.addEventListener('change', loadCommercialAnalytics);
 els.billingPeriodSelect?.addEventListener('change', loadBilling);
 els.billingStatusFilter?.addEventListener('change', loadBilling);
@@ -549,7 +553,6 @@ async function activatePlatformView(view = 'overview', options = {}) {
 
 function renderSelects() {
   const planOptions = state.plans.map((plan) => `<option value="${escapeAttribute(plan.code)}">${escapeHtml(plan.name)}</option>`).join('');
-  els.companyPlanSelect.innerHTML = `<option value="">Selecione o plano inicial</option>${planOptions || '<option value="essential">Essencial</option>'}`;
   if (els.clientPlanFilter) {
     const selected = els.clientPlanFilter.value;
     els.clientPlanFilter.innerHTML = `<option value="">Todos planos</option>${planOptions}`;
@@ -569,13 +572,6 @@ function renderSelects() {
   const companyOptions = state.companies
     .map((company) => `<option value="${escapeAttribute(company.id)}">${escapeHtml(company.name)}</option>`)
     .join('');
-  els.storeCompanySelect.innerHTML = `<option value="">Selecione a empresa</option>${companyOptions}`;
-  els.storeCompanySelect.disabled = !state.companies.length;
-  if (els.supportCompanySelect) {
-    const selected = els.supportCompanySelect.value;
-    els.supportCompanySelect.innerHTML = `<option value="">Sem empresa vinculada</option>${companyOptions}`;
-    els.supportCompanySelect.value = selected;
-  }
   els.auditCompanySelect.innerHTML = `<option value="">Todas empresas</option>${companyOptions}`;
   if (els.operationalLogCompanyFilter) {
     const selected = els.operationalLogCompanyFilter.value;
@@ -587,11 +583,6 @@ function renderSelects() {
     .map((store) => `<option value="${escapeAttribute(store.id)}">${escapeHtml(store.name)} - ${escapeHtml(store.company_name)}</option>`)
     .join('');
   els.auditStoreSelect.innerHTML = '<option value="">Todas lojas</option>' + storeOptions;
-  if (els.supportStoreSelect) {
-    const selected = els.supportStoreSelect.value;
-    els.supportStoreSelect.innerHTML = '<option value="">Sem loja vinculada</option>' + storeOptions;
-    els.supportStoreSelect.value = selected;
-  }
   if (els.operationalLogStoreFilter) {
     const selected = els.operationalLogStoreFilter.value;
     els.operationalLogStoreFilter.innerHTML = '<option value="">Todas lojas</option>' + storeOptions;
@@ -720,21 +711,86 @@ function renderBillingMetrics() {
     return;
   }
   const billing = state.summary?.billing || {};
-  const rows = [
-    ['MRR', moneyCents(billing.mrr_cents, billing.mrr)],
-    ['Receita pedidos/mês', moneyCents(billing.monthly_order_revenue_cents, billing.monthly_order_revenue)],
-    ['Trials iniciados', billing.trials_started || 0],
-    ['Upgrades', billing.upgrades || 0],
-    ['Downgrades', billing.downgrades || 0],
-    ['Cancelamentos', billing.cancellations || 0],
-    ['Pagamentos aprovados', billing.paid_events || 0],
-    ['Pagamentos recusados', billing.refused_events || 0]
+  const highlights = [
+    {
+      label: 'MRR estimado',
+      value: moneyCents(billing.mrr_cents, billing.mrr),
+      hint: 'Receita recorrente dos planos ativos',
+      tone: Number(billing.mrr_cents || billing.mrr || 0) ? 'success' : 'neutral'
+    },
+    {
+      label: 'Receita de pedidos no mês',
+      value: moneyCents(billing.monthly_order_revenue_cents, billing.monthly_order_revenue),
+      hint: 'Faturamento bruto gerado pelas lojas',
+      tone: Number(billing.monthly_order_revenue_cents || billing.monthly_order_revenue || 0) ? 'success' : 'neutral'
+    }
+  ];
+  const operations = [
+    ['Trials', billing.trials_started || 0, 'Novas contas testando', 'info'],
+    ['Upgrades', billing.upgrades || 0, 'Evoluções de plano', 'success'],
+    ['Downgrades', billing.downgrades || 0, 'Reduções de plano', 'warning'],
+    ['Cancelamentos', billing.cancellations || 0, 'Perdas no período', Number(billing.cancellations || 0) ? 'danger' : 'neutral']
+  ];
+  const payments = [
+    ['Aprovados', billing.paid_events || 0, 'Pagamentos confirmados', 'success'],
+    ['Recusados', billing.refused_events || 0, 'Falhas de cobrança', Number(billing.refused_events || 0) ? 'danger' : 'neutral']
   ];
   const revenueByPlan = billing.revenue_by_plan || [];
+  const maxRevenue = Math.max(1, ...revenueByPlan.map((entry) => Number(entry.revenue_cents || 0)));
   els.platformBillingMetrics.innerHTML = `
-    ${rows.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join('')}
+    <div class="platform-billing-highlights">
+      ${highlights.map((item) => `
+        <article class="platform-billing-highlight tone-${escapeAttribute(item.tone)}">
+          <span>${escapeHtml(item.label)}</span>
+          <strong>${escapeHtml(item.value)}</strong>
+          <small>${escapeHtml(item.hint)}</small>
+        </article>
+      `).join('')}
+    </div>
+    <div class="platform-billing-section">
+      <div class="platform-billing-section-title">
+        <strong>Movimento comercial</strong>
+        <small>Trial, expansão, retenção e perdas</small>
+      </div>
+      <div class="platform-billing-mini-grid">
+        ${operations.map(([label, value, hint, tone]) => `
+          <article class="platform-billing-mini tone-${escapeAttribute(tone)}">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <small>${escapeHtml(hint)}</small>
+          </article>
+        `).join('')}
+      </div>
+    </div>
+    <div class="platform-billing-section">
+      <div class="platform-billing-section-title">
+        <strong>Cobranças</strong>
+        <small>Eventos financeiros registrados</small>
+      </div>
+      <div class="platform-billing-payment-grid">
+        ${payments.map(([label, value, hint, tone]) => `
+          <article class="platform-billing-payment tone-${escapeAttribute(tone)}">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <small>${escapeHtml(hint)}</small>
+          </article>
+        `).join('')}
+      </div>
+    </div>
     <div class="platform-plan-revenue">
-      ${revenueByPlan.map((entry) => `<span>${escapeHtml(entry.plan)} <strong>${moneyCents(entry.revenue_cents, entry.revenue)}</strong></span>`).join('') || '<span>Sem receita por plano.</span>'}
+      <div class="platform-billing-section-title">
+        <strong>Receita por plano</strong>
+        <small>Distribuição do faturamento comercial</small>
+      </div>
+      ${revenueByPlan.length ? revenueByPlan.map((entry) => `
+        <article class="platform-plan-revenue-row">
+          <div>
+            <strong>${escapeHtml(entry.plan || 'Sem plano')}</strong>
+            <span>${moneyCents(entry.revenue_cents, entry.revenue)}</span>
+          </div>
+          <i style="width:${Math.max(6, (Number(entry.revenue_cents || 0) / maxRevenue) * 100)}%"></i>
+        </article>
+      `).join('') : '<p class="empty-state">Sem receita por plano no período.</p>'}
     </div>
   `;
 }
@@ -1068,7 +1124,7 @@ function filteredCompanies() {
   const status = data.get('status') || '';
   const plan = data.get('plan') || '';
   const activity = data.get('activity') || '';
-  const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'suspended']);
+  const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended']);
   return state.companies.filter((company) => {
     const metrics = companyMetrics(company.id);
     const stores = company.stores || [];
@@ -1107,7 +1163,7 @@ function clientAlertsForCompany(company, metrics = {}) {
   const alerts = [];
   const stores = company.stores || [];
   const subscription = company.subscription || {};
-  const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'suspended']);
+  const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended']);
   if (trialEndingSoon(subscription)) alerts.push({ type: 'trial', severity: 'warning', title: 'Trial perto do fim', action: 'Entrar em contato e orientar upgrade.' });
   if (delinquent.has(metrics.subscription_status || subscription.status || company.status)) alerts.push({ type: 'billing', severity: 'critical', title: 'Cobrança pendente', action: 'Verificar pagamento e webhook.' });
   if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar cardápio ou unidade.' });
@@ -1752,68 +1808,196 @@ function renderEmailTemplates() {
 function renderSupport() {
   if (!els.platformSupportTicketList) return;
   const tickets = filteredSupportTickets();
+  const queueStats = supportQueueStats(tickets);
   renderSupportSummary(tickets);
+  renderSupportInsights(tickets);
+  renderSupportTabs();
   if (!state.supportLoaded && !state.supportLoading) {
     els.platformSupportTicketList.innerHTML = '<p class="empty-state">Chamados serão carregados ao abrir esta aba.</p>';
+    if (els.platformSupportDetail) els.platformSupportDetail.innerHTML = supportDetailEmptyState('Selecione um chamado para ver a conversa.');
     return;
   }
   if (state.supportLoading && !tickets.length) {
     els.platformSupportTicketList.innerHTML = '<p class="empty-state">Carregando chamados...</p>';
+    if (els.platformSupportDetail) els.platformSupportDetail.innerHTML = supportDetailEmptyState('Carregando detalhes...');
     return;
   }
-  els.platformSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => {
+  if (!tickets.some((ticket) => ticket.id === state.selectedSupportTicketId)) {
+    state.selectedSupportTicketId = tickets.find((ticket) => !['resolved', 'closed'].includes(ticket.status))?.id || tickets[0]?.id || null;
+  }
+  const queueHeader = `
+    <div class="platform-support-queue-head">
+      <div>
+        <p class="eyebrow">Fila</p>
+        <strong>${queueStats.total} chamado(s)</strong>
+      </div>
+      <span>${queueStats.open} aberto(s)</span>
+      <span class="${queueStats.overdue ? 'is-danger' : ''}">${queueStats.overdue} vencido(s)</span>
+    </div>
+  `;
+  els.platformSupportTicketList.innerHTML = tickets.length ? queueHeader + tickets.map((ticket) => {
     const context = supportTicketContext(ticket);
     const sla = supportSla(ticket);
     const lastMessage = latestSupportMessage(ticket);
+    const waiting = supportWaitingLabel(ticket);
+    const ticketShortId = String(ticket.id || '').slice(0, 6).toUpperCase();
     return `
-    <details class="platform-support-ticket priority-${escapeAttribute(ticket.priority)} sla-${escapeAttribute(sla.status)}">
-      <summary>
-        <div class="platform-support-ticket-title">
+    <button class="platform-support-ticket-row priority-${escapeAttribute(ticket.priority)} sla-${escapeAttribute(sla.status)} ${ticket.id === state.selectedSupportTicketId ? 'active' : ''}" type="button" data-support-ticket-id="${escapeAttribute(ticket.id)}">
+        <div class="platform-support-ticket-top">
           <strong>${escapeHtml(ticket.subject)}</strong>
-          <small>${escapeHtml(ticket.company_name || 'Sem empresa')} ${ticket.store_name ? `· ${escapeHtml(ticket.store_name)}` : ''} · ${escapeHtml(ticket.category || 'sem categoria')}</small>
+          <span>#${escapeHtml(ticketShortId)}</span>
         </div>
-        <span class="platform-sla-pill ${escapeAttribute(sla.status)}">${escapeHtml(sla.label)}</span>
-        <span class="pill ${ticket.priority === 'critical' || ticket.priority === 'high' ? 'pill-danger' : 'pill-muted'}">${escapeHtml(priorityLabel(ticket.priority))}</span>
-        <span class="pill ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
-      </summary>
-      <div class="platform-support-body">
-        <section class="platform-support-ticket-grid">
-          <article class="platform-support-context">
+        <div class="platform-support-ticket-title">
+          <small>${escapeHtml(ticket.company_name || 'Sem empresa')} ${ticket.store_name ? `· ${escapeHtml(ticket.store_name)}` : ''} · ${escapeHtml(context.planName)} · ${escapeHtml(ticket.category || 'sem categoria')}</small>
+          <p>${escapeHtml(supportMessagePreview(lastMessage) || 'Sem mensagens no chamado.')}</p>
+        </div>
+        <div class="platform-support-row-meta">
+          <span class="platform-sla-pill ${escapeAttribute(sla.status)}">${escapeHtml(sla.label)}</span>
+          <span class="pill ${supportPriorityClass(ticket.priority)}">${escapeHtml(priorityLabel(ticket.priority))}</span>
+          <span class="pill ${supportStatusClass(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+        </div>
+        <div class="platform-support-ticket-footer">
+          <small>${escapeHtml(waiting)}</small>
+          <small>Aberto em ${escapeHtml(formatDateTime(ticket.created_at))}</small>
+        </div>
+    </button>
+  `;
+  }).join('') : '<p class="empty-state">Nenhum chamado encontrado para os filtros.</p>';
+  els.platformSupportTicketList.querySelectorAll('[data-support-ticket-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.selectedSupportTicketId = button.dataset.supportTicketId;
+      renderSupport();
+    });
+  });
+  renderSupportDetail(tickets.find((ticket) => ticket.id === state.selectedSupportTicketId) || null);
+}
+
+function renderSupportTabs() {
+  els.platformSupportTabs.forEach((button) => button.classList.toggle('active', button.dataset.supportTab === state.supportActiveTab));
+  els.platformSupportPanels.forEach((panel) => {
+    const active = panel.dataset.supportPanel === state.supportActiveTab;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
+  });
+}
+
+function activateSupportTab(tab = 'queue') {
+  state.supportActiveTab = tab;
+  renderSupportTabs();
+}
+
+function renderSupportDetail(ticket) {
+  if (!els.platformSupportDetail) return;
+  if (!ticket) {
+    els.platformSupportDetail.innerHTML = supportDetailEmptyState('Selecione um chamado para ver a conversa.');
+    return;
+  }
+  const context = supportTicketContext(ticket);
+  const sla = supportSla(ticket);
+  const lastMessage = latestSupportMessage(ticket);
+  const age = supportTicketAge(ticket);
+  const waiting = supportWaitingLabel(ticket);
+  const messageCount = (ticket.messages || []).length;
+  const contactName = supportTicketContactName(ticket);
+  els.platformSupportDetail.innerHTML = `
+    <article class="platform-support-detail-main">
+      <div class="platform-support-detail-header">
+        <div>
+          <p class="eyebrow">Chamado selecionado</p>
+          <h3>${escapeHtml(ticket.subject)}</h3>
+          <p>${escapeHtml(ticket.company_name || 'Sem empresa')} ${ticket.store_name ? `· ${escapeHtml(ticket.store_name)}` : ''} · ${escapeHtml(ticket.category || 'sem categoria')}</p>
+          ${contactName ? `<p class="platform-support-contact-chip"><span>Contato</span>${escapeHtml(contactName)}</p>` : ''}
+        </div>
+        <div class="platform-support-row-meta">
+          <span class="platform-sla-pill ${escapeAttribute(sla.status)}">${escapeHtml(sla.hint)}</span>
+          <span class="pill ${supportPriorityClass(ticket.priority)}">${escapeHtml(priorityLabel(ticket.priority))}</span>
+          <span class="pill ${supportStatusClass(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+        </div>
+      </div>
+      <div class="platform-support-case-strip">
+        <article>
+          <span>SLA</span>
+          <strong>${escapeHtml(sla.label)}</strong>
+          <small>${escapeHtml(sla.hint)}</small>
+        </article>
+        <article>
+          <span>Tempo aberto</span>
+          <strong>${escapeHtml(age)}</strong>
+          <small>${escapeHtml(waiting)}</small>
+        </article>
+        <article>
+          <span>Mensagens</span>
+          <strong>${Number(messageCount || 0)}</strong>
+          <small>${lastMessage ? `Última em ${escapeHtml(formatDateTime(lastMessage.created_at))}` : 'Sem mensagens'}</small>
+        </article>
+        <article>
+          <span>Contato</span>
+          <strong>${escapeHtml(contactName || 'Não informado')}</strong>
+          <small>Nome enviado pelo lojista ao abrir o chamado</small>
+        </article>
+      </div>
+      <section class="platform-support-detail-grid">
+        <article class="platform-support-thread">
+          <div class="section-actions compact-section-actions">
+            <div>
+              <h4>Conversa</h4>
+              <p class="muted">Última mensagem: ${escapeHtml(lastMessage ? formatDateTime(lastMessage.created_at) : 'sem mensagens')}</p>
+            </div>
+          </div>
+          <div class="platform-support-messages">
+            ${(ticket.messages || []).length ? ticket.messages.map((message) => renderPlatformSupportMessage(message)).join('') : '<p class="empty-state">Sem mensagens carregadas.</p>'}
+          </div>
+          <form class="platform-support-message-form" data-ticket-id="${escapeAttribute(ticket.id)}">
+            <div class="platform-support-reply-mode" role="group" aria-label="Tipo de resposta">
+              <button class="active" type="button" data-reply-mode="customer">Responder cliente</button>
+              <button type="button" data-reply-mode="internal">Nota interna</button>
+            </div>
+            <input name="is_internal" type="hidden" value="false">
+            <textarea name="message" rows="5" required placeholder="Escreva uma resposta para o cliente"></textarea>
+            <div class="row-actions">
+              <button class="primary-button compact" type="submit">Enviar resposta</button>
+            </div>
+          </form>
+        </article>
+        <aside class="platform-support-context">
+          <div class="platform-support-context-head">
             <h4>Contexto do cliente</h4>
+            <span>${escapeHtml(ticket.assigned_to_admin_name || 'Sem responsável')}</span>
+          </div>
+          <section class="platform-support-context-box">
+            <h5>Comercial</h5>
             <div>
               <span>Plano</span><strong>${escapeHtml(context.planName)}</strong>
               <span>Assinatura</span><strong>${escapeHtml(context.subscriptionStatus)}</strong>
+              <span>Trial</span><strong>${escapeHtml(context.trialLabel)}</strong>
+              <span>Faturamento/mês</span><strong>${moneyCents(context.revenueMonthCents, context.revenueMonth)}</strong>
+            </div>
+          </section>
+          <section class="platform-support-context-box">
+            <h5>Operação</h5>
+            <div>
+              <span>Loja</span><strong>${escapeHtml(context.storeStatus)}</strong>
+              <span>WhatsApp</span><strong>${escapeHtml(context.whatsappLabel)}</strong>
               <span>Lojas</span><strong>${Number(context.storesCount || 0)}</strong>
               <span>Produtos</span><strong>${Number(context.productsCount || 0)}</strong>
+              <span>Pedidos/mês</span><strong>${Number(context.ordersMonth || 0)}</strong>
+            </div>
+          </section>
+          <section class="platform-support-context-box">
+            <h5>Atividade</h5>
+            <div>
               <span>Último pedido</span><strong>${escapeHtml(context.lastOrderLabel)}</strong>
-              <span>Responsável</span><strong>${escapeHtml(ticket.assigned_to_admin_name || 'Sem responsável')}</strong>
+              <span>Último acesso</span><strong>${escapeHtml(context.lastAccessLabel)}</strong>
+              <span>Aberto há</span><strong>${escapeHtml(age)}</strong>
             </div>
-            <div class="row-actions">
-              ${context.storeSlug ? `<a class="ghost-button compact" href="/${escapeAttribute(context.storeSlug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
-              ${ticket.store_id ? `<button class="ghost-button compact" data-support-impersonate-store="${escapeAttribute(ticket.store_id)}" type="button">Entrar como suporte</button>` : ''}
-            </div>
-          </article>
-          <article class="platform-support-thread">
-            <div class="section-actions compact-section-actions">
-              <div>
-                <h4>Conversa</h4>
-                <p class="muted">Última mensagem: ${escapeHtml(lastMessage ? formatDateTime(lastMessage.created_at) : 'sem mensagens')}</p>
-              </div>
-              <span class="platform-sla-pill ${escapeAttribute(sla.status)}">${escapeHtml(sla.hint)}</span>
-            </div>
-            <div class="platform-support-messages">
-              ${(ticket.messages || []).length ? ticket.messages.map((message) => `
-                <article class="${message.is_internal ? 'is-internal' : ''}">
-                  <strong>${escapeHtml(message.author_name || message.author_type)}</strong>
-                  <small>${formatDateTime(message.created_at)}${message.is_internal ? ' · nota interna' : ''}</small>
-                  <p>${escapeHtml(message.message)}</p>
-                </article>
-              `).join('') : '<p class="empty-state">Sem mensagens carregadas.</p>'}
-            </div>
-          </article>
-        </section>
-        <section class="platform-support-actions-grid">
+          </section>
+          <div class="platform-support-context-actions">
+            ${context.storeSlug ? `<a class="ghost-button compact" href="/${escapeAttribute(context.storeSlug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
+            ${ticket.store_id ? `<button class="ghost-button compact" data-support-impersonate-store="${escapeAttribute(ticket.store_id)}" type="button">Entrar como suporte</button>` : ''}
+            ${ticket.company_id ? `<button class="ghost-button compact" data-support-open-client="${escapeAttribute(ticket.company_id)}" type="button">Ver cliente</button>` : ''}
+          </div>
           <form class="platform-support-update" data-ticket-id="${escapeAttribute(ticket.id)}">
+            <p class="eyebrow">Atualizar atendimento</p>
             <select name="status">${supportStatusOptions(ticket.status)}</select>
             <select name="priority">${supportPriorityOptions(ticket.priority)}</select>
             <select name="assigned_to_admin_id">
@@ -1822,29 +2006,52 @@ function renderSupport() {
             </select>
             <button class="ghost-button compact">Salvar atendimento</button>
           </form>
-          <form class="platform-support-message-form" data-ticket-id="${escapeAttribute(ticket.id)}">
-            <textarea name="message" rows="3" required placeholder="Responder ao cliente ou registrar nota interna"></textarea>
-            <div class="row-actions">
-              <label class="payment-option"><input name="is_internal" type="checkbox"> Nota interna</label>
-              <button class="primary-button compact">Enviar</button>
-            </div>
-          </form>
-        </section>
-      </div>
-    </details>
+        </aside>
+      </section>
+    </article>
   `;
-  }).join('') : '<p class="empty-state">Nenhum chamado encontrado para os filtros.</p>';
-  els.platformSupportTicketList.querySelectorAll('.platform-support-update').forEach((form) => form.addEventListener('submit', submitSupportTicketUpdate));
-  els.platformSupportTicketList.querySelectorAll('.platform-support-message-form').forEach((form) => form.addEventListener('submit', submitSupportTicketMessage));
-  els.platformSupportTicketList.querySelectorAll('[data-support-impersonate-store]').forEach((button) => {
+  els.platformSupportDetail.querySelectorAll('.platform-support-update').forEach((form) => form.addEventListener('submit', submitSupportTicketUpdate));
+  els.platformSupportDetail.querySelectorAll('[data-reply-mode]').forEach((button) => {
+    button.addEventListener('click', () => setSupportReplyMode(button));
+  });
+  els.platformSupportDetail.querySelectorAll('[data-support-impersonate-store]').forEach((button) => {
     button.addEventListener('click', () => openSupportImpersonation(button.dataset.supportImpersonateStore));
   });
+  els.platformSupportDetail.querySelectorAll('[data-support-open-client]').forEach((button) => {
+    button.addEventListener('click', () => openSupportClient(button.dataset.supportOpenClient));
+  });
+}
+
+function supportDetailEmptyState(message) {
+  return `<div class="platform-support-detail-empty"><strong>${escapeHtml(message)}</strong><p>Escolha um item da fila para responder, adicionar nota interna e ver o contexto do cliente.</p></div>`;
+}
+
+function supportQueueStats(tickets = []) {
+  return tickets.reduce((acc, ticket) => {
+    const isClosed = ['resolved', 'closed'].includes(ticket.status);
+    const sla = supportSla(ticket);
+    acc.total += 1;
+    if (!isClosed) acc.open += 1;
+    if (sla.status === 'overdue') acc.overdue += 1;
+    return acc;
+  }, { total: 0, open: 0, overdue: 0 });
+}
+
+function setSupportReplyMode(button) {
+  const form = button.closest('.platform-support-message-form');
+  if (!form) return;
+  const isInternal = button.dataset.replyMode === 'internal';
+  form.querySelectorAll('[data-reply-mode]').forEach((item) => item.classList.toggle('active', item === button));
+  form.elements.is_internal.value = isInternal ? 'true' : 'false';
+  form.querySelector('textarea').placeholder = isInternal ? 'Escreva uma nota interna que o cliente não verá' : 'Escreva uma resposta para o cliente';
+  form.querySelector('button.primary-button').textContent = isInternal ? 'Salvar nota interna' : 'Enviar resposta';
 }
 
 function renderSupportSummary(tickets = []) {
   if (!els.platformSupportSummaryGrid) return;
   const open = tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status)).length;
-  const critical = tickets.filter((ticket) => ['critical', 'high'].includes(ticket.priority) && !['resolved', 'closed'].includes(ticket.status)).length;
+  const critical = tickets.filter((ticket) => ticket.priority === 'critical' && !['resolved', 'closed'].includes(ticket.status)).length;
+  const waitingSupport = tickets.filter((ticket) => supportNeedsAnswer(ticket)).length;
   const waiting = tickets.filter((ticket) => ticket.status === 'waiting_customer').length;
   const inReview = tickets.filter((ticket) => ticket.status === 'in_review').length;
   const resolvedToday = tickets.filter((ticket) => ['resolved', 'closed'].includes(ticket.status) && isToday(ticket.updated_at)).length;
@@ -1852,22 +2059,67 @@ function renderSupportSummary(tickets = []) {
   const averageFirstResponse = supportAverageFirstResponse(tickets);
   const averageResolution = supportAverageResolution(tickets);
   const items = [
-    ['Abertos', open, 'Chamados em andamento'],
-    ['Críticos', critical, 'Alta prioridade'],
-    ['Aguardando cliente', waiting, 'Dependem de retorno'],
-    ['Em análise', inReview, 'Com suporte interno'],
-    ['Resolvidos hoje', resolvedToday, 'Fechados ou resolvidos'],
-    ['SLA vencido', overdue, 'Precisam de ação'],
-    ['1ª resposta', averageFirstResponse, 'Tempo médio'],
-    ['Resolução', averageResolution, 'Tempo médio']
+    ['Abertos', open, 'Chamados em andamento', 'info'],
+    ['Críticos', critical, 'Prioridade máxima', 'danger'],
+    ['Aguardando suporte', waitingSupport, 'Precisam de resposta', waitingSupport ? 'warning' : 'ok'],
+    ['Aguardando cliente', waiting, 'Dependem de retorno', 'muted'],
+    ['Em análise', inReview, 'Com suporte interno', 'info'],
+    ['Resolvidos hoje', resolvedToday, 'Fechados ou resolvidos', 'ok'],
+    ['SLA vencido', overdue, 'Precisam de ação', overdue ? 'danger' : 'ok'],
+    ['1ª resposta', averageFirstResponse, 'Tempo médio', 'muted'],
+    ['Resolução', averageResolution, 'Tempo médio', 'muted']
   ];
-  els.platformSupportSummaryGrid.innerHTML = items.map(([label, value, hint]) => `
-    <article class="platform-kpi-card">
+  els.platformSupportSummaryGrid.innerHTML = items.map(([label, value, hint, tone]) => `
+    <article class="platform-kpi-card support-kpi-${escapeAttribute(tone)}">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value ?? 0)}</strong>
       <p>${escapeHtml(hint)}</p>
     </article>
   `).join('');
+}
+
+function renderSupportInsights(tickets = []) {
+  if (!els.platformSupportInsights) return;
+  const openTickets = tickets.filter((ticket) => !['resolved', 'closed'].includes(ticket.status));
+  const categoryRows = supportDistribution(tickets, (ticket) => ticket.category || 'Sem categoria').slice(0, 5);
+  const priorityRows = supportDistribution(tickets, (ticket) => priorityLabel(ticket.priority)).slice(0, 4);
+  const statusRows = supportDistribution(tickets, (ticket) => ticketStatusLabel(ticket.status)).slice(0, 5);
+  const topClients = supportDistribution(openTickets, (ticket) => ticket.company_name || 'Sem empresa').slice(0, 5);
+  els.platformSupportInsights.innerHTML = [
+    supportInsightCard('Por status', statusRows, tickets.length),
+    supportInsightCard('Por prioridade', priorityRows, tickets.length),
+    supportInsightCard('Categorias comuns', categoryRows, tickets.length),
+    supportInsightCard('Clientes com chamados abertos', topClients, openTickets.length)
+  ].join('');
+}
+
+function supportDistribution(items, getKey) {
+  const counts = new Map();
+  for (const item of items || []) {
+    const key = cleanDisplayValue(getKey(item)) || 'Sem dado';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+function supportInsightCard(title, rows, total) {
+  return `
+    <article class="platform-support-insight-card">
+      <h3>${escapeHtml(title)}</h3>
+      ${rows.length ? rows.map((row) => {
+        const percent = total ? Math.round((row.count / total) * 100) : 0;
+        return `
+          <div class="platform-support-insight-row">
+            <span>${escapeHtml(row.label)}</span>
+            <strong>${Number(row.count)}</strong>
+            <i style="--value:${Math.max(4, percent)}%"></i>
+          </div>
+        `;
+      }).join('') : '<p class="empty-state">Sem dados no período.</p>'}
+    </article>
+  `;
 }
 
 function filteredSupportTickets() {
@@ -1915,20 +2167,99 @@ function supportTicketContext(ticket) {
   const subscription = company?.subscription || {};
   const plan = state.plans.find((item) => item.id === subscription.plan_id || item.code === subscription.plan_code);
   const metrics = company ? companyMetrics(company.id) : {};
+  const settings = store?.settings || {};
+  const trialEndsAt = subscription.trial_ends_at || metrics.trial_ends_at || null;
   return {
     planCode: plan?.code || metrics.plan_code || '',
     planName: plan?.name || metrics.plan_name || 'Sem plano',
     subscriptionStatus: subscription.status || metrics.subscription_status || company?.status || 'sem assinatura',
+    trialLabel: trialEndsAt ? formatDateTime(trialEndsAt) : 'Sem trial',
+    storeStatus: store ? `${store.is_active === false ? 'Não publicada' : 'Publicada'} · ${settings.is_open === false ? 'Fechada' : 'Aberta'}` : 'Sem loja',
+    whatsappLabel: metrics.stores_without_whatsapp_count > 0 ? 'Pendente' : 'Configurado',
     storesCount: metrics.stores_count || stores.length || 0,
     productsCount: metrics.products_count || 0,
+    ordersMonth: metrics.orders_month || 0,
+    revenueMonth: metrics.revenue_month || 0,
+    revenueMonthCents: metrics.revenue_month_cents || 0,
+    lastAccessLabel: metrics.last_access_at ? formatDateTime(metrics.last_access_at) : 'Sem acesso',
     lastOrderLabel: metrics.last_order_at ? formatDateTime(metrics.last_order_at) : 'Sem pedido',
     storeSlug: store?.slug || ''
   };
 }
 
+function cleanDisplayValue(value) {
+  return String(value || '').trim();
+}
+
 function latestSupportMessage(ticket) {
   const messages = ticket.messages || [];
   return messages.length ? messages[messages.length - 1] : null;
+}
+
+function supportMessagePreview(message) {
+  if (!message) return '';
+  const parsed = parseSupportMessage(message.message || '');
+  return parsed.body || parsed.contact || '';
+}
+
+function supportTicketContactName(ticket) {
+  const messages = ticket.messages || [];
+  const customerMessage = messages.find((message) => !message.is_internal && message.author_type !== 'support');
+  const parsed = parseSupportMessage(customerMessage?.message || '');
+  return cleanDisplayValue(parsed.contact || ticket.contact_name || ticket.customer_name || '');
+}
+
+function parseSupportMessage(text = '') {
+  const value = String(text || '').trim();
+  const match = value.match(/^Contato:\s*(.+?)(?:\n{2,}|\r\n{2,})([\s\S]*)$/i);
+  if (!match) return { contact: '', body: value };
+  return { contact: match[1].trim(), body: match[2].trim() };
+}
+
+function renderPlatformSupportMessage(message) {
+  const parsed = parseSupportMessage(message.message || '');
+  const type = message.is_internal ? 'internal' : message.author_type === 'support' ? 'support' : 'customer';
+  const author = type === 'support'
+    ? 'Equipe de suporte'
+    : type === 'internal'
+      ? (message.author_name || 'Nota interna')
+      : (message.author_name || 'Cliente');
+  return `
+    <article class="platform-support-message ${escapeAttribute(type)}">
+      <div>
+        <strong>${escapeHtml(author)}</strong>
+        <small>${formatDateTime(message.created_at)}${message.is_internal ? ' · nota interna' : ''}</small>
+      </div>
+      ${parsed.contact ? `<p class="support-contact-line"><span>Contato</span>${escapeHtml(parsed.contact)}</p>` : ''}
+      <p>${escapeHtml(parsed.body)}</p>
+    </article>
+  `;
+}
+
+function supportTicketAge(ticket) {
+  return durationLabel(Date.now() - new Date(ticket.created_at || Date.now()).getTime());
+}
+
+function supportWaitingLabel(ticket) {
+  if (['resolved', 'closed'].includes(ticket.status)) return 'Encerrado';
+  const last = latestSupportMessage(ticket);
+  if (!last) return 'Sem mensagem';
+  const prefix = supportNeedsAnswer(ticket) ? 'Sem resposta há' : 'Última resposta há';
+  return `${prefix} ${durationLabel(Date.now() - new Date(last.created_at || ticket.created_at || Date.now()).getTime())}`;
+}
+
+function supportPriorityClass(priority) {
+  if (priority === 'critical') return 'pill-danger';
+  if (priority === 'high') return 'pill-warning';
+  if (priority === 'low') return 'pill-ok';
+  return 'pill-muted';
+}
+
+function supportStatusClass(status) {
+  if (['resolved', 'closed'].includes(status)) return 'pill-ok';
+  if (status === 'in_review') return 'pill-warning';
+  if (status === 'waiting_customer') return 'pill-info';
+  return 'pill-muted';
 }
 
 function supportNeedsAnswer(ticket) {
@@ -1995,7 +2326,10 @@ function supportAssigneeOptions(selected = '') {
 const SUPPORT_QUICK_REPLIES = [
   ['WhatsApp', 'Olá {{company_name}}, para configurar o WhatsApp acesse Configurações da Loja > Atendimento e pedidos, informe o número com DDI/DDD e salve. Depois faça um pedido de teste para validar.'],
   ['Publicar cardápio', 'Olá {{company_name}}, para publicar o cardápio conclua o onboarding ou acesse Configurações da Loja, revise dados, horário, pagamentos e clique em salvar/publicar. Link: {{cardapio_url}}'],
-  ['Alterar plano', 'Olá {{company_name}}, a alteração de plano fica em Plano. Se preferir, posso revisar o plano ideal para sua operação e orientar o upgrade.'],
+  ['Cadastrar produto', 'Olá {{company_name}}, para cadastrar um produto acesse Cardápio > Produtos, clique em Novo produto, selecione a categoria, informe nome, preço e disponibilidade. Depois salve e confira no cardápio público.'],
+  ['Configurar Pix', 'Olá {{company_name}}, para ativar Pix acesse Configurações da Loja > Integrações/Pagamentos, confira a chave ou provedor configurado e faça um pedido de teste antes de vender.'],
+  ['Onboarding', 'Olá {{company_name}}, percebi que a configuração inicial pode estar incompleta. Abra o onboarding pelo painel para revisar loja, operação, pagamento, entrega e primeiro produto.'],
+  ['Alterar plano', 'Olá {{company_name}}, sua loja está no plano {{plan_name}}. Se precisar de mais recursos, posso revisar o plano ideal para sua operação e orientar o upgrade.'],
   ['Pedido teste', 'Olá {{company_name}}, recomendo abrir o cardápio público, adicionar um produto, finalizar um pedido teste e conferir se ele aparece em Pedidos no painel.'],
   ['Domínio', 'Olá {{company_name}}, para configurar domínio próprio, cadastre o domínio em Configurações da Loja > Domínio personalizado e aponte o DNS conforme instruções exibidas.'],
   ['Pagamento', 'Olá {{company_name}}, vou verificar os eventos de cobrança e o retorno do provedor. Se houver pagamento pendente, enviarei o link seguro para regularização.']
@@ -2012,22 +2346,33 @@ function renderSupportQuickReplies() {
 }
 
 function insertSupportQuickReply(template) {
-  const openTicket = els.platformSupportTicketList?.querySelector('.platform-support-ticket[open]');
-  const textarea = openTicket?.querySelector('.platform-support-message-form textarea');
+  if (state.supportActiveTab !== 'queue') activateSupportTab('queue');
+  const textarea = els.platformSupportDetail?.querySelector('.platform-support-message-form textarea');
   if (!textarea) {
-    toast('Abra um chamado para inserir uma resposta rápida.');
+    toast('Selecione um chamado para inserir uma resposta rápida.');
     return;
   }
-  const ticketId = openTicket.querySelector('.platform-support-message-form')?.dataset.ticketId;
-  const ticket = (state.supportTickets || []).find((item) => item.id === ticketId);
+  const ticket = (state.supportTickets || []).find((item) => item.id === state.selectedSupportTicketId);
   const context = ticket ? supportTicketContext(ticket) : {};
   const text = template
     .replaceAll('{{company_name}}', ticket?.company_name || 'cliente')
     .replaceAll('{{store_name}}', ticket?.store_name || 'loja')
+    .replaceAll('{{plan_name}}', context.planName || 'plano atual')
     .replaceAll('{{dashboard_url}}', `${window.location.origin}/admin`)
     .replaceAll('{{cardapio_url}}', context.storeSlug ? `${window.location.origin}/${context.storeSlug}` : `${window.location.origin}/cardapio`);
   textarea.value = textarea.value ? `${textarea.value}\n\n${text}` : text;
   textarea.focus();
+}
+
+async function openSupportClient(companyId) {
+  const company = state.companies.find((item) => item.id === companyId);
+  await activatePlatformView('clients', { load: true });
+  const search = els.clientFilterForm?.querySelector('input[name="search"]');
+  if (search && company) {
+    search.value = company.name || company.billing_email || '';
+    renderCompanies();
+    search.focus();
+  }
 }
 
 async function openSupportImpersonation(storeId) {
@@ -2395,32 +2740,6 @@ function auditQueryString() {
   return query ? `?${query}` : '';
 }
 
-async function submitCompany(event) {
-  event.preventDefault();
-  const data = Object.fromEntries(new FormData(els.companyForm));
-  await request('/api/platform/companies', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  els.companyForm.reset();
-  await loadPlatform();
-  toast('Cliente cadastrado na plataforma.');
-}
-
-async function submitStore(event) {
-  event.preventDefault();
-  const data = Object.fromEntries(new FormData(els.storeForm));
-  await request('/api/platform/stores', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  els.storeForm.reset();
-  await loadPlatform();
-  toast('Cardápio criado para o cliente.');
-}
-
 async function submitCompanyManagement(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2639,24 +2958,6 @@ async function submitEmailTemplate(event) {
   }
 }
 
-async function submitPlatformSupportTicket(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = Object.fromEntries(new FormData(form));
-  try {
-    await request('/api/platform/support/tickets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    form.reset();
-    toast('Chamado criado.');
-    await loadSupport({ silent: true });
-  } catch (error) {
-    toast(error.message || 'Não foi possível criar chamado.');
-  }
-}
-
 async function submitSupportTicketUpdate(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2676,19 +2977,38 @@ async function submitSupportTicketUpdate(event) {
 
 async function submitSupportTicketMessage(event) {
   event.preventDefault();
-  const form = event.currentTarget;
+  const form = event.target?.closest?.('.platform-support-message-form') || event.currentTarget;
+  if (!form || !form.matches?.('.platform-support-message-form')) return;
+  if (form.dataset.submitting === 'true') return;
   const data = Object.fromEntries(new FormData(form));
-  data.is_internal = form.elements.is_internal.checked;
+  data.is_internal = form.elements.is_internal?.type === 'checkbox'
+    ? form.elements.is_internal.checked
+    : data.is_internal === 'true';
+  const submitButton = form.querySelector('button[type="submit"], button:not([type])');
+  const previousText = submitButton?.textContent || '';
   try {
+    state.selectedSupportTicketId = form.dataset.ticketId || state.selectedSupportTicketId;
+    form.dataset.submitting = 'true';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Enviando...';
+    }
     await request(`/api/platform/support/tickets/${form.dataset.ticketId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
+    form.reset();
     toast(data.is_internal ? 'Nota interna registrada.' : 'Resposta enviada.');
     await loadSupport({ silent: true });
   } catch (error) {
     toast(error.message || 'Não foi possível enviar mensagem.');
+  } finally {
+    form.dataset.submitting = 'false';
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = previousText;
+    }
   }
 }
 

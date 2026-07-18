@@ -33,6 +33,8 @@ const THEME_DEFAULTS = {
 };
 
 const els = {
+  storeNotFound: document.querySelector('#storeNotFound'),
+  storeNotFoundMessage: document.querySelector('#storeNotFoundMessage'),
   storeCover: document.querySelector('#storeCover'),
   storeLogo: document.querySelector('#storeLogo'),
   storeStatus: document.querySelector('#storeStatus'),
@@ -117,17 +119,17 @@ const els = {
 document.querySelector('#demoNotice')?.toggleAttribute('hidden', !state.isDemoMode);
 document.body.classList.toggle('demo-mode', state.isDemoMode);
 
-els.searchInput.addEventListener('input', () => {
+els.searchInput?.addEventListener('input', () => {
   state.query = els.searchInput.value.trim().toLowerCase();
   renderMenu();
 });
 
 els.refreshButton?.addEventListener('click', loadBootstrap);
-els.customerLogoutButton.addEventListener('click', logoutCustomer);
-els.checkoutButton.addEventListener('click', openCheckout);
-els.mobileBagButton.addEventListener('click', openCheckout);
-els.featured.addEventListener('wheel', scrollFeaturedWithWheel, { passive: false });
-els.clearCartButton.addEventListener('click', () => {
+els.customerLogoutButton?.addEventListener('click', logoutCustomer);
+els.checkoutButton?.addEventListener('click', openCheckout);
+els.mobileBagButton?.addEventListener('click', openCheckout);
+els.featured?.addEventListener('wheel', scrollFeaturedWithWheel, { passive: false });
+els.clearCartButton?.addEventListener('click', () => {
   state.cart = [];
   state.coupon = null;
   persistCart();
@@ -135,7 +137,7 @@ els.clearCartButton.addEventListener('click', () => {
 });
 els.applyCouponButton?.addEventListener('click', applyCoupon);
 
-els.checkoutForm.addEventListener('change', (event) => {
+els.checkoutForm?.addEventListener('change', (event) => {
   if (event.target.name === 'fulfillment_method') {
     state.coupon = null;
     clearCouponFeedback();
@@ -149,7 +151,7 @@ els.checkoutForm.addEventListener('change', (event) => {
     renderCheckoutReview();
   }
 });
-els.checkoutForm.addEventListener('input', (event) => {
+els.checkoutForm?.addEventListener('input', (event) => {
   if (event.target.name === 'postal_code') {
     event.target.value = formatCep(event.target.value);
   }
@@ -157,37 +159,37 @@ els.checkoutForm.addEventListener('input', (event) => {
     renderCheckoutReview();
   }
 });
-els.checkoutForm.elements.phone?.addEventListener('input', (event) => {
+els.checkoutForm?.elements?.phone?.addEventListener('input', (event) => {
   event.target.value = formatPhone(event.target.value);
 });
 
-els.checkoutForm.addEventListener('submit', submitOrder);
-els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog.close());
-els.productForm.addEventListener('change', renderProductDialogTotal);
-els.productForm.addEventListener('input', renderProductDialogTotal);
-els.productForm.addEventListener('submit', submitProductCustomization);
-els.productQuantityMinus.addEventListener('click', () => changeProductDialogQuantity(-1));
-els.productQuantityPlus.addEventListener('click', () => changeProductDialogQuantity(1));
+els.checkoutForm?.addEventListener('submit', submitOrder);
+els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog?.close());
+els.productForm?.addEventListener('change', renderProductDialogTotal);
+els.productForm?.addEventListener('input', renderProductDialogTotal);
+els.productForm?.addEventListener('submit', submitProductCustomization);
+els.productQuantityMinus?.addEventListener('click', () => changeProductDialogQuantity(-1));
+els.productQuantityPlus?.addEventListener('click', () => changeProductDialogQuantity(1));
 els.closedStoreRefreshButton?.addEventListener('click', () => {
-  els.closedStoreDialog.close();
+  els.closedStoreDialog?.close();
   loadBootstrap();
 });
 configureStoreLinks();
-els.savedAddressSelect.addEventListener('change', () => {
+els.savedAddressSelect?.addEventListener('change', () => {
   const address = selectedSavedAddress();
   applySavedCustomerAddress(address, { force: true });
   state.savedAddressApplied = true;
   renderAddressPrefillSummary(address, customerAddresses().length);
 });
-els.editAddressButton.addEventListener('click', () => {
+els.editAddressButton?.addEventListener('click', () => {
   clearAddressFields();
   state.savedAddressApplied = false;
-  els.savedAddressSelect.hidden = true;
-  els.deleteSavedAddressButton.hidden = true;
+  if (els.savedAddressSelect) els.savedAddressSelect.hidden = true;
+  if (els.deleteSavedAddressButton) els.deleteSavedAddressButton.hidden = true;
   updatePrefillNotice('Informe outro endereço. Depois de enviar o pedido, ele ficará salvo na sua conta.');
-  els.checkoutForm.elements.street.focus();
+  els.checkoutForm?.elements?.street?.focus();
 });
-els.deleteSavedAddressButton.addEventListener('click', deleteSelectedSavedAddress);
+els.deleteSavedAddressButton?.addEventListener('click', deleteSelectedSavedAddress);
 
 renderCachedCustomer();
 renderCheckoutCustomerSection();
@@ -215,6 +217,7 @@ async function loadBootstrap() {
   setStatus(state.categories.length ? 'Atualizando cardápio...' : 'Carregando cardápio...');
   try {
     const data = await request('/api/bootstrap');
+    hideStoreNotFound();
     state.store = data.store || null;
     state.categories = data.categories || [];
     if (state.isDemoMode) applyDemoStoreHints();
@@ -225,6 +228,10 @@ async function loadBootstrap() {
     setStatus(isStoreClosed() ? closedStoreMessage() : `${countItems(state.categories)} produtos disponiveis`);
     loadLoggedCustomer().catch(() => {});
   } catch (error) {
+    if (isStoreNotFoundError(error)) {
+      showStoreNotFound(error.message);
+      return;
+    }
     setStatus(state.categories.length ? `${countItems(state.categories)} produtos disponiveis` : error.message);
     if (!state.categories.length) renderEmptyState();
   }
@@ -1195,6 +1202,10 @@ function cartItemKey(id, modifierIds, notes) {
 }
 
 async function openCheckout() {
+  if (!els.checkoutDialog || !els.checkoutForm) {
+    setStatus('Checkout indisponível no momento. Atualize a página e tente novamente.');
+    return;
+  }
   if (isStoreClosed()) {
     showClosedStoreDialog(true);
     return;
@@ -1211,7 +1222,11 @@ async function openCheckout() {
   updateCheckoutDeliveryFields();
   updatePaymentDetailsVisibility();
   renderCheckoutReview();
-  els.checkoutDialog.showModal();
+  if (typeof els.checkoutDialog.showModal === 'function') {
+    els.checkoutDialog.showModal();
+  } else {
+    setStatus('Seu navegador não abriu o checkout. Atualize a página e tente novamente.');
+  }
 }
 
 function renderCheckoutReview() {
@@ -1253,6 +1268,10 @@ function renderCheckoutReview() {
 async function submitOrder(event) {
   event.preventDefault();
   if (state.orderSubmitting) return;
+  if (!els.checkoutForm) {
+    setStatus('Checkout indisponível no momento. Atualize a página e tente novamente.');
+    return;
+  }
   if (isStoreClosed()) {
     showClosedStoreDialog(true);
     return;
@@ -1504,16 +1523,21 @@ async function loadLoggedCustomer() {
 }
 
 async function logoutCustomer() {
-  await request('/api/customer/logout', { method: 'POST' });
-  state.customer = null;
-  state.customerChecked = true;
-  state.savedAddressApplied = false;
-  clearAccountCache();
-  els.accountPrefill.hidden = true;
-  els.deleteSavedAddressButton.hidden = true;
-  renderCheckoutCustomerSection();
-  renderCustomerActions();
-  setStatus('Você saiu da conta.');
+  try {
+    await request('/api/customer/logout', { method: 'POST' });
+  } catch (error) {
+    console.warn('Falha ao encerrar sessão do cliente:', error.message || error);
+  } finally {
+    state.customer = null;
+    state.customerChecked = true;
+    state.savedAddressApplied = false;
+    clearAccountCache();
+    if (els.accountPrefill) els.accountPrefill.hidden = true;
+    if (els.deleteSavedAddressButton) els.deleteSavedAddressButton.hidden = true;
+    renderCheckoutCustomerSection();
+    renderCustomerActions();
+    setStatus('Você saiu da conta.');
+  }
 }
 
 function saveAccountCache() {
@@ -1851,7 +1875,10 @@ async function request(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof data.detail === 'string' ? data.detail : '';
-    throw new Error(detail || data.error || 'Falha na requisicao.');
+    const error = new Error(detail || data.error || 'Falha na requisicao.');
+    error.status = response.status;
+    error.code = data.code || data.error_code || '';
+    throw error;
   }
   return data;
 }
@@ -2052,6 +2079,24 @@ function persistFavorites() {
 function renderEmptyState() {
   els.featured.replaceChildren();
   els.menu.innerHTML = '<section class="empty-state"><h2>Configure o banco local</h2><p>Confira o DATABASE_URL, rode as migrations do Prisma e reinicie o servidor.</p></section>';
+}
+
+function isStoreNotFoundError(error) {
+  return error?.status === 404 || ['STORE_NOT_FOUND', 'STORE_INACTIVE'].includes(error?.code);
+}
+
+function showStoreNotFound(message) {
+  document.body.classList.add('store-unavailable');
+  if (els.storeNotFound) els.storeNotFound.hidden = false;
+  if (els.storeNotFoundMessage) {
+    els.storeNotFoundMessage.textContent = message || 'Confira se o link está correto ou fale com o estabelecimento para confirmar o endereço do cardápio.';
+  }
+  setStatus('Loja não encontrada.');
+}
+
+function hideStoreNotFound() {
+  document.body.classList.remove('store-unavailable');
+  if (els.storeNotFound) els.storeNotFound.hidden = true;
 }
 
 function countItems(categories) {

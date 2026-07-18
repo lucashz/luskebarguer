@@ -32,7 +32,7 @@ CREATE TYPE "PromotionDiscountType" AS ENUM ('fixed', 'percent', 'free_delivery'
 CREATE TYPE "SessionType" AS ENUM ('admin', 'customer');
 
 -- CreateEnum
-CREATE TYPE "SubscriptionStatus" AS ENUM ('trial', 'active', 'payment_pending', 'grace_period', 'cancelled', 'expired', 'suspended');
+CREATE TYPE "SubscriptionStatus" AS ENUM ('trial', 'active', 'payment_pending', 'grace_period', 'past_due', 'blocked', 'cancelled', 'expired', 'suspended');
 
 -- CreateEnum
 CREATE TYPE "OverrideType" AS ENUM ('allow', 'block', 'limit');
@@ -614,6 +614,29 @@ CREATE TABLE "subscription_events" (
 );
 
 -- CreateTable
+CREATE TABLE "subscription_payment_transactions" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" UUID NOT NULL,
+    "subscription_id" UUID,
+    "plan_id" UUID,
+    "provider" TEXT NOT NULL,
+    "external_transaction_id" TEXT,
+    "external_event_id" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "amount_cents" INTEGER NOT NULL DEFAULT 0,
+    "checkout_url" TEXT,
+    "raw_payload" JSONB,
+    "metadata" JSONB NOT NULL DEFAULT '{}',
+    "paid_at" TIMESTAMPTZ(6),
+    "failed_at" TIMESTAMPTZ(6),
+    "expires_at" TIMESTAMPTZ(6),
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "subscription_payment_transactions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "audit_logs" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "company_id" UUID,
@@ -755,6 +778,21 @@ CREATE UNIQUE INDEX "onboarding_progress_company_id_store_id_key" ON "onboarding
 
 -- CreateIndex
 CREATE INDEX "subscription_events_company_id_created_at_idx" ON "subscription_events"("company_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "subscription_payment_transactions_company_id_created_at_idx" ON "subscription_payment_transactions"("company_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "subscription_payment_transactions_subscription_id_created_at_idx" ON "subscription_payment_transactions"("subscription_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "subscription_payment_transactions_provider_status_created_at_idx" ON "subscription_payment_transactions"("provider", "status", "created_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "subscription_payment_transactions_provider_external_transaction_id_key" ON "subscription_payment_transactions"("provider", "external_transaction_id") WHERE "external_transaction_id" IS NOT NULL;
+
+-- CreateIndex
+CREATE UNIQUE INDEX "subscription_payment_transactions_provider_external_event_id_key" ON "subscription_payment_transactions"("provider", "external_event_id") WHERE "external_event_id" IS NOT NULL;
 
 -- CreateIndex
 CREATE INDEX "audit_logs_company_id_created_at_idx" ON "audit_logs"("company_id", "created_at");
@@ -938,6 +976,15 @@ ALTER TABLE "subscription_events" ADD CONSTRAINT "subscription_events_subscripti
 
 -- AddForeignKey
 ALTER TABLE "subscription_events" ADD CONSTRAINT "subscription_events_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "admin_users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscription_payment_transactions" ADD CONSTRAINT "subscription_payment_transactions_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscription_payment_transactions" ADD CONSTRAINT "subscription_payment_transactions_subscription_id_fkey" FOREIGN KEY ("subscription_id") REFERENCES "company_subscriptions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscription_payment_transactions" ADD CONSTRAINT "subscription_payment_transactions_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "subscription_plans"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE SET NULL ON UPDATE CASCADE;

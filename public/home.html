@@ -3,181 +3,375 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cardápio digital para restaurantes venderem melhor</title>
-    <meta name="description" content="Crie um cardápio digital com pedidos online, adicionais, mesas, comandas, pagamentos e painel administrativo simples para restaurantes.">
-    <meta property="og:title" content="Cardápio digital para restaurantes venderem melhor">
-    <meta property="og:description" content="Cardápio online, pedidos organizados e painel administrativo para delivery, retirada e salão.">
+    <title>Cardápio Digital para restaurantes venderem melhor</title>
+    <meta name="description" content="Crie seu cardápio digital em minutos, receba pedidos pelo painel e organize sua loja sem aplicativo, sem taxa por pedido e sem complicação.">
+    <meta property="og:title" content="Cardápio Digital para restaurantes venderem melhor">
+    <meta property="og:description" content="Cardápio online, QR Code, pedidos organizados, WhatsApp, planos mensais e painel administrativo para restaurantes.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="/">
     <meta property="og:image" content="/assets/sistema-cardapio-preview.png">
     <link rel="canonical" href="/">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111827'/%3E%3Cpath d='M16 20h32v6H16zm0 12h32v6H16zm0 12h22v6H16z' fill='%23e9252f'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/styles.css?v=20260713-home-suporte-v3">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23dc2626'/%3E%3Cpath d='M18 18h28v6H18zm0 11h28v6H18zm0 11h18v6H18z' fill='white'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/home.css?v=20260718-hero-cards">
   </head>
-  <body class="portal-page commercial-home clean-home support-style-home">
-    <header class="clean-topbar">
-      <a class="clean-brand" href="/" aria-label="Início">
-        <span>CD</span>
-        <strong>Cardápio Digital</strong>
-      </a>
-      <button class="clean-menu-button" id="homeMenuButton" type="button" aria-expanded="false" aria-controls="homeNav">Menu</button>
-      <nav class="clean-nav" id="homeNav" aria-label="Navegação principal">
+  <body>
+    <header class="home-header">
+      <div class="home-container home-nav-shell">
+        <a class="home-brand" href="/" aria-label="Início">
+          <span class="home-brand-icon" aria-hidden="true">CD</span>
+          <strong>Cardápio Digital</strong>
+        </a>
+
+        <nav class="home-nav" id="homeNav" aria-label="Navegação principal">
+          <a href="#recursos">Recursos</a>
+          <a href="#planos">Planos</a>
+          <a href="#comparativo">Comparativo</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+
+        <div class="home-nav-actions">
+          <a class="home-login" href="/entrar">Entrar</a>
+          <a class="home-button small" href="/cadastro">Criar cardápio</a>
+        </div>
+
+        <button class="home-menu-button" id="homeMenuButton" type="button" aria-expanded="false" aria-controls="homeMobileMenu">
+          <span class="home-menu-icon" aria-hidden="true"></span>
+          <span class="sr-only">Abrir menu</span>
+        </button>
+      </div>
+
+      <div class="home-mobile-menu" id="homeMobileMenu" hidden>
         <a href="#recursos">Recursos</a>
         <a href="#planos">Planos</a>
         <a href="#comparativo">Comparativo</a>
         <a href="#faq">FAQ</a>
-        <span class="clean-lang" aria-label="Idiomas disponíveis"><b>PT</b><em>EN</em><em>ES</em></span>
         <a href="/entrar">Entrar</a>
-        <a class="clean-nav-cta" href="/cadastro">Criar meu cardápio</a>
-      </nav>
+        <a class="home-button" href="/cadastro">Criar cardápio</a>
+      </div>
     </header>
 
     <main>
-      <section class="clean-hero">
-        <div class="clean-hero-copy">
-          <p class="clean-eyebrow">Cardápio digital para delivery, retirada e salão</p>
-          <h1>Seu cardápio sempre online e seus pedidos sempre organizados.</h1>
-          <p>Pedidos pelo celular, adicionais claros, mesas com QR Code e painel administrativo para o restaurante vender sem depender de conversa perdida.</p>
-          <div class="clean-actions">
-            <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
+      <section class="home-hero home-container">
+        <div class="home-hero-copy">
+          <div class="home-badge">
+            <span aria-hidden="true"></span>
+            Teste grátis por 7 dias · sem cartão de crédito
           </div>
-          <p class="clean-hero-note">Teste grátis para montar sua loja antes de contratar um plano.</p>
-          <div class="clean-proof" id="recursos" aria-label="Destaques do sistema">
-            <span>Pedido sem confusão</span>
-            <span>Cardápio sempre online</span>
-            <span>QR Code para mesa</span>
-            <span>Sem fidelidade</span>
+
+          <h1>Seu cardápio sempre <span>online</span> e seus pedidos sempre <span>organizados.</span></h1>
+          <p>Crie seu cardápio digital em minutos, receba pedidos pelo painel e seja notificado no WhatsApp a cada nova venda. Sem aplicativo, sem complicação.</p>
+
+          <div class="home-actions">
+            <a class="home-button" href="/cadastro">Criar meu cardápio <span aria-hidden="true">→</span></a>
+            <a class="home-button demo" href="/cardapio">Ver demonstração</a>
+            <a class="home-button ghost" href="#planos">Ver planos e preços</a>
+          </div>
+
+          <ul class="home-trust" aria-label="Destaques comerciais">
+            <li>Sem taxa por pedido</li>
+            <li>Cancele quando quiser</li>
+            <li>Dados no Brasil</li>
+          </ul>
+        </div>
+
+        <div class="home-hero-demo" aria-label="Prévia do sistema em telas reais">
+          <div class="hero-decor decor-orb decor-orb-red" aria-hidden="true"></div>
+          <div class="hero-decor decor-orb decor-orb-blue" aria-hidden="true"></div>
+          <div class="hero-decor decor-dots" aria-hidden="true"></div>
+          <div class="hero-decor decor-curve" aria-hidden="true"></div>
+
+          <p class="hero-side-note"><span aria-hidden="true"></span>Tudo que seu negócio precisa, em um só lugar.</p>
+
+          <div class="home-real-carousel" data-home-carousel>
+            <div class="home-carousel-frame">
+              <figure class="home-carousel-slide is-active" data-home-slide>
+                <img src="/assets/sistema-cardapio-preview.png" alt="Cardápio público com categorias, produtos e sacola" width="1440" height="980" fetchpriority="high" decoding="async">
+                <figcaption>
+                  <strong>Cardápio público</strong>
+                  <span>Cliente navega, escolhe adicionais e monta a sacola pelo celular.</span>
+                </figcaption>
+              </figure>
+              <figure class="home-carousel-slide crop-pedidos" data-home-slide>
+                <img src="/assets/sistema-admin-pedidos-original.png" alt="Painel administrativo com pedidos separados por status" width="1920" height="1470" decoding="async">
+                <figcaption>
+                  <strong>Pedidos no painel</strong>
+                  <span>Equipe acompanha novos pedidos, preparo, entrega e conclusão.</span>
+                </figcaption>
+              </figure>
+              <figure class="home-carousel-slide crop-produtos" data-home-slide>
+                <img src="/assets/sistema-admin-produtos-original.png" alt="Tela administrativa de produtos com lista, filtros e ações" width="1920" height="1662" decoding="async">
+                <figcaption>
+                  <strong>Produtos organizados</strong>
+                  <span>Fotos, preços, disponibilidade e destaque em uma lista simples.</span>
+                </figcaption>
+              </figure>
+              <figure class="home-carousel-slide crop-operacao" data-home-slide>
+                <img src="/assets/sistema-admin-operacao-original.jpg" alt="Tela de operação com loja aberta, métricas e ações rápidas" width="1920" height="927" decoding="async">
+                <figcaption>
+                  <strong>Operação da loja</strong>
+                  <span>Status aberto, métricas rápidas e próximos passos em uma tela.</span>
+                </figcaption>
+              </figure>
+            </div>
+
+            <div class="home-carousel-controls" aria-label="Selecionar imagem do sistema">
+              <button class="is-active" type="button" data-home-slide-control="0">Cardápio</button>
+              <button type="button" data-home-slide-control="1">Pedidos</button>
+              <button type="button" data-home-slide-control="2">Produtos</button>
+              <button type="button" data-home-slide-control="3">Operação</button>
+            </div>
+          </div>
+
+          <div class="home-float-grid" aria-label="Benefícios rápidos">
+            <div class="home-float-card float-ready">
+              <span aria-hidden="true">OK</span>
+              <div>
+                <strong>Pronto em minutos</strong>
+                <small>Configure e publique sem complicação.</small>
+              </div>
+            </div>
+
+            <div class="home-float-card float-realtime">
+              <span aria-hidden="true">RT</span>
+              <div>
+                <strong>Pedidos em tempo real</strong>
+                <small>Tudo organizado no painel.</small>
+              </div>
+            </div>
+
+            <div class="home-float-card float-whatsapp">
+              <span aria-hidden="true">WA</span>
+              <div>
+                <strong>WhatsApp integrado</strong>
+                <small>Receba notificações automaticamente.</small>
+              </div>
+            </div>
+
+            <div class="home-float-card float-trial">
+              <span aria-hidden="true">7d</span>
+              <div>
+                <strong>7 dias grátis</strong>
+                <small>sem cartão de crédito</small>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <div class="clean-divider" aria-hidden="true"></div>
-
-      <section class="clean-section clean-home-demo" id="demonstracao">
-        <div>
-          <p class="clean-eyebrow">Demonstração</p>
-          <h2>Veja o sistema funcionando por dentro.</h2>
-        </div>
-        <section class="clean-preview clean-system-carousel" aria-label="Prévia do sistema">
-          <div class="clean-carousel-track">
-            <figure class="clean-system-shot is-active" data-home-slide>
-              <img src="/assets/sistema-cardapio-preview.png" alt="Cardápio público com categorias, produtos e sacola" width="1440" height="980" fetchpriority="high" decoding="async">
-              <figcaption>Cardápio público com produtos, adicionais e sacola.</figcaption>
-            </figure>
-            <figure class="clean-system-shot crop-pedidos-admin" data-home-slide>
-              <img src="/assets/sistema-admin-pedidos-original.png" alt="Painel administrativo com cards de pedidos por status" width="1920" height="1470" decoding="async">
-              <figcaption>Painel administrativo com pedidos organizados por status.</figcaption>
-            </figure>
-            <figure class="clean-system-shot crop-produtos-admin" data-home-slide>
-              <img src="/assets/sistema-admin-produtos-original.png" alt="Tela do admin com gestão de produtos, filtros e lista de produtos" width="1920" height="1662" decoding="async">
-              <figcaption>Admin com produtos, preços, disponibilidade e edição rápida.</figcaption>
-            </figure>
-            <figure class="clean-system-shot crop-admin" data-home-slide>
-              <img src="/assets/sistema-admin-operacao-original.jpg" alt="Tela do admin com operação da loja, status, métricas e ações rápidas" width="1920" height="927" decoding="async">
-              <figcaption>Painel de operação com loja aberta, métricas e ações rápidas.</figcaption>
-            </figure>
+      <section class="home-section white" id="recursos">
+        <div class="home-container">
+          <div class="home-section-head center">
+            <p>Plataforma</p>
+            <h2>Veja o sistema funcionando por dentro.</h2>
+            <span>Do cadastro dos produtos à chegada do pedido, tudo em um só lugar, sem complicação.</span>
           </div>
-        </section>
-        <div class="clean-carousel-controls" aria-label="Selecionar prévia">
-          <button class="is-active" type="button" data-home-slide-control="0">Cardápio</button>
-          <button type="button" data-home-slide-control="1">Pedidos</button>
-          <button type="button" data-home-slide-control="2">Produtos</button>
-          <button type="button" data-home-slide-control="3">Painel</button>
-        </div>
-        <div class="clean-demo-action">
-          <a class="clean-button ghost" href="/cardapio">Abrir demonstração completa</a>
-        </div>
-      </section>
 
-      <div class="clean-divider" aria-hidden="true"></div>
-
-      <section class="clean-section" id="planos">
-        <p class="clean-eyebrow">Planos</p>
-        <h2>Escolha o nível ideal para a sua operação.</h2>
-        <p class="clean-section-lead">Todo cadastro começa com teste grátis. Depois, você escolhe o plano certo para publicar, vender e acompanhar a rotina da loja.</p>
-        <div class="clean-plans" id="homePlans">
-          <article>
-            <span>Carregando</span>
-            <strong>Planos</strong>
-            <p>Buscando planos cadastrados no sistema.</p>
-          </article>
-        </div>
-      </section>
-
-      <div class="clean-divider" aria-hidden="true"></div>
-
-      <section class="clean-section clean-comparison" id="comparativo">
-        <div>
-          <p class="clean-eyebrow">Comparativo</p>
-          <h2>Compare os recursos antes de começar.</h2>
-          <p>Comece simples e evolua para uma operação mais completa quando fizer sentido para o restaurante.</p>
-        </div>
-        <div class="clean-compare-table" role="table" aria-label="Comparativo de recursos">
-          <div role="row" class="compare-head">
-            <span role="columnheader">Recurso</span>
-            <span role="columnheader">Essencial</span>
-            <span role="columnheader">Profissional</span>
-            <span role="columnheader">Premium</span>
+          <div class="home-features-grid">
+            <article style="--accent:#dc2626;--soft:#fef2f2">
+              <span aria-hidden="true">QR</span>
+              <strong>Cardápio via QR Code</strong>
+              <p>Gere um QR Code exclusivo para sua loja. O cliente escaneia e já visualiza produtos com fotos, descrições e preços atualizados.</p>
+            </article>
+            <article style="--accent:#dc2626;--soft:#fef2f2">
+              <span aria-hidden="true">PD</span>
+              <strong>Pedidos organizados</strong>
+              <p>Receba e gerencie todos os pedidos em um painel centralizado. Sem anotações em papel, sem confusão na cozinha.</p>
+            </article>
+            <article style="--accent:#16a34a;--soft:#f0fdf4">
+              <span aria-hidden="true">WA</span>
+              <strong>Notificação no WhatsApp</strong>
+              <p>Cada novo pedido pode chegar no WhatsApp do estabelecimento. Atendimento ágil e menos venda perdida.</p>
+            </article>
+            <article style="--accent:#2563eb;--soft:#eff6ff">
+              <span aria-hidden="true">VT</span>
+              <strong>Vitrine personalizada</strong>
+              <p>Monte a identidade visual da sua loja com logo, cores e banner para uma experiência profissional, mesmo sem aplicativo.</p>
+            </article>
+            <article style="--accent:#d97706;--soft:#fffbeb">
+              <span aria-hidden="true">RT</span>
+              <strong>Atualização em tempo real</strong>
+              <p>Altere preços, disponibilidade e produtos na hora. O cardápio online reflete as mudanças imediatamente.</p>
+            </article>
+            <article style="--accent:#7c3aed;--soft:#f5f3ff">
+              <span aria-hidden="true">LK</span>
+              <strong>Link próprio da loja</strong>
+              <p>Compartilhe o link do cardápio no Instagram, WhatsApp, Google e outros canais para atrair pedidos todos os dias.</p>
+            </article>
           </div>
-          <div role="row"><span role="cell">Produtos</span><strong role="cell">25</strong><strong role="cell">100</strong><strong role="cell">Ilimitado</strong></div>
-          <div role="row"><span role="cell">Pedidos</span><strong role="cell">150/mês</strong><strong role="cell">Ilimitado</strong><strong role="cell">Ilimitado</strong></div>
-          <div role="row"><span role="cell">Usuários</span><strong role="cell">1</strong><strong role="cell">5</strong><strong role="cell">10</strong></div>
-          <div role="row"><span role="cell">Mesas e QR Code</span><strong role="cell">Básico</strong><strong role="cell">Completo</strong><strong role="cell">Completo</strong></div>
-          <div role="row"><span role="cell">Cupons e campanhas</span><strong role="cell">-</strong><strong role="cell">Sim</strong><strong role="cell">Sim</strong></div>
-          <div role="row"><span role="cell">KDS, impressão e relatórios</span><strong role="cell">-</strong><strong role="cell">Sim</strong><strong role="cell">Sim</strong></div>
-          <div role="row"><span role="cell">Automação, fidelidade e domínio</span><strong role="cell">-</strong><strong role="cell">-</strong><strong role="cell">Sim</strong></div>
         </div>
       </section>
 
-      <div class="clean-divider" aria-hidden="true"></div>
+      <section class="home-section" id="planos">
+        <div class="home-container">
+          <div class="home-section-head center">
+            <p>Planos</p>
+            <h2>Escolha o nível ideal para a sua operação.</h2>
+            <span>Todo mundo começa no plano certo. Depois cresce quando quiser.</span>
+          </div>
 
-      <section class="clean-section clean-faq" id="faq">
-        <div>
-          <p class="clean-eyebrow">Dúvidas</p>
-          <h2>Dúvidas frequentes</h2>
-          <p>Tudo sobre criação da loja, cardápio, pedidos e recursos antes de começar.</p>
-        </div>
-        <div>
-          <details><summary>Preciso instalar aplicativo?</summary><p>Não. O cliente e a equipe usam tudo pelo navegador.</p></details>
-          <details><summary>O cliente consegue pedir pelo celular?</summary><p>Sim. A experiência é pensada para celular, com produtos, adicionais, sacola e checkout.</p></details>
-          <details><summary>Posso usar no salão com QR Code?</summary><p>Sim. O sistema tem mesas, comandas e QR Code conforme o plano e a configuração da loja.</p></details>
-          <details><summary>Consigo alterar preços e disponibilidade?</summary><p>Sim. Você edita produtos, categorias, fotos, preços e disponibilidade pelo painel administrativo.</p></details>
-          <details><summary>O pedido chega no WhatsApp?</summary><p>A loja pode configurar o WhatsApp para atendimento e comunicação conforme os recursos disponíveis no plano.</p></details>
-          <details><summary>Existe teste grátis?</summary><p>Sim. Você pode criar a conta, configurar a loja e testar o fluxo antes de contratar.</p></details>
+          <div class="home-plans">
+            <article>
+              <small>Essencial</small>
+              <div><strong>R$ 49,90</strong><span>/mês</span></div>
+              <p>Para quem está começando e quer profissionalizar as vendas.</p>
+              <ul>
+                <li>Até 30 produtos</li>
+                <li>Até 5 categorias</li>
+                <li>Cardápio com QR Code</li>
+                <li>Link da loja compartilhável</li>
+                <li>Pedidos pelo painel</li>
+                <li>Suporte por e-mail</li>
+              </ul>
+              <a href="/cadastro">Começar grátis</a>
+            </article>
+
+            <article class="featured">
+              <em>Mais popular</em>
+              <small>Profissional</small>
+              <div><strong>R$ 89,90</strong><span>/mês</span></div>
+              <p>Para operações em crescimento que precisam de mais controle.</p>
+              <ul>
+                <li>Até 100 produtos</li>
+                <li>Até 15 categorias</li>
+                <li>Notificação de pedido no WhatsApp</li>
+                <li>Personalização da vitrine</li>
+                <li>Relatórios de vendas</li>
+                <li>Suporte prioritário</li>
+                <li>Acesso a API</li>
+              </ul>
+              <a href="/cadastro">Testar 7 dias grátis</a>
+            </article>
+
+            <article>
+              <small>Premium</small>
+              <div><strong>R$ 141,90</strong><span>/mês</span></div>
+              <p>Para quem quer o máximo de recursos e escala sem limites.</p>
+              <ul>
+                <li>Produtos ilimitados</li>
+                <li>Categorias ilimitadas</li>
+                <li>Tudo do plano Profissional</li>
+                <li>Múltiplos operadores</li>
+                <li>Domínio próprio</li>
+                <li>Suporte dedicado 24/7</li>
+                <li>Integrações avançadas</li>
+              </ul>
+              <a href="/cadastro">Testar 7 dias grátis</a>
+            </article>
+          </div>
+
+          <p class="home-plan-note">Sem taxa por pedido · Sem comissão sobre vendas · Cancele quando quiser</p>
         </div>
       </section>
 
-      <div class="clean-divider" aria-hidden="true"></div>
+      <section class="home-section white" id="comparativo">
+        <div class="home-container narrow">
+          <div class="home-section-head center">
+            <p>Comparativo</p>
+            <h2>Compare os recursos antes de começar.</h2>
+            <span>Escolha com clareza. Sem asterisco, sem letra miúda.</span>
+          </div>
 
-      <section class="clean-final">
-        <p class="clean-eyebrow">Vamos montar sua loja</p>
-        <h2>Crie seu cardápio digital e veja o pedido chegando organizado.</h2>
-        <p>Em dúvida sobre qual plano escolher? Comece pelo teste grátis, veja o fluxo funcionando e publique quando estiver pronto.</p>
-        <div class="clean-actions">
-          <a class="clean-button" href="/cadastro">Criar meu cardápio</a>
-          <a class="clean-button ghost dark" href="/cardapio">Ver demonstração</a>
+          <div class="home-table" role="table" aria-label="Comparativo de planos">
+            <div role="row" class="head"><span></span><strong>Essencial</strong><strong>Profissional</strong><strong>Premium</strong></div>
+            <div role="row"><span>Produtos</span><b>30</b><b>100</b><b>Ilimitado</b></div>
+            <div role="row"><span>Categorias</span><b>5</b><b>15</b><b>Ilimitado</b></div>
+            <div role="row"><span>Clientes cadastrados</span><b>Básico</b><b>Completo</b><b>Completo</b></div>
+            <div role="row"><span>Pedidos pelo painel</span><b>✓</b><b>✓</b><b>✓</b></div>
+            <div role="row"><span>Notificação no WhatsApp</span><b>•</b><b>✓</b><b>✓</b></div>
+            <div role="row"><span>Personalização da vitrine</span><b>•</b><b>✓</b><b>✓</b></div>
+            <div role="row"><span>Relatórios de vendas</span><b>•</b><b>✓</b><b>✓</b></div>
+            <div role="row"><span>Múltiplos operadores</span><b>•</b><b>•</b><b>✓</b></div>
+            <div role="row"><span>Domínio próprio</span><b>•</b><b>•</b><b>✓</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section" id="faq">
+        <div class="home-container faq-container">
+          <div class="home-section-head center">
+            <p>Dúvidas frequentes</p>
+            <h2>Perguntas que surgem antes de começar.</h2>
+          </div>
+
+          <div class="home-faq-list">
+            <details open>
+              <summary>Posso testar a aplicação antes de pagar?</summary>
+              <p>Sim. Todos os planos possuem 7 dias de teste grátis, sem precisar informar cartão de crédito. Você configura sua loja e só paga se decidir continuar.</p>
+            </details>
+            <details>
+              <summary>O cliente começa pelo plano Essencial?</summary>
+              <p>Todo mundo começa pelo plano que preferir. Você pode iniciar no Essencial e migrar para o Profissional ou Premium a qualquer momento, sem perder seus dados.</p>
+            </details>
+            <details>
+              <summary>Consigo alterar preço e disponibilidade dos produtos?</summary>
+              <p>Sim. As alterações são feitas diretamente no painel e ficam disponíveis no cardápio do cliente em tempo real.</p>
+            </details>
+            <details>
+              <summary>O pedido chega no WhatsApp do estabelecimento?</summary>
+              <p>Nos planos com o recurso habilitado, cada novo pedido pode gerar uma notificação automática no WhatsApp cadastrado.</p>
+            </details>
+            <details>
+              <summary>Existe taxa por pedido ou por venda?</summary>
+              <p>Não. O Cardápio Digital cobra apenas a mensalidade do plano. Não cobramos comissão por pedido, percentual sobre vendas ou taxa oculta.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-final">
+        <div class="home-container narrow">
+          <div class="home-badge dark">
+            <span aria-hidden="true"></span>
+            Comece hoje, sem cartão de crédito
+          </div>
+          <h2>Crie seu cardápio digital e veja o pedido chegando organizado.</h2>
+          <p>Em menos de 30 minutos seu cardápio estará no ar e pronto para receber pedidos. 7 dias de teste grátis, sem precisar de cartão.</p>
+          <div class="home-actions center">
+          <a class="home-button white" href="/cadastro">Criar meu cardápio <span aria-hidden="true">→</span></a>
+            <a class="home-button red-outline" href="/cardapio">Ver demonstração</a>
+          </div>
         </div>
       </section>
     </main>
 
-    <footer class="clean-footer">
-      <div>
-        <a class="clean-brand" href="/"><span>CD</span><strong>Cardápio Digital</strong></a>
-        <p>Cardápio digital, pedidos e gestão simples para restaurantes.</p>
+    <footer class="home-footer">
+      <div class="home-container footer-grid">
+        <div>
+          <a class="home-brand" href="/">
+            <span class="home-brand-icon" aria-hidden="true">CD</span>
+            <strong>Cardápio Digital</strong>
+          </a>
+          <p>Ajude sua loja a ganhar mais vendas com um cardápio sempre online.</p>
+        </div>
+
+        <nav>
+          <strong>Produto</strong>
+          <a href="#recursos">Recursos</a>
+          <a href="#planos">Planos</a>
+          <a href="#comparativo">Comparativo</a>
+          <a href="/cardapio">Demonstração</a>
+        </nav>
+
+        <nav>
+          <strong>Conta</strong>
+          <a href="/entrar">Login</a>
+          <a href="/cadastro">Criar conta</a>
+          <a href="/cardapio">Loja demonstração</a>
+        </nav>
+
+        <nav>
+          <strong>Legal</strong>
+          <a href="/terms.html">Termos de uso</a>
+          <a href="/privacy.html">Política de privacidade</a>
+        </nav>
       </div>
-      <nav>
-        <a href="#recursos">Recursos</a>
-        <a href="#planos">Planos</a>
-        <a href="#comparativo">Comparativo</a>
-        <a href="#faq">FAQ</a>
-        <a href="/cardapio">Demonstração</a>
-        <a href="/entrar">Login</a>
-        <a href="/cadastro">Criar conta</a>
-        <a href="/termos">Termos de uso</a>
-        <a href="/privacidade">Política de privacidade</a>
-      </nav>
+
+      <div class="home-container home-copyright">
+        <span>© 2026 Cardápio Digital. Todos os direitos reservados.</span>
+        <span>Cardápio Digital — ajude sua loja a ganhar mais vendas</span>
+      </div>
     </footer>
 
-    <script src="/home.js?v=20260713-home-suporte-v3" defer></script>
+    <script src="/home.js?v=20260717-figma-export" defer></script>
   </body>
 </html>

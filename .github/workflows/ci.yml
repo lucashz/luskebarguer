@@ -53,6 +53,9 @@ jobs:
       - name: Local database smoke
         run: npm run test:local
 
+      - name: Plan matrix smoke
+        run: npm run test:plans
+
       - name: Core flow smoke
         run: npm run test:flows
 

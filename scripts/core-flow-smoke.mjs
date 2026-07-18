@@ -30,6 +30,13 @@ try {
   await client.connect();
   serverProcess = await startServer();
 
+  const missingStore = await request('/api/bootstrap?store=loja-inexistente-smoke', { allowFailure: true });
+  assert(missingStore.status === 404, 'Loja inexistente deveria retornar 404 no bootstrap.');
+  assert(missingStore.data.code === 'STORE_NOT_FOUND', 'Loja inexistente deveria retornar codigo STORE_NOT_FOUND.');
+  const missingStorePage = await fetch(`${baseUrl}/loja-inexistente-smoke`);
+  const missingStoreHtml = await missingStorePage.text();
+  assert(missingStorePage.ok && missingStoreHtml.includes('storeNotFound'), 'Pagina de loja inexistente nao carregou o estado visual.');
+
   const signup = await request('/api/portal/signup', {
     method: 'POST',
     body: {

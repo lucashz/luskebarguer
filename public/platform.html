@@ -35,7 +35,6 @@
         <nav class="platform-tabs" aria-label="Áreas da plataforma">
           <button class="active" data-platform-view="overview" type="button">Visão Geral</button>
           <button data-platform-view="clients" type="button">Clientes</button>
-          <button data-platform-view="setup" type="button">Cadastros</button>
           <button data-platform-view="billing" type="button">Billing</button>
           <button data-platform-view="health" type="button">Saúde e Serviços</button>
           <button data-platform-view="audit" type="button">Auditoria</button>
@@ -239,94 +238,6 @@
           </section>
         </section>
 
-        <section class="platform-view-stack" data-platform-section="setup" hidden>
-          <div class="section-actions">
-            <div>
-              <p class="eyebrow">Cadastros</p>
-              <h2>Implantação assistida de clientes</h2>
-              <p class="muted">Crie empresa, loja, plano inicial e prepare o acesso do cliente com menos risco de duplicidade.</p>
-            </div>
-          </div>
-          <section class="platform-setup-flow" aria-label="Fluxo recomendado de cadastro">
-            <article class="is-active"><span>1</span><strong>Empresa</strong><small>Dados comerciais e cobrança</small></article>
-            <article><span>2</span><strong>Responsável</strong><small>Admin vinculado ao cliente</small></article>
-            <article><span>3</span><strong>Loja</strong><small>Cardápio público e WhatsApp</small></article>
-            <article><span>4</span><strong>Plano</strong><small>Limites, trial e permissões</small></article>
-            <article><span>5</span><strong>Revisão</strong><small>Publicação e acompanhamento</small></article>
-          </section>
-          <section class="platform-context-strip">
-            <article class="platform-explain-card">
-              <strong>Empresas</strong>
-              <p>Representam o cliente contratante do SaaS. Aqui ficam plano, cobrança, status comercial e permissões.</p>
-            </article>
-            <article class="platform-explain-card">
-              <strong>Lojas</strong>
-              <p>São os cardápios públicos de uma empresa. Uma empresa pode ter uma ou mais lojas/unidades.</p>
-            </article>
-            <article class="platform-explain-card">
-              <strong>Auditoria e backup</strong>
-              <p>Servem para suporte interno: investigar eventos, conferir rotina de banco e acompanhar operação.</p>
-            </article>
-          </section>
-
-          <div class="management-grid platform-management-grid">
-            <form class="panel stack-form" id="companyForm">
-              <p class="eyebrow">Uso interno</p>
-              <h2>Cadastrar cliente manualmente</h2>
-              <p class="muted">Cria uma conta de empresa no SaaS sem passar pelo fluxo público de cadastro. Use para suporte, implantação assistida ou clientes cadastrados pela equipe comercial.</p>
-              <div class="platform-help-box">
-                <strong>Quando usar?</strong>
-                <span>Somente quando você, Admin Master, precisar criar o cliente por ele. Se o cliente se cadastrou em /cadastro, esta etapa não é necessária.</span>
-              </div>
-              <label class="platform-field">
-                <span>Nome do cliente/empresa</span>
-                <input name="name" required placeholder="Ex: Hamburgueria Central LTDA">
-              </label>
-              <label class="platform-field">
-                <span>E-mail financeiro</span>
-                <input name="billing_email" type="email" placeholder="financeiro@empresa.com.br">
-              </label>
-              <label class="platform-field">
-                <span>Telefone</span>
-                <input name="phone" inputmode="tel" placeholder="(11) 99999-9999">
-              </label>
-              <label class="platform-field">
-                <span>Plano inicial</span>
-                <select name="plan_code" id="companyPlanSelect"></select>
-              </label>
-              <button class="primary-button">Criar empresa</button>
-            </form>
-
-            <form class="panel stack-form" id="storeForm">
-              <p class="eyebrow">Cardápio do cliente</p>
-              <h2>Criar cardápio ou unidade</h2>
-              <p class="muted">Cria o endereço público do cardápio para uma empresa já cadastrada. Uma mesma empresa pode ter várias lojas/unidades.</p>
-              <div class="platform-help-box">
-                <strong>Exemplo prático</strong>
-                <span>Empresa: “Central Burger”. Loja/cardápio: “Central Burger Centro” com link público /central-burger-centro.</span>
-              </div>
-              <label class="platform-field">
-                <span>Empresa dona da loja</span>
-                <select name="company_id" id="storeCompanySelect" required></select>
-              </label>
-              <label class="platform-field">
-                <span>Nome da loja</span>
-                <input name="name" required placeholder="Ex: Central Burger - Unidade Centro">
-              </label>
-              <label class="platform-field">
-                <span>Endereço público</span>
-                <input name="slug" placeholder="Ex: central-burger">
-                <small>Esse texto vira o link público: /central-burger.</small>
-              </label>
-              <label class="platform-field">
-                <span>WhatsApp da loja</span>
-                <input name="whatsapp_number" inputmode="tel" placeholder="5511999999999">
-              </label>
-              <button class="primary-button">Criar cardápio</button>
-            </form>
-          </div>
-        </section>
-
         <section class="panel platform-billing-panel" data-platform-section="billing" hidden>
           <div class="section-actions">
             <div>
@@ -451,48 +362,53 @@
             </div>
             <button class="ghost-button compact" id="refreshSupportButton" type="button">Atualizar chamados</button>
           </div>
-          <section class="platform-support-summary-grid" id="platformSupportSummaryGrid"></section>
-          <section class="platform-health-grid">
-            <form class="platform-service-card stack-form" id="platformSupportCreateForm">
-              <p class="eyebrow">Novo chamado</p>
-              <h3>Criar chamado manual</h3>
-              <label>Empresa<select name="company_id" id="supportCompanySelect"></select></label>
-              <label>Loja<select name="store_id" id="supportStoreSelect"></select></label>
-              <label>Assunto<input name="subject" required placeholder="Ex: Ajuda para configurar domínio"></label>
-              <div class="two-cols">
-                <label>Categoria<input name="category" placeholder="configuração"></label>
-                <label>Prioridade<select name="priority"><option value="low">Baixa</option><option value="medium" selected>Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label>
-              </div>
-              <label>Mensagem<textarea name="message" rows="4" placeholder="Descreva o contexto do chamado"></textarea></label>
-              <button class="primary-button compact">Criar chamado</button>
-            </form>
-            <article class="platform-service-card">
-              <p class="eyebrow">Filtros</p>
-              <h3>Fila de atendimento</h3>
-              <div class="stack-form">
-                <input id="supportSearchFilter" type="search" placeholder="Buscar assunto, cliente, loja ou mensagem">
-                <select id="supportStatusFilter"><option value="">Todos status</option><option value="open">Aberto</option><option value="waiting_customer">Aguardando cliente</option><option value="in_review">Em análise</option><option value="resolved">Resolvido</option><option value="closed">Fechado</option></select>
-                <select id="supportPriorityFilter"><option value="">Todas prioridades</option><option value="low">Baixa</option><option value="medium">Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select>
-                <select id="supportSlaFilter"><option value="">Todos SLA</option><option value="overdue">SLA vencido</option><option value="due_soon">Perto de vencer</option><option value="unanswered">Sem resposta</option></select>
-                <select id="supportPlanFilter"><option value="">Todos planos</option></select>
-              </div>
-            </article>
+          <nav class="platform-support-tabs" aria-label="Áreas de atendimento">
+            <button class="active" type="button" data-support-tab="queue">Fila</button>
+            <button type="button" data-support-tab="metrics">Métricas</button>
+            <button type="button" data-support-tab="templates">Templates</button>
+          </nav>
+          <section class="platform-support-tab-panel active" data-support-panel="queue">
+            <section class="platform-support-filter-row">
+              <article class="platform-service-card support-filter-card">
+                <div>
+                  <p class="eyebrow">Filtros</p>
+                  <h3>Fila de atendimento</h3>
+                  <p class="muted">Priorize chamados por SLA, status, plano e urgência.</p>
+                </div>
+                <div class="stack-form">
+                  <input id="supportSearchFilter" type="search" placeholder="Buscar assunto, cliente, loja ou mensagem">
+                  <select id="supportStatusFilter"><option value="">Todos status</option><option value="open">Aberto</option><option value="waiting_customer">Aguardando cliente</option><option value="in_review">Em análise</option><option value="resolved">Resolvido</option><option value="closed">Fechado</option></select>
+                  <select id="supportPriorityFilter"><option value="">Todas prioridades</option><option value="low">Baixa</option><option value="medium">Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select>
+                  <select id="supportSlaFilter"><option value="">Todos SLA</option><option value="overdue">SLA vencido</option><option value="due_soon">Perto de vencer</option><option value="unanswered">Sem resposta</option></select>
+                  <select id="supportPlanFilter"><option value="">Todos planos</option></select>
+                </div>
+              </article>
+            </section>
+            <section class="platform-support-desk">
+              <div class="platform-support-list" id="platformSupportTicketList"></div>
+              <div class="platform-support-detail" id="platformSupportDetail"></div>
+            </section>
           </section>
-          <section class="platform-support-workbench">
-            <article class="platform-support-templates">
-              <div>
-                <p class="eyebrow">Respostas rápidas</p>
-                <h3>Templates de atendimento</h3>
-              </div>
-              <div id="supportQuickReplies"></div>
-            </article>
-            <article class="platform-support-queue-info">
-              <p class="eyebrow">SLA simples</p>
-              <h3>Ordem da fila</h3>
-              <p>Crítico primeiro, depois SLA vencido, prioridade e última atualização. Use as respostas rápidas para acelerar o atendimento.</p>
-            </article>
+          <section class="platform-support-tab-panel" data-support-panel="metrics" hidden>
+            <section class="platform-support-summary-grid" id="platformSupportSummaryGrid"></section>
+            <section class="platform-support-insights" id="platformSupportInsights"></section>
           </section>
-          <div class="platform-support-list" id="platformSupportTicketList"></div>
+          <section class="platform-support-tab-panel" data-support-panel="templates" hidden>
+            <section class="platform-support-workbench">
+              <article class="platform-support-templates">
+                <div>
+                  <p class="eyebrow">Respostas rápidas</p>
+                  <h3>Templates de atendimento</h3>
+                </div>
+                <div id="supportQuickReplies"></div>
+              </article>
+              <article class="platform-support-queue-info">
+                <p class="eyebrow">SLA simples</p>
+                <h3>Ordem da fila</h3>
+                <p>Crítico primeiro, depois SLA vencido, prioridade e última atualização. Use as respostas rápidas para acelerar o atendimento.</p>
+              </article>
+            </section>
+          </section>
         </section>
 
         <section class="panel" data-platform-section="clients" hidden>

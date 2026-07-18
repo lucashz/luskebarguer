@@ -12374,29 +12374,67 @@ legend {
   font-size: 1.6rem;
 }
 
-.clean-plans a {
+..clean-plans a {
   margin-top: 8px;
 }
 
-.clean-faq details + details {
-  margin-top: 10px;
+.clean-trust,
+.clean-differentials-grid,
+.clean-audience-grid {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
 }
 
-.clean-faq summary {
-  cursor: pointer;
-  color: var(--clean-ink);
-  font-weight: 900;
+.clean-trust {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.clean-final {
-  margin-block: 42px;
-  border-radius: 22px;
-  background:
-    radial-gradient(circle at 15% 10%, rgba(245, 158, 11, .32), transparent 32%),
-    linear-gradient(135deg, var(--clean-red-dark), #15171c 58%);
-  color: #fff;
-  padding: 48px;
+.clean-differentials-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+
+.clean-audience-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.clean-trust article,
+.clean-differentials-grid article,
+.clean-audience-grid article {
+  border: 1px solid var(--clean-line);
+  border-radius: 18px;
+  background: #fff;
+  padding: 22px;
+  box-shadow: 0 16px 35px rgba(16, 17, 20, .06);
+}
+
+.clean-audience-grid article {
+  text-align: center;
+  min-height: 170px;
+}
+
+.clean-audience-grid strong {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 860px) {
+  .clean-trust,
+  .clean-differentials-grid,
+  .clean-audience-grid,
+  .clean-steps,
+  .clean-plans {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .clean-trust article,
+  .clean-differentials-grid article,
+  .clean-audience-grid article {
+    padding: 18px;
+  }
+}
+
 
 .clean-final h2,
 .clean-final p {

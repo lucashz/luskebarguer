@@ -404,6 +404,14 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  const adminSupportMessageMatch = url.pathname.match(/^\/api\/admin\/support\/tickets\/([a-f0-9-]+)\/messages$/i);
+  if (adminSupportMessageMatch && method === 'POST') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 201, { message: await createAdminSupportMessage(req, admin, adminSupportMessageMatch[1], await readJson(req)) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/plan') {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
@@ -4760,7 +4768,9 @@ async function updatePlatformStore(id, data, admin) {
   if (!payload.slug && 'slug' in payload) throw httpError(422, 'Informe um endereço público válido.');
   if (payload.slug) payload.public_url = `/${payload.slug}`;
   const [store] = await dbRequest('PATCH', 'stores', { id: `eq.${storeId}` }, payload, ['Prefer: return=representation']);
-  if (!store) throw httpError(404, 'Loja não encontrada.');
+  if (!store) {
+    throw httpError(404, 'Loja não encontrada ou indisponível.', { code: 'STORE_NOT_FOUND' });
+  }
   if (payload.name || payload.slug || payload.description) {
     await dbRequest('PATCH', 'store_settings', { store_id: `eq.${storeId}` }, {
       ...(payload.name ? { name: payload.name } : {}),
@@ -4969,7 +4979,23 @@ async function createBillingCheckout(req, admin, data = {}) {
   const changeType = billingPlanChangeType(currentPlan, plan);
   const downgradeWarnings = await planLimitWarnings(companyId, admin.store_id, plan);
   const amount = moneyCents(plan.monthly_price || 0);
-  if (PLATFORM_BILLING_PROVIDER === 'mock' || !PLATFORM_BILLING_API_KEY || amount <= 0) {
+  const reusableCheckout = await findReusablePendingBillingCheckout(companyId, plan.id);
+  if (reusableCheckout?.checkout_url) {
+    return {
+      subscription: reusableCheckout.subscription,
+      plan,
+      payment_transaction: reusableCheckout.transaction,
+      checkout_url: reusableCheckout.checkout_url,
+      provider: reusableCheckout.subscription?.billing_provider || PLATFORM_BILLING_PROVIDER,
+      reused: true,
+      change_type: reusableCheckout.subscription?.metadata?.change_type || changeType,
+      downgrade_warnings: reusableCheckout.subscription?.metadata?.downgrade_warnings || downgradeWarnings
+    };
+  }
+  if (amount > 0 && PLATFORM_BILLING_PROVIDER !== 'mock' && !PLATFORM_BILLING_API_KEY) {
+    throw httpError(503, 'Checkout indisponível: configure ABACATEPAY_API_KEY ou PLATFORM_BILLING_API_KEY no servidor.');
+  }
+  if (PLATFORM_BILLING_PROVIDER === 'mock' || amount <= 0) {
     const activated = await activateCompanyPlan(req, admin, company, plan, {
       source: amount <= 0 ? 'free_plan' : 'manual_activation',
       provider: 'manual',
@@ -4987,6 +5013,9 @@ async function createBillingCheckout(req, admin, data = {}) {
     };
   }
   const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount });
+  if (!checkout.checkoutUrl) {
+    throw httpError(502, 'O provedor de pagamento não retornou a URL do checkout. Confira a configuração da Abacate Pay.');
+  }
   const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
     company_id: companyId,
     plan_id: plan.id,
@@ -5003,6 +5032,24 @@ async function createBillingCheckout(req, admin, data = {}) {
       downgrade_warnings: downgradeWarnings
     }
   }, ['Prefer: return=representation']);
+  const transaction = await createSubscriptionPaymentTransaction({
+    companyId,
+    subscriptionId: subscription.id,
+    planId: plan.id,
+    provider: PLATFORM_BILLING_PROVIDER,
+    externalTransactionId: checkout.subscriptionId || checkout.transactionId || null,
+    status: 'pending',
+    amountCents: amount,
+    checkoutUrl: checkout.checkoutUrl || null,
+    expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
+    metadata: {
+      source: 'admin_billing_checkout',
+      plan_code: plan.code,
+      plan_name: plan.name,
+      change_type: changeType,
+      downgrade_warnings: downgradeWarnings
+    }
+  });
   await dbRequest('POST', 'subscription_events', {}, {
     company_id: companyId,
     subscription_id: subscription.id,
@@ -5011,6 +5058,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     metadata: {
       provider: PLATFORM_BILLING_PROVIDER,
       provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
+      payment_transaction_id: transaction?.id || null,
       plan_code: plan.code,
       checkout_url: checkout.checkoutUrl || null,
       amount_cents: amount,
@@ -5031,11 +5079,40 @@ async function createBillingCheckout(req, admin, data = {}) {
   return {
     subscription,
     plan,
+    payment_transaction: transaction,
     checkout_url: checkout.checkoutUrl || null,
     provider: PLATFORM_BILLING_PROVIDER,
     change_type: changeType,
     downgrade_warnings: downgradeWarnings
   };
+}
+
+async function findReusablePendingBillingCheckout(companyId, planId) {
+  const resolvedCompanyId = cleanUuid(companyId);
+  const resolvedPlanId = cleanUuid(planId);
+  if (!resolvedCompanyId || !resolvedPlanId) return null;
+  const [subscription] = await dbRequest('GET', 'company_subscriptions', {
+    select: '*',
+    company_id: `eq.${resolvedCompanyId}`,
+    plan_id: `eq.${resolvedPlanId}`,
+    status: 'eq.payment_pending',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  if (!subscription) return null;
+  const dueAt = subscription.payment_due_at ? new Date(subscription.payment_due_at).getTime() : 0;
+  const checkoutUrl = cleanText(subscription.metadata?.checkout_url || '');
+  if (!checkoutUrl || (dueAt && dueAt < Date.now())) return null;
+  const [transaction] = await dbRequest('GET', 'subscription_payment_transactions', {
+    select: '*',
+    subscription_id: `eq.${subscription.id}`,
+    status: 'eq.pending',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const expiresAt = transaction?.expires_at ? new Date(transaction.expires_at).getTime() : dueAt;
+  if (expiresAt && expiresAt < Date.now()) return null;
+  return { subscription, transaction: transaction || null, checkout_url: transaction?.checkout_url || checkoutUrl };
 }
 
 async function activateCompanyPlan(req, admin, company, plan, options = {}) {
@@ -5139,8 +5216,8 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
         quantity: 1,
         price: amount
       }],
-      returnUrl: `${origin}/admin`,
-      completionUrl: `${origin}/admin`,
+      returnUrl: `${origin}/admin?billing=cancelled`,
+      completionUrl: `${origin}/admin?billing=success`,
       customer: {
         name: admin.name || company.name,
         email: admin.email || company.billing_email || `empresa-${company.id}@local.test`,
@@ -5156,18 +5233,103 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
   };
 }
 
+async function createSubscriptionPaymentTransaction(data = {}) {
+  const payload = {
+    company_id: cleanUuid(data.companyId || data.company_id, 'empresa'),
+    subscription_id: data.subscriptionId || data.subscription_id ? cleanUuid(data.subscriptionId || data.subscription_id, 'assinatura') : null,
+    plan_id: data.planId || data.plan_id ? cleanUuid(data.planId || data.plan_id, 'plano') : null,
+    provider: cleanSlug(data.provider || PLATFORM_BILLING_PROVIDER || 'manual'),
+    external_transaction_id: cleanExternalId(data.externalTransactionId || data.external_transaction_id || '') || null,
+    external_event_id: cleanExternalId(data.externalEventId || data.external_event_id || '') || null,
+    status: cleanSlug(data.status || 'pending') || 'pending',
+    amount_cents: Math.max(0, Number(data.amountCents ?? data.amount_cents ?? 0) || 0),
+    checkout_url: cleanText(data.checkoutUrl || data.checkout_url || '') || null,
+    expires_at: data.expiresAt || data.expires_at || null,
+    metadata: sanitizeAuditPayload(data.metadata || {}) || {}
+  };
+  const [row] = await dbRequest('POST', 'subscription_payment_transactions', {}, payload, ['Prefer: return=representation']);
+  return row || null;
+}
+
+async function findSubscriptionPaymentTransactionByEvent(provider, eventId) {
+  const normalizedProvider = cleanSlug(provider || '');
+  const normalizedEventId = cleanExternalId(eventId || '');
+  if (!normalizedProvider || !normalizedEventId) return null;
+  const [row] = await dbRequest('GET', 'subscription_payment_transactions', {
+    select: '*',
+    provider: `eq.${normalizedProvider}`,
+    external_event_id: `eq.${normalizedEventId}`,
+    limit: '1'
+  }).catch(() => []);
+  return row || null;
+}
+
+async function findSubscriptionPaymentTransactionByExternalId(provider, externalId) {
+  const normalizedProvider = cleanSlug(provider || '');
+  const normalizedExternalId = cleanExternalId(externalId || '');
+  if (!normalizedProvider || !normalizedExternalId) return null;
+  const [row] = await dbRequest('GET', 'subscription_payment_transactions', {
+    select: '*',
+    provider: `eq.${normalizedProvider}`,
+    external_transaction_id: `eq.${normalizedExternalId}`,
+    limit: '1'
+  }).catch(() => []);
+  return row || null;
+}
+
+async function updateSubscriptionPaymentTransaction(id, patch = {}) {
+  const transactionId = cleanUuid(id);
+  if (!transactionId) return null;
+  const payload = {
+    ...patch,
+    updated_at: new Date().toISOString()
+  };
+  const [row] = await dbRequest('PATCH', 'subscription_payment_transactions', { id: `eq.${transactionId}` }, payload, ['Prefer: return=representation']);
+  return row || null;
+}
+
+function billingWebhookAmountCents(payload = {}, data = {}) {
+  const raw = payload.amount ?? payload.value ?? payload.totalAmount ?? data.amount ?? data.value ?? null;
+  if (raw === null || raw === undefined || raw === '') return 0;
+  if (typeof raw === 'string' && /[,.]/.test(raw)) return moneyCents(parseMoneyInput(raw) ?? raw);
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return 0;
+  return numeric > 999 ? Math.round(numeric) : moneyCents(numeric);
+}
+
+function billingTransactionStatus(subscriptionStatus) {
+  return ({
+    active: 'paid',
+    payment_pending: 'pending',
+    grace_period: 'past_due',
+    past_due: 'past_due',
+    cancelled: 'cancelled',
+    suspended: 'failed',
+    expired: 'expired'
+  })[subscriptionStatus] || 'pending';
+}
+
 async function receiveBillingWebhook(data, options = {}) {
   const provider = cleanSlug(options.provider || inferPaymentProvider(data) || PLATFORM_BILLING_PROVIDER);
   if (PLATFORM_BILLING_WEBHOOK_SECRET && options.webhookSecret !== PLATFORM_BILLING_WEBHOOK_SECRET) {
     throw httpError(401, 'Webhook de assinatura inválido.');
   }
   const payload = data.data || data.billing || data.subscription || data;
-  const eventId = cleanExternalId(data.id || data.eventId || payload.id || `billing_${Date.now()}`);
+  const rawEventId = data.id || data.eventId || data.event_id || (
+    (data.event || payload.status) && (payload.id || payload.billingId || payload.subscriptionId)
+      ? `${data.event || payload.status}_${payload.id || payload.billingId || payload.subscriptionId}`
+      : payload.id
+  ) || `billing_${Date.now()}`;
+  const eventId = cleanExternalId(rawEventId);
   const externalId = cleanText(payload.id || payload.billingId || payload.subscriptionId || data.billingId || '');
   const metadata = payload.metadata || data.metadata || {};
   const companyId = cleanUuid(metadata.companyId || metadata.company_id || data.companyId || '');
   const planCode = cleanSlug(metadata.planCode || metadata.plan_code || payload.externalId || '');
   const status = billingProviderStatus(payload.status || data.status || data.event);
+  const amountCents = billingWebhookAmountCents(payload, data);
+
+  const duplicateTransaction = await findSubscriptionPaymentTransactionByEvent(provider, eventId);
+  if (duplicateTransaction) return { ok: true, duplicate: true, transaction: duplicateTransaction };
 
   let query = {
     select: '*',
@@ -5181,6 +5343,32 @@ async function receiveBillingWebhook(data, options = {}) {
 
   const [subscription] = await dbRequest('GET', 'company_subscriptions', query);
   if (!subscription) throw httpError(404, 'Assinatura não encontrada.');
+  let transaction = await findSubscriptionPaymentTransactionByExternalId(provider, externalId);
+  if (!transaction && subscription.id) {
+    const [latest] = await dbRequest('GET', 'subscription_payment_transactions', {
+      select: '*',
+      subscription_id: `eq.${subscription.id}`,
+      provider: `eq.${provider}`,
+      order: 'created_at.desc',
+      limit: '1'
+    }).catch(() => []);
+    transaction = latest || null;
+  }
+  if (transaction?.amount_cents && amountCents && Number(transaction.amount_cents) !== Number(amountCents)) {
+    await updateSubscriptionPaymentTransaction(transaction.id, {
+      external_event_id: eventId,
+      status: 'amount_mismatch',
+      raw_payload: sanitizeAuditPayload(data),
+      metadata: {
+        ...(transaction.metadata || {}),
+        expected_amount_cents: Number(transaction.amount_cents || 0),
+        received_amount_cents: amountCents,
+        mismatch_at: new Date().toISOString()
+      },
+      failed_at: new Date().toISOString()
+    }).catch(() => {});
+    throw httpError(422, 'Valor do pagamento não confere com a cobrança da assinatura.');
+  }
   let planId = subscription.plan_id;
   if (planCode) {
     const [plan] = await dbRequest('GET', 'subscription_plans', { select: 'id', code: `eq.${planCode}`, limit: '1' });
@@ -5201,6 +5389,40 @@ async function receiveBillingWebhook(data, options = {}) {
     next_renewal_at: status === 'active' ? periodEnd : subscription.next_renewal_at,
     metadata: { ...(subscription.metadata || {}), last_webhook: { eventId, status, received_at: now.toISOString() } }
   }, ['Prefer: return=representation']);
+  if (!transaction) {
+    transaction = await createSubscriptionPaymentTransaction({
+      companyId: subscription.company_id,
+      subscriptionId: subscription.id,
+      planId,
+      provider,
+      externalTransactionId: externalId || subscription.external_subscription_id || null,
+      status: billingTransactionStatus(status),
+      amountCents,
+      metadata: {
+        source: 'webhook_without_checkout_transaction',
+        plan_code: planCode || null
+      }
+    }).catch(() => null);
+  }
+  if (transaction?.id) {
+    await updateSubscriptionPaymentTransaction(transaction.id, {
+      subscription_id: subscription.id,
+      plan_id: planId || transaction.plan_id || null,
+      external_transaction_id: externalId || transaction.external_transaction_id || subscription.external_subscription_id || null,
+      external_event_id: eventId,
+      status: billingTransactionStatus(status),
+      amount_cents: amountCents || transaction.amount_cents || 0,
+      raw_payload: sanitizeAuditPayload(data),
+      metadata: {
+        ...(transaction.metadata || {}),
+        last_status: status,
+        last_event_id: eventId,
+        received_at: now.toISOString()
+      },
+      paid_at: status === 'active' ? now.toISOString() : transaction.paid_at || null,
+      failed_at: ['past_due', 'cancelled', 'suspended'].includes(status) ? now.toISOString() : transaction.failed_at || null
+    }).catch(() => {});
+  }
   if (status === 'active') {
     await dbRequest('PATCH', 'company_subscriptions', {
       company_id: `eq.${subscription.company_id}`,
@@ -5218,11 +5440,13 @@ async function receiveBillingWebhook(data, options = {}) {
     metadata: {
       provider,
       provider_event_id: eventId,
+      payment_transaction_id: transaction?.id || null,
       plan_code: planCode || null,
-      payload: data
+      amount_cents: amountCents || transaction?.amount_cents || 0,
+      payload: sanitizeAuditPayload(data)
     }
   }, ['Prefer: return=minimal']);
-  return { ok: true, subscription: updated };
+  return { ok: true, subscription: updated, transaction };
 }
 
 async function recordBillingWebhookFailure(data, options = {}) {
@@ -5240,17 +5464,17 @@ async function recordBillingWebhookFailure(data, options = {}) {
       provider: cleanSlug(options.provider || PLATFORM_BILLING_PROVIDER),
       status: error.status || 500,
       code: error.detail?.code || error.code || null,
-      payload: data
+      payload: sanitizeAuditPayload(data)
     }
   }, ['Prefer: return=minimal']);
 }
 
 function billingProviderStatus(value) {
   const status = cleanSlug(value || '');
-  if (['paid', 'active', 'completed', 'approved'].includes(status)) return 'active';
-  if (['past_due', 'overdue', 'expired'].includes(status)) return 'past_due';
-  if (['cancelled', 'canceled'].includes(status)) return 'cancelled';
-  if (['suspended', 'blocked'].includes(status)) return 'suspended';
+  if (['paid', 'active', 'completed', 'approved', 'billing-paid', 'payment-paid', 'payment-approved'].includes(status) || status.endsWith('-paid') || status.endsWith('-approved')) return 'active';
+  if (['past-due', 'past_due', 'overdue', 'expired', 'billing-expired', 'payment-expired', 'refused', 'rejected', 'failed'].includes(status) || status.endsWith('-failed') || status.endsWith('-refused')) return 'past_due';
+  if (['cancelled', 'canceled', 'billing-cancelled', 'billing-canceled'].includes(status) || status.endsWith('-cancelled') || status.endsWith('-canceled')) return 'cancelled';
+  if (['suspended', 'blocked', 'billing-blocked'].includes(status)) return 'suspended';
   return 'payment_pending';
 }
 
@@ -5263,10 +5487,10 @@ async function companyCommercialStatus(companyId) {
   ]);
   const subscription = pickCurrentCompanySubscription(subscriptions);
   const status = subscription?.status || company?.status || 'unknown';
-  if (!company || ['suspended', 'cancelled', 'archived'].includes(company.status)) {
+  if (!company || ['suspended', 'blocked', 'cancelled', 'archived'].includes(company.status)) {
     return { canOperate: false, status: company?.status || 'missing', message: 'Empresa sem permissão comercial para operar.' };
   }
-  if (['suspended', 'cancelled', 'expired'].includes(status)) {
+  if (['suspended', 'blocked', 'cancelled', 'expired'].includes(status)) {
     return { canOperate: false, status, message: 'Plano indisponível para operação. Regularize ou reative a empresa.' };
   }
   if (status === 'trial' && subscription?.trial_ends_at && new Date(subscription.trial_ends_at).getTime() < Date.now()) {
@@ -6619,11 +6843,17 @@ function publicSupportTicket(ticket = {}, extra = {}) {
 
 function publicSupportMessage(message = {}, admins = []) {
   const admin = admins.find((entry) => entry.id === message.author_admin_id);
+  const authorType = message.author_type || 'admin';
+  const authorName = (() => {
+    if (authorType === 'support') return 'Equipe de suporte';
+    if (authorType === 'internal') return admin?.name || 'Nota interna';
+    return admin?.name || 'Cliente';
+  })();
   return {
     id: message.id,
     ticket_id: message.ticket_id,
-    author_type: message.author_type || 'admin',
-    author_name: admin?.name || (message.author_type === 'support' ? 'Suporte' : 'Cliente'),
+    author_type: authorType,
+    author_name: authorName,
     message: message.message || '',
     is_internal: message.is_internal === true,
     created_at: message.created_at
@@ -6633,8 +6863,11 @@ function publicSupportMessage(message = {}, admins = []) {
 async function createAdminSupportTicket(req, admin, data = {}) {
   const subject = cleanText(data.subject || '').slice(0, 180);
   const message = cleanText(data.message || '').slice(0, 5000);
+  const contactName = cleanText(data.contact_name || admin.name || '').slice(0, 120);
   if (!subject) throw httpError(422, 'Informe o assunto do chamado.');
+  if (!contactName) throw httpError(422, 'Informe o nome para contato.');
   if (!message) throw httpError(422, 'Informe a mensagem do chamado.');
+  const messageWithContact = `Contato: ${contactName}\n\n${message}`;
   const [ticket] = await dbRequest('POST', 'support_tickets', {}, {
     company_id: cleanOptionalUuid(admin.company_id || '') || null,
     store_id: cleanOptionalUuid(admin.store_id || '') || null,
@@ -6651,7 +6884,7 @@ async function createAdminSupportTicket(req, admin, data = {}) {
     ticket_id: ticket.id,
     author_admin_id: admin.id,
     author_type: 'admin',
-    message,
+    message: messageWithContact,
     is_internal: false
   }, ['Prefer: return=minimal']);
   await audit('admin.support.ticket.create', {
@@ -6661,9 +6894,56 @@ async function createAdminSupportTicket(req, admin, data = {}) {
     store_id: admin.store_id,
     entity_type: 'support_ticket',
     entity_id: ticket.id,
-    after_data: { subject, priority: ticket.priority }
+    after_data: { subject, priority: ticket.priority, contact_name: contactName }
   });
-  return publicSupportTicket(ticket, { messages: [{ message, author_type: 'admin', created_at: new Date().toISOString() }] });
+  return publicSupportTicket(ticket, { messages: [{ message: messageWithContact, author_type: 'admin', created_at: new Date().toISOString() }] });
+}
+
+async function createAdminSupportMessage(req, admin, ticketId, data = {}) {
+  const ticket = await getSupportTicket(ticketId);
+  const adminCompanyId = cleanOptionalUuid(admin.company_id || '');
+  const adminStoreId = cleanOptionalUuid(admin.store_id || '');
+  if ((ticket.company_id && ticket.company_id !== adminCompanyId) || (ticket.store_id && ticket.store_id !== adminStoreId)) {
+    throw httpError(403, 'Este chamado não pertence à sua loja.');
+  }
+  if (['closed'].includes(ticket.status)) throw httpError(422, 'Chamado fechado não aceita novas respostas.');
+  const messageText = cleanText(data.message || '').slice(0, 5000);
+  if (!messageText) throw httpError(422, 'Informe a mensagem.');
+  const duplicateWindow = new Date(Date.now() - 15000).toISOString();
+  const [recentDuplicate] = await dbRequest('GET', 'support_ticket_messages', {
+    select: '*',
+    ticket_id: `eq.${ticket.id}`,
+    author_admin_id: `eq.${admin.id}`,
+    author_type: 'eq.admin',
+    is_internal: 'eq.false',
+    message: `eq.${messageText}`,
+    created_at: `gte.${duplicateWindow}`,
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  if (recentDuplicate) return publicSupportMessage(recentDuplicate, [admin]);
+
+  const [message] = await dbRequest('POST', 'support_ticket_messages', {}, {
+    ticket_id: ticket.id,
+    author_admin_id: admin.id,
+    author_type: 'admin',
+    message: messageText,
+    is_internal: false
+  }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'support_tickets', { id: `eq.${ticket.id}` }, {
+    status: 'open',
+    last_message_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('admin.support.ticket.message', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id
+  });
+  return publicSupportMessage(message, [admin]);
 }
 
 async function createPlatformSupportTicket(req, admin, data = {}) {
@@ -6711,10 +6991,25 @@ async function createPlatformSupportMessage(req, admin, ticketId, data = {}) {
   const messageText = cleanText(data.message || '').slice(0, 5000);
   if (!messageText) throw httpError(422, 'Informe a mensagem.');
   const isInternal = data.is_internal === true;
+  const authorType = isInternal ? 'internal' : 'support';
+  const duplicateWindow = new Date(Date.now() - 15000).toISOString();
+  const [recentDuplicate] = await dbRequest('GET', 'support_ticket_messages', {
+    select: '*',
+    ticket_id: `eq.${ticket.id}`,
+    author_admin_id: `eq.${admin.id}`,
+    author_type: `eq.${authorType}`,
+    is_internal: `eq.${isInternal}`,
+    message: `eq.${messageText}`,
+    created_at: `gte.${duplicateWindow}`,
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  if (recentDuplicate) return publicSupportMessage(recentDuplicate, [admin]);
+
   const [message] = await dbRequest('POST', 'support_ticket_messages', {}, {
     ticket_id: ticket.id,
     author_admin_id: admin.id,
-    author_type: isInternal ? 'internal' : 'support',
+    author_type: authorType,
     message: messageText,
     is_internal: isInternal
   }, ['Prefer: return=representation']);
@@ -7213,19 +7508,21 @@ async function getStoreById(id) {
     id: `eq.${storeId}`,
     limit: '1'
   });
-  if (!store) throw httpError(404, 'Loja não encontrada.');
+  if (!store) {
+    throw httpError(404, 'Loja não encontrada ou indisponível.', { code: 'STORE_NOT_FOUND' });
+  }
   return store;
 }
 
 function sanitizeCompanyStatus(status) {
   const value = cleanSlug(status || '');
-  if (['onboarding', 'active', 'trial', 'payment_pending', 'grace_period', 'past_due', 'suspended', 'cancelled', 'archived'].includes(value)) return value;
+  if (['onboarding', 'active', 'trial', 'payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended', 'cancelled', 'archived'].includes(value)) return value;
   throw httpError(422, 'Status da empresa inválido.');
 }
 
 function sanitizeSubscriptionStatus(status) {
   const value = cleanSlug(status || '');
-  if (['trial', 'active', 'payment_pending', 'grace_period', 'cancelled', 'expired', 'suspended'].includes(value)) return value;
+  if (['trial', 'active', 'payment_pending', 'grace_period', 'past_due', 'blocked', 'cancelled', 'expired', 'suspended'].includes(value)) return value;
   return 'active';
 }
 
@@ -8172,7 +8469,9 @@ async function resolvePublicStore(req, url) {
     ''
   );
   const store = hostStore || (slug ? await getStoreBySlug(slug) : await getDefaultStore());
-  if (!store) throw httpError(404, 'Loja não encontrada.');
+  if (!store) {
+    throw httpError(404, 'Loja não encontrada ou indisponível.', { code: 'STORE_NOT_FOUND' });
+  }
   return { store };
 }
 

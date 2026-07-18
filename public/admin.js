@@ -46,9 +46,15 @@
   onboardingOverview: null,
   activeAdminTab: 'operation',
   loadedAdminTabs: new Set(),
+  loadedAdminTabAt: new Map(),
   loadingAdminTabs: new Set(),
   selectedAdminUserIds: new Set(),
-  supportTickets: []
+  supportStatusFilter: 'all',
+  supportSearch: '',
+  openSupportTicketIds: new Set(),
+  supportTickets: [],
+  commercialBlock: null,
+  checkoutPlanCode: ''
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
@@ -344,6 +350,8 @@ const els = {
   planHistory: document.querySelector('#planHistory'),
   adminSupportTicketForm: document.querySelector('#adminSupportTicketForm'),
   adminSupportTicketList: document.querySelector('#adminSupportTicketList'),
+  adminSupportStatusFilters: document.querySelector('#adminSupportStatusFilters'),
+  adminSupportSearch: document.querySelector('#adminSupportSearch'),
   refreshSupportTicketsButton: document.querySelector('#refreshSupportTicketsButton'),
   promotionForm: document.querySelector('#promotionForm'),
   promotionList: document.querySelector('#promotionList'),
@@ -379,7 +387,7 @@ document.querySelectorAll('[data-modifier-preset]').forEach((button) => {
 els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
 els.logoutButton?.addEventListener('click', logout);
-els.adminHeaderLogoutButton.addEventListener('click', logout);
+els.adminHeaderLogoutButton?.addEventListener('click', logout);
 els.endSupportModeButton?.addEventListener('click', endSupportMode);
 els.storeSwitcher?.addEventListener('change', switchStore);
 els.refreshPlanButton?.addEventListener('click', () => loadPlanData({ force: true }));
@@ -499,6 +507,17 @@ els.selectAllAdminUsers?.addEventListener('change', toggleVisibleAdminUsersSelec
 els.deleteSelectedAdminUsersButton?.addEventListener('click', deleteSelectedAdminUsers);
 els.adminSupportTicketForm?.addEventListener('submit', submitAdminSupportTicket);
 els.refreshSupportTicketsButton?.addEventListener('click', () => loadSupportTickets({ force: true }));
+els.adminSupportSearch?.addEventListener('input', () => {
+  state.supportSearch = els.adminSupportSearch.value.trim().toLowerCase();
+  renderSupportTickets();
+});
+els.adminSupportStatusFilters?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-support-filter]');
+  if (!button) return;
+  state.supportStatusFilter = button.dataset.supportFilter || 'all';
+  els.adminSupportStatusFilters.querySelectorAll('button').forEach((item) => item.classList.toggle('active', item === button));
+  renderSupportTickets();
+});
 els.inviteAdminButton?.addEventListener('click', submitAdminInvitation);
 els.promotionForm?.addEventListener('submit', submitPromotion);
 els.cancelPromotionEditButton?.addEventListener('click', resetPromotionForm);
@@ -579,6 +598,7 @@ async function init() {
     const me = await request('/api/admin/me');
     state.admin = me.admin;
     saveAdminCache();
+    handleBillingReturn();
     showPanel();
     await loadAdminData();
   } catch {
@@ -588,6 +608,24 @@ async function init() {
     els.loginCard.hidden = !setup.has_admin;
     showAuth();
   }
+}
+
+function handleBillingReturn() {
+  const params = new URLSearchParams(window.location.search || '');
+  const status = params.get('billing');
+  if (!status) return;
+  state.activeAdminTab = 'plan';
+  const messages = {
+    success: 'Pagamento recebido. Se a confirmação ainda não aparecer, aguarde o processamento do webhook.',
+    cancelled: 'Pagamento cancelado. Sua assinatura anterior foi mantida.',
+    error: 'Não foi possível concluir o pagamento. Tente novamente ou fale com o suporte.',
+    mock: 'Checkout de teste registrado.'
+  };
+  setTimeout(() => toast(messages[status] || 'Status de pagamento atualizado.'), 300);
+  params.delete('billing');
+  const nextQuery = params.toString();
+  const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
+  window.history.replaceState({}, '', nextUrl);
 }
 
 async function submitSetup(event) {
@@ -636,11 +674,16 @@ async function submitLogin(event) {
 }
 
 async function logout() {
-  await request('/api/admin/logout', { method: 'POST' });
-  state.admin = null;
-  clearAdminCache();
-  stopOrderPolling();
-  showAuth();
+  try {
+    await request('/api/admin/logout', { method: 'POST' });
+  } catch (error) {
+    console.warn('Falha ao encerrar sessão no servidor:', error.message || error);
+  } finally {
+    state.admin = null;
+    clearAdminCache();
+    stopOrderPolling();
+    showAuth();
+  }
 }
 
 async function endSupportMode() {
@@ -766,7 +809,7 @@ function logSlowClientLoad(scope, startedAt) {
 
 async function loadAdminTabData(tab, options = {}) {
   if (!canAccessTab(tab)) return;
-  if (!options.force && state.loadedAdminTabs.has(tab)) return;
+  if (!options.force && state.loadedAdminTabs.has(tab) && isAdminTabFresh(tab)) return;
   if (state.loadingAdminTabs.has(tab)) return;
   state.loadingAdminTabs.add(tab);
   try {
@@ -814,8 +857,28 @@ async function loadAdminTabData(tab, options = {}) {
   } catch (error) {
     toast(error.message || 'Não foi possível carregar esta área.');
   } finally {
+    if (state.loadedAdminTabs.has(tab)) state.loadedAdminTabAt.set(tab, Date.now());
     state.loadingAdminTabs.delete(tab);
   }
+}
+
+function isAdminTabFresh(tab) {
+  const loadedAt = state.loadedAdminTabAt.get(tab) || 0;
+  const maxAge = ({
+    operation: 6000,
+    orders: 6000,
+    menu: 30000,
+    tables: 15000,
+    customers: 30000,
+    promotions: 30000,
+    store: 45000,
+    integrations: 45000,
+    plan: 45000,
+    support: 30000,
+    account: 45000,
+    reports: 30000
+  })[tab] || 30000;
+  return loadedAt > 0 && Date.now() - loadedAt < maxAge;
 }
 
 async function loadMenuData(options = {}) {
@@ -4050,28 +4113,162 @@ async function submitAdminSupportTicket(event) {
 
 function renderSupportTickets() {
   if (!els.adminSupportTicketList) return;
-  const tickets = state.supportTickets || [];
-  els.adminSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => `
-    <article class="support-ticket-card">
-      <div class="section-actions compact-section-actions">
-        <div>
-          <strong>${escapeHtml(ticket.subject)}</strong>
-          <small>${formatDateTime(ticket.created_at)} · ${escapeHtml(ticket.category || 'sem categoria')}</small>
-        </div>
-        <span class="pill ${ticket.priority === 'critical' || ticket.priority === 'high' ? 'pill-danger' : 'pill-muted'}">${escapeHtml(priorityLabel(ticket.priority))}</span>
-        <span class="pill ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
-      </div>
-      <div class="support-ticket-messages">
-        ${(ticket.messages || []).map((message) => `
-          <div>
-            <strong>${escapeHtml(message.author_name || message.author_type)}</strong>
-            <small>${formatDateTime(message.created_at)}</small>
-            <p>${escapeHtml(message.message)}</p>
+  const tickets = filteredSupportTickets();
+  els.adminSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => {
+    const lastMessage = [...(ticket.messages || [])].pop();
+    const preview = supportMessagePreview(lastMessage);
+    return `
+      <details class="support-ticket-card priority-${escapeAttribute(ticket.priority)} status-${escapeAttribute(ticket.status)}" data-ticket-id="${escapeAttribute(ticket.id)}" ${state.openSupportTicketIds.has(ticket.id) ? 'open' : ''}>
+        <summary>
+          <div class="support-ticket-main">
+            <strong>${escapeHtml(ticket.subject)}</strong>
+            <small>${escapeHtml(ticket.category || 'Sem categoria')} · Aberto em ${formatDateTime(ticket.created_at)}${ticket.updated_at ? ` · Atualizado em ${formatDateTime(ticket.updated_at)}` : ''}</small>
+            <p>${escapeHtml(preview || 'Sem mensagens no chamado.')}</p>
           </div>
-        `).join('') || '<p class="empty-state">Sem mensagens.</p>'}
+          <span class="pill ${supportPriorityClass(ticket.priority)}">${escapeHtml(priorityLabel(ticket.priority))}</span>
+          <span class="pill ${supportStatusClass(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+          <span class="support-ticket-toggle">Ver conversa</span>
+        </summary>
+        <div class="support-ticket-body">
+          <div class="support-ticket-messages">
+            ${(ticket.messages || []).length ? ticket.messages.map((message) => renderAdminSupportMessage(message)).join('') : '<p class="empty-state">Sem mensagens.</p>'}
+          </div>
+          ${['resolved', 'closed'].includes(ticket.status) ? `
+            <p class="empty-state compact-empty-state">Este chamado está ${escapeHtml(ticketStatusLabel(ticket.status).toLowerCase())}.</p>
+          ` : `
+            <form class="support-ticket-reply-form" data-ticket-id="${escapeAttribute(ticket.id)}">
+              <label>Responder ao suporte<textarea name="message" rows="3" required placeholder="Escreva uma resposta para a equipe de suporte"></textarea></label>
+              <button class="primary-button compact" type="submit">Enviar resposta</button>
+            </form>
+          `}
+        </div>
+      </details>
+    `;
+  }).join('') : supportTicketsEmptyState();
+  els.adminSupportTicketList.querySelectorAll('.support-ticket-card').forEach((details) => {
+    details.addEventListener('toggle', () => {
+      if (details.open) state.openSupportTicketIds.add(details.dataset.ticketId);
+      else state.openSupportTicketIds.delete(details.dataset.ticketId);
+    });
+  });
+  els.adminSupportTicketList.querySelectorAll('.support-ticket-reply-form').forEach((form) => form.addEventListener('submit', submitAdminSupportReply));
+  els.adminSupportTicketList.querySelector('[data-focus-support-form]')?.addEventListener('click', () => {
+    els.adminSupportTicketForm?.querySelector('input[name="subject"]')?.focus();
+  });
+}
+
+function filteredSupportTickets() {
+  const search = state.supportSearch || '';
+  return (state.supportTickets || []).filter((ticket) => {
+    const filter = state.supportStatusFilter || 'all';
+    const statusMatch = filter === 'all'
+      || ticket.status === filter
+      || (filter === 'open' && !['resolved', 'closed'].includes(ticket.status))
+      || (filter === 'critical' && ticket.priority === 'critical');
+    if (!statusMatch) return false;
+    if (!search) return true;
+    const haystack = [
+      ticket.subject,
+      ticket.category,
+      ticket.status,
+      ticket.priority,
+      ...(ticket.messages || []).map((message) => message.message)
+    ].join(' ').toLowerCase();
+    return haystack.includes(search);
+  });
+}
+
+function supportMessagePreview(message) {
+  if (!message) return '';
+  const parsed = parseSupportMessage(message.message || '');
+  return parsed.body || parsed.contact || '';
+}
+
+function parseSupportMessage(text = '') {
+  const value = String(text || '').trim();
+  const match = value.match(/^Contato:\s*(.+?)(?:\n{2,}|\r\n{2,})([\s\S]*)$/i);
+  if (!match) return { contact: '', body: value };
+  return { contact: match[1].trim(), body: match[2].trim() };
+}
+
+function renderAdminSupportMessage(message) {
+  const parsed = parseSupportMessage(message.message || '');
+  const isSupport = message.author_type === 'support';
+  const author = isSupport ? 'Equipe de suporte' : 'Você';
+  return `
+    <article class="support-message-bubble ${isSupport ? 'from-support' : 'from-customer'}">
+      <div>
+        <strong>${escapeHtml(author)}</strong>
+        <small>${formatDateTime(message.created_at)}</small>
       </div>
+      ${parsed.contact ? `<p class="support-contact-line"><span>Contato</span>${escapeHtml(parsed.contact)}</p>` : ''}
+      <p>${escapeHtml(parsed.body)}</p>
     </article>
-  `).join('') : '<p class="empty-state">Você ainda não abriu chamados de suporte.</p>';
+  `;
+}
+
+function supportPriorityClass(priority) {
+  if (priority === 'critical') return 'pill-danger';
+  if (priority === 'high') return 'pill-warning';
+  if (priority === 'low') return 'pill-ok';
+  return 'pill-muted';
+}
+
+function supportStatusClass(status) {
+  if (['resolved', 'closed'].includes(status)) return 'pill-ok';
+  if (status === 'in_review') return 'pill-warning';
+  if (status === 'waiting_customer') return 'pill-info';
+  return 'pill-muted';
+}
+
+function supportTicketsEmptyState() {
+  const hasFilters = (state.supportStatusFilter && state.supportStatusFilter !== 'all') || state.supportSearch;
+  return `
+    <div class="support-empty-state">
+      <strong>${hasFilters ? 'Nenhum chamado encontrado.' : 'Você ainda não abriu chamados.'}</strong>
+      <p>${hasFilters ? 'Tente remover filtros ou buscar por outro termo.' : 'Quando precisar de ajuda, abra um chamado e acompanhe tudo por aqui.'}</p>
+      ${hasFilters ? '' : '<button class="ghost-button compact" type="button" data-focus-support-form>Abrir chamado</button>'}
+    </div>
+  `;
+}
+
+async function submitAdminSupportReply(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (form.dataset.submitting === 'true') return;
+  const ticketId = form.dataset.ticketId;
+  const button = form.querySelector('button[type="submit"]');
+  const previousText = button?.textContent || '';
+  try {
+    form.dataset.submitting = 'true';
+    if (ticketId) state.openSupportTicketIds.add(ticketId);
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Enviando...';
+    }
+    await request(`/api/admin/support/tickets/${ticketId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(new FormData(form)))
+    });
+    form.reset();
+    toast('Resposta enviada.');
+    state.loadedAdminTabs.delete('support');
+    await loadSupportTickets({ force: true });
+    if (ticketId) {
+      [...(els.adminSupportTicketList?.querySelectorAll('.support-ticket-card') || [])]
+        .find((details) => details.dataset.ticketId === ticketId)
+        ?.scrollIntoView({ block: 'nearest' });
+    }
+  } catch (error) {
+    toast(error.message || 'Não foi possível responder o chamado.');
+  } finally {
+    form.dataset.submitting = 'false';
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 async function submitAccount(event) {
@@ -4410,7 +4607,8 @@ function renderPlan() {
   const features = data.features || [];
   const billingHistory = Array.isArray(data.billing_history) ? data.billing_history : [];
   const selectedPlanCode = plan.code || availablePlans[0]?.code || '';
-  const status = subscription.status || company.status || 'indefinido';
+  const rawStatus = subscription.status || company.status || 'indefinido';
+  const status = isTrialExpired(subscription) ? 'trial_expired' : rawStatus;
   const statusLabel = commercialStatusLabel(status);
   const nextRenewal = subscription.next_renewal_at || subscription.current_period_ends_at || subscription.trial_ends_at || '';
   const pendingCheckoutUrl = pendingSubscription.metadata?.checkout_url || '';
@@ -4424,6 +4622,7 @@ function renderPlan() {
   if (els.planAlerts) {
     els.planAlerts.innerHTML = planAlerts({ subscription, pendingSubscription, usage, features });
   }
+  updateCommercialBlockFromPlan(status, subscription);
 
   els.planSummary.innerHTML = `
     <div class="plan-main-card">
@@ -4448,7 +4647,7 @@ function renderPlan() {
       </div>
     </div>
   `;
-  document.querySelector('#billingCheckoutButton')?.addEventListener('click', () => createBillingCheckout());
+  document.querySelector('#billingCheckoutButton')?.addEventListener('click', () => openPlanCheckoutModal());
 
   if (els.planBilling) {
     els.planBilling.innerHTML = `
@@ -4465,7 +4664,7 @@ function renderPlan() {
         <button class="ghost-button compact" id="billingRenewButton" type="button"${availablePlans.length ? '' : ' disabled'}>${pendingSubscription.id ? 'Trocar plano' : 'Ativar/alterar plano'}</button>
       </div>
     `;
-    document.querySelector('#billingRenewButton')?.addEventListener('click', () => createBillingCheckout());
+    document.querySelector('#billingRenewButton')?.addEventListener('click', () => openPlanCheckoutModal());
   }
 
   if (els.planRenewal) {
@@ -4510,20 +4709,116 @@ function renderPlan() {
   if (els.planCompare) {
     els.planCompare.innerHTML = availablePlans.length ? availablePlans.map((entry) => comparePlanCard(entry, plan.code)).join('') : '<p class="empty-state">Nenhum plano disponível.</p>';
     els.planCompare.querySelectorAll('[data-plan-code]').forEach((button) => {
-      button.addEventListener('click', () => createBillingCheckout(button.dataset.planCode));
+      button.addEventListener('click', () => openPlanCheckoutModal(button.dataset.planCode));
     });
   }
 
   if (els.planHistory) {
+    const visibleBillingHistory = billingHistory.slice(0, 5);
     els.planHistory.innerHTML = billingHistory.length ? `
       <div class="plan-history-table">
-        ${billingHistory.map((event) => billingHistoryRow(event)).join('')}
+        ${visibleBillingHistory.map((event) => billingHistoryRow(event)).join('')}
       </div>
+      ${billingHistory.length > visibleBillingHistory.length ? `<p class="muted compact-muted">Mostrando os 5 eventos mais recentes de ${billingHistory.length} registro(s).</p>` : ''}
     ` : '<p class="empty-state">Nenhum evento de cobrança registrado.</p>';
   }
 }
 
-async function createBillingCheckout(forcedPlanCode = '') {
+function updateCommercialBlockFromPlan(status, subscription = {}) {
+  if (commercialStatusBlocksOperation(status)) {
+    showCommercialBlocker({
+      status,
+      message: status === 'trial_expired'
+        ? 'Seu período de teste terminou. Escolha um plano mensal para voltar a usar o painel.'
+        : 'Sua assinatura precisa ser regularizada para liberar o painel.'
+    }, { switchToPlan: false });
+    return;
+  }
+  if (state.commercialBlock && !commercialStatusBlocksOperation(status) && !isTrialExpired(subscription)) {
+    hideCommercialBlocker();
+  }
+}
+
+function isTrialExpired(subscription = {}) {
+  if (subscription.status !== 'trial' || !subscription.trial_ends_at) return false;
+  const endsAt = new Date(subscription.trial_ends_at).getTime();
+  return Number.isFinite(endsAt) && endsAt < Date.now();
+}
+
+function commercialStatusBlocksOperation(status) {
+  return ['trial_expired', 'payment_pending', 'past_due', 'grace_period_expired', 'suspended', 'cancelled', 'expired', 'archived'].includes(String(status || ''));
+}
+
+function selectedCheckoutPlan(planCode = '') {
+  const code = planCode || document.querySelector('#billingPlanSelect')?.value || state.plan?.plan?.code || '';
+  const plans = Array.isArray(state.plan?.available_plans) ? state.plan.available_plans : [];
+  return plans.find((entry) => entry.code === code) || null;
+}
+
+function openPlanCheckoutModal(planCode = '') {
+  const plan = selectedCheckoutPlan(planCode);
+  if (!plan) {
+    toast('Plano não encontrado para cobrança.');
+    return;
+  }
+  if (plan.code === state.plan?.plan?.code && ['trial', 'active'].includes(state.plan?.subscription?.status) && !isTrialExpired(state.plan?.subscription)) {
+    toast('Este já é o plano atual.');
+    return;
+  }
+  state.checkoutPlanCode = plan.code;
+  const currentPlan = state.plan?.plan || {};
+  const currentStatus = isTrialExpired(state.plan?.subscription) ? 'trial_expired' : state.plan?.subscription?.status;
+  const modal = ensurePlanCheckoutModal();
+  modal.innerHTML = `
+    <div class="plan-checkout-modal-card" role="dialog" aria-modal="true" aria-labelledby="planCheckoutTitle">
+      <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
+      <p class="eyebrow">${commercialStatusBlocksOperation(currentStatus) ? 'Liberar painel' : 'Pagamento mensal'}</p>
+      <h2 id="planCheckoutTitle">${escapeHtml(plan.name || 'Plano mensal')}</h2>
+      <p class="muted">${escapeHtml(plan.description || 'Finalize o pagamento para ativar os recursos deste plano.')}</p>
+      <div class="plan-checkout-summary">
+        <span>Plano atual <strong>${escapeHtml(currentPlan.name || 'Sem plano')}</strong></span>
+        <span>Novo plano <strong>${escapeHtml(plan.name || 'Plano')}</strong></span>
+        <span>Valor mensal <strong>${formatPlanPrice(plan.monthly_price || 0)}</strong></span>
+      </div>
+      <div class="plan-checkout-note">
+        <strong>Como funciona</strong>
+        <p>Ao continuar, vamos abrir o checkout seguro. O plano é liberado automaticamente assim que o pagamento for confirmado pelo provedor.</p>
+      </div>
+      <div class="row-actions plan-checkout-footer">
+        <button class="ghost-button compact" type="button" data-close-plan-checkout>Cancelar</button>
+        <button class="primary-button compact" type="button" data-confirm-plan-checkout>Ir para pagamento</button>
+      </div>
+    </div>
+  `;
+  modal.hidden = false;
+  modal.querySelectorAll('[data-close-plan-checkout]').forEach((button) => button.addEventListener('click', closePlanCheckoutModal));
+  modal.querySelector('[data-confirm-plan-checkout]')?.addEventListener('click', (event) => {
+    createBillingCheckout(state.checkoutPlanCode, { redirectToCheckout: true, triggerButton: event.currentTarget });
+  });
+  modal.querySelector('[data-confirm-plan-checkout]')?.focus();
+}
+
+function closePlanCheckoutModal() {
+  const modal = document.querySelector('#planCheckoutModal');
+  if (modal) modal.hidden = true;
+  state.checkoutPlanCode = '';
+}
+
+function ensurePlanCheckoutModal() {
+  let modal = document.querySelector('#planCheckoutModal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'planCheckoutModal';
+  modal.className = 'plan-checkout-modal';
+  modal.hidden = true;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closePlanCheckoutModal();
+  });
+  return modal;
+}
+
+async function createBillingCheckout(forcedPlanCode = '', options = {}) {
   const planCode = forcedPlanCode || document.querySelector('#billingPlanSelect')?.value || state.plan?.plan?.code;
   if (!planCode) {
     toast('Plano não encontrado para cobrança.');
@@ -4534,26 +4829,45 @@ async function createBillingCheckout(forcedPlanCode = '') {
     return;
   }
   const buttons = [...document.querySelectorAll('#billingCheckoutButton, #billingRenewButton, [data-plan-code]')];
+  const triggerButton = options.triggerButton || null;
+  const previousTriggerText = triggerButton?.textContent || '';
   buttons.forEach((button) => { button.disabled = true; });
+  if (triggerButton) {
+    triggerButton.disabled = true;
+    triggerButton.textContent = 'Abrindo pagamento...';
+  }
   try {
     const result = await request('/api/admin/billing/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan_code: planCode })
     });
-    await loadPlanData({ force: true });
     if (result.checkout_url) {
-      window.open(result.checkout_url, '_blank', 'noopener');
-      toast('Cobrança aberta em uma nova aba.');
+      toast('Redirecionando para o pagamento...');
+      closePlanCheckoutModal();
+      if (options.redirectToCheckout) {
+        window.location.assign(result.checkout_url);
+      } else {
+        window.open(result.checkout_url, '_blank', 'noopener');
+      }
+      return;
     } else if (result.activated) {
+      await loadPlanData({ force: true });
       toast(result.already_current ? 'Este já era o plano atual.' : 'Plano ativado com sucesso.');
+      closePlanCheckoutModal();
     } else {
+      await loadPlanData({ force: true });
       toast('Solicitação registrada.');
+      closePlanCheckoutModal();
     }
   } catch (error) {
     toast(error.message || 'Não foi possível criar a cobrança.');
   } finally {
     buttons.forEach((button) => { button.disabled = false; });
+    if (triggerButton) {
+      triggerButton.disabled = false;
+      triggerButton.textContent = previousTriggerText;
+    }
   }
 }
 
@@ -4561,8 +4875,11 @@ function planStatusClass(status) {
   return ({
     active: 'ok',
     trial: 'warn',
+    trial_expired: 'danger',
     payment_pending: 'warn',
     past_due: 'danger',
+    blocked: 'danger',
+    grace_period_expired: 'danger',
     suspended: 'danger',
     cancelled: 'muted',
     expired: 'muted'
@@ -4709,6 +5026,7 @@ function planAlerts({ subscription = {}, pendingSubscription = {}, usage = {}, f
   const alerts = [];
   if (subscription.status === 'trial' && subscription.trial_ends_at) {
     const days = Math.ceil((new Date(subscription.trial_ends_at).getTime() - Date.now()) / 86400000);
+    if (days < 0) alerts.push('Seu teste terminou. Escolha um plano mensal para continuar usando o sistema.');
     if (days >= 0 && days <= 7) alerts.push(`Seu teste termina em ${days || 1} dia(s).`);
   }
   if (pendingSubscription.id) alerts.push('Existe uma cobrança pendente. Regularize para evitar bloqueio.');
@@ -4733,10 +5051,13 @@ function usageMetric(label, value) {
 function commercialStatusLabel(status) {
   return ({
     trial: 'Teste',
+    trial_expired: 'Teste encerrado',
     active: 'Ativo',
     payment_pending: 'Pagamento pendente',
     past_due: 'Pendente',
+    blocked: 'Bloqueado',
     grace_period: 'Prazo de regularização',
+    grace_period_expired: 'Prazo encerrado',
     suspended: 'Suspenso',
     cancelled: 'Cancelado',
     expired: 'Expirado',
@@ -6278,6 +6599,8 @@ async function uploadImage(file, usage = 'product') {
 function showAuth() {
   els.authScreen.hidden = false;
   els.adminAuthLoading.hidden = true;
+  els.setupCard.hidden = true;
+  els.loginCard.hidden = false;
   els.adminSidebar.hidden = true;
   els.adminShell.hidden = true;
   els.adminLayout.classList.add('auth-only');
@@ -6942,6 +7265,12 @@ async function request(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 402 && data.commercial_status) {
+      showCommercialBlocker({
+        status: data.commercial_status,
+        message: data.error || friendlyRequestError(url, response, data)
+      });
+    }
     const detail = typeof data.detail === 'string' ? data.detail : '';
     const error = new Error(detail || data.error || friendlyRequestError(url, response, data));
     error.code = data.code || data.error_code || '';
@@ -6949,9 +7278,56 @@ async function request(url, options = {}) {
     error.usageKey = data.usage_key || '';
     error.limit = data.limit;
     error.used = data.used;
+    error.commercialStatus = data.commercial_status || '';
     throw error;
   }
   return data;
+}
+
+function showCommercialBlocker(info = {}, options = {}) {
+  const status = info.status || 'blocked';
+  const message = info.message || 'Regularize a assinatura para continuar usando o painel.';
+  state.commercialBlock = { status, message };
+  const blocker = ensureCommercialBlocker();
+  blocker.innerHTML = `
+    <section class="commercial-blocker-card">
+      <p class="eyebrow">${status === 'trial_expired' ? 'Teste encerrado' : 'Assinatura'}</p>
+      <h2>${status === 'trial_expired' ? 'Escolha um plano para continuar' : 'Regularize seu plano'}</h2>
+      <p>${escapeHtml(message)}</p>
+      <div class="commercial-blocker-actions">
+        <button class="primary-button compact" type="button" data-commercial-plan>Ver planos mensais</button>
+        <button class="ghost-button compact" type="button" data-commercial-account>Minha conta</button>
+      </div>
+    </section>
+  `;
+  blocker.hidden = false;
+  blocker.querySelector('[data-commercial-plan]')?.addEventListener('click', () => {
+    activateAdminTab('plan');
+    loadPlanData({ force: true }).catch(() => {});
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  blocker.querySelector('[data-commercial-account]')?.addEventListener('click', () => activateAdminTab('account'));
+  if (options.switchToPlan !== false && state.activeAdminTab !== 'plan') {
+    activateAdminTab('plan');
+  }
+}
+
+function hideCommercialBlocker() {
+  state.commercialBlock = null;
+  const blocker = document.querySelector('#commercialBlocker');
+  if (blocker) blocker.hidden = true;
+}
+
+function ensureCommercialBlocker() {
+  let blocker = document.querySelector('#commercialBlocker');
+  if (blocker) return blocker;
+  blocker = document.createElement('div');
+  blocker.id = 'commercialBlocker';
+  blocker.className = 'commercial-blocker';
+  blocker.hidden = true;
+  const anchor = document.querySelector('#adminShell') || document.body;
+  anchor.prepend(blocker);
+  return blocker;
 }
 
 function friendlyRequestError(url, response, data = {}) {

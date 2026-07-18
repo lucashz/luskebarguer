@@ -93,6 +93,7 @@ enum SubscriptionStatus {
   payment_pending
   grace_period
   past_due
+  blocked
   cancelled
   expired
   suspended
@@ -131,6 +132,7 @@ model Company {
   usageEvents        UsageEvent[]
   onboarding         OnboardingProgress[]
   subscriptionEvents SubscriptionEvent[]
+  paymentTransactions SubscriptionPaymentTransaction[]
   auditLogs          AuditLog[]
   sessions           AppSession[]
 
@@ -691,6 +693,7 @@ model SubscriptionPlan {
 
   features      PlanFeature[]
   subscriptions CompanySubscription[]
+  paymentTransactions SubscriptionPaymentTransaction[]
 
   @@map("subscription_plans")
 }
@@ -734,9 +737,39 @@ model CompanySubscription {
   company Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   plan    SubscriptionPlan?   @relation(fields: [planId], references: [id], onDelete: SetNull)
   events  SubscriptionEvent[]
+  paymentTransactions SubscriptionPaymentTransaction[]
 
   @@index([companyId, status, createdAt])
   @@map("company_subscriptions")
+}
+
+model SubscriptionPaymentTransaction {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId             String    @map("company_id") @db.Uuid
+  subscriptionId        String?   @map("subscription_id") @db.Uuid
+  planId                String?   @map("plan_id") @db.Uuid
+  provider              String
+  externalTransactionId String?   @map("external_transaction_id")
+  externalEventId       String?   @map("external_event_id")
+  status                String    @default("pending")
+  amountCents           Int       @default(0) @map("amount_cents")
+  checkoutUrl           String?   @map("checkout_url")
+  rawPayload            Json?     @map("raw_payload")
+  metadata              Json      @default("{}")
+  paidAt                DateTime? @map("paid_at") @db.Timestamptz(6)
+  failedAt              DateTime? @map("failed_at") @db.Timestamptz(6)
+  expiresAt             DateTime? @map("expires_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscription CompanySubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  plan         SubscriptionPlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([subscriptionId, createdAt])
+  @@index([provider, status, createdAt])
+  @@map("subscription_payment_transactions")
 }
 
 model CompanyFeatureOverride {

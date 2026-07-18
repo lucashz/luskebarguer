@@ -1,5 +1,7 @@
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:3000';
 
+await ensureDefaultStoreCanReceiveOrders();
+
 const payloads = [
   {
     name: 'POST /api/orders rejeita id de item malformado',
@@ -26,7 +28,7 @@ const payloads = [
         ]
       })
     },
-    allowedStatuses: [400, 401, 404, 422, 423]
+    allowedStatuses: [400, 401, 403, 404, 422, 423]
   },
   {
     name: 'POST /api/coupons/preview rejeita id de item malformado',
@@ -78,4 +80,73 @@ for (const test of payloads) {
 
 if (failures) {
   process.exitCode = 1;
+}
+
+async function ensureDefaultStoreCanReceiveOrders() {
+  if (!process.env.DATABASE_URL) return;
+  let pg;
+  try {
+    pg = await import('pg');
+  } catch {
+    return;
+  }
+  const client = new pg.default.Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: shouldUseSsl(process.env.DATABASE_URL) ? { rejectUnauthorized: false } : false
+  });
+  try {
+    await client.connect();
+    await client.query(`
+      insert into public.company_subscriptions (
+        company_id,
+        plan_id,
+        status,
+        trial_ends_at,
+        current_period_starts_at,
+        current_period_ends_at,
+        next_renewal_at,
+        billing_provider,
+        metadata
+      )
+      select
+        s.company_id,
+        p.id,
+        'active',
+        now() + interval '14 days',
+        now(),
+        now() + interval '30 days',
+        now() + interval '30 days',
+        'test',
+        jsonb_build_object('source', 'sql_injection_smoke')
+      from public.stores s
+      join public.subscription_plans p on p.code in ('essential', 'professional', 'premium', 'trial')
+      join public.plan_features pf on pf.plan_id = p.id
+      join public.platform_features f on f.id = pf.feature_id and f.code = 'orders'
+      where s.slug = 'luske-burguer'
+        and coalesce(pf.is_enabled, true) = true
+        and not exists (
+          select 1
+          from public.company_subscriptions existing
+          where existing.company_id = s.company_id
+            and existing.status in ('active', 'trial', 'grace_period', 'payment_pending')
+        )
+      order by
+        case p.code
+          when 'essential' then 1
+          when 'professional' then 2
+          when 'premium' then 3
+          when 'trial' then 4
+          else 5
+        end
+      limit 1
+    `);
+  } catch (error) {
+    console.warn(`Aviso: não foi possível preparar plano para teste de segurança: ${error.message}`);
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+function shouldUseSsl(databaseUrl) {
+  return /sslmode=require/i.test(databaseUrl || '') || /supabase|neon|render|railway/i.test(databaseUrl || '');
 }
