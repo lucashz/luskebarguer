@@ -4370,15 +4370,20 @@ async function upsertAdminGuidedTour(admin, tourKey, data = {}) {
     metadata,
     updated_at: now
   };
-  if (existing) {
-    const [updated] = await dbRequest('PATCH', 'admin_tour_progress', { id: `eq.${existing.id}` }, payload, ['Prefer: return=representation']);
-    return publicAdminGuidedTour(updated || { ...existing, ...payload });
+  try {
+    if (existing) {
+      const [updated] = await dbRequest('PATCH', 'admin_tour_progress', { id: `eq.${existing.id}` }, payload, ['Prefer: return=representation']);
+      return publicAdminGuidedTour(updated || { ...existing, ...payload });
+    }
+    const [created] = await dbRequest('POST', 'admin_tour_progress', {}, {
+      ...payload,
+      created_at: now
+    }, ['Prefer: return=representation']);
+    return publicAdminGuidedTour(created);
+  } catch (error) {
+    if (isMissingTableError(error)) return publicAdminGuidedTour({ ...payload, created_at: now, updated_at: now });
+    throw error;
   }
-  const [created] = await dbRequest('POST', 'admin_tour_progress', {}, {
-    ...payload,
-    created_at: now
-  }, ['Prefer: return=representation']);
-  return publicAdminGuidedTour(created);
 }
 
 async function completeAdminGuidedTour(req, admin, tourKey) {
@@ -4442,24 +4447,40 @@ async function updateAdminGuidedTourAction(admin, tourKey, payload = {}) {
   const storeId = cleanUuid(admin.store_id, 'store_id');
   const existing = await findAdminGuidedTour(adminUserId, storeId, parsedTourKey);
   const now = new Date().toISOString();
-  if (existing) {
-    const [updated] = await dbRequest('PATCH', 'admin_tour_progress', { id: `eq.${existing.id}` }, {
+  try {
+    if (existing) {
+      const [updated] = await dbRequest('PATCH', 'admin_tour_progress', { id: `eq.${existing.id}` }, {
+        ...payload,
+        updated_at: now
+      }, ['Prefer: return=representation']);
+      return publicAdminGuidedTour(updated || { ...existing, ...payload, updated_at: now });
+    }
+    const [created] = await dbRequest('POST', 'admin_tour_progress', {}, {
+      admin_user_id: adminUserId,
+      store_id: storeId,
+      tour_key: parsedTourKey,
+      current_step: 'operation',
+      metadata: {},
       ...payload,
+      created_at: now,
       updated_at: now
     }, ['Prefer: return=representation']);
-    return publicAdminGuidedTour(updated || { ...existing, ...payload, updated_at: now });
+    return publicAdminGuidedTour(created);
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return publicAdminGuidedTour({
+        admin_user_id: adminUserId,
+        store_id: storeId,
+        tour_key: parsedTourKey,
+        current_step: 'operation',
+        metadata: {},
+        ...payload,
+        created_at: now,
+        updated_at: now
+      });
+    }
+    throw error;
   }
-  const [created] = await dbRequest('POST', 'admin_tour_progress', {}, {
-    admin_user_id: adminUserId,
-    store_id: storeId,
-    tour_key: parsedTourKey,
-    current_step: 'operation',
-    metadata: {},
-    ...payload,
-    created_at: now,
-    updated_at: now
-  }, ['Prefer: return=representation']);
-  return publicAdminGuidedTour(created);
 }
 
 async function findAdminGuidedTour(adminUserId, storeId, tourKey) {
@@ -4473,9 +4494,7 @@ async function findAdminGuidedTour(adminUserId, storeId, tourKey) {
     });
     return existing || null;
   } catch (error) {
-    if (isMissingTableError(error)) {
-      throw httpError(500, 'Tabela do tour guiado não encontrada. Execute as migrations antes de salvar o progresso.');
-    }
+    if (isMissingTableError(error)) return null;
     throw error;
   }
 }

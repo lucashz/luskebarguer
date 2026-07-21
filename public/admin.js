@@ -832,8 +832,23 @@ async function loadAdminData() {
     await loadSummary();
     await loadAdminTabData(state.activeAdminTab);
   } catch (error) {
+    if (error.commercialStatus) {
+      await handleCommercialBlockOnLoad(error).catch(() => {});
+      return;
+    }
     toast(error.message || 'Não foi possível atualizar os dados do painel.');
   }
+}
+
+async function handleCommercialBlockOnLoad(error = {}) {
+  const status = error.commercialStatus || 'blocked';
+  showCommercialBlocker({
+    status,
+    message: error.message || 'Regularize a assinatura para continuar usando o painel.'
+  }, { switchToPlan: true });
+  await loadPlanData({ force: true, allowDuringBlock: true });
+  renderPermissionedNavigation();
+  activateAdminTab('plan');
 }
 
 async function loadSummary(options = {}) {
@@ -7191,6 +7206,7 @@ function firstAllowedAdminTab() {
 }
 
 function canAccessTab(tab) {
+  if (commercialStatusBlocksOperation(state.commercialBlock?.status) && !['plan', 'support', 'account'].includes(tab)) return false;
   if (tab === 'account' || tab === 'support') return true;
   if (!hasRoleAccessToTab(tab)) return false;
   return isTabAvailableInPlan(tab);
