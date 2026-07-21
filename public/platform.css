@@ -1268,7 +1268,7 @@ body.platform-redesign [hidden] {
   height: calc(100vh - 101px);
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+  grid-template-columns: clamp(340px, 22vw, 410px) minmax(0, 1fr);
   gap: 0;
   padding: 0;
   border: 0;
@@ -1291,10 +1291,10 @@ body.platform-redesign [hidden] {
 .platform-redesign .support-filter-card {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
-  gap: 10px 12px;
-  padding: 14px 24px;
+  gap: 10px;
+  padding: 12px 18px;
   border: 0;
   border-radius: 0;
   border-bottom: 1px solid var(--pf-border);
@@ -1367,7 +1367,7 @@ body.platform-redesign [hidden] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 18px;
   border-bottom: 1px solid var(--pf-border);
   color: #64748b;
   font-size: 11px;
@@ -1383,7 +1383,7 @@ body.platform-redesign [hidden] {
   grid-template-columns: 28px minmax(0, 1fr) 8px;
   gap: 11px;
   align-items: start;
-  padding: 14px 24px;
+  padding: 14px 18px;
   border: 0;
   border-left: 2px solid transparent;
   border-bottom: 1px solid var(--pf-border);
@@ -1543,7 +1543,7 @@ body.platform-redesign [hidden] {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 18vw, 350px);
   grid-template-rows: minmax(0, 1fr);
   border: 0;
   border-radius: 0;
@@ -1561,12 +1561,12 @@ body.platform-redesign [hidden] {
 }
 
 .platform-redesign .platform-support-detail-header {
-  min-height: 104px;
+  min-height: 96px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 24px;
+  padding: 14px 22px;
   border-bottom: 1px solid var(--pf-border);
   background: #fff;
 }
@@ -1582,7 +1582,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .platform-support-detail-header h3 {
   margin: 0;
   color: var(--pf-text);
-  font-size: 19px;
+  font-size: 18px;
   line-height: 1.25;
 }
 
@@ -1697,12 +1697,12 @@ body.platform-redesign [hidden] {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 22px 28px;
+  padding: 18px 24px;
   overflow-y: auto;
 }
 
 .platform-redesign .platform-support-message {
-  max-width: min(720px, 78%);
+  max-width: min(760px, 82%);
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
@@ -1773,7 +1773,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .platform-support-message-form {
   position: relative;
   margin: 0;
-  padding: 10px 16px 8px;
+  padding: 10px 16px 10px;
   border: 0;
   border-top: 1px solid var(--pf-border);
   border-radius: 0;
@@ -1808,7 +1808,7 @@ body.platform-redesign [hidden] {
 
 .platform-redesign .support-template-toggle {
   position: absolute;
-  top: 13px;
+  top: 12px;
   right: 16px;
   width: 30px;
   height: 28px;
@@ -1842,7 +1842,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .support-template-popover {
   position: absolute;
   right: 16px;
-  bottom: calc(100% - 8px);
+  bottom: calc(100% + 8px);
   z-index: 8;
   width: min(320px, calc(100% - 32px));
   display: grid;
@@ -1890,8 +1890,8 @@ body.platform-redesign [hidden] {
 
 .platform-redesign .platform-support-message-form textarea {
   width: 100%;
-  min-height: 54px;
-  max-height: 96px;
+  min-height: 72px;
+  max-height: 140px;
   resize: vertical;
   padding: 11px 13px;
   border: 1px solid var(--pf-border-strong);
@@ -1906,7 +1906,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .platform-support-message-form .row-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
@@ -1942,6 +1942,7 @@ body.platform-redesign [hidden] {
 
 .platform-redesign .platform-support-message-form .primary-button,
 .platform-redesign .support-fast-actions .primary-button {
+  margin-left: auto;
   border-color: var(--pf-blue);
   background: var(--pf-blue);
   color: #fff;
@@ -1965,6 +1966,7 @@ body.platform-redesign [hidden] {
   border-radius: 0;
   background: #fff;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .platform-redesign .platform-support-context-head,
@@ -1972,7 +1974,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .platform-support-context-actions,
 .platform-redesign .platform-support-update {
   display: block;
-  padding: 16px;
+  padding: 14px 16px;
   border: 0;
   border-bottom: 1px solid var(--pf-border);
   border-radius: 0;
@@ -2002,7 +2004,7 @@ body.platform-redesign [hidden] {
 
 .platform-redesign .platform-support-context-box > div {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(82px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
   gap: 8px 12px;
 }
 

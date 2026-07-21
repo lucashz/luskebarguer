@@ -11872,6 +11872,22 @@ body.admin-tour-active {
 }
 
 @media (max-width: 820px) {
+  .menu-page {
+    overflow-x: hidden;
+  }
+
+  .menu-page .public-topbar,
+  .demo-notice,
+  .store-header,
+  .store-summary,
+  .ifood-layout,
+  .category-rail,
+  .menu-feed {
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
   .store-header {
     margin-top: 0;
     padding: 0;
@@ -11911,6 +11927,8 @@ body.admin-tour-active {
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: max-content;
+    min-width: 0;
+    max-width: 100%;
     overflow-x: auto;
   }
 
@@ -14039,6 +14057,10 @@ body.admin-tour-active {
   }
 
   .demo-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
     padding: 14px 16px;
   }
 
@@ -14065,7 +14087,7 @@ body.admin-tour-active {
     width: 72px;
   }
 }
-/* Ajustes mobile da loja demonstraÃ§Ã£o */
+/* Ajustes mobile da loja demonstração */
 .featured-strip {
   position: relative;
   scroll-padding-inline: 2px;
@@ -14094,8 +14116,23 @@ body.admin-tour-active {
   .demo-notice strong,
   .demo-notice span,
   .demo-notice a {
+    flex: 1 1 100%;
+    min-width: 0;
     max-width: 100%;
+    white-space: normal !important;
     overflow-wrap: anywhere;
+  }
+
+  .store-copy,
+  .store-copy p {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: break-word;
+  }
+
+  .demo-notice {
+    align-items: flex-start;
   }
 }
 /* Platform billing */

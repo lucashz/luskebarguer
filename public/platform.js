@@ -3579,7 +3579,7 @@ async function quickUpdateSupportTicket(ticketId, status) {
       body: JSON.stringify(payload)
     });
     state.selectedSupportTicketId = ticketId;
-    toast(status === 'resolved' ? 'Chamado resolvido.' : 'Chamado atualizado.');
+    toast(status === 'closed' ? 'Atendimento encerrado.' : status === 'resolved' ? 'Chamado resolvido.' : 'Chamado atualizado.');
     await loadSupport({ silent: true });
   } catch (error) {
     toast(error.message || 'Não foi possível atualizar o chamado.');
