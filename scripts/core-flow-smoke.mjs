@@ -65,6 +65,7 @@ try {
   companyId = signup.data.admin?.company_id || signup.data.company?.id || null;
   storeId = signup.data.admin?.store_id || signup.data.store?.id || null;
   assert(companyId && storeId, 'Cadastro nao retornou empresa/loja ativa.');
+  await setSmokeCompanyPlan(companyId, 'professional');
 
   await request('/api/admin/logout', { method: 'POST', cookie: adminCookie });
   const login = await request('/api/admin/login', {
@@ -85,7 +86,7 @@ try {
     }
   });
   const published = await request('/api/admin/onboarding/publish', { method: 'POST', cookie: adminCookie });
-  assert(published.data.progress?.is_completed === true, 'Onboarding nao foi publicado.');
+  assert(published.data.progress?.store_published === true || published.data.store?.onboarding_completed === true, 'Onboarding nao foi publicado.');
   assert(published.data.store?.is_open === true, 'Loja nao ficou aberta apos publicar onboarding.');
 
   const categoryCreated = await request('/api/categories', {
@@ -164,7 +165,7 @@ try {
   const checkout = await request('/api/admin/billing/checkout', {
     method: 'POST',
     cookie: adminCookie,
-    body: { plan_code: 'professional' }
+    body: { plan_code: 'premium' }
   });
   assert(checkout.data.subscription?.id, 'Checkout/ativacao de plano nao retornou assinatura.');
   const webhook = await request('/api/billing/webhook?provider=manual', {
@@ -172,7 +173,7 @@ try {
     body: {
       eventId: `smoke-billing-${suffix}`,
       status: 'paid',
-      metadata: { companyId, planCode: 'professional' }
+      metadata: { companyId, planCode: 'premium' }
     }
   });
   assert(webhook.data.ok === true, 'Webhook de billing nao retornou ok.');
@@ -284,6 +285,23 @@ async function request(path, options = {}) {
     throw new Error(`${options.method || 'GET'} ${path}: ${data.error || response.statusText}`);
   }
   return { status: response.status, data, cookie };
+}
+
+async function setSmokeCompanyPlan(targetCompanyId, planCode) {
+  const plan = await client.query('select id from public.subscription_plans where code = $1 limit 1', [planCode]);
+  assert(plan.rows[0]?.id, `Plano ${planCode} nao encontrado para o smoke.`);
+  await client.query(`
+    update public.company_subscriptions
+       set plan_id = $2,
+           status = 'active',
+           trial_ends_at = null,
+           current_period_starts_at = now(),
+           current_period_ends_at = now() + interval '30 days',
+           next_renewal_at = now() + interval '30 days',
+           metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('source', 'core_flow_smoke')
+     where company_id = $1
+  `, [targetCompanyId, plan.rows[0].id]);
+  await client.query(`update public.companies set status = 'active' where id = $1`, [targetCompanyId]);
 }
 
 function firstRow(data) {

@@ -1,6 +1,5 @@
-﻿const planContainers = [
-  document.querySelector('#portalPlans'),
-  document.querySelector('#signupPlanOptions')
+const planContainers = [
+  document.querySelector('#portalPlans')
 ].filter(Boolean);
 const signupForm = document.querySelector('#signupForm');
 const signupProgress = document.querySelector('#signupProgress');
@@ -89,7 +88,6 @@ function markVisibleSignupStep() {
 function updateSignupProgressState() {
   if (!signupProgress) return;
   const completed = {
-    plan: Boolean(signupForm.querySelector('input[name="plan_code"]:checked')),
     owner: ['owner_name', 'owner_phone', 'owner_email', 'password', 'confirm_password']
       .every((name) => String(signupForm.elements[name]?.value || '').trim()),
     business: ['business_name', 'business_type']
@@ -190,7 +188,7 @@ async function submitSignup(event) {
   await validateSlug();
   const form = new FormData(signupForm);
   const payload = {
-    plan_code: form.get('plan_code') || 'essential',
+    plan_code: 'trial',
     accept_terms: form.get('accept_terms') === 'on',
     marketing_opt_in: form.get('marketing_opt_in') === 'on',
     owner: {
@@ -367,23 +365,10 @@ function roleLabel(role) {
   })[role] || 'equipe';
 }
 
-function renderPlan(plan, index) {
+function renderPlan(plan) {
   const price = Number(plan.monthly_price || 0);
-  const params = new URLSearchParams(location.search);
-  const selected = params.get('plan') || '';
-  const checked = selected ? selected === plan.code : index === 0;
   const features = portalPlanHighlights(plan).map((feature) => `<li>${escapeHtml(feature)}</li>`).join('');
   const isTrial = isTrialPlan(plan);
-  if (document.querySelector('#signupPlanOptions')) {
-    return `
-      <label class="signup-plan-card">
-        <input type="radio" name="plan_code" value="${escapeAttribute(plan.code)}"${checked ? ' checked' : ''}>
-        <strong>${escapeHtml(plan.name)}</strong>
-        <span>${price > 0 ? formatMoney(price) + '/mês' : 'Teste grátis'}</span>
-        <small>${escapeHtml(plan.description || '')}</small>
-      </label>
-    `;
-  }
   return `
     <article class="portal-plan-card">
       <p class="eyebrow">${isTrial ? 'Teste grátis' : /professional|profissional/i.test(`${plan.code} ${plan.name}`) ? 'Mais escolhido' : 'Plano'}</p>
@@ -391,7 +376,7 @@ function renderPlan(plan, index) {
       <strong>${price > 0 ? formatMoney(price) + '/mês' : 'R$ 0 no teste'}</strong>
       <p>${escapeHtml(plan.description || '')}</p>
       <ul>${features}</ul>
-      <a class="portal-button small" href="/cadastro?plan=${encodeURIComponent(plan.code)}">Começar teste</a>
+      <a class="portal-button small" href="/cadastro">Começar teste</a>
     </article>
   `;
 }
@@ -453,4 +438,3 @@ function cssEscape(value) {
   if (window.CSS?.escape) return window.CSS.escape(value);
   return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
 }
-

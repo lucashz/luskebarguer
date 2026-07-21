@@ -851,6 +851,24 @@ model OnboardingProgress {
   @@map("onboarding_progress")
 }
 
+model AdminGuidedTourProgress {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUserId String    @map("admin_user_id") @db.Uuid
+  storeId     String    @map("store_id") @db.Uuid
+  tourKey     String    @map("tour_key")
+  currentStep String    @default("operation") @map("current_step")
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  skippedAt   DateTime? @map("skipped_at") @db.Timestamptz(6)
+  metadata    Json      @default("{}")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([adminUserId, storeId, tourKey])
+  @@index([storeId, tourKey])
+  @@index([adminUserId, tourKey])
+  @@map("admin_tour_progress")
+}
+
 model SubscriptionEvent {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId      String   @map("company_id") @db.Uuid

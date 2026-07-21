@@ -42,11 +42,13 @@ try {
   expect('trial', 'menu_categories', true, 3);
   expect('trial', 'orders', true, 30);
   expect('trial', 'admin_users', true, 1);
+  expect('trial', 'manual_whatsapp', true, null);
 
   expect('essential', 'digital_menu', true, 25);
   expect('essential', 'menu_categories', true, 5);
   expect('essential', 'orders', true, 150);
   expect('essential', 'admin_users', true, 1);
+  expect('essential', 'manual_whatsapp', true, null);
   expect('essential', 'promotions', false, null);
   expect('essential', 'custom_domain', false, null);
 

@@ -44,6 +44,15 @@
   onboardingStep: 0,
   onboardingCategoryId: null,
   onboardingOverview: null,
+  adminTour: {
+    progress: null,
+    active: false,
+    index: 0,
+    autoChecked: false,
+    loading: false,
+    fromOnboarding: false,
+    elements: null
+  },
   activeAdminTab: 'operation',
   loadedAdminTabs: new Set(),
   loadedAdminTabAt: new Map(),
@@ -52,6 +61,7 @@
   supportStatusFilter: 'all',
   supportSearch: '',
   openSupportTicketIds: new Set(),
+  selectedSupportTicketId: null,
   supportTickets: [],
   commercialBlock: null,
   checkoutPlanCode: ''
@@ -60,7 +70,66 @@
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
 const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
 const ONBOARDING_SKIPPED_KEY = 'admin_onboarding_skipped_v1';
-const ONBOARDING_STEP_LABELS = ['Boas-vindas', 'Loja', 'Operação', 'Pagamentos', 'Entrega', 'Categoria', 'Produto', 'Aparência', 'Treinamento', 'Publicar'];
+const ONBOARDING_STEP_LABELS = ['Boas-vindas', 'Loja', 'Operação', 'Pagamentos', 'Entrega', 'Categoria', 'Produto', 'Aparência', 'Tour guiado', 'Publicar'];
+const ADMIN_PANEL_TOUR_KEY = 'admin-panel';
+const ADMIN_TOUR_STEPS = [
+  {
+    key: 'operation',
+    tab: 'operation',
+    target: '[data-admin-section="operation"]',
+    title: 'Operação',
+    text: 'Aqui você abre ou fecha a loja, acompanha o resumo do dia e acessa as ações rápidas da operação.'
+  },
+  {
+    key: 'orders',
+    tab: 'orders',
+    target: '#adminOrders',
+    title: 'Pedidos',
+    text: 'Os pedidos aparecem separados por status. Abra um card para ver detalhes, adicionais, entrega, pagamento e avançar o preparo.'
+  },
+  {
+    key: 'menu',
+    tab: 'menu',
+    target: '[data-admin-section="menu"]',
+    title: 'Cardápio',
+    text: 'Gerencie categorias, produtos, fotos, preços, adicionais e disponibilidade sem precisar refazer o cardápio.'
+  },
+  {
+    key: 'tables',
+    tab: 'tables',
+    target: '[data-admin-section="tables"]',
+    title: 'Mesas e comandas',
+    text: 'Crie mesas, gere QR Codes e acompanhe comandas do salão vinculadas à loja atual.'
+  },
+  {
+    key: 'reports',
+    tab: 'reports',
+    target: '[data-admin-section="reports"]',
+    title: 'Relatórios',
+    text: 'Veja vendas, horários de pico, formas de pagamento, produtos mais vendidos e fechamento do período.'
+  },
+  {
+    key: 'store',
+    tab: 'store',
+    target: '#storeForm',
+    title: 'Configurações da Loja',
+    text: 'Configure WhatsApp dos pedidos, entrega, pagamentos, horários, imagens e tema do cardápio público.'
+  },
+  {
+    key: 'plan',
+    tab: 'plan',
+    target: '[data-admin-section="plan"]',
+    title: 'Plano',
+    text: 'Confira limites, recursos disponíveis, histórico de cobrança e opções de upgrade quando precisar crescer.'
+  },
+  {
+    key: 'support',
+    tab: 'support',
+    target: '[data-admin-section="support"]',
+    title: 'Suporte',
+    text: 'Abra chamados, acompanhe respostas e mantenha o histórico de atendimento da sua loja organizado.'
+  }
+];
 const PLAN_FEATURE_CODES = [
   'orders',
   'digital_menu',
@@ -77,13 +146,13 @@ const PLAN_FEATURE_CODES = [
   'custom_domain'
 ];
 const THEME_DEFAULTS = {
-  primaryColor: '#f97316',
-  secondaryColor: '#111827',
-  backgroundColor: '#fff7ed',
-  buttonColor: '#f97316',
+  primaryColor: '#d71920',
+  secondaryColor: '#18181b',
+  backgroundColor: '#f5f5f4',
+  buttonColor: '#d71920',
   buttonTextColor: '#ffffff',
-  selectionColor: '#ffedd5',
-  selectionTextColor: '#9a3412'
+  selectionColor: '#d71920',
+  selectionTextColor: '#ffffff'
 };
 const THEME_PRESETS = {
   classic: {
@@ -132,6 +201,7 @@ const THEME_PRESETS = {
     selectionTextColor: '#ffffff'
   }
 };
+const THEME_SETTING_KEYS = Object.keys(THEME_DEFAULTS);
 
 const ADMIN_ROLE_DEFINITIONS = {
   admin: {
@@ -398,6 +468,12 @@ els.onboardingResumeButton?.addEventListener('click', reopenOnboarding);
 els.onboardingPublishButton?.addEventListener('click', publishOnboardingFromWizard);
 document.querySelectorAll('[data-reopen-onboarding]').forEach((button) => {
   button.addEventListener('click', reopenOnboarding);
+});
+document.querySelectorAll('[data-onboarding-theme-preset]').forEach((button) => {
+  button.addEventListener('click', () => selectOnboardingThemePreset(button.dataset.onboardingThemePreset));
+});
+document.querySelectorAll('[data-start-admin-tour]').forEach((button) => {
+  button.addEventListener('click', () => startAdminGuidedTour({ force: true }));
 });
 els.startOperationButton?.addEventListener('click', startOperation);
 els.stopOperationButton?.addEventListener('click', stopOperation);
@@ -744,6 +820,11 @@ function resetLoadedStoreState() {
   state.editingProductId = null;
   state.editingPromotionId = null;
   state.selectedTableId = null;
+  state.adminTour.progress = null;
+  state.adminTour.active = false;
+  state.adminTour.index = 0;
+  state.adminTour.autoChecked = false;
+  state.adminTour.fromOnboarding = false;
 }
 
 async function loadAdminData() {
@@ -1559,6 +1640,7 @@ function renderOnboarding() {
   if (completed) {
     localStorage.setItem(onboardingStorageKey(ONBOARDING_COMPLETED_KEY), 'true');
     localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
+    scheduleAdminGuidedTourAutostart();
   }
   els.onboardingPanel.hidden = completed || skipped;
   if (els.onboardingReminder) els.onboardingReminder.hidden = completed || !skipped;
@@ -1603,10 +1685,29 @@ function fillOnboardingDefaults() {
   if (appearanceForm) {
     setValue(appearanceForm.elements.logo_url, store.logo_url);
     setValue(appearanceForm.elements.cover_url, store.cover_url);
-    setValue(appearanceForm.elements.theme_primaryColor, store.theme_settings?.primaryColor || THEME_PRESETS.classic.primaryColor);
-    setValue(appearanceForm.elements.theme_buttonColor, store.theme_settings?.buttonColor || THEME_PRESETS.classic.buttonColor);
-    setValue(appearanceForm.elements.theme_backgroundColor, store.theme_settings?.backgroundColor || THEME_PRESETS.classic.backgroundColor);
+    selectOnboardingThemePreset(themePresetKeyFromSettings(store.theme_settings), { silent: true });
   }
+}
+
+function selectOnboardingThemePreset(presetKey, options = {}) {
+  const key = THEME_PRESETS[presetKey] ? presetKey : 'classic';
+  const appearanceForm = document.querySelector('[data-onboarding-step="7"]');
+  if (appearanceForm?.elements.theme_preset) appearanceForm.elements.theme_preset.value = key;
+  document.querySelectorAll('[data-onboarding-theme-preset]').forEach((button) => {
+    const selected = button.dataset.onboardingThemePreset === key;
+    button.classList.toggle('is-selected', selected);
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
+  if (!options.silent) toast('Tema selecionado. Ele será salvo ao continuar.');
+}
+
+function themePresetKeyFromSettings(settings = {}) {
+  const normalized = { ...THEME_DEFAULTS, ...(settings || {}) };
+  const exactMatch = Object.entries(THEME_PRESETS).find(([, preset]) => (
+    THEME_SETTING_KEYS.every((key) => String(normalized[key] || '').toLowerCase() === String(preset[key] || '').toLowerCase())
+  ));
+  if (exactMatch) return exactMatch[0];
+  return 'classic';
 }
 
 function showOnboardingStep(step) {
@@ -1727,10 +1828,10 @@ async function saveOnboardingStep(step, data) {
   if (step === 1) {
     const name = cleanText(data.get('name'));
     const slug = publicSlug(data.get('slug') || name);
-    const whatsapp = digits(data.get('whatsapp_number'));
+    const whatsapp = normalizeBrazilLocalWhatsapp(data.get('whatsapp_number'));
     if (!name) throw new Error('Informe o nome da loja.');
     if (!slug || slug.length < 3) throw new Error('Informe um link público válido.');
-    if (!whatsapp || whatsapp.length < 12) throw new Error('Informe o WhatsApp com DDI e DDD.');
+    if (!isBrazilLocalWhatsapp(whatsapp)) throw new Error('Informe o WhatsApp com DDD + telefone, sem +55. Ex: 55936191201.');
     await validateOnboardingSlug(slug);
     await updateOnboardingStore({
       name,
@@ -1787,9 +1888,15 @@ async function saveOnboardingStep(step, data) {
     const categoryId = data.get('category_id') || state.onboardingCategoryId || state.categories[0]?.id;
     const name = cleanText(data.get('name'));
     const price = Number.parseFloat(String(data.get('price') || '').replace(',', '.'));
+    const imageFile = data.get('image_file');
+    let imageUrl = '';
     if (!categoryId) throw new Error('Crie uma categoria antes do produto.');
     if (!name) throw new Error('Informe o nome do produto inicial.');
     if (!Number.isFinite(price) || price <= 0) throw new Error('Informe um preço válido para o produto.');
+    if (imageFile instanceof File && imageFile.size > 0) {
+      const uploaded = await uploadImage(imageFile, 'product');
+      imageUrl = uploaded.url;
+    }
     await request('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1798,6 +1905,7 @@ async function saveOnboardingStep(step, data) {
         name,
         description: data.get('description'),
         price,
+        image_url: imageUrl,
         is_featured: true,
         is_available: true,
         sort_order: 0,
@@ -1807,15 +1915,24 @@ async function saveOnboardingStep(step, data) {
     await loadMenuData({ force: true });
   }
   if (step === 7) {
+    const presetKey = THEME_PRESETS[data.get('theme_preset')] ? data.get('theme_preset') : 'classic';
+    const logoFile = data.get('logo_file');
+    const coverFile = data.get('cover_file');
+    let logoUrl = data.get('logo_url') || state.store?.logo_url || '';
+    let coverUrl = data.get('cover_url') || state.store?.cover_url || '';
+    if (logoFile instanceof File && logoFile.size > 0) {
+      const uploaded = await uploadImage(logoFile, 'logo');
+      logoUrl = uploaded.url;
+    }
+    if (coverFile instanceof File && coverFile.size > 0) {
+      const uploaded = await uploadImage(coverFile, 'cover');
+      coverUrl = uploaded.url;
+    }
     await updateOnboardingStore({
-      logo_url: data.get('logo_url'),
-      cover_url: data.get('cover_url'),
+      logo_url: logoUrl,
+      cover_url: coverUrl,
       theme_settings: {
-        ...(state.store?.theme_settings || {}),
-        primaryColor: data.get('theme_primaryColor') || THEME_PRESETS.classic.primaryColor,
-        buttonColor: data.get('theme_buttonColor') || THEME_PRESETS.classic.buttonColor,
-        backgroundColor: data.get('theme_backgroundColor') || THEME_PRESETS.classic.backgroundColor,
-        buttonTextColor: '#ffffff'
+        ...THEME_PRESETS[presetKey]
       }
     });
   }
@@ -1886,12 +2003,35 @@ function skipOnboardingForNow() {
   toast('Onboarding pausado. Você pode reabrir quando quiser.');
 }
 
-function reopenOnboarding() {
-  localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
-  if (els.onboardingPanel) els.onboardingPanel.hidden = false;
-  if (els.onboardingReminder) els.onboardingReminder.hidden = true;
-  renderOnboarding();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+async function reopenOnboarding(event) {
+  const button = event?.currentTarget || null;
+  const previousText = button?.textContent || '';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Reabrindo...';
+    }
+    state.onboardingOverview = await request('/api/admin/onboarding/reopen', { method: 'POST' });
+    state.onboardingStep = 0;
+    state.adminTour.progress = null;
+    state.adminTour.autoChecked = false;
+    state.adminTour.fromOnboarding = false;
+    localStorage.removeItem(onboardingStorageKey(ONBOARDING_COMPLETED_KEY));
+    localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
+    await loadStoreData({ force: true });
+    if (els.onboardingPanel) els.onboardingPanel.hidden = false;
+    if (els.onboardingReminder) els.onboardingReminder.hidden = true;
+    renderOnboarding();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    toast('Onboarding reaberto.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível reabrir o onboarding.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 async function publishOnboardingFromWizard() {
@@ -1908,7 +2048,8 @@ async function publishOnboardingFromWizard() {
     localStorage.removeItem(onboardingStorageKey(ONBOARDING_SKIPPED_KEY));
     await loadStoreData({ force: true });
     activateAdminTab('operation');
-    toast('Loja publicada e pronta para receber pedidos.');
+    toast('Loja publicada. Agora vamos conhecer o painel.');
+    await startAdminGuidedTour({ force: true, fromOnboarding: true });
   } catch (error) {
     setOnboardingStatus(error.message || 'Revise os itens pendentes antes de publicar.');
     toast(error.message || 'Não foi possível publicar a loja.');
@@ -1920,6 +2061,257 @@ async function publishOnboardingFromWizard() {
 function onboardingStorageKey(baseKey) {
   const storeKey = state.store?.store_id || state.store?.id || state.admin?.store_id || state.store?.slug || 'global';
   return `${baseKey}:${storeKey}`;
+}
+
+function scheduleAdminGuidedTourAutostart() {
+  if (state.adminTour.autoChecked || state.adminTour.active || !state.admin || !state.store) return;
+  state.adminTour.autoChecked = true;
+  window.setTimeout(() => {
+    startAdminGuidedTour({ force: false }).catch(() => {});
+  }, 650);
+}
+
+async function startAdminGuidedTour(options = {}) {
+  const force = options.force === true;
+  const fromOnboarding = options.fromOnboarding === true;
+  if (!state.admin || !state.store) {
+    if (force) toast('Entre no painel de uma loja para iniciar o tour.');
+    return;
+  }
+  if (!force && !isAdminStoreOnboardingCompleted()) return;
+  if (state.adminTour.loading) return;
+  state.adminTour.loading = true;
+  try {
+    const progress = await loadAdminGuidedTourProgress();
+    state.adminTour.progress = progress;
+    if (!force && (progress?.completed_at || progress?.skipped_at)) return;
+    const steps = availableAdminTourSteps();
+    if (!steps.length) {
+      if (force) toast('Nenhuma área disponível para iniciar o tour nesta conta.');
+      return;
+    }
+    ensureAdminTourElements();
+    state.adminTour.active = true;
+    state.adminTour.fromOnboarding = fromOnboarding;
+    document.body.classList.add('admin-tour-active');
+    const initialIndex = force ? 0 : Math.max(0, steps.findIndex((step) => step.key === progress?.current_step));
+    await showAdminTourStep(initialIndex >= 0 ? initialIndex : 0, { save: true });
+  } catch (error) {
+    if (force) toast(error.message || 'Não foi possível iniciar o tour.');
+  } finally {
+    state.adminTour.loading = false;
+  }
+}
+
+function isAdminStoreOnboardingCompleted() {
+  return state.store?.onboarding_completed === true || state.onboardingOverview?.progress?.is_completed === true;
+}
+
+async function loadAdminGuidedTourProgress() {
+  if (state.adminTour.progress) return state.adminTour.progress;
+  try {
+    const data = await request('/api/admin/tours');
+    const progress = (data.tours || []).find((tour) => tour.tour_key === ADMIN_PANEL_TOUR_KEY) || null;
+    state.adminTour.progress = progress;
+    return progress;
+  } catch (error) {
+    state.adminTour.progress = null;
+    return null;
+  }
+}
+
+function availableAdminTourSteps() {
+  return ADMIN_TOUR_STEPS.filter((step) => canAccessTab(step.tab));
+}
+
+function ensureAdminTourElements() {
+  if (state.adminTour.elements) return state.adminTour.elements;
+  const root = document.createElement('div');
+  root.className = 'admin-tour';
+  root.hidden = true;
+  root.innerHTML = `
+    <div class="admin-tour-backdrop" data-admin-tour-close></div>
+    <div class="admin-tour-highlight" aria-hidden="true"></div>
+    <section class="admin-tour-card" role="dialog" aria-modal="true" aria-labelledby="adminTourTitle">
+      <span class="admin-tour-progress"></span>
+      <h2 id="adminTourTitle"></h2>
+      <p></p>
+      <div class="admin-tour-actions">
+        <button class="ghost-button compact" type="button" data-admin-tour-prev>Voltar</button>
+        <button class="ghost-button compact" type="button" data-admin-tour-skip>Pular</button>
+        <button class="primary-button compact" type="button" data-admin-tour-next>Próximo</button>
+      </div>
+    </section>
+  `;
+  document.body.appendChild(root);
+  const elements = {
+    root,
+    highlight: root.querySelector('.admin-tour-highlight'),
+    card: root.querySelector('.admin-tour-card'),
+    progress: root.querySelector('.admin-tour-progress'),
+    title: root.querySelector('#adminTourTitle'),
+    text: root.querySelector('p'),
+    prev: root.querySelector('[data-admin-tour-prev]'),
+    skip: root.querySelector('[data-admin-tour-skip]'),
+    next: root.querySelector('[data-admin-tour-next]')
+  };
+  elements.prev?.addEventListener('click', () => previousAdminTourStep());
+  elements.skip?.addEventListener('click', () => skipAdminGuidedTour());
+  elements.next?.addEventListener('click', () => nextAdminTourStep());
+  window.addEventListener('resize', positionAdminTour);
+  window.addEventListener('scroll', positionAdminTour, { passive: true });
+  document.addEventListener('keydown', handleAdminTourKeydown);
+  state.adminTour.elements = elements;
+  return elements;
+}
+
+async function showAdminTourStep(index, options = {}) {
+  if (!state.adminTour.active) return;
+  const steps = availableAdminTourSteps();
+  if (!steps.length) return closeAdminGuidedTour();
+  const nextIndex = Math.max(0, Math.min(index, steps.length - 1));
+  const step = steps[nextIndex];
+  state.adminTour.index = nextIndex;
+  if (state.activeAdminTab !== step.tab) {
+    activateAdminTab(step.tab);
+  }
+  await waitForTourPaint();
+  const elements = ensureAdminTourElements();
+  elements.root.hidden = false;
+  elements.progress.textContent = `Passo ${nextIndex + 1} de ${steps.length}`;
+  elements.title.textContent = step.title;
+  elements.text.textContent = step.text;
+  elements.prev.disabled = nextIndex === 0;
+  elements.next.textContent = nextIndex === steps.length - 1 ? 'Concluir' : 'Próximo';
+  positionAdminTour();
+  if (options.save !== false) {
+    saveAdminTourStep(step.key).catch(() => {});
+  }
+}
+
+async function waitForTourPaint() {
+  await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  await new Promise((resolve) => window.setTimeout(resolve, 90));
+}
+
+function positionAdminTour() {
+  if (!state.adminTour.active || !state.adminTour.elements) return;
+  const steps = availableAdminTourSteps();
+  const step = steps[state.adminTour.index];
+  const elements = state.adminTour.elements;
+  const target = step?.target ? document.querySelector(step.target) : null;
+  const rect = target?.getBoundingClientRect();
+  const isMobile = window.matchMedia('(max-width: 760px)').matches;
+  if (!rect || rect.width <= 0 || rect.height <= 0) {
+    elements.highlight.hidden = true;
+  } else {
+    const padding = isMobile ? 6 : 10;
+    elements.highlight.hidden = false;
+    elements.highlight.style.top = `${Math.max(8, rect.top - padding)}px`;
+    elements.highlight.style.left = `${Math.max(8, rect.left - padding)}px`;
+    elements.highlight.style.width = `${Math.min(window.innerWidth - 16, rect.width + padding * 2)}px`;
+    elements.highlight.style.height = `${Math.min(window.innerHeight - 16, rect.height + padding * 2)}px`;
+  }
+  if (isMobile) {
+    elements.card.removeAttribute('style');
+    return;
+  }
+  const cardRect = elements.card.getBoundingClientRect();
+  const margin = 18;
+  const targetRect = rect || { top: 120, left: window.innerWidth / 2, right: window.innerWidth / 2, bottom: 120, width: 0, height: 0 };
+  let left = targetRect.right + margin;
+  if (left + cardRect.width > window.innerWidth - margin) left = targetRect.left - cardRect.width - margin;
+  if (left < margin) left = Math.min(window.innerWidth - cardRect.width - margin, Math.max(margin, targetRect.left));
+  let top = targetRect.top + Math.min(36, Math.max(0, targetRect.height / 4));
+  if (top + cardRect.height > window.innerHeight - margin) top = window.innerHeight - cardRect.height - margin;
+  if (top < margin) top = margin;
+  elements.card.style.left = `${Math.round(left)}px`;
+  elements.card.style.top = `${Math.round(top)}px`;
+}
+
+async function previousAdminTourStep() {
+  await showAdminTourStep(state.adminTour.index - 1, { save: true });
+}
+
+async function nextAdminTourStep() {
+  const steps = availableAdminTourSteps();
+  if (state.adminTour.index >= steps.length - 1) {
+    await completeAdminGuidedTour();
+    return;
+  }
+  await showAdminTourStep(state.adminTour.index + 1, { save: true });
+}
+
+async function saveAdminTourStep(stepKey) {
+  await request(`/api/admin/tours/${encodeURIComponent(ADMIN_PANEL_TOUR_KEY)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_step: stepKey })
+  });
+}
+
+async function completeAdminGuidedTour() {
+  setAdminTourButtonsDisabled(true);
+  try {
+    const data = await request(`/api/admin/tours/${encodeURIComponent(ADMIN_PANEL_TOUR_KEY)}/complete`, { method: 'POST' });
+    const fromOnboarding = state.adminTour.fromOnboarding;
+    state.adminTour.progress = data.tour || null;
+    closeAdminGuidedTour();
+    toast(fromOnboarding
+      ? 'Onboarding concluído. Sua loja está publicada e pronta para operar.'
+      : 'Tour concluído. Você pode rever pela aba Conta.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível concluir o tour.');
+  } finally {
+    setAdminTourButtonsDisabled(false);
+  }
+}
+
+async function skipAdminGuidedTour() {
+  setAdminTourButtonsDisabled(true);
+  try {
+    const data = await request(`/api/admin/tours/${encodeURIComponent(ADMIN_PANEL_TOUR_KEY)}/skip`, { method: 'POST' });
+    const fromOnboarding = state.adminTour.fromOnboarding;
+    state.adminTour.progress = data.tour || null;
+    closeAdminGuidedTour();
+    toast(fromOnboarding
+      ? 'Tour pulado. A loja foi publicada e você pode rever o tour pela aba Conta.'
+      : 'Tour pulado. Você pode rever quando quiser.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível pular o tour.');
+  } finally {
+    setAdminTourButtonsDisabled(false);
+  }
+}
+
+function setAdminTourButtonsDisabled(disabled) {
+  const elements = state.adminTour.elements;
+  if (!elements) return;
+  [elements.prev, elements.skip, elements.next].forEach((button) => {
+    if (button) button.disabled = disabled;
+  });
+}
+
+function closeAdminGuidedTour() {
+  state.adminTour.active = false;
+  state.adminTour.fromOnboarding = false;
+  document.body.classList.remove('admin-tour-active');
+  if (state.adminTour.elements) {
+    state.adminTour.elements.root.hidden = true;
+  }
+}
+
+function handleAdminTourKeydown(event) {
+  if (!state.adminTour.active) return;
+  if (event.key === 'Escape') {
+    skipAdminGuidedTour().catch(() => closeAdminGuidedTour());
+  }
+  if (event.key === 'ArrowRight') {
+    nextAdminTourStep().catch(() => {});
+  }
+  if (event.key === 'ArrowLeft') {
+    previousAdminTourStep().catch(() => {});
+  }
 }
 
 function businessHoursEveryDay(open, close) {
@@ -2761,7 +3153,7 @@ function orderCard(order) {
           <button class="ghost-button compact print-order-button" type="button" data-print-order="${escapeAttribute(order.id)}" data-print-type="both">Imprimir ambas</button>
           <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
           <button class="ghost-button compact print-order-button" type="button" data-reprint-order="${escapeAttribute(order.id)}">Reimprimir</button>
-          ${canSendManualWhatsapp ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Reenviar WhatsApp</button>` : ''}
+          ${canSendManualWhatsapp ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">WhatsApp manual</button>` : ''}
           ${order.financial_status === 'paid' ? `<button class="danger-button compact" type="button" data-refund-order="${escapeAttribute(order.id)}">Estornar pagamento</button>` : ''}
         </div>
       </div>
@@ -2832,6 +3224,7 @@ function whatsappLogLabel(log = {}) {
     sent: 'enviado',
     failed: 'falhou',
     skipped: 'não enviado',
+    manual: 'aberto manualmente',
     pending: 'pendente'
   })[log.delivery_status] || 'registrado';
 }
@@ -2998,6 +3391,9 @@ async function notifyOrderStatus(order) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: order.status })
     });
+    if (result.log?.whatsapp_url) {
+      window.open(result.log.whatsapp_url, '_blank', 'noopener');
+    }
     toast(`WhatsApp: ${whatsappLogLabel(result.log)}.`);
     await refreshOrdersOnly({ skipNotifications: true, silent: true });
   } catch (error) {
@@ -4009,7 +4405,7 @@ function customerEditor(customer) {
 function customerOrderHistoryRow(order) {
   const createdAt = new Date(order.created_at).toLocaleString('pt-BR');
   const whatsappAction = canUsePlanFeature('manual_whatsapp')
-    ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">Avisar</button>`
+    ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">WhatsApp manual</button>`
     : '';
   return `
     <article class="customer-order-row status-${order.status}">
@@ -4114,47 +4510,110 @@ async function submitAdminSupportTicket(event) {
 function renderSupportTickets() {
   if (!els.adminSupportTicketList) return;
   const tickets = filteredSupportTickets();
-  els.adminSupportTicketList.innerHTML = tickets.length ? tickets.map((ticket) => {
-    const lastMessage = [...(ticket.messages || [])].pop();
-    const preview = supportMessagePreview(lastMessage);
-    return `
-      <details class="support-ticket-card priority-${escapeAttribute(ticket.priority)} status-${escapeAttribute(ticket.status)}" data-ticket-id="${escapeAttribute(ticket.id)}" ${state.openSupportTicketIds.has(ticket.id) ? 'open' : ''}>
-        <summary>
-          <div class="support-ticket-main">
-            <strong>${escapeHtml(ticket.subject)}</strong>
-            <small>${escapeHtml(ticket.category || 'Sem categoria')} · Aberto em ${formatDateTime(ticket.created_at)}${ticket.updated_at ? ` · Atualizado em ${formatDateTime(ticket.updated_at)}` : ''}</small>
-            <p>${escapeHtml(preview || 'Sem mensagens no chamado.')}</p>
-          </div>
-          <span class="pill ${supportPriorityClass(ticket.priority)}">${escapeHtml(priorityLabel(ticket.priority))}</span>
-          <span class="pill ${supportStatusClass(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
-          <span class="support-ticket-toggle">Ver conversa</span>
-        </summary>
-        <div class="support-ticket-body">
-          <div class="support-ticket-messages">
-            ${(ticket.messages || []).length ? ticket.messages.map((message) => renderAdminSupportMessage(message)).join('') : '<p class="empty-state">Sem mensagens.</p>'}
-          </div>
-          ${['resolved', 'closed'].includes(ticket.status) ? `
-            <p class="empty-state compact-empty-state">Este chamado está ${escapeHtml(ticketStatusLabel(ticket.status).toLowerCase())}.</p>
-          ` : `
-            <form class="support-ticket-reply-form" data-ticket-id="${escapeAttribute(ticket.id)}">
-              <label>Responder ao suporte<textarea name="message" rows="3" required placeholder="Escreva uma resposta para a equipe de suporte"></textarea></label>
-              <button class="primary-button compact" type="submit">Enviar resposta</button>
-            </form>
-          `}
+  if (!tickets.length) {
+    state.selectedSupportTicketId = null;
+    els.adminSupportTicketList.innerHTML = supportTicketsEmptyState();
+    els.adminSupportTicketList.querySelector('[data-focus-support-form]')?.addEventListener('click', () => {
+      els.adminSupportTicketForm?.querySelector('input[name="subject"]')?.focus();
+    });
+    return;
+  }
+  if (!tickets.some((ticket) => ticket.id === state.selectedSupportTicketId)) {
+    state.selectedSupportTicketId = tickets[0].id;
+  }
+  const selected = tickets.find((ticket) => ticket.id === state.selectedSupportTicketId) || tickets[0];
+  els.adminSupportTicketList.innerHTML = `
+    <div class="support-desk-layout">
+      <aside class="support-desk-queue" aria-label="Fila de chamados">
+        <div class="support-desk-queue-head">
+          <strong>Fila de atendimento</strong>
+          <span>${tickets.length} chamado${tickets.length === 1 ? '' : 's'}</span>
         </div>
-      </details>
-    `;
-  }).join('') : supportTicketsEmptyState();
-  els.adminSupportTicketList.querySelectorAll('.support-ticket-card').forEach((details) => {
-    details.addEventListener('toggle', () => {
-      if (details.open) state.openSupportTicketIds.add(details.dataset.ticketId);
-      else state.openSupportTicketIds.delete(details.dataset.ticketId);
+        <div class="support-desk-queue-list">
+          ${tickets.map((ticket) => renderSupportTicketQueueItem(ticket, selected.id)).join('')}
+        </div>
+      </aside>
+      ${renderSupportTicketDetail(selected)}
+    </div>
+  `;
+  els.adminSupportTicketList.querySelectorAll('[data-support-select]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.selectedSupportTicketId = button.dataset.supportSelect;
+      renderSupportTickets();
     });
   });
   els.adminSupportTicketList.querySelectorAll('.support-ticket-reply-form').forEach((form) => form.addEventListener('submit', submitAdminSupportReply));
-  els.adminSupportTicketList.querySelector('[data-focus-support-form]')?.addEventListener('click', () => {
-    els.adminSupportTicketForm?.querySelector('input[name="subject"]')?.focus();
+  els.adminSupportTicketList.querySelectorAll('[data-close-support-ticket]').forEach((button) => {
+    button.addEventListener('click', () => closeAdminSupportTicket(button.dataset.closeSupportTicket));
   });
+}
+
+function renderSupportTicketQueueItem(ticket, selectedId) {
+  const lastMessage = [...(ticket.messages || [])].pop();
+  const preview = supportMessagePreview(lastMessage);
+  const isSelected = ticket.id === selectedId;
+  const isClosed = ['resolved', 'closed'].includes(ticket.status);
+  return `
+    <button class="support-queue-item ${isSelected ? 'is-selected' : ''} ${isClosed ? 'is-closed' : ''}" type="button" data-support-select="${escapeAttribute(ticket.id)}" aria-pressed="${isSelected ? 'true' : 'false'}">
+      <span class="support-queue-title">
+        <strong>${escapeHtml(ticket.subject)}</strong>
+        <small>${escapeHtml(ticket.category || 'Sem categoria')}</small>
+      </span>
+      <span class="support-queue-preview">${escapeHtml(preview || 'Sem mensagem registrada.')}</span>
+      <span class="support-queue-footer">
+        <em class="${supportPriorityClass(ticket.priority)}">${escapeHtml(priorityLabel(ticket.priority))}</em>
+        <em class="${supportStatusClass(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</em>
+        <small>${formatDateTime(ticket.updated_at || ticket.last_message_at || ticket.created_at)}</small>
+      </span>
+    </button>
+  `;
+}
+
+function renderSupportTicketDetail(ticket) {
+  const isClosed = ['resolved', 'closed'].includes(ticket.status);
+  const messages = ticket.messages || [];
+  const ticketContactName = supportTicketContactName(ticket);
+  return `
+    <section class="support-desk-detail" aria-label="Detalhes do chamado selecionado">
+      <header class="support-detail-header">
+        <div>
+          <p class="eyebrow">Chamado selecionado</p>
+          <h3>${escapeHtml(ticket.subject)}</h3>
+          <span>${escapeHtml(ticket.category || 'Sem categoria')} · Aberto em ${formatDateTime(ticket.created_at)}</span>
+        </div>
+        <div class="support-detail-badges">
+          <span class="pill ${supportPriorityClass(ticket.priority)}">${escapeHtml(priorityLabel(ticket.priority))}</span>
+          <span class="pill ${supportStatusClass(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+        </div>
+      </header>
+
+      <div class="support-detail-meta">
+        <div><span>Última atualização</span><strong>${formatDateTime(ticket.updated_at || ticket.last_message_at || ticket.created_at)}</strong></div>
+      </div>
+
+      <div class="support-ticket-messages support-thread-panel">
+        ${messages.length ? messages.map((message) => renderAdminSupportMessage(message, ticketContactName)).join('') : '<p class="empty-state">Sem mensagens.</p>'}
+      </div>
+
+      ${isClosed ? `
+        <p class="empty-state compact-empty-state">Este chamado está ${escapeHtml(ticketStatusLabel(ticket.status).toLowerCase())}.</p>
+      ` : `
+        <form class="support-ticket-reply-form support-reply-panel" data-ticket-id="${escapeAttribute(ticket.id)}">
+          <label>Responder ao suporte<textarea name="message" rows="4" required placeholder="Escreva uma resposta objetiva para a equipe de suporte"></textarea></label>
+          <div class="support-ticket-reply-actions">
+            <button class="ghost-button compact" type="button" data-close-support-ticket="${escapeAttribute(ticket.id)}">Encerrar atendimento</button>
+            <button class="primary-button compact" type="submit">Enviar resposta</button>
+          </div>
+        </form>
+      `}
+    </section>
+  `;
+}
+
+function supportTicketContactName(ticket) {
+  const firstCustomerMessage = (ticket.messages || []).find((message) => message.author_type !== 'support');
+  const parsed = parseSupportMessage(firstCustomerMessage?.message || '');
+  return parsed.contact || firstCustomerMessage?.author_name || 'Cliente';
 }
 
 function filteredSupportTickets() {
@@ -4181,28 +4640,34 @@ function filteredSupportTickets() {
 function supportMessagePreview(message) {
   if (!message) return '';
   const parsed = parseSupportMessage(message.message || '');
+  if (parsed.contact && parsed.body) return `${parsed.contact}: ${parsed.body}`;
   return parsed.body || parsed.contact || '';
 }
 
 function parseSupportMessage(text = '') {
   const value = String(text || '').trim();
-  const match = value.match(/^Contato:\s*(.+?)(?:\n{2,}|\r\n{2,})([\s\S]*)$/i);
-  if (!match) return { contact: '', body: value };
-  return { contact: match[1].trim(), body: match[2].trim() };
+  if (!value) return { contact: '', body: '' };
+  const normalized = value.replace(/\r\n/g, '\n');
+  const labeledMatch = normalized.match(/^Contato\s*:?\s*([^\n]+)\n+([\s\S]*)$/i);
+  if (labeledMatch) return { contact: labeledMatch[1].trim(), body: labeledMatch[2].trim() };
+  const compactMatch = normalized.match(/^Contato\s*:?\s*([^\n]+?)(?:\s{2,}|\n)([\s\S]*)$/i);
+  if (compactMatch) return { contact: compactMatch[1].trim(), body: compactMatch[2].trim() };
+  const stuckMatch = normalized.match(/^Contato\s*:?\s*([A-ZÁÀÂÃÉÊÍÓÔÕÚÇ][^\n]{1,48}?)([A-ZÁÀÂÃÉÊÍÓÔÕÚÇa-záàâãéêíóôõúç0-9].*)$/i);
+  if (stuckMatch) return { contact: stuckMatch[1].trim(), body: stuckMatch[2].trim() };
+  return { contact: '', body: normalized };
 }
 
-function renderAdminSupportMessage(message) {
+function renderAdminSupportMessage(message, ticketContactName = 'Cliente') {
   const parsed = parseSupportMessage(message.message || '');
   const isSupport = message.author_type === 'support';
-  const author = isSupport ? 'Equipe de suporte' : 'Você';
+  const author = isSupport ? 'Equipe de suporte' : (parsed.contact || ticketContactName || 'Cliente');
   return `
     <article class="support-message-bubble ${isSupport ? 'from-support' : 'from-customer'}">
       <div>
         <strong>${escapeHtml(author)}</strong>
         <small>${formatDateTime(message.created_at)}</small>
       </div>
-      ${parsed.contact ? `<p class="support-contact-line"><span>Contato</span>${escapeHtml(parsed.contact)}</p>` : ''}
-      <p>${escapeHtml(parsed.body)}</p>
+      ${parsed.body ? `<p class="support-message-text">${escapeHtml(parsed.body)}</p>` : '<p class="support-message-text muted">Sem descrição informada.</p>'}
     </article>
   `;
 }
@@ -4256,14 +4721,39 @@ async function submitAdminSupportReply(event) {
     state.loadedAdminTabs.delete('support');
     await loadSupportTickets({ force: true });
     if (ticketId) {
-      [...(els.adminSupportTicketList?.querySelectorAll('.support-ticket-card') || [])]
-        .find((details) => details.dataset.ticketId === ticketId)
-        ?.scrollIntoView({ block: 'nearest' });
+      state.selectedSupportTicketId = ticketId;
+      els.adminSupportTicketList?.querySelector('.support-desk-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      els.adminSupportTicketList?.querySelector('.support-ticket-reply-form textarea[name="message"]')?.focus({ preventScroll: true });
     }
   } catch (error) {
     toast(error.message || 'Não foi possível responder o chamado.');
   } finally {
     form.dataset.submitting = 'false';
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
+}
+
+async function closeAdminSupportTicket(ticketId) {
+  if (!ticketId) return;
+  if (!window.confirm('Encerrar este atendimento? Depois disso, novas respostas neste chamado serão bloqueadas.')) return;
+  const button = els.adminSupportTicketList?.querySelector(`[data-close-support-ticket="${CSS.escape(ticketId)}"]`);
+  const previousText = button?.textContent || '';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Encerrando...';
+    }
+    await request(`/api/admin/support/tickets/${ticketId}/close`, { method: 'POST' });
+    toast('Atendimento encerrado.');
+    state.selectedSupportTicketId = ticketId;
+    state.loadedAdminTabs.delete('support');
+    await loadSupportTickets({ force: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível encerrar o atendimento.');
+  } finally {
     if (button) {
       button.disabled = false;
       button.textContent = previousText;
@@ -6139,9 +6629,9 @@ async function refreshTablesAfterMutation() {
 async function submitStore(event) {
   event.preventDefault();
   const payload = formToStore(els.storeForm);
-  payload.whatsapp_number = digits(payload.whatsapp_number);
-  if (!digits(payload.whatsapp_number) || digits(payload.whatsapp_number).length < 12) {
-    toast('Informe o WhatsApp com DDI e DDD. Ex: 5511999999999');
+  payload.whatsapp_number = normalizeBrazilLocalWhatsapp(payload.whatsapp_number);
+  if (!isBrazilLocalWhatsapp(payload.whatsapp_number)) {
+    toast('Informe o WhatsApp com DDD + telefone, sem +55. Ex: 55936191201');
     els.storeForm.elements.whatsapp_number.focus();
     return;
   }
@@ -7473,6 +7963,17 @@ function clampNumber(value, min, max, fallback) {
 
 function digits(value) {
   return String(value || '').replace(/\D/g, '');
+}
+
+function isBrazilLocalWhatsapp(value) {
+  const phone = digits(value);
+  return phone.length === 10 || phone.length === 11;
+}
+
+function normalizeBrazilLocalWhatsapp(value) {
+  const phone = digits(value);
+  if ((phone.length === 12 || phone.length === 13) && phone.startsWith('55')) return phone.slice(2);
+  return phone;
 }
 
 function statusLabel(status) {

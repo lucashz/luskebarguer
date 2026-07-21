@@ -19,27 +19,23 @@
       <section class="signup-intro">
         <p class="eyebrow">Teste grátis</p>
         <h1>Vamos criar sua loja digital.</h1>
-        <p>Você cadastra a conta, informa os dados do estabelecimento e escolhe o endereço público do cardápio.</p>
+        <p>Cadastre o responsável, os dados da loja e o endereço público do cardápio. Sua conta começa no teste grátis e você pode escolher um plano depois, dentro do painel.</p>
         <div class="signup-progress" id="signupProgress">
-          <span class="active" data-signup-progress="plan">Plano</span>
-          <span data-signup-progress="owner">Responsável</span>
-          <span data-signup-progress="business">Loja</span>
-          <span data-signup-progress="publish">Publicar</span>
+          <span class="active" data-signup-progress="owner"><em>1</em>Responsável</span>
+          <span data-signup-progress="business"><em>2</em>Loja</span>
+          <span data-signup-progress="publish"><em>3</em>Publicar</span>
+        </div>
+        <div class="signup-side-note">
+          <strong>O que acontece depois?</strong>
+          <span>Você será levado ao onboarding para cadastrar produtos, pagamentos, entrega e aparência da loja.</span>
         </div>
       </section>
 
       <form class="signup-card" id="signupForm">
-        <section class="signup-step" data-signup-step="plan">
-          <p class="eyebrow">Etapa 1</p>
-          <h2>Escolha o plano</h2>
-          <div class="signup-plan-options" id="signupPlanOptions">
-            <p>Carregando planos...</p>
-          </div>
-        </section>
-
         <section class="signup-step" data-signup-step="owner">
-          <p class="eyebrow">Etapa 2</p>
+          <p class="eyebrow">Etapa 1</p>
           <h2>Responsável pela conta</h2>
+          <p class="muted">Use um e-mail real. Ele será o acesso principal ao painel administrativo.</p>
           <div class="two-cols">
             <label>Nome completo<input name="owner_name" required autocomplete="name"></label>
             <label>WhatsApp<input name="owner_phone" required inputmode="tel" placeholder="(55) 99999-9999"></label>
@@ -52,8 +48,9 @@
         </section>
 
         <section class="signup-step" data-signup-step="business">
-          <p class="eyebrow">Etapa 3</p>
+          <p class="eyebrow">Etapa 2</p>
           <h2>Dados do estabelecimento</h2>
+          <p class="muted">Essas informações ajudam a montar a loja e podem ser ajustadas depois.</p>
           <div class="two-cols">
             <label>Nome do estabelecimento<input name="business_name" required placeholder="Ex: LSK Burger"></label>
             <label>Tipo de negócio
@@ -82,8 +79,9 @@
         </section>
 
         <section class="signup-step" data-signup-step="publish">
-          <p class="eyebrow">Etapa 4</p>
+          <p class="eyebrow">Etapa 3</p>
           <h2>Endereço do cardápio</h2>
+          <p class="muted">Este será o link público da loja. Use um nome curto, sem espaços e fácil de falar.</p>
           <label>Identificador público
             <div class="slug-field">
               <span>/</span>

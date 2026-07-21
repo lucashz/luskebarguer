@@ -28,6 +28,7 @@ const client = new pg.Client({
 let serverProcess = null;
 let companyId = null;
 let fixtureEmails = [];
+let smtpSettingsSnapshot = null;
 
 try {
   await client.connect();
@@ -172,6 +173,7 @@ try {
 
   const smtpSettings = await request('/api/platform/smtp', { cookie: superLogin.cookie });
   assert(smtpSettings.data.smtp && smtpSettings.data.smtp.password_token === undefined, 'SMTP expos senha/token.');
+  smtpSettingsSnapshot = await snapshotSmtpSettings();
   const savedSmtp = await request('/api/platform/smtp', {
     method: 'PUT',
     cookie: superLogin.cookie,
@@ -196,6 +198,8 @@ try {
     allowFailure: true
   });
   assert(smtpTest.status === 502, 'Teste SMTP sem configuracao ativa nao retornou erro tratado.');
+  await restoreSmtpSettings(smtpSettingsSnapshot);
+  smtpSettingsSnapshot = null;
 
   const templates = await request('/api/platform/email-templates', { cookie: superLogin.cookie });
   assert(templates.data.templates?.some((template) => template.template_key === 'welcome'), 'Templates de e-mail nao carregaram.');
@@ -433,6 +437,9 @@ try {
 
   console.log('Saude operacional da plataforma validada com sucesso.');
 } finally {
+  if (smtpSettingsSnapshot) {
+    await restoreSmtpSettings(smtpSettingsSnapshot).catch(() => {});
+  }
   if (fixtureEmails.length) {
     await cleanupAdminsByEmail(fixtureEmails).catch(() => {});
   }
@@ -448,6 +455,27 @@ try {
     await new Promise((resolve) => serverProcess.once('exit', resolve));
   }
   await rm(new URL(`../.tmp/platform-health-${suffix}/`, import.meta.url), { recursive: true, force: true }).catch(() => {});
+}
+
+async function snapshotSmtpSettings() {
+  const rows = await client.query(`
+    select * from public.platform_smtp_settings
+    order by created_at asc
+  `).catch(() => ({ rows: [] }));
+  return rows.rows;
+}
+
+async function restoreSmtpSettings(snapshot = []) {
+  await client.query('delete from public.platform_smtp_settings').catch(() => {});
+  for (const row of snapshot) {
+    const columns = Object.keys(row);
+    const values = columns.map((key) => row[key]);
+    const placeholders = columns.map((_, index) => `$${index + 1}`);
+    await client.query(`
+      insert into public.platform_smtp_settings (${columns.map((column) => `"${column}"`).join(', ')})
+      values (${placeholders.join(', ')})
+    `, values);
+  }
 }
 
 async function cleanupAdminsByEmail(emails) {

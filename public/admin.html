@@ -117,7 +117,7 @@
               <label>Descrição<textarea name="description" placeholder="Ex: Pizzas artesanais, porções e bebidas geladas."></textarea></label>
               <div class="two-cols">
                 <label>Endereço<input name="address" placeholder="Rua, número, bairro"></label>
-                <label>WhatsApp dos pedidos<input name="whatsapp_number" required inputmode="tel" placeholder="Ex: 5511999999999"></label>
+                <label>WhatsApp dos pedidos<input name="whatsapp_number" required inputmode="tel" placeholder="Ex: 55936191201"></label>
               </div>
             </form>
 
@@ -173,45 +173,83 @@
               <label>Nome do produto<input name="name" required placeholder="Ex: Burger da Casa"></label>
               <label>Descrição<textarea name="description" placeholder="Ex: Pão brioche, burger artesanal, queijo e molho da casa"></textarea></label>
               <label>Preço<input name="price" required type="number" min="0" step="0.01" value="29.90"></label>
+              <label class="media-upload-card onboarding-product-image">
+                <span>Imagem do produto</span>
+                <small>Envie uma foto para deixar o primeiro item mais atrativo.</small>
+                <input name="image_file" accept="image/png,image/jpeg,image/webp" type="file">
+              </label>
             </form>
 
             <form class="onboarding-step" data-onboarding-step="7" data-onboarding-key="appearance">
               <h3>Aparência</h3>
-              <p class="muted">Deixe o cardápio com a identidade da loja. Você também pode enviar imagens depois na aba Loja.</p>
-              <div class="two-cols">
-                <label>URL do logo<input name="logo_url" placeholder="https://..."></label>
-                <label>URL da capa<input name="cover_url" placeholder="https://..."></label>
+              <p class="muted">Escolha um tema visual e envie o logo/capa da loja. Você pode refinar as cores depois em Configurações da Loja.</p>
+              <div class="theme-preset-grid onboarding-theme-presets" aria-label="Escolher tema do cardápio">
+                <button type="button" data-onboarding-theme-preset="classic">
+                  <span style="--swatch:#d71920"></span>
+                  <strong>Clássico delivery</strong>
+                  <small>Vermelho, fundo neutro e ação forte.</small>
+                </button>
+                <button type="button" data-onboarding-theme-preset="modern">
+                  <span style="--swatch:#2563eb"></span>
+                  <strong>Moderno azul</strong>
+                  <small>Azul limpo, direto e confiável.</small>
+                </button>
+                <button type="button" data-onboarding-theme-preset="premium">
+                  <span style="--swatch:#f59e0b"></span>
+                  <strong>Premium escuro</strong>
+                  <small>Dourado, grafite e contraste elegante.</small>
+                </button>
+                <button type="button" data-onboarding-theme-preset="burger">
+                  <span style="--swatch:#f97316"></span>
+                  <strong>Quente</strong>
+                  <small>Laranja, preto suave e fundo acolhedor.</small>
+                </button>
+                <button type="button" data-onboarding-theme-preset="fresh">
+                  <span style="--swatch:#64748b"></span>
+                  <strong>Urbano slate</strong>
+                  <small>Azul acinzentado, limpo e moderno.</small>
+                </button>
               </div>
-              <div class="onboarding-theme-grid">
-                <label>Cor principal<input name="theme_primaryColor" type="color" value="#d71920"></label>
-                <label>Cor dos botões<input name="theme_buttonColor" type="color" value="#d71920"></label>
-                <label>Cor de fundo<input name="theme_backgroundColor" type="color" value="#f5f5f4"></label>
+              <div class="media-upload-grid onboarding-upload-grid">
+                <label class="media-upload-card">
+                  <span>Logo da loja</span>
+                  <small>PNG, JPG ou WebP até 5 MB.</small>
+                  <input name="logo_file" accept="image/png,image/jpeg,image/webp" type="file">
+                </label>
+                <label class="media-upload-card">
+                  <span>Capa do cardápio</span>
+                  <small>Imagem horizontal para destacar a loja.</small>
+                  <input name="cover_file" accept="image/png,image/jpeg,image/webp" type="file">
+                </label>
               </div>
+              <input name="theme_preset" type="hidden" value="classic">
+              <input name="logo_url" type="hidden">
+              <input name="cover_url" type="hidden">
             </form>
 
             <form class="onboarding-step" data-onboarding-step="8" data-onboarding-key="training">
-              <h3>Treinamento rápido</h3>
-              <p class="muted">Antes de publicar, veja para que serve cada área principal do painel.</p>
+              <h3>Tour guiado do painel</h3>
+              <p class="muted">Depois de publicar, vamos abrir o painel e mostrar cada área na própria tela, com destaque no lugar certo.</p>
               <div class="onboarding-training-grid">
-                <article><strong>Pedidos</strong><span>Acompanhe novos pedidos, preparo, entrega e conclusão.</span></article>
-                <article><strong>Cardápio</strong><span>Edite categorias, produtos, fotos, preços e adicionais.</span></article>
-                <article><strong>Loja</strong><span>Configure horário, entrega, pagamentos, domínio, logo e tema.</span></article>
-                <article><strong>Mesas e comandas</strong><span>Crie QR Codes, abra comandas e lance itens no salão.</span></article>
-                <article><strong>Relatórios</strong><span>Confira faturamento, pedidos, ticket médio e fechamento.</span></article>
-                <article><strong>Integrações</strong><span>Conecte WhatsApp, Pix, cartão online e impressão.</span></article>
+                <article><strong>Operação</strong><span>Abrir ou fechar a loja, ver resumo e próximos passos.</span></article>
+                <article><strong>Pedidos</strong><span>Acompanhar status, detalhes, adicionais, pagamento e entrega.</span></article>
+                <article><strong>Cardápio</strong><span>Editar categorias, produtos, fotos, preços e adicionais.</span></article>
+                <article><strong>Mesas</strong><span>Criar QR Codes, abrir comandas e atender o salão.</span></article>
+                <article><strong>Relatórios</strong><span>Conferir vendas, horários de pico e fechamento.</span></article>
+                <article><strong>Suporte</strong><span>Abrir chamados quando precisar de ajuda.</span></article>
               </div>
               <label class="onboarding-confirm-check">
                 <input name="training_seen" required type="checkbox">
-                <span>Entendi o básico do painel administrativo.</span>
+                <span>Estou pronto para fazer o tour guiado após publicar.</span>
               </label>
             </form>
 
             <form class="onboarding-step" data-onboarding-step="9" data-onboarding-key="publish">
               <h3>Finalização</h3>
-              <p class="muted">Confira o checklist. Quando publicar, a loja ficará aberta e pronta para receber pedidos.</p>
+              <p class="muted">Confira o checklist. Ao publicar, sua loja ficará aberta e o tour guiado começará dentro do painel.</p>
               <div class="onboarding-final-checklist" id="onboardingFinalChecklist"></div>
               <div class="onboarding-final-actions">
-                <button class="primary-button" id="onboardingPublishButton" type="button">Publicar minha loja</button>
+                <button class="primary-button" id="onboardingPublishButton" type="button">Publicar e iniciar tour</button>
                 <a class="ghost-button compact" id="onboardingPublicLink" href="/cardapio" target="_blank" rel="noopener">Abrir cardápio público</a>
               </div>
             </form>
@@ -697,9 +735,9 @@
                   <section class="settings-callout">
                     <div>
                       <strong>WhatsApp dos pedidos</strong>
-                      <p>Use DDI + DDD + número. Exemplo: 5511999999999.</p>
+                      <p>Use somente DDD + telefone, sem +55. Exemplo: 55936191201.</p>
                     </div>
-                    <input name="whatsapp_number" inputmode="tel" placeholder="Ex: 5511999999999">
+                    <input name="whatsapp_number" inputmode="tel" placeholder="Ex: 55936191201">
                   </section>
                   <div class="switch-row">
                     <label class="check"><input name="is_open" type="checkbox" checked> Loja aberta</label>
@@ -1139,7 +1177,10 @@
                   <h2>Sua conta</h2>
                   <p>Gerencie seu login, revise o perfil ativo e mantenha a senha protegida.</p>
                 </div>
-                <button class="ghost-button compact" data-reopen-onboarding type="button">Reabrir onboarding</button>
+                <div class="account-access-actions">
+                  <button class="ghost-button compact" data-start-admin-tour type="button">Ver tour novamente</button>
+                  <button class="ghost-button compact" data-reopen-onboarding type="button">Reabrir onboarding</button>
+                </div>
               </div>
 
               <div class="account-access-grid">

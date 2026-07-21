@@ -3,9 +3,10 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
+import v8 from 'node:v8';
 import net from 'node:net';
 import tls from 'node:tls';
 import pg from 'pg';
@@ -412,6 +413,14 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  const adminSupportCloseMatch = url.pathname.match(/^\/api\/admin\/support\/tickets\/([a-f0-9-]+)\/close$/i);
+  if (adminSupportCloseMatch && method === 'POST') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { ticket: await closeAdminSupportTicket(req, admin, adminSupportCloseMatch[1]) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/plan') {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
@@ -459,6 +468,39 @@ async function handleApi(req, res, url) {
     const admin = await requireAdminPermission(req, res, 'store');
     if (!admin) return;
     json(res, 200, await publishAdminOnboarding(req, admin));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/onboarding/reopen') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, await reopenAdminOnboarding(req, admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/tours') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await listAdminGuidedTours(admin));
+    return;
+  }
+
+  const adminTourMatch = url.pathname.match(/^\/api\/admin\/tours\/([a-z0-9-]+)$/i);
+  if (adminTourMatch && (method === 'PUT' || method === 'PATCH')) {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, { tour: await upsertAdminGuidedTour(admin, adminTourMatch[1], await readJson(req)) });
+    return;
+  }
+
+  const adminTourActionMatch = url.pathname.match(/^\/api\/admin\/tours\/([a-z0-9-]+)\/(complete|skip)$/i);
+  if (adminTourActionMatch && method === 'POST') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    const tour = adminTourActionMatch[2] === 'complete'
+      ? await completeAdminGuidedTour(req, admin, adminTourActionMatch[1])
+      : await skipAdminGuidedTour(req, admin, adminTourActionMatch[1]);
+    json(res, 200, { tour });
     return;
   }
 
@@ -2821,7 +2863,7 @@ async function getPlatformCompanyScoreContext(companyId) {
     dbRequest('GET', 'admin_users', { select: 'id,name,email,role,is_active,last_login_at,created_at', company_id: `eq.${resolvedCompanyId}`, limit: '200' }).catch(() => []),
     listCompanySubscriptions(resolvedCompanyId, 50),
     dbRequest('GET', 'subscription_plans', { select: '*', limit: '100' }).catch(() => []),
-    dbRequest('GET', 'support_tickets', { select: 'id,status,priority,created_at,resolved_at', company_id: `eq.${resolvedCompanyId}`, limit: '500' }).catch(() => [])
+    dbRequest('GET', 'support_tickets', { select: 'id,status,priority,created_at,updated_at', company_id: `eq.${resolvedCompanyId}`, limit: '500' }).catch(() => [])
   ]);
   const storeIds = cleanUuidArray(stores.map((store) => store.id));
   const [orders, settingsRows, products] = storeIds.length ? await Promise.all([
@@ -2888,7 +2930,7 @@ async function getPlatformCompanyTimelineAdvanced(companyId) {
       limit: '50'
     }).catch(() => []) : Promise.resolve([]),
     dbRequest('GET', 'support_tickets', {
-      select: 'id,subject,status,priority,created_at,resolved_at',
+      select: 'id,subject,status,priority,created_at,updated_at',
       company_id: `eq.${resolvedCompanyId}`,
       order: 'created_at.desc',
       limit: '100'
@@ -2930,7 +2972,7 @@ async function getPlatformCompanyTimelineAdvanced(companyId) {
       type: 'support',
       title: `Chamado ${subscriptionEventLabel(ticket.status)}`,
       description: ticket.subject || 'Chamado de suporte',
-      created_at: ticket.resolved_at || ticket.created_at
+      created_at: ['resolved', 'closed'].includes(ticket.status) ? ticket.updated_at || ticket.created_at : ticket.created_at
     });
   }
   const ticketIds = new Set(tickets.map((ticket) => ticket.id));
@@ -4083,7 +4125,7 @@ async function createPortalSignup(req, data = {}) {
 function sanitizePortalSignup(data = {}) {
   const owner = data.owner || {};
   const business = data.business || {};
-  const planCode = cleanSlug(data.plan_code || data.planCode || 'essential') || 'essential';
+  const planCode = 'trial';
   const ownerName = cleanText(owner.name || data.name || '');
   const ownerEmail = cleanEmail(owner.email || data.email || '');
   const ownerPhone = onlyDigits(owner.phone || data.phone || '');
@@ -4136,7 +4178,7 @@ async function createPortalStoreSettings(storeId, parsed) {
     name: parsed.store.name,
     slug: parsed.store.slug,
     description: parsed.store.description,
-    whatsapp_number: parsed.business.phone || parsed.owner.phone,
+    whatsapp_number: normalizeBrazilLocalPhone(parsed.business.phone || parsed.owner.phone),
     address: parsed.business.address,
     payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
     business_hours: defaultBusinessHours(),
@@ -4185,7 +4227,8 @@ async function getAdminOnboarding(admin) {
     progress: {
       ...progress,
       completed_steps: completedSteps,
-      is_completed: store.onboarding_completed === true || progress.is_completed === true
+      is_completed: progress.is_completed === true,
+      store_published: store.onboarding_completed === true
     },
     store: publicStore(store),
     steps: computed.steps.map((step) => ({
@@ -4233,8 +4276,8 @@ async function publishAdminOnboarding(req, admin) {
     company_id: `eq.${admin.company_id}`,
     store_id: `eq.${admin.store_id}`
   }, {
-    is_completed: true,
-    current_step: 'published',
+    is_completed: false,
+    current_step: 'tour',
     completed_steps: overview.steps.map((step) => step.key)
   }, ['Prefer: return=minimal']);
   clearStoreSettingsCache();
@@ -4248,6 +4291,222 @@ async function publishAdminOnboarding(req, admin) {
     after_data: { onboarding_completed: true, is_open: true }
   });
   return getAdminOnboarding(admin);
+}
+
+async function reopenAdminOnboarding(req, admin) {
+  const storeId = cleanUuid(admin.store_id);
+  const companyId = cleanUuid(admin.company_id);
+  if (!storeId || !companyId) throw httpError(422, 'Loja ativa não encontrada.');
+  const current = await getStoreSettings(storeId);
+  const now = new Date().toISOString();
+  await dbRequest('PATCH', 'store_settings', { id: `eq.${current.id}` }, {
+    onboarding_completed: false,
+    is_open: false
+  }, ['Prefer: return=minimal']);
+  const progress = await ensureOnboardingProgress(companyId, storeId);
+  await dbRequest('PATCH', 'onboarding_progress', { id: `eq.${progress.id}` }, {
+    is_completed: false,
+    current_step: 'welcome',
+    completed_steps: [],
+    metadata: {
+      ...(isPlainObject(progress.metadata) ? progress.metadata : {}),
+      reopened_at: now,
+      reopened_by: admin.id
+    }
+  }, ['Prefer: return=minimal']);
+  await dbRequest('DELETE', 'admin_tour_progress', {
+    admin_user_id: `eq.${admin.id}`,
+    store_id: `eq.${storeId}`,
+    tour_key: 'eq.admin-panel'
+  }, null, ['Prefer: return=minimal']).catch(() => {});
+  clearStoreSettingsCache(storeId);
+  clearPublicBootstrapCache(storeId);
+  await audit('admin.onboarding.reopen', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: 'store_settings',
+    entity_id: current.id,
+    severity: 'warning',
+    before_data: { onboarding_completed: current.onboarding_completed, is_open: current.is_open },
+    after_data: { onboarding_completed: false, is_open: false }
+  });
+  return getAdminOnboarding(admin);
+}
+
+async function listAdminGuidedTours(admin) {
+  const adminUserId = cleanUuid(admin.id, 'admin_user_id');
+  const storeId = cleanUuid(admin.store_id, 'store_id');
+  try {
+    const tours = await dbRequest('GET', 'admin_tour_progress', {
+      select: '*',
+      admin_user_id: `eq.${adminUserId}`,
+      store_id: `eq.${storeId}`,
+      order: 'updated_at.desc'
+    });
+    return { tours: tours.map(publicAdminGuidedTour) };
+  } catch (error) {
+    if (isMissingTableError(error)) return { tours: [] };
+    throw error;
+  }
+}
+
+async function upsertAdminGuidedTour(admin, tourKey, data = {}) {
+  const parsedTourKey = cleanAdminTourKey(tourKey);
+  const adminUserId = cleanUuid(admin.id, 'admin_user_id');
+  const storeId = cleanUuid(admin.store_id, 'store_id');
+  const currentStep = cleanAdminTourStep(data.current_step || 'operation');
+  const metadata = isPlainObject(data.metadata) ? data.metadata : {};
+  const existing = await findAdminGuidedTour(adminUserId, storeId, parsedTourKey);
+  const now = new Date().toISOString();
+  const payload = {
+    admin_user_id: adminUserId,
+    store_id: storeId,
+    tour_key: parsedTourKey,
+    current_step: currentStep,
+    completed_at: null,
+    skipped_at: null,
+    metadata,
+    updated_at: now
+  };
+  if (existing) {
+    const [updated] = await dbRequest('PATCH', 'admin_tour_progress', { id: `eq.${existing.id}` }, payload, ['Prefer: return=representation']);
+    return publicAdminGuidedTour(updated || { ...existing, ...payload });
+  }
+  const [created] = await dbRequest('POST', 'admin_tour_progress', {}, {
+    ...payload,
+    created_at: now
+  }, ['Prefer: return=representation']);
+  return publicAdminGuidedTour(created);
+}
+
+async function completeAdminGuidedTour(req, admin, tourKey) {
+  const tour = await updateAdminGuidedTourAction(admin, tourKey, {
+    completed_at: new Date().toISOString(),
+    skipped_at: null
+  });
+  await markAdminOnboardingTourFinished(admin, 'tour_completed').catch(() => {});
+  await audit('admin.tour.complete', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    entity_type: 'admin_tour_progress',
+    entity_id: tour.id,
+    after_data: { tour_key: tour.tour_key, current_step: tour.current_step }
+  }).catch(() => {});
+  return tour;
+}
+
+async function skipAdminGuidedTour(req, admin, tourKey) {
+  const tour = await updateAdminGuidedTourAction(admin, tourKey, {
+    skipped_at: new Date().toISOString()
+  });
+  await markAdminOnboardingTourFinished(admin, 'tour_skipped').catch(() => {});
+  await audit('admin.tour.skip', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    entity_type: 'admin_tour_progress',
+    entity_id: tour.id,
+    after_data: { tour_key: tour.tour_key, current_step: tour.current_step }
+  }).catch(() => {});
+  return tour;
+}
+
+async function markAdminOnboardingTourFinished(admin, currentStep) {
+  const companyId = cleanUuid(admin.company_id, 'company_id');
+  const storeId = cleanUuid(admin.store_id, 'store_id');
+  const progress = await ensureOnboardingProgress(companyId, storeId);
+  const completedSteps = [...new Set([
+    ...(Array.isArray(progress.completed_steps) ? progress.completed_steps : []),
+    'training',
+    'publish',
+    'tour'
+  ])];
+  await dbRequest('PATCH', 'onboarding_progress', {
+    company_id: `eq.${companyId}`,
+    store_id: `eq.${storeId}`
+  }, {
+    is_completed: true,
+    current_step: currentStep,
+    completed_steps: completedSteps
+  }, ['Prefer: return=minimal']);
+}
+
+async function updateAdminGuidedTourAction(admin, tourKey, payload = {}) {
+  const parsedTourKey = cleanAdminTourKey(tourKey);
+  const adminUserId = cleanUuid(admin.id, 'admin_user_id');
+  const storeId = cleanUuid(admin.store_id, 'store_id');
+  const existing = await findAdminGuidedTour(adminUserId, storeId, parsedTourKey);
+  const now = new Date().toISOString();
+  if (existing) {
+    const [updated] = await dbRequest('PATCH', 'admin_tour_progress', { id: `eq.${existing.id}` }, {
+      ...payload,
+      updated_at: now
+    }, ['Prefer: return=representation']);
+    return publicAdminGuidedTour(updated || { ...existing, ...payload, updated_at: now });
+  }
+  const [created] = await dbRequest('POST', 'admin_tour_progress', {}, {
+    admin_user_id: adminUserId,
+    store_id: storeId,
+    tour_key: parsedTourKey,
+    current_step: 'operation',
+    metadata: {},
+    ...payload,
+    created_at: now,
+    updated_at: now
+  }, ['Prefer: return=representation']);
+  return publicAdminGuidedTour(created);
+}
+
+async function findAdminGuidedTour(adminUserId, storeId, tourKey) {
+  try {
+    const [existing] = await dbRequest('GET', 'admin_tour_progress', {
+      select: '*',
+      admin_user_id: `eq.${adminUserId}`,
+      store_id: `eq.${storeId}`,
+      tour_key: `eq.${tourKey}`,
+      limit: '1'
+    });
+    return existing || null;
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      throw httpError(500, 'Tabela do tour guiado não encontrada. Execute as migrations antes de salvar o progresso.');
+    }
+    throw error;
+  }
+}
+
+function cleanAdminTourKey(value) {
+  const tourKey = cleanSlug(value || '');
+  if (tourKey !== 'admin-panel') throw httpError(422, 'Tour inválido.');
+  return tourKey;
+}
+
+function cleanAdminTourStep(value) {
+  const step = cleanSlug(value || 'operation');
+  const allowed = new Set(['operation', 'orders', 'menu', 'tables', 'reports', 'store', 'plan', 'support']);
+  if (!allowed.has(step)) throw httpError(422, 'Etapa do tour inválida.');
+  return step;
+}
+
+function publicAdminGuidedTour(row = {}) {
+  return {
+    id: row.id,
+    tour_key: row.tour_key,
+    current_step: row.current_step,
+    completed_at: row.completed_at || null,
+    skipped_at: row.skipped_at || null,
+    updated_at: row.updated_at || null
+  };
+}
+
+function isMissingTableError(error) {
+  const text = `${error?.message || ''} ${error?.detail || ''} ${JSON.stringify(error?.cause || {})}`;
+  return /relation .* does not exist|schema cache|PGRST205|42P01|not found in the schema/i.test(text);
 }
 
 async function ensureOnboardingProgress(companyId, storeId) {
@@ -4358,7 +4617,7 @@ async function createOnboardingProgress(companyId, storeId, parsed) {
 }
 
 async function createStarterMenu(storeId, businessType) {
-  const names = starterCategoriesForBusiness(businessType);
+  const names = starterCategoriesForBusiness(businessType).slice(0, 1);
   let sort = 1;
   for (const name of names) {
     await dbRequest('POST', 'menu_categories', {}, {
@@ -4491,6 +4750,23 @@ async function reopenPlatformCompanyOnboarding(req, id, data, admin) {
     await dbRequest('PATCH', 'store_settings', { store_id: `eq.${store.id}` }, {
       onboarding_completed: false
     }, ['Prefer: return=minimal']).catch(() => {});
+    await dbRequest('PATCH', 'onboarding_progress', {
+      company_id: `eq.${companyId}`,
+      store_id: `eq.${store.id}`
+    }, {
+      is_completed: false,
+      current_step: 'welcome',
+      completed_steps: [],
+      metadata: {
+        reopened_at: new Date().toISOString(),
+        reopened_by: admin.id,
+        source: 'platform'
+      }
+    }, ['Prefer: return=minimal']).catch(() => {});
+    await dbRequest('DELETE', 'admin_tour_progress', {
+      store_id: `eq.${store.id}`,
+      tour_key: 'eq.admin-panel'
+    }, null, ['Prefer: return=minimal']).catch(() => {});
     clearStoreSettingsCache(store.id);
     clearPublicBootstrapCache(store.id);
   }
@@ -5630,7 +5906,7 @@ async function platformBackupStatus() {
   const manifest = await readJsonFile(statusPath).catch(() => null);
   const entries = await readdir(BACKUP_DIR).catch(() => []);
   const dumps = await Promise.all(entries
-    .filter((entry) => /^postgres-.+\.dump$/.test(entry))
+    .filter((entry) => /^postgres-.+\.(dump|sql)$/.test(entry))
     .map(async (entry) => {
       const info = await stat(path.join(BACKUP_DIR, entry)).catch(() => null);
       return info ? {
@@ -5643,25 +5919,30 @@ async function platformBackupStatus() {
     .filter(Boolean)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 10);
+  const latest = recent[0] || null;
+  const manifestStatus = sanitizeBackupStatus(manifest?.status);
+  const status = manifestStatus !== 'unknown' ? manifestStatus : latest ? 'success' : 'unknown';
   return {
-    status: sanitizeBackupStatus(manifest?.status),
-    updated_at: cleanText(manifest?.updated_at || ''),
+    status,
+    updated_at: cleanText(manifest?.updated_at || latest?.created_at || ''),
     started_at: cleanText(manifest?.started_at || ''),
-    finished_at: cleanText(manifest?.finished_at || ''),
-    latest: recent[0] || null,
-    last_output: cleanBackupFileName(manifest?.output || ''),
+    finished_at: cleanText(manifest?.finished_at || latest?.created_at || ''),
+    latest,
+    last_output: cleanBackupFileName(manifest?.output || latest?.file || ''),
     retention_days: clampNumber(Number(manifest?.retention_days || process.env.BACKUP_RETENTION_DAYS || 14), 1, 365),
+    mode: cleanText(manifest?.mode || ''),
     error: manifest?.status === 'failed' ? cleanText(manifest.error || '').slice(0, 240) : '',
     recent
   };
 }
 
 async function platformServicesStatus() {
-  const [database, backup, git, storageUsage] = await Promise.all([
+  const [database, backup, git, storageUsage, smtp] = await Promise.all([
     checkDatabaseHealth(),
     platformBackupStatus(),
     getGitRuntimeInfo(),
-    platformStorageUsage()
+    platformStorageUsage(),
+    smtpServiceStatus()
   ]);
   const serviceName = cleanText(process.env.PLATFORM_SERVICE_NAME || 'cardapio.service');
   return {
@@ -5685,6 +5966,7 @@ async function platformServicesStatus() {
       message: database.message,
       latency_ms: database.latency_ms
     },
+    smtp,
     backups: backup,
     webhooks: await platformWebhookServiceStatus(),
     jobs: {
@@ -6141,7 +6423,7 @@ async function platformOperationalHealth(params = new URLSearchParams()) {
     jobsHealthStatus(),
     await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads'),
     sslDomainHealthStatus(),
-    smtpHealthStatus()
+    await smtpHealthStatus()
   ];
   const alerts = platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs });
   return normalizePortuguesePayload({
@@ -6188,7 +6470,7 @@ async function platformOperationalAlertsEndpoint(params = new URLSearchParams())
     jobsHealthStatus(),
     await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads'),
     sslDomainHealthStatus(),
-    smtpHealthStatus()
+    await smtpHealthStatus()
   ];
   return normalizePortuguesePayload({
     generated_at: new Date().toISOString(),
@@ -6259,7 +6541,7 @@ async function platformTechnicalMetrics(period, databaseStatus = null, backup = 
     source: 'verificação atual'
   };
   metrics.system = {
-    memory: memorySnapshot(),
+    memory: await memorySnapshot(),
     cpu: cpuSnapshot(),
     disk: {
       uploads: uploadsDisk,
@@ -6284,17 +6566,40 @@ function requestsPerMinute(rows, period) {
   return Number((rows.length / minutes).toFixed(2));
 }
 
-function memorySnapshot() {
+async function memorySnapshot() {
   const memory = process.memoryUsage();
+  const heap = v8.getHeapStatistics();
+  const meminfo = await linuxMeminfo();
+  const swapTotal = meminfo.SwapTotal || 0;
+  const swapFree = meminfo.SwapFree || 0;
+  const swapUsed = Math.max(0, swapTotal - swapFree);
+  const heapLimit = Number(heap.heap_size_limit || 0);
   return {
     rss_bytes: memory.rss,
     heap_used_bytes: memory.heapUsed,
     heap_total_bytes: memory.heapTotal,
+    heap_limit_bytes: heapLimit,
+    heap_used_percent: heapLimit ? Number(((memory.heapUsed / heapLimit) * 100).toFixed(1)) : null,
     external_bytes: memory.external,
     system_total_bytes: os.totalmem(),
     system_free_bytes: os.freemem(),
-    system_used_percent: os.totalmem() ? Number((((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(1)) : null
+    system_used_percent: os.totalmem() ? Number((((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(1)) : null,
+    swap_total_bytes: swapTotal,
+    swap_free_bytes: swapFree,
+    swap_used_bytes: swapUsed,
+    swap_used_percent: swapTotal ? Number(((swapUsed / swapTotal) * 100).toFixed(1)) : null
   };
+}
+
+async function linuxMeminfo() {
+  if (process.platform !== 'linux') return {};
+  const content = await readFile('/proc/meminfo', 'utf8').catch(() => '');
+  const data = {};
+  for (const line of content.split('\n')) {
+    const match = line.match(/^([A-Za-z_()]+):\s+(\d+)\s+kB/i);
+    if (match) data[match[1]] = Number(match[2]) * 1024;
+  }
+  return data;
 }
 
 function cpuSnapshot() {
@@ -6409,15 +6714,44 @@ function sslDomainHealthStatus() {
   }
 }
 
-function smtpHealthStatus() {
-  const configured = Boolean(process.env.SMTP_URL || process.env.SMTP_HOST);
+async function smtpHealthStatus() {
+  const smtp = await getPlatformSmtpSettings().catch(() => null);
+  const configured = Boolean(smtp?.is_active && smtp?.host && smtp?.from_email && smtp?.has_password);
+  const source = smtp?.source === 'env' ? 'ambiente' : 'Platform';
+  const lastTest = smtp?.last_test_status
+    ? ` Último teste: ${smtp.last_test_status}${smtp.last_test_at ? ` em ${new Date(smtp.last_test_at).toLocaleString('pt-BR')}` : ''}.`
+    : '';
   return platformStatus(
     'smtp',
     'SMTP/e-mail',
-    configured ? 'healthy' : 'unknown',
-    configured ? 'Configuração SMTP encontrada.' : 'SMTP não configurado neste ambiente.',
+    configured ? 'healthy' : 'attention',
+    configured ? `SMTP ativo via ${source}.${lastTest}` : 'SMTP não está ativo ou está incompleto.',
     null
   );
+}
+
+async function smtpServiceStatus() {
+  const smtp = await getPlatformSmtpSettings().catch(() => null);
+  const configured = Boolean(smtp?.is_active && smtp?.host && smtp?.from_email && smtp?.has_password);
+  const missing = [];
+  if (!smtp?.is_active) missing.push('ativo');
+  if (!smtp?.host) missing.push('host');
+  if (!smtp?.from_email) missing.push('remetente');
+  if (!smtp?.has_password) missing.push('senha/token');
+  return {
+    status: configured ? 'healthy' : 'attention',
+    source: smtp?.source || 'database',
+    host: smtp?.host ? maskConfigValue(`smtp://${smtp.host}`, 'url') : '',
+    port: smtp?.port || 587,
+    from_email: smtp?.from_email || '',
+    has_password: Boolean(smtp?.has_password),
+    is_active: Boolean(smtp?.is_active),
+    last_test_status: smtp?.last_test_status || null,
+    last_test_at: smtp?.last_test_at || null,
+    message: configured
+      ? `SMTP ativo para ${smtp.from_email}.`
+      : `Configuração incompleta: ${missing.join(', ') || 'dados ausentes'}.`
+  };
 }
 
 async function getPlatformSmtpSettings() {
@@ -6454,10 +6788,12 @@ async function updatePlatformSmtpSettings(req, admin, data = {}) {
   });
   const current = currentRows[0] || null;
   const password = String(data.password_token || data.password || '').trim();
+  const rawUsername = cleanText(data.username || '').slice(0, 255);
+  const username = rawUsername.includes('***') && current?.username ? current.username : rawUsername;
   const payload = {
     host: cleanText(data.host || '').slice(0, 255) || null,
     port: clampNumber(Number(data.port || 587), 1, 65535),
-    username: cleanText(data.username || '').slice(0, 255) || null,
+    username: username || null,
     ...(password ? { password_token: password } : {}),
     from_email: cleanEmail(data.from_email || '') || null,
     from_name: cleanText(data.from_name || '').slice(0, 180) || null,
@@ -6490,7 +6826,7 @@ function publicSmtpSettings(row = {}) {
     host: row.host || '',
     port: Number(row.port || 587),
     username: row.username ? maskEmailOrToken(row.username) : '',
-    has_password: Boolean(row.password_token),
+    has_password: Boolean(row.password_token || process.env.SMTP_PASS || process.env.SMTP_TOKEN),
     from_email: row.from_email || '',
     from_name: row.from_name || '',
     reply_to: row.reply_to || '',
@@ -6567,26 +6903,57 @@ async function markSmtpTest(status) {
   }, ['Prefer: return=minimal']).catch(() => {});
 }
 
-async function sendPlatformEmail({ to, subject, body }) {
+const PLATFORM_SYSTEM_EMAIL_RECIPIENT = 'lucasbulow@hotmail.com';
+const PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS = new Set([
+  'backup_failed',
+  'webhook_failed',
+  'smtp_failed',
+  'critical_support_ticket',
+  'delinquent_support_ticket',
+  'cancellation_received',
+  'account_created_not_published',
+  'store_published_no_orders',
+  'internal_payment_refused',
+  'internal_account_suspended',
+  'internal_trial_expiring',
+  'internal_trial_expired',
+  'internal_plan_changed'
+]);
+
+function platformEmailRecipient(templateKey, fallbackTo) {
+  if (PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS.has(String(templateKey || ''))) {
+    return PLATFORM_SYSTEM_EMAIL_RECIPIENT;
+  }
+  return cleanEmail(fallbackTo || '');
+}
+
+async function sendPlatformEmail({ to, subject, body, templateKey }) {
   const rows = await dbRequest('GET', 'platform_smtp_settings', { select: '*', order: 'created_at.desc', limit: '1' }).catch(() => []);
   const settings = privateSmtpSettings(rows[0] || {});
   if (!settings.is_active || !settings.host || !settings.from_email) throw new Error('SMTP não configurado.');
-  const message = buildSmtpMessage({ to, subject, body, settings });
-  await smtpSend(settings, message, to);
+  const recipient = platformEmailRecipient(templateKey, to);
+  if (!recipient) throw new Error('Destinatário de e-mail não informado.');
+  const message = buildSmtpMessage({ to: recipient, subject, body, settings });
+  await smtpSend(settings, message, recipient);
 }
 
 function buildSmtpMessage({ to, subject, body, settings }) {
   const fromName = settings.from_name || 'Cardápio Digital';
+  const ehloDomain = process.env.SMTP_EHLO_DOMAIN || 'cardapio.local';
+  const plainBody = String(body || '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
   const headers = [
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: <${randomUUID()}@${ehloDomain}>`,
     `From: ${encodeMailAddress(fromName, settings.from_email)}`,
     `To: ${to}`,
     `Subject: ${encodeMimeHeader(subject)}`,
     `Reply-To: ${settings.reply_to || settings.from_email}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: 8bit'
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    'X-Mailer: Cardapio Digital Platform'
   ];
-  return `${headers.join('\r\n')}\r\n\r\n${body}\r\n`;
+  return `${headers.join('\r\n')}\r\n\r\n${Buffer.from(plainBody, 'utf8').toString('base64')}\r\n`;
 }
 
 function encodeMailAddress(name, email) {
@@ -6599,9 +6966,10 @@ function encodeMimeHeader(value) {
 }
 
 function smtpSend(settings, message, to) {
-  const useTls = settings.use_tls === true || Number(settings.port) === 465;
+  const directTls = Number(settings.port) === 465;
+  const useStartTls = settings.use_tls === true && !directTls;
   return new Promise((resolve, reject) => {
-    const socket = useTls
+    let socket = directTls
       ? tls.connect({ host: settings.host, port: settings.port, servername: settings.host, rejectUnauthorized: false })
       : net.connect({ host: settings.host, port: settings.port });
     let buffer = '';
@@ -6618,6 +6986,20 @@ function smtpSend(settings, message, to) {
       if (error) reject(error);
       else resolve(true);
     };
+    const upgradeToTls = () => new Promise((res, rej) => {
+      const secureSocket = tls.connect({
+        socket,
+        servername: settings.host,
+        rejectUnauthorized: false
+      });
+      secureSocket.once('secureConnect', () => {
+        socket = secureSocket;
+        socket.once('error', finish);
+        buffer = '';
+        res();
+      });
+      secureSocket.once('error', rej);
+    });
     const read = (expected) => new Promise((res, rej) => {
       const onData = (chunk) => {
         buffer += chunk.toString('utf8');
@@ -6640,11 +7022,18 @@ function smtpSend(settings, message, to) {
     socket.once('error', (error) => {
       finish(error);
     });
-    socket.once('connect', async () => {
+    socket.once(directTls ? 'secureConnect' : 'connect', async () => {
       try {
         await read([220]);
         write(`EHLO ${process.env.SMTP_EHLO_DOMAIN || 'localhost'}`);
         await read([250]);
+        if (useStartTls) {
+          write('STARTTLS');
+          await read([220]);
+          await upgradeToTls();
+          write(`EHLO ${process.env.SMTP_EHLO_DOMAIN || 'localhost'}`);
+          await read([250]);
+        }
         if (settings.username && settings.password) {
           write('AUTH LOGIN');
           await read([334]);
@@ -6672,16 +7061,62 @@ function smtpSend(settings, message, to) {
 }
 
 const EMAIL_TEMPLATE_DEFINITIONS = [
-  { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}}, seja bem-vindo ao {{store_name}}. Acesse {{dashboard_url}} para começar.' },
-  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha', body: 'Olá {{customer_name}}, use o link {{dashboard_url}} para recuperar sua senha.' },
-  { key: 'trial_ending', name: 'Trial acabando', subject: 'Seu teste termina em breve', body: 'Olá {{company_name}}, seu teste do plano {{plan_name}} termina em {{due_date}}.' },
-  { key: 'payment_pending', name: 'Pagamento pendente', subject: 'Pagamento pendente do plano {{plan_name}}', body: 'Olá {{company_name}}, regularize o pagamento até {{due_date}} em {{payment_url}}.' },
-  { key: 'payment_approved', name: 'Pagamento aprovado', subject: 'Pagamento aprovado', body: 'Olá {{company_name}}, o pagamento do plano {{plan_name}} foi aprovado.' },
-  { key: 'account_suspended', name: 'Conta suspensa', subject: 'Sua conta foi suspensa', body: 'Olá {{company_name}}, sua conta foi suspensa. Acesse {{payment_url}} ou fale com o suporte.' },
-  { key: 'support_replied', name: 'Suporte respondeu', subject: 'O suporte respondeu seu chamado', body: 'Olá {{customer_name}}, respondemos seu chamado. Acesse {{dashboard_url}} para acompanhar.' }
+  { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada com sucesso.\n\nAcesse o painel para concluir a configuração, cadastrar produtos e publicar seu cardápio:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
+  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao seu painel.\n\nUse o link abaixo para continuar:\n{{dashboard_url}}\n\nSe você não solicitou isso, ignore esta mensagem.' },
+  { key: 'onboarding_incomplete', name: 'Onboarding incompleto', subject: 'Finalize a configuração da sua loja', body: 'Olá {{company_name}},\n\nSua loja {{store_name}} ainda não está totalmente configurada.\n\nFinalize o onboarding para ajustar horários, pagamentos, entrega e cardápio inicial:\n{{dashboard_url}}\n\nIsso ajuda sua loja a ficar pronta para receber pedidos sem retrabalho.' },
+  { key: 'store_published', name: 'Loja publicada', subject: 'Seu cardápio já está publicado', body: 'Olá {{company_name}},\n\nBoa notícia: o cardápio da {{store_name}} foi publicado com sucesso.\n\nVocê já pode compartilhar o link com seus clientes:\n{{cardapio_url}}\n\nAcompanhe os pedidos pelo painel:\n{{dashboard_url}}' },
+  { key: 'first_order_received', name: 'Primeiro pedido recebido', subject: 'Seu primeiro pedido chegou', body: 'Olá {{company_name}},\n\nA loja {{store_name}} recebeu o primeiro pedido pelo cardápio digital.\n\nPedido: {{order_id}}\nValor: {{order_total}}\n\nAcesse o painel para acompanhar o preparo, entrega e conclusão:\n{{dashboard_url}}' },
+  { key: 'trial_ending', name: 'Trial acabando', subject: 'Seu teste grátis termina em breve', body: 'Olá {{company_name}},\n\nSeu período de teste do plano {{plan_name}} termina em {{due_date}}.\n\nPara manter o cardápio ativo e continuar recebendo pedidos, escolha um plano no painel:\n{{payment_url}}' },
+  { key: 'trial_expired', name: 'Trial encerrado', subject: 'Seu teste grátis terminou', body: 'Olá {{company_name}},\n\nO período de teste da loja {{store_name}} terminou.\n\nPara continuar usando o cardápio, pedidos e recursos do painel, contrate um plano mensal:\n{{payment_url}}\n\nSe precisar de ajuda para escolher o melhor plano, fale com o suporte.' },
+  { key: 'payment_pending', name: 'Pagamento pendente', subject: 'Pagamento pendente do plano {{plan_name}}', body: 'Olá {{company_name}},\n\nIdentificamos uma pendência no pagamento do plano {{plan_name}}.\n\nRegularize pelo painel para evitar bloqueios no cardápio e nos recursos da loja:\n{{payment_url}}' },
+  { key: 'payment_approved', name: 'Pagamento aprovado', subject: 'Pagamento aprovado', body: 'Olá {{company_name}},\n\nO pagamento do plano {{plan_name}} foi aprovado.\n\nSua assinatura está ativa e os recursos do plano já podem ser usados no painel:\n{{dashboard_url}}' },
+  { key: 'payment_refused', name: 'Pagamento recusado', subject: 'Não foi possível aprovar seu pagamento', body: 'Olá {{company_name}},\n\nO pagamento do plano {{plan_name}} não foi aprovado.\n\nConfira os dados de pagamento ou tente novamente pelo painel:\n{{payment_url}}\n\nSua assinatura pode entrar em período de tolerância até a regularização.' },
+  { key: 'account_suspended', name: 'Conta suspensa', subject: 'Sua conta foi suspensa', body: 'Olá {{company_name}},\n\nSua conta foi suspensa temporariamente.\n\nAcesse o painel para regularizar a assinatura ou fale com o suporte:\n{{payment_url}}' },
+  { key: 'account_reactivated', name: 'Conta reativada', subject: 'Sua conta foi reativada', body: 'Olá {{company_name}},\n\nSua conta foi reativada e a loja {{store_name}} já pode voltar a operar.\n\nAcesse o painel para conferir o status da assinatura e continuar recebendo pedidos:\n{{dashboard_url}}' },
+  { key: 'support_replied', name: 'Suporte respondeu', subject: 'O suporte respondeu seu chamado', body: 'Olá {{customer_name}},\n\nA equipe de suporte respondeu seu chamado.\n\nAcompanhe a conversa e envie uma nova mensagem pelo painel:\n{{support_url}}\n\nSe o problema já foi resolvido, você pode encerrar o atendimento por lá.' },
+  { key: 'support_ticket_closed', name: 'Chamado encerrado', subject: 'Seu chamado foi encerrado', body: 'Olá {{customer_name}},\n\nO chamado "{{ticket_subject}}" foi encerrado pela equipe de suporte.\n\nSe precisar continuar o atendimento, acesse o histórico e envie uma nova mensagem:\n{{support_url}}\n\nObrigado pelo retorno.' },
+  { key: 'account_created_not_published', name: 'Conta sem publicação', subject: 'Sua loja ainda não foi publicada', body: 'Olá {{company_name}},\n\nPercebemos que sua conta foi criada, mas o cardápio da {{store_name}} ainda não está publicado.\n\nPublique sua loja para começar a divulgar o link e receber pedidos:\n{{dashboard_url}}\n\nSe quiser, podemos ajudar nos primeiros ajustes.' },
+  { key: 'store_published_no_orders', name: 'Loja publicada sem pedidos', subject: 'Vamos ajudar sua loja a receber pedidos', body: 'Olá {{company_name}},\n\nSeu cardápio já está publicado, mas ainda não encontramos pedidos recentes na {{store_name}}.\n\nConfira produtos, formas de pagamento, WhatsApp e compartilhe o link com seus clientes:\n{{cardapio_url}}\n\nAcesse o painel para revisar tudo:\n{{dashboard_url}}' },
+  { key: 'plan_limit_warning', name: 'Limite do plano próximo', subject: 'Sua loja está perto do limite do plano', body: 'Olá {{company_name}},\n\nA loja {{store_name}} está perto do limite de {{limit_name}} do plano {{plan_name}}.\n\nUso atual: {{usage_count}}\nLimite: {{limit_value}}\n\nPara continuar crescendo sem bloqueios, avalie um upgrade:\n{{payment_url}}' },
+  { key: 'plan_upgrade_suggestion', name: 'Sugestão de upgrade', subject: 'Existe um plano melhor para sua operação', body: 'Olá {{company_name}},\n\nPelo uso recente da loja {{store_name}}, o plano {{plan_name}} pode estar limitando sua operação.\n\nUm plano superior pode liberar mais produtos, pedidos, mesas, relatórios e recursos avançados.\n\nConfira as opções no painel:\n{{payment_url}}' },
+  { key: 'plan_changed', name: 'Plano alterado', subject: 'Seu plano foi alterado para {{plan_name}}', body: 'Olá {{company_name}},\n\nO plano da loja {{store_name}} foi alterado para {{plan_name}}.\n\nOs recursos e limites já foram atualizados no painel:\n{{dashboard_url}}\n\nConsulte o histórico de cobrança para acompanhar os detalhes.' },
+  { key: 'cancellation_received', name: 'Cancelamento recebido', subject: 'Recebemos sua solicitação de cancelamento', body: 'Olá {{company_name}},\n\nRecebemos a solicitação de cancelamento da loja {{store_name}}.\n\nNossa equipe vai revisar a assinatura e confirmar os próximos passos.\n\nSe o cancelamento foi um engano ou se podemos ajudar com algum ajuste, responda este e-mail ou abra um chamado:\n{{support_url}}' },
+  { key: 'satisfaction_survey', name: 'Pesquisa de satisfação', subject: 'Como foi sua experiência com o suporte?', body: 'Olá {{customer_name}},\n\nQueremos saber como foi sua experiência com o atendimento.\n\nSe puder, avalie rapidamente o suporte recebido:\n{{rating_url}}\n\nSua opinião ajuda a melhorar o sistema e o atendimento.' },
+  { key: 'backup_failed', name: 'Backup falhou', subject: 'Alerta: falha no backup da plataforma', body: 'Alerta operacional do TáPronto.\n\nA rotina de backup falhou ou está atrasada.\n\nResumo: {{error_summary}}\nPeríodo: {{period}}\n\nAcesse o Platform para verificar Saúde e Serviços:\n{{platform_url}}' },
+  { key: 'webhook_failed', name: 'Webhook falhou', subject: 'Alerta: webhook com falha', body: 'Alerta operacional do TáPronto.\n\nUm webhook apresentou falha de processamento.\n\nProvedor: {{provider}}\nEvento: {{event_id}}\nResumo: {{error_summary}}\n\nVerifique logs, assinatura do webhook e eventos financeiros no Platform:\n{{platform_url}}' },
+  { key: 'smtp_failed', name: 'SMTP com erro', subject: 'Alerta: envio de e-mail com falha', body: 'Alerta operacional do TáPronto.\n\nO SMTP apresentou falha no envio ou teste de entrega.\n\nResumo: {{error_summary}}\n\nAcesse Comunicação no Platform para revisar host, porta, TLS, usuário e senha de app:\n{{platform_url}}' },
+  { key: 'critical_support_ticket', name: 'Chamado crítico aberto', subject: 'Chamado crítico aberto no suporte', body: 'Um chamado crítico foi aberto no Platform.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nAssunto: {{ticket_subject}}\n\nAcesse a central de atendimentos para responder com prioridade:\n{{support_url}}' },
+  { key: 'delinquent_support_ticket', name: 'Inadimplente abriu chamado', subject: 'Cliente inadimplente abriu chamado', body: 'Um cliente com pendência financeira abriu chamado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nAssunto: {{ticket_subject}}\n\nVerifique cobrança, assinatura e atendimento:\n{{support_url}}' },
+  { key: 'internal_payment_refused', name: 'Interno: pagamento recusado', subject: 'Alerta interno: pagamento recusado', body: 'Alerta comercial do TáPronto.\n\nUm pagamento foi recusado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nVerifique a assinatura, cobrança e eventos do provedor no Platform:\n{{platform_url}}' },
+  { key: 'internal_account_suspended', name: 'Interno: conta suspensa', subject: 'Alerta interno: conta suspensa', body: 'Alerta comercial do TáPronto.\n\nUma conta foi suspensa.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nConfira o motivo, cobrança e histórico do cliente no Platform:\n{{platform_url}}' },
+  { key: 'internal_trial_expiring', name: 'Interno: trial vencendo', subject: 'Alerta interno: trial perto do fim', body: 'Alerta comercial do TáPronto.\n\nUm trial está perto do fim.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nVencimento: {{due_date}}\n\nEntre em contato para orientar a contratação:\n{{platform_url}}' },
+  { key: 'internal_trial_expired', name: 'Interno: trial encerrado', subject: 'Alerta interno: trial encerrado', body: 'Alerta comercial do TáPronto.\n\nUm trial terminou.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nVencimento: {{due_date}}\n\nVerifique se o cliente deve ser acionado, bloqueado ou convertido:\n{{platform_url}}' },
+  { key: 'internal_plan_changed', name: 'Interno: plano alterado', subject: 'Alerta interno: plano alterado', body: 'Alerta comercial do TáPronto.\n\nUm plano foi alterado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nNovo plano: {{plan_name}}\nResumo: {{error_summary}}\n\nConfira assinatura, MRR e auditoria no Platform:\n{{platform_url}}' }
 ];
 
-const EMAIL_TEMPLATE_VARIABLES = ['store_name', 'company_name', 'customer_name', 'plan_name', 'due_date', 'dashboard_url', 'payment_url'];
+const EMAIL_TEMPLATE_VARIABLES = [
+  'store_name',
+  'company_name',
+  'customer_name',
+  'plan_name',
+  'due_date',
+  'dashboard_url',
+  'payment_url',
+  'support_url',
+  'cardapio_url',
+  'platform_url',
+  'order_id',
+  'order_total',
+  'ticket_subject',
+  'rating_url',
+  'limit_name',
+  'usage_count',
+  'limit_value',
+  'period',
+  'provider',
+  'event_id',
+  'error_summary'
+];
 
 async function listPlatformEmailTemplates() {
   const rows = await dbRequest('GET', 'email_templates', {
@@ -6946,6 +7381,32 @@ async function createAdminSupportMessage(req, admin, ticketId, data = {}) {
   return publicSupportMessage(message, [admin]);
 }
 
+async function closeAdminSupportTicket(req, admin, ticketId) {
+  const ticket = await getSupportTicket(ticketId);
+  const adminCompanyId = cleanOptionalUuid(admin.company_id || '');
+  const adminStoreId = cleanOptionalUuid(admin.store_id || '');
+  if ((ticket.company_id && ticket.company_id !== adminCompanyId) || (ticket.store_id && ticket.store_id !== adminStoreId)) {
+    throw httpError(403, 'Este chamado não pertence à sua loja.');
+  }
+  if (['closed', 'resolved'].includes(ticket.status)) return publicSupportTicket(ticket);
+  const now = new Date().toISOString();
+  const [updated] = await dbRequest('PATCH', 'support_tickets', { id: `eq.${ticket.id}` }, {
+    status: 'closed',
+    updated_at: now
+  }, ['Prefer: return=representation']);
+  await audit('admin.support.ticket.close', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id,
+    before_data: { status: ticket.status },
+    after_data: { status: 'closed' }
+  });
+  return publicSupportTicket(updated || { ...ticket, status: 'closed', updated_at: now });
+}
+
 async function createPlatformSupportTicket(req, admin, data = {}) {
   const subject = cleanText(data.subject || '').slice(0, 180);
   const message = cleanText(data.message || '').slice(0, 5000);
@@ -7115,10 +7576,12 @@ async function notifySupportTicket(ticket, templateKey) {
     plan_name: '',
     due_date: '',
     dashboard_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin`,
-    payment_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin`
+    payment_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin?tab=plan`,
+    support_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin?tab=support`
   };
   await sendPlatformEmail({
     to,
+    templateKey,
     subject: renderEmailTemplate(template.subject, variables),
     body: renderEmailTemplate(template.body, variables)
   });
@@ -7168,6 +7631,7 @@ async function storageHealthStatus(directory, key, label) {
 async function platformConfigChecklist() {
   const uploads = await directoryWritable(UPLOAD_DIR);
   const backups = await directoryWritable(BACKUP_DIR);
+  const smtp = await smtpServiceStatus();
   const production = process.env.NODE_ENV === 'production';
   const appUrl = process.env.APP_URL || process.env.PUBLIC_APP_URL || '';
   const apiUrl = process.env.API_URL || appUrl || '';
@@ -7182,7 +7646,7 @@ async function platformConfigChecklist() {
     configItem('abacate_api', 'Abacate Pay configurado', Boolean(PLATFORM_BILLING_API_KEY), PLATFORM_BILLING_API_KEY ? 'Configurado' : 'Ausente'),
     configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(PLATFORM_BILLING_WEBHOOK_SECRET), PLATFORM_BILLING_WEBHOOK_SECRET ? 'Configurado' : 'Ausente'),
     configItem('uploads', 'Upload/storage gravável', uploads, maskConfigValue(UPLOAD_DIR, 'path')),
-    configItem('smtp', 'SMTP/e-mail configurado', Boolean(process.env.SMTP_URL || process.env.SMTP_HOST), process.env.SMTP_URL || process.env.SMTP_HOST ? 'Configurado' : 'Não configurado', true),
+    configItem('smtp', 'SMTP/e-mail configurado', smtp.status === 'healthy', smtp.status === 'healthy' ? `Configurado (${smtp.source})` : smtp.message, true),
     configItem('proxy', 'Proxy/Nginx compatível', Boolean(process.env.TRUST_PROXY || process.env.PUBLIC_APP_URL || process.env.APP_URL), 'Verifique headers X-Forwarded-* no Nginx'),
     configItem('rate_limit', 'Rate limit ativo', true, 'Ativo em memória por rota sensível'),
     configItem('backup_dir', 'Diretório de backup configurado', Boolean(BACKUP_DIR), maskConfigValue(BACKUP_DIR, 'path')),
@@ -7230,6 +7694,15 @@ function maskConfigValue(value, type = 'text') {
   return 'Configurado';
 }
 
+function bytesLabel(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 function platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs }) {
   const alerts = [];
   const add = (type, severity, title, message, action) => alerts.push({ key: type, type, severity, title, message, action });
@@ -7253,11 +7726,30 @@ function platformHealthAlerts({ statuses, metrics, config, backup, operationalLo
   if (Number(metrics.system?.disk?.lowest_free_percent ?? 100) < 15) {
     add('disk_low', 'critical', 'Espaço em disco baixo', `Menos de ${metrics.system.disk.lowest_free_percent}% livre em uploads/backups.`, 'Limpe arquivos antigos ou aumente o volume.');
   }
+  const memory = metrics.system?.memory || {};
+  const ramUsed = Number(memory.system_used_percent || 0);
+  if (ramUsed >= 90) {
+    add('ram_critical', 'critical', 'RAM em uso crítico', `Memória do sistema em ${ramUsed}%.`, 'Reduza carga, verifique processos e planeje upgrade de RAM.');
+  } else if (ramUsed >= 75) {
+    add('ram_attention', 'warning', 'RAM exige atenção', `Memória do sistema em ${ramUsed}%.`, 'Monitore crescimento, paginação e consumo do Node/PostgreSQL.');
+  }
+  const swapUsed = Number(memory.swap_used_bytes || 0);
+  if (swapUsed >= 1024 * 1024 * 1024) {
+    add('swap_critical', 'critical', 'Swap em uso crítico', `Swap usado: ${bytesLabel(swapUsed)}.`, 'Swap não substitui RAM. Considere upgrade e revise processos.');
+  } else if (swapUsed >= 512 * 1024 * 1024) {
+    add('swap_attention', 'warning', 'Swap em uso elevado', `Swap usado: ${bytesLabel(swapUsed)}.`, 'Monitore lentidão e reduza pressão de memória.');
+  }
+  const heapUsed = Number(memory.heap_used_percent || 0);
+  if (heapUsed >= 90) {
+    add('node_heap_critical', 'critical', 'Heap do Node em uso crítico', `Heap usado: ${heapUsed}%.`, 'Reinicie de forma planejada e investigue vazamento de memória.');
+  } else if (heapUsed >= 80) {
+    add('node_heap_attention', 'warning', 'Heap do Node exige atenção', `Heap usado: ${heapUsed}%.`, 'Monitore crescimento e avalie NODE_OPTIONS/upgrade de RAM.');
+  }
   if (!PLATFORM_BILLING_API_KEY) {
     add('abacatepay_missing', 'warning', 'Abacate Pay desconfigurado', 'API key de billing não encontrada.', 'Configure ABACATEPAY_API_KEY no servidor.');
   }
-  if (!(process.env.SMTP_URL || process.env.SMTP_HOST)) {
-    add('smtp_missing', 'attention', 'SMTP não configurado', 'Envio de e-mails operacionais não está disponível.', 'Configure SMTP_URL ou SMTP_HOST quando habilitar e-mails.');
+  if (statuses.some((status) => status.key === 'smtp' && status.status !== 'healthy')) {
+    add('smtp_missing', 'attention', 'SMTP exige atenção', 'Envio de e-mails operacionais não está totalmente disponível.', 'Revise Comunicação > SMTP no Platform ou as variáveis SMTP do servidor.');
   }
   if (metrics.api.p95_ms && metrics.api.p95_ms > 1500) {
     add('latency', 'warning', 'Latência alta', `P95 da API em ${metrics.api.p95_ms} ms.`, 'Verifique banco, integrações e servidor.');
@@ -7410,7 +7902,7 @@ function sanitizeBackupStatus(value) {
 
 function cleanBackupFileName(value) {
   const file = path.basename(cleanText(value || ''));
-  return /^postgres-.+\.dump$/.test(file) ? file : '';
+  return /^postgres-.+\.(dump|sql)$/.test(file) ? file : '';
 }
 
 async function listStoreDomains(storeId) {
@@ -7529,11 +8021,11 @@ function sanitizeSubscriptionStatus(status) {
 async function createDefaultSubscription(companyId, planCode) {
   const plan = (await dbRequest('GET', 'subscription_plans', {
     select: 'id',
-    code: `eq.${cleanSlug(planCode || 'essential')}`,
+    code: `eq.${cleanSlug(planCode || 'trial')}`,
     limit: '1'
   }))[0] || (await dbRequest('GET', 'subscription_plans', {
     select: 'id',
-    code: 'eq.essential',
+    code: 'eq.trial',
     limit: '1'
   }))[0];
   if (!plan) return null;
@@ -9297,7 +9789,7 @@ async function createOrder(req, data, options = {}) {
   if (['table', 'tab'].includes(fulfillmentMethod)) clearAdminTablesCache();
   if (customerRow?.id) clearAdminCustomersCache();
 
-  const whatsappNumber = onlyDigits(store.whatsapp_number || STORE_WHATSAPP_NUMBER);
+  const whatsappNumber = whatsappRecipientPhone(store.whatsapp_number || STORE_WHATSAPP_NUMBER);
   const whatsappUrl = whatsappNumber
     ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}`
     : null;
@@ -9875,6 +10367,17 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
       is_manual: manual,
       provider: integrations.whatsapp.provider
     }, options);
+  }
+  if (manual) {
+    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const log = await createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
+      recipient_phone: phone,
+      delivery_status: 'manual',
+      provider: 'wa.me',
+      provider_message_id: `manual_${Date.now()}`,
+      is_manual: true
+    }, options);
+    return { ...log, whatsapp_url: whatsappUrl };
   }
   if (!integrations.whatsapp.enabled) {
     return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
@@ -11670,13 +12173,13 @@ function defaultLoyaltyProgram() {
 
 function defaultThemeSettings() {
   return {
-    primaryColor: '#f97316',
-    secondaryColor: '#111827',
-    backgroundColor: '#fff7ed',
-    buttonColor: '#f97316',
+    primaryColor: '#d71920',
+    secondaryColor: '#18181b',
+    backgroundColor: '#f5f5f4',
+    buttonColor: '#d71920',
     buttonTextColor: '#ffffff',
-    selectionColor: '#ffedd5',
-    selectionTextColor: '#9a3412'
+    selectionColor: '#d71920',
+    selectionTextColor: '#ffffff'
   };
 }
 
@@ -12075,6 +12578,10 @@ function sanitizeStore(data) {
     integration_settings: 'object',
     onboarding_completed: 'boolean'
   }, ['name']);
+  if ('whatsapp_number' in store) store.whatsapp_number = normalizeBrazilLocalPhone(store.whatsapp_number);
+  if ('whatsapp_number' in store && store.whatsapp_number && !isBrazilLocalPhone(store.whatsapp_number)) {
+    throw httpError(422, 'Informe o WhatsApp dos pedidos com DDD + telefone, sem +55. Ex: 55936191201.');
+  }
   if ('delivery_neighborhood_fees' in store) {
     store.delivery_neighborhood_fees = sanitizeNeighborhoodFees(store.delivery_neighborhood_fees);
   }
@@ -12814,6 +13321,17 @@ function cleanEmail(value) {
 
 function onlyDigits(value) {
   return String(value ?? '').replace(/\D/g, '');
+}
+
+function isBrazilLocalPhone(value) {
+  const digits = onlyDigits(value);
+  return digits.length === 10 || digits.length === 11;
+}
+
+function normalizeBrazilLocalPhone(value) {
+  const digits = onlyDigits(value);
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) return digits.slice(2);
+  return digits;
 }
 
 function parseBoolean(value, fallback = false) {
