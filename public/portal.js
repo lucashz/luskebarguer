@@ -9,6 +9,7 @@ const signupMessage = document.querySelector('#signupMessage');
 const signupSubmitButton = document.querySelector('#signupSubmitButton');
 const portalLoginForm = document.querySelector('#portalLoginForm');
 const portalRecoverForm = document.querySelector('#portalRecoverForm');
+const portalResetPasswordForm = document.querySelector('#portalResetPasswordForm');
 const onboardingChecklist = document.querySelector('#onboardingChecklist');
 const onboardingProgress = document.querySelector('#onboardingProgress');
 const onboardingPublishButton = document.querySelector('#onboardingPublishButton');
@@ -22,6 +23,7 @@ async function initPortal() {
   if (signupForm) initSignup();
   if (portalLoginForm) initLogin();
   if (portalRecoverForm) initRecover();
+  if (portalResetPasswordForm) await initPasswordReset();
   if (onboardingChecklist) {
     setupAdminStoreHomeLinks().catch(() => {});
     await loadOnboarding();
@@ -154,6 +156,62 @@ function initRecover() {
     } finally {
       button.disabled = false;
       button.textContent = 'Solicitar recuperação';
+    }
+  });
+}
+
+async function initPasswordReset() {
+  const params = new URLSearchParams(location.search);
+  const token = params.get('token') || '';
+  const intro = document.querySelector('#resetIntro');
+  const emailInput = document.querySelector('#resetEmail');
+  const message = document.querySelector('#portalResetPasswordMessage');
+  const button = document.querySelector('#portalResetPasswordButton');
+
+  if (!/^[a-f0-9]{32,128}$/i.test(token)) {
+    if (intro) intro.textContent = 'Link de recuperação inválido.';
+    portalResetPasswordForm.hidden = true;
+    return;
+  }
+
+  try {
+    const data = await request(`/api/portal/password-reset/${encodeURIComponent(token)}`);
+    if (emailInput) emailInput.value = data.reset?.email || '';
+    if (intro) intro.textContent = `Link válido até ${formatDateTime(data.reset?.expires_at)}.`;
+  } catch (error) {
+    if (intro) intro.textContent = error.message || 'Link inválido ou expirado.';
+    portalResetPasswordForm.hidden = true;
+    return;
+  }
+
+  portalResetPasswordForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(portalResetPasswordForm);
+    if (message) message.textContent = '';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Salvando...';
+    }
+    try {
+      const data = await request(`/api/portal/password-reset/${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: form.get('password'),
+          confirm_password: form.get('confirm_password')
+        })
+      });
+      if (message) message.textContent = data.message || 'Senha redefinida com sucesso.';
+      setTimeout(() => {
+        location.href = '/painel';
+      }, 800);
+    } catch (error) {
+      if (message) message.textContent = error.message || 'Não foi possível redefinir a senha.';
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Salvar nova senha';
+      }
     }
   });
 }
@@ -408,6 +466,16 @@ async function request(path, options = {}) {
 
 function formatMoney(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short'
+  }).format(date);
 }
 
 function slugify(value) {

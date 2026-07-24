@@ -340,6 +340,20 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  const portalPasswordResetMatch = url.pathname.match(/^\/api\/portal\/password-reset\/([a-f0-9]{32,128})$/i);
+  if (portalPasswordResetMatch && method === 'GET') {
+    json(res, 200, { reset: await getPublicAdminPasswordReset(portalPasswordResetMatch[1]) });
+    return;
+  }
+
+  if (portalPasswordResetMatch && method === 'POST') {
+    const result = await resetAdminPassword(req, portalPasswordResetMatch[1], await readJson(req));
+    json(res, 200, { ok: true, message: 'Senha redefinida com sucesso.', admin: result.body?.admin || null }, {
+      'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId)
+    });
+    return;
+  }
+
   const portalInviteMatch = url.pathname.match(/^\/api\/portal\/invitations\/([a-f0-9]{32,128})$/i);
   if (portalInviteMatch && method === 'GET') {
     json(res, 200, { invitation: await getPublicInvitation(portalInviteMatch[1]) });
@@ -1868,11 +1882,38 @@ async function requestAdminPasswordRecovery(req, data = {}) {
   const email = cleanEmail(data.email || '');
   if (!email) throw httpError(422, 'Informe um e-mail válido.');
   const [admin] = await dbRequest('GET', 'admin_users', {
-    select: 'id,company_id,email,is_active',
+    select: 'id,company_id,name,email,is_active',
     email: `eq.${email}`,
     limit: '1'
   });
   if (admin?.id && admin.is_active !== false) {
+    const token = randomBytes(24).toString('hex');
+    const tokenHash = hashPasswordResetToken(token);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await dbRequest('PATCH', 'admin_password_reset_tokens', {
+      admin_user_id: `eq.${admin.id}`,
+      status: 'eq.pending'
+    }, {
+      status: 'cancelled'
+    }, ['Prefer: return=minimal']).catch(() => {});
+    await dbRequest('POST', 'admin_password_reset_tokens', {}, {
+      admin_user_id: admin.id,
+      token_hash: tokenHash,
+      status: 'pending',
+      expires_at: expiresAt
+    }, ['Prefer: return=minimal']);
+    await sendAdminPasswordRecoveryEmail(req, admin, token, expiresAt).catch(async (error) => {
+      await audit('admin.password_recovery.email_failed', {
+        req,
+        actor_admin_id: admin.id,
+        company_id: admin.company_id || null,
+        entity_type: 'admin_user',
+        entity_id: admin.id,
+        severity: 'warning',
+        after_data: { email: maskEmailOrToken(email), message: error.message || 'Falha ao enviar recuperação.' }
+      });
+      throw httpError(502, 'Não foi possível enviar o e-mail de recuperação. Verifique a configuração SMTP.');
+    });
     await audit('admin.password_recovery.request', {
       req,
       actor_admin_id: admin.id,
@@ -1884,6 +1925,97 @@ async function requestAdminPasswordRecovery(req, data = {}) {
     });
   }
   return { ok: true };
+}
+
+async function sendAdminPasswordRecoveryEmail(req, admin, token, expiresAt) {
+  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === 'password_recovery');
+  if (!template?.is_active) throw new Error('Template de recuperação desativado.');
+  const resetUrl = absoluteAppUrl(req, `/redefinir-senha?token=${token}`);
+  const variables = {
+    customer_name: admin.name || admin.email,
+    company_name: '',
+    store_name: '',
+    due_date: formatDateTimePt(expiresAt),
+    dashboard_url: resetUrl,
+    reset_url: resetUrl,
+    support_url: absolutePublicUrl('/painel?tab=support'),
+    payment_url: absolutePublicUrl('/painel?tab=plan'),
+    platform_url: absolutePublicUrl('/platform')
+  };
+  await sendPlatformEmail({
+    to: admin.email,
+    templateKey: 'password_recovery',
+    subject: renderEmailTemplate(template.subject, variables),
+    body: renderEmailTemplate(template.body, variables)
+  });
+}
+
+async function getPublicAdminPasswordReset(token) {
+  const reset = await findAdminPasswordResetByToken(token);
+  const [admin] = await dbRequest('GET', 'admin_users', {
+    select: 'email,name',
+    id: `eq.${reset.admin_user_id}`,
+    limit: '1'
+  });
+  if (!admin) throw httpError(404, 'Link de recuperação inválido.');
+  return {
+    email: admin.email,
+    name: admin.name || '',
+    expires_at: reset.expires_at
+  };
+}
+
+async function resetAdminPassword(req, token, data = {}) {
+  const reset = await findAdminPasswordResetByToken(token);
+  const password = validatePassword(data.password);
+  const confirmPassword = String(data.confirm_password || data.confirmPassword || '');
+  if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmação de senha não confere.');
+  const [admin] = await dbRequest('PATCH', 'admin_users', { id: `eq.${reset.admin_user_id}` }, {
+    password_hash: hashPassword(password),
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  if (!admin) throw httpError(404, 'Conta administrativa não encontrada.');
+  await dbRequest('PATCH', 'admin_password_reset_tokens', { id: `eq.${reset.id}` }, {
+    status: 'used',
+    used_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']);
+  await dbRequest('PATCH', 'admin_password_reset_tokens', {
+    admin_user_id: `eq.${admin.id}`,
+    status: 'eq.pending'
+  }, {
+    status: 'cancelled'
+  }, ['Prefer: return=minimal']).catch(() => {});
+  clearSessionCacheByOwner('admin', admin.id);
+  await audit('admin.password_recovery.reset', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id || null,
+    entity_type: 'admin_user',
+    entity_id: admin.id,
+    severity: 'info',
+    after_data: { email: maskEmailOrToken(admin.email) }
+  });
+  return createAdminSession(admin);
+}
+
+async function findAdminPasswordResetByToken(token) {
+  const value = String(token || '').trim();
+  if (!/^[a-f0-9]{32,128}$/i.test(value)) throw httpError(404, 'Link de recuperação inválido.');
+  const tokenHash = hashPasswordResetToken(value);
+  const [reset] = await dbRequest('GET', 'admin_password_reset_tokens', {
+    select: '*',
+    token_hash: `eq.${tokenHash}`,
+    status: 'eq.pending',
+    limit: '1'
+  });
+  if (!reset) throw httpError(404, 'Link de recuperação inválido ou já utilizado.');
+  if (new Date(reset.expires_at).getTime() < Date.now()) {
+    await dbRequest('PATCH', 'admin_password_reset_tokens', { id: `eq.${reset.id}` }, {
+      status: 'expired'
+    }, ['Prefer: return=minimal']).catch(() => {});
+    throw httpError(410, 'Este link de recuperação expirou.');
+  }
+  return reset;
 }
 
 async function getAdminById(adminId) {
@@ -2105,6 +2237,10 @@ function sanitizeInviteRole(role) {
 
 function hashInviteToken(token) {
   return pbkdf2Sync(String(token || ''), 'admin_invitation', 120000, 32, 'sha256').toString('hex');
+}
+
+function hashPasswordResetToken(token) {
+  return pbkdf2Sync(String(token || ''), 'admin_password_reset', 120000, 32, 'sha256').toString('hex');
 }
 
 async function updateAdminUser(id, data, session) {
@@ -6859,10 +6995,12 @@ function publicSmtpSettings(row = {}) {
 }
 
 function privateSmtpSettings(row = {}) {
+  const rawUsername = String(row.username || process.env.SMTP_USER || '');
+  const safeUsername = rawUsername.includes('***') ? (row.from_email || process.env.SMTP_FROM_EMAIL || '') : rawUsername;
   return {
     host: row.host || process.env.SMTP_HOST || '',
     port: Number(row.port || process.env.SMTP_PORT || 587),
-    username: row.username || process.env.SMTP_USER || '',
+    username: safeUsername,
     password: row.password_token || process.env.SMTP_PASS || process.env.SMTP_TOKEN || '',
     from_email: row.from_email || process.env.SMTP_FROM_EMAIL || '',
     from_name: row.from_name || process.env.SMTP_FROM_NAME || '',
@@ -7081,7 +7219,7 @@ function smtpSend(settings, message, to) {
 
 const EMAIL_TEMPLATE_DEFINITIONS = [
   { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada com sucesso.\n\nAcesse o painel para concluir a configuração, cadastrar produtos e publicar seu cardápio:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
-  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao seu painel.\n\nUse o link abaixo para continuar:\n{{dashboard_url}}\n\nSe você não solicitou isso, ignore esta mensagem.' },
+  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao painel da sua loja.\n\nClique no link abaixo para criar uma nova senha:\n{{reset_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não solicitou isso, ignore este e-mail.' },
   { key: 'onboarding_incomplete', name: 'Onboarding incompleto', subject: 'Finalize a configuração da sua loja', body: 'Olá {{company_name}},\n\nSua loja {{store_name}} ainda não está totalmente configurada.\n\nFinalize o onboarding para ajustar horários, pagamentos, entrega e cardápio inicial:\n{{dashboard_url}}\n\nIsso ajuda sua loja a ficar pronta para receber pedidos sem retrabalho.' },
   { key: 'store_published', name: 'Loja publicada', subject: 'Seu cardápio já está publicado', body: 'Olá {{company_name}},\n\nBoa notícia: o cardápio da {{store_name}} foi publicado com sucesso.\n\nVocê já pode compartilhar o link com seus clientes:\n{{cardapio_url}}\n\nAcompanhe os pedidos pelo painel:\n{{dashboard_url}}' },
   { key: 'first_order_received', name: 'Primeiro pedido recebido', subject: 'Seu primeiro pedido chegou', body: 'Olá {{company_name}},\n\nA loja {{store_name}} recebeu o primeiro pedido pelo cardápio digital.\n\nPedido: {{order_id}}\nValor: {{order_total}}\n\nAcesse o painel para acompanhar o preparo, entrega e conclusão:\n{{dashboard_url}}' },
@@ -7120,6 +7258,7 @@ const EMAIL_TEMPLATE_VARIABLES = [
   'plan_name',
   'due_date',
   'dashboard_url',
+  'reset_url',
   'payment_url',
   'support_url',
   'cardapio_url',
@@ -10263,6 +10402,35 @@ function absoluteUrl(req, relativePath) {
   return `${proto}://${host}${relativePath}`;
 }
 
+function absoluteFromBase(base, relativePath = '/') {
+  const normalizedPath = String(relativePath || '/').startsWith('/') ? String(relativePath || '/') : `/${relativePath}`;
+  return `${String(base || '').replace(/\/+$/, '')}${normalizedPath}`;
+}
+
+function absoluteAppUrl(req, relativePath = '/') {
+  const base = process.env.APP_URL || process.env.PUBLIC_APP_URL || absoluteUrl(req, '/');
+  return absoluteFromBase(base, relativePath);
+}
+
+function absolutePublicUrl(relativePath = '/') {
+  const base = process.env.PUBLIC_APP_URL || process.env.APP_URL || `http://${HOST}:${PORT}`;
+  return absoluteFromBase(base, relativePath);
+}
+
+function formatDateTimePt(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 async function listCustomerOrders(customerId, storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId);
@@ -12526,6 +12694,7 @@ function routePath(requestPath, hostHeader = '') {
   if (requestPath === '/privacidade') return '/privacy.html';
   if (requestPath === '/entrar') return '/login.html';
   if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
+  if (requestPath === '/redefinir-senha') return '/reset-password.html';
   if (requestPath === '/onboarding') return '/admin.html';
   if (requestPath === '/convite') return '/invite.html';
   if (requestPath === '/painel' || requestPath === '/admin') return '/admin.html';

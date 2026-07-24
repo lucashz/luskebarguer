@@ -265,6 +265,9 @@ const els = {
   storeSwitcher: document.querySelector('#storeSwitcher'),
   setupForm: document.querySelector('#setupForm'),
   loginForm: document.querySelector('#loginForm'),
+  adminRecoverForm: document.querySelector('#adminRecoverForm'),
+  adminRecoverButton: document.querySelector('#adminRecoverButton'),
+  adminRecoverMessage: document.querySelector('#adminRecoverMessage'),
   adminLoginMessage: document.querySelector('#adminLoginMessage'),
   logoutButton: document.querySelector('#logoutButton'),
   adminHeaderLogoutButton: document.querySelector('#adminHeaderLogoutButton'),
@@ -456,6 +459,7 @@ document.querySelectorAll('[data-modifier-preset]').forEach((button) => {
 
 els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
+els.adminRecoverForm?.addEventListener('submit', submitAdminPasswordRecovery);
 els.logoutButton?.addEventListener('click', logout);
 els.adminHeaderLogoutButton?.addEventListener('click', logout);
 els.endSupportModeButton?.addEventListener('click', endSupportMode);
@@ -745,6 +749,37 @@ async function submitLogin(event) {
     if (button) {
       button.disabled = false;
       button.textContent = 'Entrar';
+    }
+  }
+}
+
+async function submitAdminPasswordRecovery(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(els.adminRecoverForm));
+  const loginEmail = els.loginForm?.elements?.email?.value || '';
+  const email = data.email || loginEmail;
+  if (els.adminRecoverMessage) els.adminRecoverMessage.textContent = '';
+  if (els.adminRecoverButton) {
+    els.adminRecoverButton.disabled = true;
+    els.adminRecoverButton.textContent = 'Enviando...';
+  }
+  try {
+    const result = await request('/api/portal/recover-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const message = result.message || 'Se o e-mail existir, enviaremos as instruções de recuperação.';
+    if (els.adminRecoverMessage) els.adminRecoverMessage.textContent = message;
+    toast(message);
+  } catch (error) {
+    const message = error.message || 'Não foi possível solicitar recuperação.';
+    if (els.adminRecoverMessage) els.adminRecoverMessage.textContent = message;
+    toast(message);
+  } finally {
+    if (els.adminRecoverButton) {
+      els.adminRecoverButton.disabled = false;
+      els.adminRecoverButton.textContent = 'Enviar link';
     }
   }
 }

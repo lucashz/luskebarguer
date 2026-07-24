@@ -7476,6 +7476,34 @@ legend {
   margin: 6px 0 18px;
 }
 
+.admin-recover-box {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.admin-recover-box summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.admin-recover-box summary:hover {
+  text-decoration: underline;
+}
+
+.admin-recover-box form {
+  margin-top: 12px;
+}
+
+.admin-recover-box .muted {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .account-consent-box {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);

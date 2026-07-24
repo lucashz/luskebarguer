@@ -59,6 +59,15 @@
               <button class="primary-button wide">Entrar</button>
               <p class="form-message" id="adminLoginMessage" role="alert" aria-live="polite"></p>
             </form>
+            <details class="admin-recover-box">
+              <summary>Esqueceu a senha?</summary>
+              <form id="adminRecoverForm" class="stack-form">
+                <p class="muted">Informe seu e-mail para receber um link seguro de redefinição de senha.</p>
+                <input name="email" required type="email" placeholder="E-mail cadastrado">
+                <button class="ghost-button compact" id="adminRecoverButton" type="submit">Enviar link</button>
+                <p class="form-message" id="adminRecoverMessage" role="alert" aria-live="polite"></p>
+              </form>
+            </details>
           </div>
         </section>
 
