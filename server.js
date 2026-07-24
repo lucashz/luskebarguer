@@ -13220,7 +13220,7 @@ function routePath(requestPath, hostHeader = '') {
   if (['/recursos', '/demonstracao'].includes(requestPath)) return '/home.html';
   if (requestPath === '/termos') return '/terms.html';
   if (requestPath === '/privacidade') return '/privacy.html';
-  if (requestPath === '/entrar') return '/login.html';
+  if (requestPath === '/entrar') return '/admin.html';
   if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
   if (requestPath === '/ativar-conta') return '/activate-account.html';
   if (requestPath === '/redefinir-senha') return '/reset-password.html';

@@ -7713,6 +7713,13 @@ legend {
   line-height: 1.45;
 }
 
+.auth-home-button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+  text-decoration: none;
+}
+
 .account-consent-box {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);

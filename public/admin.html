@@ -34,24 +34,25 @@
           <section class="account-loading auth-card" id="adminAuthLoading">
             <span class="loading-dot"></span>
             <div>
-              <p class="eyebrow">Admin</p>
+              <p class="eyebrow">Painel da loja</p>
               <h1>Carregando painel</h1>
             </div>
           </section>
 
           <div class="auth-card" id="setupCard" hidden>
             <p class="eyebrow">Primeiro acesso</p>
-            <h1>Criar conta admin</h1>
+            <h1>Criar conta</h1>
             <form id="setupForm" class="stack-form">
               <input name="name" required placeholder="Nome">
               <input name="email" required type="email" placeholder="E-mail">
               <input name="password" required type="password" minlength="8" placeholder="Senha">
               <button class="primary-button wide">Criar e entrar</button>
             </form>
+            <a class="ghost-button compact auth-home-button" href="/">Início</a>
           </div>
 
           <div class="auth-card" id="loginCard" hidden>
-            <p class="eyebrow">Admin</p>
+            <p class="eyebrow">Painel da loja</p>
             <h1>Entrar no painel</h1>
             <form id="loginForm" class="stack-form">
               <input name="email" required type="email" placeholder="E-mail">
@@ -68,6 +69,7 @@
                 <p class="form-message" id="adminRecoverMessage" role="alert" aria-live="polite"></p>
               </form>
             </details>
+            <a class="ghost-button compact auth-home-button" href="/">Início</a>
           </div>
         </section>
 

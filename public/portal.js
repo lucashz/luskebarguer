@@ -7,8 +7,6 @@ const slugInput = document.querySelector('#signupSlug');
 const slugStatus = document.querySelector('#slugStatus');
 const signupMessage = document.querySelector('#signupMessage');
 const signupSubmitButton = document.querySelector('#signupSubmitButton');
-const portalLoginForm = document.querySelector('#portalLoginForm');
-const portalRecoverForm = document.querySelector('#portalRecoverForm');
 const portalResetPasswordForm = document.querySelector('#portalResetPasswordForm');
 const portalActivationButton = document.querySelector('#portalActivationButton');
 const onboardingChecklist = document.querySelector('#onboardingChecklist');
@@ -22,8 +20,6 @@ initPortal();
 async function initPortal() {
   if (planContainers.length) await loadPlans();
   if (signupForm) initSignup();
-  if (portalLoginForm) initLogin();
-  if (portalRecoverForm) initRecover();
   if (portalResetPasswordForm) await initPasswordReset();
   if (portalActivationButton) await initAccountActivation();
   if (onboardingChecklist) {
@@ -110,57 +106,6 @@ function setSignupProgress(step) {
   });
 }
 
-function initLogin() {
-  portalLoginForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const message = document.querySelector('#portalLoginMessage');
-    const button = document.querySelector('#portalLoginButton');
-    const form = new FormData(portalLoginForm);
-    button.disabled = true;
-    button.textContent = 'Entrando...';
-    if (message) message.textContent = '';
-    try {
-      await request('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: form.get('email'),
-          password: form.get('password')
-        })
-      });
-      location.href = '/painel';
-    } catch (error) {
-      if (message) message.textContent = error.message || 'Não foi possível entrar.';
-      button.disabled = false;
-      button.textContent = 'Entrar no painel';
-    }
-  });
-}
-
-function initRecover() {
-  portalRecoverForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const message = document.querySelector('#portalRecoverMessage');
-    const button = document.querySelector('#portalRecoverButton');
-    const form = new FormData(portalRecoverForm);
-    button.disabled = true;
-    button.textContent = 'Solicitando...';
-    if (message) message.textContent = '';
-    try {
-      const data = await request('/api/portal/recover-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.get('email') })
-      });
-      if (message) message.textContent = data.message || 'Solicitação registrada.';
-    } catch (error) {
-      if (message) message.textContent = error.message || 'Não foi possível solicitar recuperação.';
-    } finally {
-      button.disabled = false;
-      button.textContent = 'Solicitar recuperação';
-    }
-  });
-}
 
 async function initPasswordReset() {
   const params = new URLSearchParams(location.search);
