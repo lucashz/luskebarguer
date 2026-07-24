@@ -11452,6 +11452,9 @@ async function createProviderPayment({ store, order, type, integrations }) {
 async function createAbacatePayPayment({ store, order, type, integrations }) {
   const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
   if (!token) throw httpError(422, 'Configure a chave da Abacate Pay.');
+  if (isMaskedSecretValue(token)) {
+    throw httpError(422, 'A chave da Abacate Pay desta loja está salva apenas como máscara. Reconfigure a API key real em Integrações > Pagamento online.');
+  }
   const customer = abacatePayCustomer(order);
   const amount = moneyCents(order.total);
 
@@ -13074,7 +13077,11 @@ function mergeIntegrationSettings(currentValue, nextValue) {
 
 function shouldKeepExistingSecret(value) {
   const text = String(value || '').trim();
-  return !text || /^\*{4,}/.test(text);
+  return !text || isMaskedSecretValue(text);
+}
+
+function isMaskedSecretValue(value) {
+  return /^\*{4,}/.test(String(value || '').trim());
 }
 
 function maskedSecret(value) {
