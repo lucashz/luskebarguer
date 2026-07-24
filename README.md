@@ -1,6 +1,6 @@
-# Cardapio Digital Local
+# TáPronto
 
-Aplicação de cardápio digital com frontend, backend Node.js e PostgreSQL local.
+Cardápio digital, pedidos organizados e sua loja online em minutos.
 
 ## Requisitos
 
@@ -52,7 +52,7 @@ npm run admin:create
 ## Rotas
 
 - Cliente: `http://127.0.0.1:3000/cardapio`
-- Admin: `http://127.0.0.1:3000/admin`
+- Painel: `http://127.0.0.1:3000/painel`
 - Conta do cliente: `http://127.0.0.1:3000/conta`
 - Pedidos do cliente: `http://127.0.0.1:3000/pedidos`
 

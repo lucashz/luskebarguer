@@ -43,24 +43,29 @@ try {
   expect('trial', 'orders', true, 30);
   expect('trial', 'admin_users', true, 1);
   expect('trial', 'manual_whatsapp', true, null);
+  expect('trial', 'automatic_whatsapp', false, null);
 
   expect('essential', 'digital_menu', true, 25);
   expect('essential', 'menu_categories', true, 5);
   expect('essential', 'orders', true, 150);
   expect('essential', 'admin_users', true, 1);
   expect('essential', 'manual_whatsapp', true, null);
+  expect('essential', 'automatic_whatsapp', false, null);
   expect('essential', 'promotions', false, null);
   expect('essential', 'custom_domain', false, null);
 
   expect('professional', 'digital_menu', true, 100);
   expect('professional', 'orders', true, null);
   expect('professional', 'admin_users', true, 5);
+  expect('professional', 'manual_whatsapp', false, null);
+  expect('professional', 'automatic_whatsapp', true, null);
   expect('professional', 'promotions', true, null);
   expect('professional', 'print_kitchen', true, null);
   expect('professional', 'custom_domain', false, null);
 
   expect('premium', 'digital_menu', true, null);
   expect('premium', 'admin_users', true, 10);
+  expect('premium', 'manual_whatsapp', false, null);
   expect('premium', 'automatic_whatsapp', true, null);
   expect('premium', 'loyalty', true, null);
   expect('premium', 'cart_suggestions', true, null);

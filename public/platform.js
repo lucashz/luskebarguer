@@ -1272,7 +1272,7 @@ function renderCompanies() {
             </form>
             <div class="platform-client-quick-actions" data-company-id="${escapeAttribute(company.id)}">
               ${stores[0]?.slug ? `<a class="ghost-button compact" href="/${escapeAttribute(stores[0].slug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
-              <a class="ghost-button compact" href="/admin" target="_blank" rel="noopener">Abrir admin</a>
+              <a class="ghost-button compact" href="/painel" target="_blank" rel="noopener">Abrir painel</a>
               ${stores[0]?.id ? `<button class="ghost-button compact" data-company-action="impersonate" data-store-id="${escapeAttribute(stores[0].id)}" type="button">Entrar como suporte</button>` : ''}
               <button class="ghost-button compact" data-company-action="activate" type="button">Liberar cliente</button>
               <button class="danger-button compact" data-company-action="suspend" type="button">Suspender</button>
@@ -1431,7 +1431,7 @@ function clientAlertsForCompany(company, metrics = {}) {
   const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended']);
   if (trialEndingSoon(subscription)) alerts.push({ type: 'trial', severity: 'warning', title: 'Trial perto do fim', action: 'Entrar em contato e orientar upgrade.' });
   if (delinquent.has(metrics.subscription_status || subscription.status || company.status)) alerts.push({ type: 'billing', severity: 'critical', title: 'Cobrança pendente', action: 'Verificar pagamento e webhook.' });
-  if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar cardápio ou unidade.' });
+  if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar meu cardápio ou unidade.' });
   if (stores.some((store) => store.is_active === false)) alerts.push({ type: 'store', severity: 'attention', title: 'Loja não publicada ou suspensa', action: 'Validar status da loja.' });
   if (Number(metrics.stores_without_whatsapp_count || 0) > 0) alerts.push({ type: 'whatsapp', severity: 'warning', title: 'Loja sem WhatsApp', action: 'Completar configuração de atendimento.' });
   if (stores.length && Number(metrics.products_count || 0) === 0) alerts.push({ type: 'menu', severity: 'critical', title: 'Sem produto cadastrado', action: 'Ajudar o cliente a montar o cardápio.' });
@@ -2835,7 +2835,7 @@ function insertSupportQuickReply(template) {
     .replaceAll('{{company_name}}', ticket?.company_name || 'cliente')
     .replaceAll('{{store_name}}', ticket?.store_name || 'loja')
     .replaceAll('{{plan_name}}', context.planName || 'plano atual')
-    .replaceAll('{{dashboard_url}}', `${window.location.origin}/admin`)
+    .replaceAll('{{dashboard_url}}', `${window.location.origin}/painel`)
     .replaceAll('{{cardapio_url}}', context.storeSlug ? `${window.location.origin}/${context.storeSlug}` : `${window.location.origin}/cardapio`);
   textarea.value = textarea.value ? `${textarea.value}\n\n${text}` : text;
   textarea.focus();
@@ -2864,7 +2864,7 @@ async function openSupportImpersonation(storeId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ store_id: storeId, confirmation: confirmation.confirmation, password: confirmation.password })
     });
-    window.location.href = '/admin';
+    window.location.href = '/painel';
   } catch (error) {
     toast(error.message || 'Não foi possível entrar como suporte.');
   }
@@ -3394,7 +3394,7 @@ async function submitCompanyQuickAction(event) {
       message: 'Você entrará temporariamente no admin desta loja. A sessão expira automaticamente e tudo será auditado.',
       critical: true,
       success: 'Modo suporte iniciado.',
-      redirect: '/admin',
+      redirect: '/painel',
       store_id: button.dataset.storeId || ''
     }
   };

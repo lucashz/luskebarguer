@@ -23,7 +23,7 @@ chown -R lucas:lucas "$BACKUP_DIR" "$LOG_DIR" 2>/dev/null || true
 
 cat >/etc/systemd/system/cardapio-db-backup.service <<SERVICE
 [Unit]
-Description=Cardapio PostgreSQL backup
+Description=TáPronto PostgreSQL backup
 Wants=network-online.target
 After=network-online.target
 
@@ -39,7 +39,7 @@ SERVICE
 
 cat >/etc/systemd/system/cardapio-db-backup.timer <<TIMER
 [Unit]
-Description=Run Cardapio PostgreSQL backup every $BACKUP_INTERVAL
+Description=Run TáPronto PostgreSQL backup every $BACKUP_INTERVAL
 
 [Timer]
 OnBootSec=10min

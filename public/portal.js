@@ -124,7 +124,7 @@ function initLogin() {
           password: form.get('password')
         })
       });
-      location.href = '/admin';
+      location.href = '/painel';
     } catch (error) {
       if (message) message.textContent = error.message || 'Não foi possível entrar.';
       button.disabled = false;
@@ -218,7 +218,7 @@ async function submitSignup(event) {
       body: JSON.stringify(payload)
     });
     signupMessage.textContent = 'Conta criada. Abrindo onboarding...';
-    location.href = data.redirect || '/admin';
+    location.href = data.redirect || '/painel';
   } catch (error) {
     signupMessage.textContent = error.message || 'Não foi possível criar a conta.';
     setSignupLoading(false);
@@ -346,7 +346,7 @@ async function initInviteAccept() {
           confirm_password: form.get('confirm_password')
         })
       });
-      location.href = '/admin';
+      location.href = '/painel';
     } catch (error) {
       if (message) message.textContent = error.message || 'Não foi possível aceitar o convite.';
       button.disabled = false;
@@ -415,6 +415,8 @@ function slugify(value) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/\b([a-z0-9])[\s._-]+(?=[a-z0-9]\b)/g, '$1')
+    .replace(/\b([a-z0-9])[\s._-]+(?=[a-z0-9]\b)/g, '$1')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);

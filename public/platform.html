@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Plataforma - Cardápio</title>
+    <title>Platform - TáPronto</title>
+    <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260713-platform-tech">
     <link rel="stylesheet" href="/platform.css?v=20260721-support-polish">
   </head>
@@ -11,9 +12,9 @@
     <main class="platform-shell">
       <aside class="platform-sidebar" aria-label="Menu do Admin Master">
         <div class="platform-sidebar-brand">
-          <span class="platform-sidebar-logo" aria-hidden="true">AM</span>
+          <img class="platform-sidebar-logo" src="/assets/tapronto-favicon.svg" alt="" width="32" height="32" aria-hidden="true">
           <div>
-            <strong>Admin Master</strong>
+            <strong>TáPronto Platform</strong>
             <small id="platformSidebarEmail">administrador.local</small>
           </div>
         </div>
@@ -39,12 +40,12 @@
       <section class="platform-main">
         <header class="platform-topbar">
           <div>
-            <p class="eyebrow" id="platformUser">Plataforma</p>
+            <p class="eyebrow" id="platformUser">TáPronto Platform</p>
             <h1 id="platformPageTitle">Admin Master</h1>
             <p class="muted" id="platformPageSubtitle">Acompanhe clientes, receita, suporte e operação do SaaS em tempo real.</p>
           </div>
           <div class="admin-header-actions">
-            <a class="ghost-button compact" href="/admin">Voltar ao admin</a>
+            <a class="ghost-button compact" href="/painel">Voltar ao painel</a>
             <button class="ghost-button compact" id="platformLogoutButton" type="button">Sair</button>
           </div>
         </header>
@@ -58,9 +59,9 @@
       <section class="platform-login-panel" id="platformLoginPanel" hidden>
         <form class="platform-login-card" id="platformLoginForm">
           <div>
-            <p class="eyebrow">Admin Master</p>
-            <h2>Entrar no Platform</h2>
-            <p class="muted">Entre com uma conta Admin Master para acompanhar clientes, cobranças, suporte e saúde operacional.</p>
+            <p class="eyebrow">TáPronto Platform</p>
+            <h2>Entrar no Admin Master</h2>
+            <p class="muted">Entre para acompanhar clientes, cobranças, suporte e saúde operacional do TáPronto.</p>
           </div>
           <label>E-mail
             <input name="email" type="email" autocomplete="username" required placeholder="admin@cardapio.local">
@@ -69,7 +70,7 @@
             <input name="password" type="password" autocomplete="current-password" required placeholder="Sua senha">
           </label>
           <p class="form-message" id="platformLoginMessage" role="status"></p>
-          <button class="primary-button" id="platformLoginButton" type="submit">Entrar no Platform</button>
+          <button class="primary-button" id="platformLoginButton" type="submit">Entrar no TáPronto Platform</button>
           <a class="ghost-button compact" href="/entrar">Voltar ao login do admin</a>
         </form>
       </section>
@@ -391,7 +392,7 @@
               </div>
               <div class="two-cols">
                 <label>Remetente padrão<input name="from_email" type="email" placeholder="suporte@dominio.com"></label>
-                <label>Nome do remetente<input name="from_name" placeholder="Cardápio Digital"></label>
+                <label>Nome do remetente<input name="from_name" placeholder="Suporte TáPronto"></label>
               </div>
               <label>E-mail de resposta<input name="reply_to" type="email" placeholder="responder@dominio.com"></label>
               <div class="payment-options">

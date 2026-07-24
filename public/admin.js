@@ -773,7 +773,7 @@ async function endSupportMode() {
     clearAdminCache();
     stopOrderPolling();
     toast('Modo suporte encerrado.');
-    window.location.href = result.restored ? '/platform' : '/admin';
+    window.location.href = result.restored ? '/platform' : '/painel';
   } catch (error) {
     toast(error.message || 'Não foi possível encerrar o modo suporte.');
   } finally {
@@ -3121,7 +3121,7 @@ function orderCard(order) {
   const payment = order.payment_method ? escapeHtml(order.payment_method) : 'Pagamento não informado';
   const latestWhatsapp = (order.whatsapp_logs || [])[0];
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
-  const canSendManualWhatsapp = canUsePlanFeature('manual_whatsapp');
+  const canSendManualWhatsapp = canUseManualWhatsapp();
   card.innerHTML = `
     <div class="order-card-top">
       <div>
@@ -4419,7 +4419,7 @@ function customerEditor(customer) {
 
 function customerOrderHistoryRow(order) {
   const createdAt = new Date(order.created_at).toLocaleString('pt-BR');
-  const whatsappAction = canUsePlanFeature('manual_whatsapp')
+  const whatsappAction = canUseManualWhatsapp()
     ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">WhatsApp manual</button>`
     : '';
   return `
@@ -7250,6 +7250,11 @@ function isTabAvailableInPlan(tab) {
 function canUsePlanFeature(feature) {
   const access = state.admin?.plan_access?.[feature];
   return access ? access.enabled !== false : true;
+}
+
+function canUseManualWhatsapp() {
+  const access = state.admin?.plan_access || {};
+  return access.manual_whatsapp?.enabled === true && access.automatic_whatsapp?.enabled !== true;
 }
 
 function planFeaturesToAccess(features = []) {

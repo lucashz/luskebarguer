@@ -25,7 +25,7 @@ async function main() {
       companyId: company.id,
       name: 'Luske Burguer',
       slug: 'luske-burguer',
-      description: 'Cardapio digital de demonstracao',
+      description: 'Loja de demonstração do TáPronto.',
       isActive: true
     }
   });
@@ -127,4 +127,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

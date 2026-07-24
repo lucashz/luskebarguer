@@ -272,7 +272,7 @@ function render() {
 
 function renderStore() {
   const store = state.store || {};
-  const name = store.name || 'Cardápio digital';
+  const name = store.name || 'TáPronto';
   els.storeName.textContent = name;
   els.storeLogo.textContent = '';
   els.storeLogo.style.backgroundImage = '';
@@ -392,7 +392,7 @@ function applyStoreTheme(theme = {}) {
 }
 
 function applyStoreIdentity(store = {}) {
-  const title = String(store.page_title || store.name || 'Cardápio Digital').trim();
+  const title = String(store.page_title || store.name || 'TáPronto').trim();
   document.title = title;
   applyFavicon(store.favicon_url);
 }
@@ -479,7 +479,7 @@ function applyDemoStoreHints() {
     demo_mode: true,
     name: state.store?.name || 'Vitrine Gourmet',
     description: state.store?.description || 'Hamburgueria artesanal de demonstração para testar o cardápio digital.',
-    page_title: state.store?.page_title || 'Loja demonstração - Cardápio Digital'
+    page_title: state.store?.page_title || 'Loja demonstração - TáPronto'
   };
 }
 

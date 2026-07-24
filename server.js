@@ -102,7 +102,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    await serveStatic(res, url.pathname);
+    await serveStatic(res, url.pathname, req.headers.host);
   } catch (error) {
     logServerError(error, req);
     const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
@@ -3921,7 +3921,7 @@ async function createPlatformStore(data, admin) {
     store_id: store.id,
     name,
     slug,
-    description: cleanText(data.description || 'Pedido rápido pelo cardápio digital.'),
+    description: cleanText(data.description || 'Pedido rápido pelo TáPronto.'),
     whatsapp_number: onlyDigits(data.whatsapp_number || ''),
     address: cleanText(data.address || ''),
     payment_methods: ['Pix', 'Cartao na entrega', 'Dinheiro'],
@@ -4113,7 +4113,7 @@ async function createPortalSignup(req, data = {}) {
         ...session.body,
         company: { id: company.id, name: company.name, status: company.status },
         store: publicStoreRef(store),
-        redirect: '/admin'
+        redirect: '/painel'
       }
     };
   } catch (error) {
@@ -4160,7 +4160,7 @@ function sanitizePortalSignup(data = {}) {
     store: {
       name: displayName,
       slug,
-      description: cleanText(business.description || `Cardápio digital de ${displayName}.`)
+      description: cleanText(business.description || `Loja online de ${displayName} no TáPronto.`)
     },
     business: {
       city: cleanText(business.city || ''),
@@ -5493,7 +5493,7 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
   if (PLATFORM_BILLING_PROVIDER === 'mock') {
     return {
       subscriptionId: `mock_sub_${company.id}_${Date.now()}`,
-      checkoutUrl: `/admin?billing=mock&plan=${encodeURIComponent(plan.code)}`
+      checkoutUrl: `/painel?billing=mock&plan=${encodeURIComponent(plan.code)}`
     };
   }
   if (PLATFORM_BILLING_PROVIDER !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
@@ -5511,8 +5511,8 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
         quantity: 1,
         price: amount
       }],
-      returnUrl: `${origin}/admin?billing=cancelled`,
-      completionUrl: `${origin}/admin?billing=success`,
+      returnUrl: `${origin}/painel?billing=cancelled`,
+      completionUrl: `${origin}/painel?billing=success`,
       customer: {
         name: admin.name || company.name,
         email: admin.email || company.billing_email || `empresa-${company.id}@local.test`,
@@ -6888,7 +6888,7 @@ async function sendPlatformSmtpTest(req, admin, data = {}) {
   try {
     await sendPlatformEmail({
       to: target,
-      subject: 'Teste de envio do Cardápio Digital',
+      subject: 'Teste de envio SMTP do TáPronto',
       body: `Olá ${admin.name || 'Admin Master'}, este é um teste de SMTP do Platform.`
     });
     await markSmtpTest('success');
@@ -6957,7 +6957,7 @@ async function sendPlatformEmail({ to, subject, body, templateKey }) {
 }
 
 function buildSmtpMessage({ to, subject, body, settings }) {
-  const fromName = settings.from_name || 'Cardápio Digital';
+  const fromName = settings.from_name || 'Suporte TáPronto';
   const ehloDomain = process.env.SMTP_EHLO_DOMAIN || 'cardapio.local';
   const plainBody = String(body || '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
   const headers = [
@@ -6970,7 +6970,7 @@ function buildSmtpMessage({ to, subject, body, settings }) {
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64',
-    'X-Mailer: Cardapio Digital Platform'
+    'X-Mailer: TáPronto Platform'
   ];
   return `${headers.join('\r\n')}\r\n\r\n${Buffer.from(plainBody, 'utf8').toString('base64')}\r\n`;
 }
@@ -7594,9 +7594,9 @@ async function notifySupportTicket(ticket, templateKey) {
     customer_name: admin?.name || company?.name || 'cliente',
     plan_name: '',
     due_date: '',
-    dashboard_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin`,
-    payment_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin?tab=plan`,
-    support_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/admin?tab=support`
+    dashboard_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/painel`,
+    payment_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/painel?tab=plan`,
+    support_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/painel?tab=support`
   };
   await sendPlatformEmail({
     to,
@@ -8571,6 +8571,12 @@ async function assertPublicUsageLimitByStore(storeId, featureCode, usageKey, nex
   await assertCompanyUsageLimit({ company_id: companyId, store_id: storeId }, featureCode, usageKey, nextAmount);
 }
 
+async function storeHasFeature(storeId, featureCode) {
+  const companyId = await companyIdForStore(storeId);
+  if (!companyId) return false;
+  return canUseFeature(companyId, featureCode).catch(() => false);
+}
+
 async function recordUsageByStore(storeId, featureCode, usageKey, options = {}) {
   const companyId = await companyIdForStore(storeId);
   if (!companyId) return;
@@ -9073,7 +9079,7 @@ async function ensureDefaultStoreStructure() {
     company_id: company.id,
     name: 'LSK Burguer',
     slug: DEFAULT_STORE_SLUG,
-    description: 'Cardápio digital da LSK Burguer.',
+    description: 'Loja online da LSK Burguer no TáPronto.',
     public_url: `/${DEFAULT_STORE_SLUG}`,
     is_active: true
   }, ['Prefer: return=representation']).catch(async () => {
@@ -9112,7 +9118,7 @@ async function ensureDefaultStoreContent(store) {
       store_id: store.id,
       name: store.name || 'LSK Burguer',
       slug: store.slug || DEFAULT_STORE_SLUG,
-      description: store.description || 'Cardápio digital de demonstração.',
+      description: store.description || 'Loja de demonstração do TáPronto.',
       is_open: true,
       accepts_delivery: true,
       accepts_pickup: true,
@@ -9251,8 +9257,8 @@ async function getStoreSettings(storeId, options = {}) {
   const store = rows[0] || {
     store_id: resolvedStoreId || null,
     name: 'Menu da Casa',
-    page_title: 'Cardápio Digital',
-    description: 'Pedido rápido pelo cardápio digital.',
+    page_title: 'TáPronto',
+    description: 'Pedido rápido pelo TáPronto.',
     whatsapp_number: STORE_WHATSAPP_NUMBER,
     is_open: true,
     accepts_delivery: true,
@@ -9399,7 +9405,7 @@ async function updateLoyaltyProgram(data, storeId, options = {}) {
     store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
-    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    description: current.description || 'Pedido rápido pelo TáPronto.',
     whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
     loyalty_program: payload.loyalty_program
   }, ['Prefer: return=representation']);
@@ -9429,7 +9435,7 @@ async function updatePrintSettings(data, storeId, options = {}) {
     store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
-    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    description: current.description || 'Pedido rápido pelo TáPronto.',
     whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
     print_settings: payload.print_settings
   }, ['Prefer: return=representation']);
@@ -9460,7 +9466,7 @@ async function updateIntegrationSettings(data, storeId, options = {}) {
     store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
-    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    description: current.description || 'Pedido rápido pelo TáPronto.',
     whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
     integration_settings: payload.integration_settings
   }, ['Prefer: return=representation']);
@@ -9559,7 +9565,7 @@ async function setStoreOpen(isOpen, storeId, options = {}) {
     store_id: resolvedStoreId,
     name: current.name || 'Menu da Casa',
     slug: current.slug || 'menu-da-casa',
-    description: current.description || 'Pedido rápido pelo cardápio digital.',
+    description: current.description || 'Pedido rápido pelo TáPronto.',
     whatsapp_number: current.whatsapp_number || STORE_WHATSAPP_NUMBER,
     accepts_delivery: current.accepts_delivery !== false,
     accepts_pickup: current.accepts_pickup !== false,
@@ -10363,6 +10369,9 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   const targetStatus = cleanText(status || order.status);
   const featureCode = manual ? 'manual_whatsapp' : 'automatic_whatsapp';
+  if (manual && await storeHasFeature(order.store_id, 'automatic_whatsapp')) {
+    throw httpError(403, 'Este plano usa WhatsApp automático. O envio manual fica disponível apenas no Teste grátis e no Essencial.', planErrorPayload('FEATURE_NOT_AVAILABLE', 'WhatsApp manual não disponível neste plano.', { feature: 'manual_whatsapp' }));
+  }
   await assertPublicUsageLimitByStore(order.store_id, featureCode, 'whatsapp_messages');
   if (!manual) {
     const existing = await db('GET', 'order_whatsapp_logs', {
@@ -12473,13 +12482,13 @@ async function localDbRequest(config, method, table, query = {}, payload, extraH
     throw httpError(error.status || 500, `Banco local: ${error.message}`, error.detail || error);
   }
 }
-async function serveStatic(res, requestPath) {
+async function serveStatic(res, requestPath, hostHeader = '') {
   if (requestPath.startsWith('/uploads/')) {
     await serveUpload(res, requestPath);
     return;
   }
 
-  const routedPath = routePath(requestPath);
+  const routedPath = routePath(requestPath, hostHeader);
   const filePath = path.normalize(path.join(publicDir, routedPath));
 
   if (!filePath.startsWith(publicDir) || !existsSync(filePath)) {
@@ -12500,7 +12509,15 @@ async function serveUpload(res, requestPath) {
   await sendFile(res, filePath);
 }
 
-function routePath(requestPath) {
+function routePath(requestPath, hostHeader = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  const panelHosts = csvEnv('PANEL_HOSTS');
+  const platformHosts = csvEnv('PLATFORM_HOSTS');
+  const isPanelHost = panelHosts.includes(hostname) || hostname.startsWith('painel.');
+  const isPlatformHost = platformHosts.includes(hostname) || hostname.startsWith('platform.');
+
+  if (requestPath === '/' && isPanelHost) return '/admin.html';
+  if (requestPath === '/' && isPlatformHost) return '/platform.html';
   if (requestPath === '/') return '/home.html';
   if (requestPath === '/cardapio') return '/app.html';
   if (requestPath === '/planos') return '/plans.html';
@@ -12511,7 +12528,7 @@ function routePath(requestPath) {
   if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
   if (requestPath === '/onboarding') return '/admin.html';
   if (requestPath === '/convite') return '/invite.html';
-  if (requestPath === '/admin') return '/admin.html';
+  if (requestPath === '/painel' || requestPath === '/admin') return '/admin.html';
   if (requestPath === '/platform' || requestPath === '/plataform') return '/platform.html';
   if (requestPath === '/cozinha') return '/kitchen.html';
   if (requestPath === '/pagamento') return '/payment.html';
@@ -12526,6 +12543,13 @@ function routePath(requestPath) {
     if (parts[1] === 'pagamento') return '/payment.html';
   }
   return decodeURIComponent(requestPath);
+}
+
+function csvEnv(name) {
+  return String(process.env[name] || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 async function sendFile(res, filePath) {
@@ -13281,6 +13305,8 @@ function cleanSlug(value) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/\b([a-z0-9])[\s._-]+(?=[a-z0-9]\b)/g, '$1')
+    .replace(/\b([a-z0-9])[\s._-]+(?=[a-z0-9]\b)/g, '$1')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 80);

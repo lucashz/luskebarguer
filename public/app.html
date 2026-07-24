@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cardápio Digital</title>
-    <meta name="description" content="Demonstração pública de cardápio digital com categorias, produtos, adicionais, sacola e checkout simulado.">
+    <title>Loja demonstração - TáPronto</title>
+    <meta name="description" content="Demonstração pública do TáPronto com categorias, produtos, adicionais, sacola e checkout simulado.">
+    <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260721-menu-mobile">
   </head>
   <body class="menu-page">
     <header class="public-topbar">
-      <a class="brand-mark" href="/">Início</a>
       <div class="public-actions">
         <a class="link-button" id="customerOrdersLink" href="/pedidos">Meus pedidos</a>
         <a class="link-button" id="customerAccountLink" href="/conta">Minha conta</a>
@@ -20,9 +20,9 @@
     </header>
 
     <section class="demo-notice" id="demoNotice" hidden>
-      <strong>Você está testando uma demonstração.</strong>
+      <strong>Demonstração do TáPronto.</strong>
       <span>Pedidos simulados, sem afetar a operação real.</span>
-      <a href="/cadastro">Criar meu próprio cardápio</a>
+      <a href="/cadastro">Criar meu próprio cardápio no TáPronto</a>
     </section>
 
     <section class="store-not-found" id="storeNotFound" hidden>
@@ -43,7 +43,7 @@
         <div class="store-logo" id="storeLogo"></div>
         <div class="store-copy">
           <p class="store-open" id="storeStatus">Carregando</p>
-          <h1 id="storeName">Cardápio digital</h1>
+          <h1 id="storeName">TáPronto</h1>
           <p id="storeDescription">Escolha seus itens e envie o pedido pelo WhatsApp da loja.</p>
           <div class="store-meta">
             <span id="deliveryMeta">Entrega</span>
@@ -93,6 +93,18 @@
         <button class="primary-button wide" id="checkoutButton">Continuar</button>
       </aside>
     </main>
+
+    <footer class="menu-powered-footer" aria-label="Tecnologia do cardápio">
+      <div class="menu-powered-brand">
+        <img src="/assets/tapronto-favicon.svg" alt="" width="34" height="34" loading="lazy" aria-hidden="true">
+        <div>
+          <small>Criado com:</small>
+          <strong>TáPronto</strong>
+          <small>Cardápio digital, pedidos organizados.</small>
+        </div>
+      </div>
+      <a href="/" aria-label="Acessar site da TáPronto">taprontomenu.com.br</a>
+    </footer>
 
     <button class="mobile-bag" id="mobileBagButton">
       <span id="mobileBagCount">0 itens</span>
@@ -227,7 +239,7 @@
           <li>Status simulado: em preparo</li>
         </ol>
         <div class="demo-order-actions">
-          <a class="primary-button" href="/cadastro">Criar meu próprio cardápio</a>
+          <a class="primary-button" href="/cadastro">Criar meu próprio cardápio no TáPronto</a>
           <button class="ghost-button" type="submit">Continuar testando</button>
         </div>
       </section>

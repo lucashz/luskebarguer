@@ -64,15 +64,11 @@ body.platform-redesign [hidden] {
 }
 
 .platform-redesign .platform-sidebar-logo {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--pf-red);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
+  width: 32px;
+  height: 32px;
+  display: block;
+  flex: 0 0 auto;
+  border-radius: 9px;
 }
 
 .platform-redesign .platform-sidebar-brand strong,
@@ -627,7 +623,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .platform-plan-revenue-row span,
 .platform-redesign .platform-plan-mrr-row span,
 .platform-redesign .platform-ranking-row em {
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
   letter-spacing: 0;
@@ -869,7 +865,7 @@ body.platform-redesign [hidden] {
 .platform-redesign .platform-daily-kpi strong,
 .platform-redesign .platform-daily-metrics b,
 .platform-redesign .platform-daily-insights strong {
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
   letter-spacing: 0;

@@ -1,18 +1,4 @@
-@font-face {
-  font-family: "Bricolage Grotesque";
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("https://static.figma.com/font/BricolageGrotesque_opsz_wdth_wght__1") format("woff2");
-}
-
-@font-face {
-  font-family: "Inter";
-  font-style: normal;
-  font-weight: 400 800;
-  font-display: swap;
-  src: url("https://static.figma.com/font/Inter_1") format("woff2");
-}
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Sora:wght@500;600;700;800&display=swap");
 
 :root {
   --home-red: #dc2626;
@@ -27,6 +13,8 @@
   --home-card: #ffffff;
   --home-shadow: 0 22px 60px rgba(15, 23, 42, .08);
   --home-radius: 22px;
+  --font-display: "Sora", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * {
@@ -41,7 +29,7 @@ body {
   margin: 0;
   background: var(--home-soft);
   color: var(--home-text);
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   overflow-x: hidden;
 }
 
@@ -102,9 +90,17 @@ select {
   gap: 10px;
   flex-shrink: 0;
   color: var(--home-text);
-  font-family: "Bricolage Grotesque", Inter, sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: -.01em;
+  letter-spacing: 0;
+}
+
+.home-brand img {
+  display: block;
+  width: 248px;
+  max-height: 68px;
+  height: auto;
+  object-fit: contain;
 }
 
 .home-brand-icon {
@@ -116,9 +112,9 @@ select {
   background: var(--home-red);
   color: #fff;
   font-size: 12px;
-  font-family: Inter, system-ui, sans-serif;
+  font-family: var(--font-body);
   font-weight: 900;
-  letter-spacing: -.03em;
+  letter-spacing: 0;
 }
 
 .home-nav,
@@ -308,7 +304,7 @@ select {
   background: var(--home-red-soft);
   color: var(--home-red-dark);
   padding: 7px 14px;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0;
@@ -340,9 +336,9 @@ select {
 .home-final h2 {
   margin: 0;
   color: var(--home-navy);
-  font-family: "Bricolage Grotesque", Inter, sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: -.035em;
+  letter-spacing: 0;
 }
 
 .home-hero h1 {
@@ -752,13 +748,13 @@ select {
   margin-bottom: 16px;
   font-size: 11px;
   font-weight: 900;
-  letter-spacing: -.02em;
+  letter-spacing: 0;
 }
 
 .home-features-grid strong {
   display: block;
   color: var(--home-text);
-  font-family: "Bricolage Grotesque", Inter, sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   margin-bottom: 8px;
 }
@@ -827,9 +823,9 @@ select {
 
 .home-plans div strong {
   color: var(--home-navy);
-  font-family: "Bricolage Grotesque", Inter, sans-serif;
+  font-family: var(--font-display);
   font-size: 34px;
-  letter-spacing: -.03em;
+  letter-spacing: 0;
 }
 
 .home-plans .featured div strong {
@@ -979,7 +975,7 @@ select {
   padding: 20px 24px;
   color: var(--home-text);
   cursor: pointer;
-  font-family: "Bricolage Grotesque", Inter, sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 700;
   list-style: none;
@@ -992,7 +988,7 @@ select {
 .home-faq-list summary::after {
   content: "+";
   color: #94a3b8;
-  font-family: Inter, sans-serif;
+  font-family: var(--font-body);
 }
 
 .home-faq-list details[open] summary::after {
@@ -1140,9 +1136,10 @@ select {
   }
 
   .home-hero h1 {
-    max-width: 100%;
-    font-size: clamp(2.45rem, 10vw, 3.1rem);
+    max-width: min(100%, 342px);
+    font-size: clamp(1.95rem, 8.2vw, 2.5rem);
     line-height: 1.08;
+    overflow-wrap: normal;
   }
 
   .home-hero h1 span:last-child {

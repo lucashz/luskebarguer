@@ -36,7 +36,7 @@ try {
   console.log('Admin pronto para uso.');
   console.log(`Email: ${email}`);
   console.log(`Senha${generatedPassword ? ' gerada' : ''}: ${password}`);
-  console.log('Troque a senha em /admin > Conta depois do primeiro login.');
+  console.log('Troque a senha em /painel > Conta depois do primeiro login.');
 } finally {
   await client.end().catch(() => {});
 }

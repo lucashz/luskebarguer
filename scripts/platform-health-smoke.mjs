@@ -183,7 +183,7 @@ try {
       username: 'suporte@cardapio.local',
       password: 'segredo-smoke',
       from_email: 'suporte@cardapio.local',
-      from_name: 'Suporte Cardapio',
+      from_name: 'Suporte TáPronto',
       reply_to: 'responder@cardapio.local',
       use_tls: false,
       is_active: false
