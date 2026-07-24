@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Platform - TáPronto</title>
+    <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260713-platform-tech">
     <link rel="stylesheet" href="/platform.css?v=20260721-support-polish">
@@ -14,7 +14,7 @@
         <div class="platform-sidebar-brand">
           <img class="platform-sidebar-logo" src="/assets/tapronto-favicon.svg" alt="" width="32" height="32" aria-hidden="true">
           <div>
-            <strong>TáPronto Platform</strong>
+            <strong>Central TáPronto</strong>
             <small id="platformSidebarEmail">administrador.local</small>
           </div>
         </div>
@@ -57,22 +57,38 @@
       </section>
 
       <section class="platform-login-panel" id="platformLoginPanel" hidden>
-        <form class="platform-login-card" id="platformLoginForm">
-          <div>
-            <p class="eyebrow">TáPronto Platform</p>
-            <h2>Entrar no Admin Master</h2>
-            <p class="muted">Entre para acompanhar clientes, cobranças, suporte e saúde operacional do TáPronto.</p>
+        <div class="platform-login-card">
+          <div class="platform-login-brand">
+            <img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82">
           </div>
-          <label>E-mail
-            <input name="email" type="email" autocomplete="username" required placeholder="admin@cardapio.local">
-          </label>
-          <label>Senha
-            <input name="password" type="password" autocomplete="current-password" required placeholder="Sua senha">
-          </label>
-          <p class="form-message" id="platformLoginMessage" role="status"></p>
-          <button class="primary-button" id="platformLoginButton" type="submit">Entrar no TáPronto Platform</button>
-          <a class="ghost-button compact" href="/entrar">Voltar ao login do admin</a>
-        </form>
+          <div>
+            <p class="eyebrow">Central TáPronto</p>
+            <h2>Entrar no Admin Master</h2>
+            <p class="muted">Acompanhe clientes, cobranças, suporte e saúde operacional em uma área segura.</p>
+          </div>
+          <form id="platformLoginForm" class="platform-login-stack">
+            <label>E-mail
+              <input name="email" type="email" autocomplete="username" required placeholder="sup.tapronto@gmail.com">
+            </label>
+            <label>Senha
+              <input name="password" type="password" autocomplete="current-password" required placeholder="Sua senha">
+            </label>
+            <p class="form-message" id="platformLoginMessage" role="status"></p>
+            <button class="primary-button" id="platformLoginButton" type="submit">Entrar na Central</button>
+          </form>
+          <details class="platform-recover-box">
+            <summary>Esqueceu a senha?</summary>
+            <form id="platformRecoverForm" class="platform-login-stack">
+              <p class="muted">Informe seu e-mail para receber um link seguro de redefinição.</p>
+              <label>E-mail
+                <input name="email" type="email" autocomplete="email" required placeholder="E-mail cadastrado">
+              </label>
+              <button class="ghost-button compact" id="platformRecoverButton" type="submit">Enviar link</button>
+              <p class="form-message" id="platformRecoverMessage" role="status"></p>
+            </form>
+          </details>
+          <a class="ghost-button compact" href="/painel">Voltar ao painel</a>
+        </div>
       </section>
 
       <section id="platformContent" hidden>
@@ -183,10 +199,74 @@
             </div>
           </div>
           <div class="platform-health-meta" id="healthMeta">Carregando status operacional...</div>
-          <section class="platform-status-grid" id="platformStatusGrid"></section>
-          <div class="platform-health-meta" id="servicesMeta">Carregando detalhes operacionais...</div>
-          <section class="platform-services-grid" id="platformServicesGrid"></section>
-          <section class="platform-backup-panel">
+          <section class="platform-tech-section">
+            <div class="platform-tech-section-title">
+              <div>
+                <p class="eyebrow">Visão rápida</p>
+                <h3>Serviços essenciais</h3>
+              </div>
+              <span>API, banco, backup, SMTP, Abacate Pay, webhooks e recursos.</span>
+            </div>
+            <section class="platform-status-grid" id="platformStatusGrid"></section>
+          </section>
+          <section class="platform-tech-section">
+            <div class="platform-tech-section-title">
+              <div>
+                <p class="eyebrow">Alertas</p>
+                <h3>Pontos que precisam atenção</h3>
+              </div>
+              <span>Somente sinais importantes aparecem aqui.</span>
+            </div>
+            <div class="platform-alert-list" id="platformAlerts"></div>
+          </section>
+          <div class="platform-health-meta" id="servicesMeta" hidden>Carregando detalhes operacionais...</div>
+          <section class="platform-services-grid platform-hidden-service-grid" id="platformServicesGrid" hidden></section>
+          <section class="platform-tech-section">
+            <div class="platform-tech-section-title">
+              <div>
+                <p class="eyebrow">Ações</p>
+                <h3>Manutenção rápida</h3>
+              </div>
+              <span>Use ações críticas só quando necessário.</span>
+            </div>
+            <section class="platform-services-actions">
+              <article class="platform-service-card">
+                <p class="eyebrow">Backups</p>
+                <h3>Backup manual</h3>
+                <p>Gere um ponto de segurança antes de mudanças críticas.</p>
+                <button class="primary-button compact" data-critical-action="backup" type="button">Fazer backup agora</button>
+              </article>
+              <article class="platform-service-card">
+                <p class="eyebrow">Retenção</p>
+                <h3>Limpeza de logs</h3>
+                <p>Simule ou aplique a retenção de logs, sessões e backups antigos.</p>
+                <div class="row-actions">
+                  <button class="ghost-button compact" id="previewLogCleanupButton" type="button">Simular limpeza</button>
+                  <button class="danger-button compact" data-critical-action="log-cleanup" type="button">Executar limpeza</button>
+                </div>
+                <div class="platform-cleanup-result" id="logCleanupResult"></div>
+              </article>
+              <article class="platform-service-card">
+                <p class="eyebrow">Billing</p>
+                <h3>Abacate Pay</h3>
+                <p>Teste a conexão de cobrança dos planos mensais.</p>
+                <button class="ghost-button compact" id="testBillingConfigButtonHealth" type="button">Testar Abacate Pay</button>
+              </article>
+              <article class="platform-service-card">
+                <p class="eyebrow">SMTP</p>
+                <h3>E-mail</h3>
+                <p>Abra Comunicação para enviar teste SMTP e revisar templates.</p>
+                <button class="ghost-button compact" id="openCommunicationFromHealth" type="button">Testar SMTP</button>
+              </article>
+              <article class="platform-service-card">
+                <p class="eyebrow">Jobs</p>
+                <h3>Trials inativos</h3>
+                <p>Remove lojas de teste abandonadas pela regra operacional.</p>
+                <button class="ghost-button compact" data-critical-action="trial-cleanup" type="button">Executar limpeza</button>
+              </article>
+            </section>
+          </section>
+          <section class="platform-backup-panel platform-tech-section">
             <div class="section-actions compact-section-actions">
               <div>
                 <p class="eyebrow">Backups</p>
@@ -197,54 +277,17 @@
             </div>
             <div class="platform-backup-list" id="platformBackupList"></div>
           </section>
-          <section class="platform-services-actions">
-            <article class="platform-service-card">
-              <p class="eyebrow">Backups</p>
-              <h3>Backup manual</h3>
-              <p>Gere um ponto de segurança antes de mudanças críticas ou manutenções.</p>
-              <button class="primary-button compact" data-critical-action="backup" type="button">Fazer backup agora</button>
-            </article>
-            <article class="platform-service-card">
-              <p class="eyebrow">Jobs</p>
-              <h3>Trials inativos</h3>
-              <p>Remove lojas de teste abandonadas conforme a política de retenção.</p>
-              <button class="ghost-button compact" data-critical-action="trial-cleanup" type="button">Executar limpeza</button>
-            </article>
-            <article class="platform-service-card">
-              <p class="eyebrow">Retenção</p>
-              <h3>Limpeza de retenção</h3>
-              <p>Controle sessões expiradas, logs técnicos, temporários e backups antigos.</p>
-              <div class="row-actions">
-                <button class="ghost-button compact" id="previewLogCleanupButton" type="button">Simular limpeza</button>
-                <button class="danger-button compact" data-critical-action="log-cleanup" type="button">Executar limpeza</button>
+          <details class="platform-tech-section platform-log-shell">
+            <summary>
+              <div>
+                <p class="eyebrow">Logs</p>
+                <h3>Ver logs das últimas 24h</h3>
               </div>
-              <div class="platform-cleanup-result" id="logCleanupResult"></div>
-            </article>
-            <article class="platform-service-card danger-service-card">
-              <p class="eyebrow">Zona de risco</p>
-              <h3>Aplicação</h3>
-              <p>Reinicie a aplicação apenas quando houver manutenção planejada ou falha confirmada.</p>
-              <button class="danger-button compact" data-critical-action="restart-app" type="button">Reiniciar aplicação</button>
-            </article>
-          </section>
-          <section class="platform-health-grid">
-            <article>
-              <h3>Performance da API</h3>
-              <div class="platform-metric-list" id="platformMetrics"></div>
-            </article>
-            <article>
-              <h3>Checklist de produção</h3>
-              <div class="platform-checklist" id="platformConfigChecklist"></div>
-            </article>
-          </section>
-          <section class="platform-health-grid">
-            <article>
-              <h3>Recomendações técnicas</h3>
-              <div class="platform-alert-list" id="platformAlerts"></div>
-            </article>
-            <article>
+              <span>Expandir filtros e eventos</span>
+            </summary>
+            <div class="platform-log-shell-body">
               <div class="section-actions compact-section-actions">
-                <h3>Logs das últimas 24h</h3>
+                <h3>Filtros</h3>
                 <div class="row-actions">
                   <select class="compact-date" id="operationalLogTypeFilter">
                     <option value="">Todos</option>
@@ -292,17 +335,35 @@
                 </div>
               </div>
               <div class="platform-log-list" id="platformOperationalLogs"></div>
-            </article>
-          </section>
-          <section class="platform-health-grid">
-            <article>
-              <h3>Eventos de serviços</h3>
               <div class="platform-log-list" id="platformServiceLogs"></div>
-            </article>
-            <article>
-              <h3>Ações sensíveis</h3>
-              <div class="platform-checklist" id="platformRiskZone"></div>
-            </article>
+            </div>
+          </details>
+          <section class="platform-tech-section platform-risk-section">
+            <div class="platform-tech-section-title">
+              <div>
+                <p class="eyebrow">Zona de risco</p>
+                <h3>Ações sensíveis</h3>
+              </div>
+              <span>Exigem senha, confirmação e auditoria.</span>
+            </div>
+            <div class="platform-risk-grid">
+              <article class="platform-service-card danger-service-card">
+                <p class="eyebrow">Aplicação</p>
+                <h3>Reiniciar aplicação</h3>
+                <p>Use apenas em manutenção planejada ou falha confirmada.</p>
+                <button class="danger-button compact" data-critical-action="restart-app" type="button">Reiniciar aplicação</button>
+              </article>
+              <article class="platform-service-card danger-service-card">
+                <p class="eyebrow">Backups</p>
+                <h3>Restaurar backup</h3>
+                <p>A restauração fica dentro da lista de backups para evitar execução acidental.</p>
+                <a class="ghost-button compact" href="#platformBackupList">Ver backups</a>
+              </article>
+              <article>
+                <h3>Proteções ativas</h3>
+                <div class="platform-checklist" id="platformRiskZone"></div>
+              </article>
+            </div>
           </section>
         </section>
 
@@ -335,6 +396,54 @@
             </div>
           </div>
           <section class="platform-billing-summary-grid" id="platformBillingSummaryGrid"></section>
+          <section class="platform-chart-card platform-billing-config-card">
+            <div class="section-actions compact-section-actions">
+              <div>
+                <p class="eyebrow">Configuração Abacate Pay</p>
+                <h3>Checkout dos planos mensais</h3>
+                <p class="muted">Conecte a cobrança das assinaturas da TáPronto. Chaves ficam mascaradas e só superadmin pode alterar.</p>
+              </div>
+              <button class="ghost-button compact" id="testBillingConfigButton" type="button">Testar conexão</button>
+            </div>
+            <form class="platform-billing-config-form stack-form" id="platformBillingConfigForm">
+              <div class="platform-billing-config-status" id="billingConfigStatusText">Configuração ainda não carregada.</div>
+              <div class="two-cols">
+                <label>Provedor
+                  <select name="provider">
+                    <option value="abacatepay">Abacate Pay</option>
+                    <option value="mock">Mock interno</option>
+                  </select>
+                </label>
+                <label>URL pública do sistema
+                  <input name="public_url" placeholder="https://taprontomenu.com.br">
+                </label>
+              </div>
+              <div class="two-cols">
+                <label>API key
+                  <input name="api_key" type="password" autocomplete="new-password" placeholder="Preencha apenas para alterar">
+                </label>
+                <label>Segredo do webhook
+                  <input name="webhook_secret" type="password" autocomplete="new-password" placeholder="Preencha apenas para alterar">
+                </label>
+              </div>
+              <label>Webhook/callback dos planos
+                <div class="readonly-code-line">
+                  <code id="billingWebhookUrl">/api/billing/webhook?provider=abacatepay</code>
+                </div>
+              </label>
+              <div class="two-cols">
+                <label>Senha do superadmin
+                  <input name="password" type="password" autocomplete="current-password" placeholder="Obrigatória para salvar">
+                </label>
+                <label class="payment-option billing-active-option">
+                  <input name="is_active" type="checkbox"> Abacate Pay ativo para planos
+                </label>
+              </div>
+              <div class="row-actions">
+                <button class="primary-button compact" id="saveBillingConfigButton" type="submit">Salvar configuração</button>
+              </div>
+            </form>
+          </section>
           <section class="platform-analytics-grid">
             <article class="platform-chart-card">
               <div>

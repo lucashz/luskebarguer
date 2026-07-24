@@ -30,7 +30,7 @@ Se você não usa Docker, crie um banco PostgreSQL manualmente e configure `DATA
 DATABASE_URL=postgresql://cardapio:cardapio_dev_password@localhost:5432/cardapio?schema=public
 UPLOAD_DIR=uploads
 BACKUP_DIR=backups
-BACKUP_RETENTION_DAYS=14
+BACKUP_RETENTION_DAYS=7
 HOST=127.0.0.1
 PORT=3000
 COOKIE_SECURE=false
@@ -104,6 +104,9 @@ Restore manual:
 ```bash
 pg_restore --clean --if-exists --no-owner --dbname "$DATABASE_URL" backups/postgres-ARQUIVO.dump
 ```
+
+Na Central, superadmins tambem podem restaurar um backup pela aba Saude e servicos.
+A restauracao exige senha, o texto `CONFIRMAR` e cria um backup preventivo antes de substituir os dados atuais.
 
 ## CI
 

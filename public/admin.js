@@ -392,7 +392,9 @@ const els = {
   abacateWebhookUrl: document.querySelector('#abacateWebhookUrl'),
   themePreview: document.querySelector('#themePreview'),
   accountForm: document.querySelector('#accountForm'),
+  accountFormMessage: document.querySelector('#accountFormMessage'),
   passwordForm: document.querySelector('#passwordForm'),
+  passwordFormMessage: document.querySelector('#passwordFormMessage'),
   accountProfileAvatar: document.querySelector('#accountProfileAvatar'),
   accountProfileName: document.querySelector('#accountProfileName'),
   accountProfileEmail: document.querySelector('#accountProfileEmail'),
@@ -4813,27 +4815,67 @@ async function closeAdminSupportTicket(ticketId) {
 
 async function submitAccount(event) {
   event.preventDefault();
-  const data = Object.fromEntries(new FormData(els.accountForm));
-  const result = await request('/api/admin/me', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  state.admin = result.admin;
-  render();
-  toast('Conta atualizada.');
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const messageEl = form.querySelector('#accountFormMessage') || els.accountFormMessage;
+  const previousText = button?.textContent || 'Salvar conta';
+  if (messageEl) messageEl.textContent = '';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Salvando...';
+    }
+    const data = Object.fromEntries(new FormData(form));
+    const result = await request('/api/admin/me', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    state.admin = result.admin;
+    render();
+    toast('Conta atualizada.');
+  } catch (error) {
+    const message = error.message || 'Não foi possível salvar a conta.';
+    if (messageEl) messageEl.textContent = message;
+    toast(message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 async function submitPassword(event) {
   event.preventDefault();
-  const data = Object.fromEntries(new FormData(els.passwordForm));
-  await request('/api/admin/change-password', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  els.passwordForm.reset();
-  toast('Senha atualizada.');
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const messageEl = form.querySelector('#passwordFormMessage') || els.passwordFormMessage;
+  const previousText = button?.textContent || 'Atualizar senha';
+  if (messageEl) messageEl.textContent = '';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Atualizando...';
+    }
+    const data = Object.fromEntries(new FormData(form));
+    await request('/api/admin/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    form.reset();
+    toast('Senha atualizada.');
+  } catch (error) {
+    const message = error.message || 'Não foi possível atualizar a senha.';
+    if (messageEl) messageEl.textContent = message;
+    toast(message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 async function submitDeleteAccount(event) {
@@ -5312,13 +5354,15 @@ function openPlanCheckoutModal(planCode = '') {
   modal.innerHTML = `
     <div class="plan-checkout-modal-card" role="dialog" aria-modal="true" aria-labelledby="planCheckoutTitle">
       <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
-      <p class="eyebrow">${commercialStatusBlocksOperation(currentStatus) ? 'Liberar painel' : 'Pagamento mensal'}</p>
-      <h2 id="planCheckoutTitle">${escapeHtml(plan.name || 'Plano mensal')}</h2>
-      <p class="muted">${escapeHtml(plan.description || 'Finalize o pagamento para ativar os recursos deste plano.')}</p>
+      <div class="plan-checkout-head">
+        <p class="eyebrow">${commercialStatusBlocksOperation(currentStatus) ? 'Liberar painel' : 'Pagamento mensal'}</p>
+        <h2 id="planCheckoutTitle">${escapeHtml(plan.name || 'Plano mensal')}</h2>
+        <p>${escapeHtml(plan.description || 'Finalize o pagamento para ativar os recursos deste plano.')}</p>
+      </div>
       <div class="plan-checkout-summary">
-        <span>Plano atual <strong>${escapeHtml(currentPlan.name || 'Sem plano')}</strong></span>
-        <span>Novo plano <strong>${escapeHtml(plan.name || 'Plano')}</strong></span>
-        <span>Valor mensal <strong>${formatPlanPrice(plan.monthly_price || 0)}</strong></span>
+        <article><span>Plano atual</span><strong>${escapeHtml(currentPlan.name || 'Sem plano')}</strong></article>
+        <article><span>Novo plano</span><strong>${escapeHtml(plan.name || 'Plano')}</strong></article>
+        <article><span>Mensalidade</span><strong>${formatPlanPrice(plan.monthly_price || 0)}</strong></article>
       </div>
       <div class="plan-checkout-note">
         <strong>Como funciona</strong>
@@ -5331,6 +5375,7 @@ function openPlanCheckoutModal(planCode = '') {
     </div>
   `;
   modal.hidden = false;
+  document.body.classList.add('plan-checkout-open');
   modal.querySelectorAll('[data-close-plan-checkout]').forEach((button) => button.addEventListener('click', closePlanCheckoutModal));
   modal.querySelector('[data-confirm-plan-checkout]')?.addEventListener('click', (event) => {
     createBillingCheckout(state.checkoutPlanCode, { redirectToCheckout: true, triggerButton: event.currentTarget });
@@ -5341,6 +5386,7 @@ function openPlanCheckoutModal(planCode = '') {
 function closePlanCheckoutModal() {
   const modal = document.querySelector('#planCheckoutModal');
   if (modal) modal.hidden = true;
+  document.body.classList.remove('plan-checkout-open');
   state.checkoutPlanCode = '';
 }
 

@@ -888,6 +888,47 @@ body.platform-redesign [hidden] {
   gap: 12px;
 }
 
+.platform-redesign .platform-billing-config-card {
+  margin: 14px 0;
+}
+
+.platform-redesign .platform-billing-config-form {
+  margin-top: 12px;
+}
+
+.platform-redesign .platform-billing-config-status {
+  border-left: 3px solid var(--pf-red);
+  border-radius: 10px;
+  background: var(--pf-red-soft);
+  color: var(--pf-text);
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.platform-redesign .readonly-code-line {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--pf-border);
+  border-radius: 10px;
+  background: var(--pf-soft);
+  padding: 0 12px;
+  overflow-x: auto;
+}
+
+.platform-redesign .readonly-code-line code {
+  color: var(--pf-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.platform-redesign .billing-active-option {
+  min-height: 42px;
+  align-self: end;
+}
+
 .platform-redesign .platform-backup-panel {
   display: grid;
   gap: 12px;
@@ -994,11 +1035,30 @@ body.platform-redesign [hidden] {
   font-size: 11px;
 }
 
-.platform-redesign .platform-backup-row > span {
+.platform-redesign .platform-backup-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.platform-redesign .platform-backup-row-actions > span {
   color: var(--pf-text);
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.platform-redesign .platform-backup-warning {
+  margin: 10px 12px 12px;
+  border-left: 3px solid var(--pf-orange);
+  border-radius: 10px;
+  background: var(--pf-orange-soft);
+  color: #92400e;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .platform-redesign .platform-support-metrics-shell {
@@ -2256,6 +2316,181 @@ body.platform-redesign [hidden] {
   color: #b45309;
 }
 
+.platform-redesign .platform-tech-section {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--pf-border);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.platform-redesign .platform-tech-section-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.platform-redesign .platform-tech-section-title h3,
+.platform-redesign .platform-tech-section summary h3 {
+  margin: 0;
+  color: var(--pf-ink);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.platform-redesign .platform-tech-section-title > span,
+.platform-redesign .platform-log-shell summary > span {
+  max-width: 360px;
+  color: var(--pf-muted);
+  font-size: .78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.platform-redesign .platform-status-card,
+.platform-redesign .platform-service-card {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid var(--pf-border);
+  border-left: 4px solid #cbd5e1;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .04);
+}
+
+.platform-redesign .platform-status-card.status-healthy,
+.platform-redesign .platform-service-card.status-healthy {
+  border-left-color: #16a34a;
+}
+
+.platform-redesign .platform-status-card.status-attention,
+.platform-redesign .platform-service-card.status-attention {
+  border-left-color: var(--pf-amber);
+}
+
+.platform-redesign .platform-status-card.status-error,
+.platform-redesign .platform-service-card.status-error,
+.platform-redesign .platform-service-card.danger-service-card {
+  border-left-color: var(--pf-red);
+}
+
+.platform-redesign .platform-status-card.status-unknown,
+.platform-redesign .platform-service-card.status-unknown {
+  border-left-color: #94a3b8;
+}
+
+.platform-redesign .platform-status-card > span {
+  width: max-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: .66rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.platform-redesign .platform-status-card.status-healthy > span {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.platform-redesign .platform-status-card.status-attention > span {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.platform-redesign .platform-status-card.status-error > span {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.platform-redesign .platform-status-card strong,
+.platform-redesign .platform-service-card h3 {
+  color: var(--pf-ink);
+  font-size: .95rem;
+  line-height: 1.2;
+}
+
+.platform-redesign .platform-status-card p,
+.platform-redesign .platform-status-card small,
+.platform-redesign .platform-service-card p {
+  color: var(--pf-muted);
+  font-size: .78rem;
+  line-height: 1.42;
+}
+
+.platform-redesign .platform-services-actions {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.platform-redesign .platform-hidden-service-grid[hidden] {
+  display: none !important;
+}
+
+.platform-redesign .platform-log-shell {
+  padding: 0;
+  overflow: hidden;
+}
+
+.platform-redesign .platform-log-shell > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.platform-redesign .platform-log-shell > summary::-webkit-details-marker {
+  display: none;
+}
+
+.platform-redesign .platform-log-shell > summary::after {
+  content: "+";
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--pf-ink);
+  font-weight: 900;
+}
+
+.platform-redesign .platform-log-shell[open] > summary::after {
+  content: "-";
+  background: var(--pf-red-soft);
+  color: var(--pf-red);
+}
+
+.platform-redesign .platform-log-shell-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--pf-border);
+}
+
+.platform-redesign .platform-risk-section {
+  border-color: #fecaca;
+  background: #fffafa;
+}
+
+.platform-redesign .platform-risk-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  align-items: start;
+}
+
 @media (max-width: 1180px) {
   .platform-redesign .platform-commercial-panel .platform-commercial-metrics-grid,
   .platform-redesign .platform-overview-daily-grid,
@@ -2295,6 +2530,10 @@ body.platform-redesign [hidden] {
 
   .platform-redesign .platform-daily-bars {
     grid-column: 1 / -1;
+  }
+
+  .platform-redesign .platform-risk-grid {
+    grid-template-columns: 1fr;
   }
 
   .platform-redesign .platform-support-detail-grid {
@@ -2346,6 +2585,18 @@ body.platform-redesign [hidden] {
     flex-direction: row;
     padding: 10px;
     overflow-x: auto;
+  }
+
+  .platform-redesign .platform-tech-section-title,
+  .platform-redesign .platform-log-shell > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .platform-redesign .platform-tech-section-title > span,
+  .platform-redesign .platform-log-shell summary > span {
+    max-width: none;
+    text-align: left;
   }
 
   .platform-redesign .platform-tabs button {

@@ -14,6 +14,7 @@
   billingPlans: [],
   billingEvents: [],
   billingSubscriptions: [],
+  billingConfig: null,
   billingLoading: false,
   billingLoaded: false,
   billingError: '',
@@ -88,6 +89,9 @@ const els = {
   platformLoginForm: document.querySelector('#platformLoginForm'),
   platformLoginMessage: document.querySelector('#platformLoginMessage'),
   platformLoginButton: document.querySelector('#platformLoginButton'),
+  platformRecoverForm: document.querySelector('#platformRecoverForm'),
+  platformRecoverMessage: document.querySelector('#platformRecoverMessage'),
+  platformRecoverButton: document.querySelector('#platformRecoverButton'),
   platformContent: document.querySelector('#platformContent'),
   platformTabs: [...document.querySelectorAll('[data-platform-view]')],
   platformSections: [...document.querySelectorAll('[data-platform-section]')],
@@ -147,6 +151,13 @@ const els = {
   platformBillingPlanList: document.querySelector('#platformBillingPlanList'),
   platformBillingEventList: document.querySelector('#platformBillingEventList'),
   platformBillingAlertList: document.querySelector('#platformBillingAlertList'),
+  platformBillingConfigForm: document.querySelector('#platformBillingConfigForm'),
+  billingConfigStatusText: document.querySelector('#billingConfigStatusText'),
+  billingWebhookUrl: document.querySelector('#billingWebhookUrl'),
+  saveBillingConfigButton: document.querySelector('#saveBillingConfigButton'),
+  testBillingConfigButton: document.querySelector('#testBillingConfigButton'),
+  testBillingConfigButtonHealth: document.querySelector('#testBillingConfigButtonHealth'),
+  openCommunicationFromHealth: document.querySelector('#openCommunicationFromHealth'),
   refreshCommunicationButton: document.querySelector('#refreshCommunicationButton'),
   platformSmtpForm: document.querySelector('#platformSmtpForm'),
   platformSmtpTestForm: document.querySelector('#platformSmtpTestForm'),
@@ -175,6 +186,7 @@ const els = {
 };
 
 els.platformLoginForm?.addEventListener('submit', submitPlatformLogin);
+els.platformRecoverForm?.addEventListener('submit', submitPlatformRecover);
 els.platformLogoutButton?.addEventListener('click', logout);
 els.refreshPlatformButton?.addEventListener('click', () => loadPlatform({ force: true }));
 els.auditFilterForm?.addEventListener('submit', submitAuditFilters);
@@ -210,6 +222,10 @@ els.commercialPeriodMirror?.addEventListener('change', () => {
 els.billingPeriodSelect?.addEventListener('change', loadBilling);
 els.billingStatusFilter?.addEventListener('change', loadBilling);
 els.billingPlanFilter?.addEventListener('change', loadBilling);
+els.platformBillingConfigForm?.addEventListener('submit', submitBillingConfig);
+els.testBillingConfigButton?.addEventListener('click', testBillingConfig);
+els.testBillingConfigButtonHealth?.addEventListener('click', testBillingConfig);
+els.openCommunicationFromHealth?.addEventListener('click', () => activatePlatformView('communication', { load: true }));
 els.clientFilterForm?.addEventListener('input', renderCompanies);
 els.clientFilterForm?.addEventListener('change', renderCompanies);
 els.operationalLogTypeFilter?.addEventListener('change', loadHealth);
@@ -272,8 +288,8 @@ function hidePlatformGateways() {
 function showPlatformLogin(message = '') {
   hidePlatformGateways();
   if (els.platformLoginPanel) els.platformLoginPanel.hidden = false;
-  if (els.platformUser) els.platformUser.textContent = 'Platform';
-  if (els.platformPageTitle) els.platformPageTitle.textContent = 'Entrar no Platform';
+  if (els.platformUser) els.platformUser.textContent = 'Central TáPronto';
+  if (els.platformPageTitle) els.platformPageTitle.textContent = 'Entrar na Central';
   if (els.platformPageSubtitle) els.platformPageSubtitle.textContent = 'Acesse com uma conta superadmin.';
   if (els.platformSidebarEmail) els.platformSidebarEmail.textContent = 'administrador.local';
   if (els.platformSidebarName) els.platformSidebarName.textContent = 'Admin Master';
@@ -308,12 +324,44 @@ async function submitPlatformLogin(event) {
     form.reset();
     await enterPlatformWithAdmin(result.admin);
   } catch (error) {
-    const message = error.message || 'Não foi possível entrar no Platform.';
+    const message = error.message || 'Não foi possível entrar na Central.';
     if (els.platformLoginMessage) els.platformLoginMessage.textContent = message;
   } finally {
     if (els.platformLoginButton) {
       els.platformLoginButton.disabled = false;
-      els.platformLoginButton.textContent = 'Entrar no Platform';
+      els.platformLoginButton.textContent = 'Entrar na Central';
+    }
+  }
+}
+
+async function submitPlatformRecover(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const loginEmail = els.platformLoginForm?.elements?.email?.value || '';
+  const data = Object.fromEntries(new FormData(form));
+  const email = data.email || loginEmail;
+  if (els.platformRecoverMessage) els.platformRecoverMessage.textContent = '';
+  if (els.platformRecoverButton) {
+    els.platformRecoverButton.disabled = true;
+    els.platformRecoverButton.textContent = 'Enviando...';
+  }
+  try {
+    const result = await request('/api/portal/recover-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const message = result.message || 'Se o e-mail existir, enviaremos as instruções de recuperação.';
+    if (els.platformRecoverMessage) els.platformRecoverMessage.textContent = message;
+    toast(message);
+  } catch (error) {
+    const message = error.message || 'Não foi possível solicitar recuperação.';
+    if (els.platformRecoverMessage) els.platformRecoverMessage.textContent = message;
+    toast(message);
+  } finally {
+    if (els.platformRecoverButton) {
+      els.platformRecoverButton.disabled = false;
+      els.platformRecoverButton.textContent = 'Enviar link';
     }
   }
 }
@@ -470,17 +518,19 @@ async function loadCommercialSnapshot() {
 
 async function loadBillingSnapshot() {
   try {
-    const [summary, plans, events, subscriptions] = await Promise.all([
+    const [summary, plans, events, subscriptions, config] = await Promise.all([
       request(billingUrl('/api/platform/billing/summary')),
       request('/api/platform/billing/plans'),
       request(billingUrl('/api/platform/billing/events')),
-      request(billingUrl('/api/platform/billing/subscriptions'))
+      request(billingUrl('/api/platform/billing/subscriptions')),
+      request('/api/platform/billing/config')
     ]);
     return {
       summary,
       plans: plans.plans || [],
       events: events.events || [],
-      subscriptions: subscriptions.subscriptions || []
+      subscriptions: subscriptions.subscriptions || [],
+      config: config.billing || null
     };
   } catch (error) {
     return { error: error.message || 'Não foi possível carregar billing.' };
@@ -497,6 +547,7 @@ async function loadBilling(options = {}) {
     state.billingPlans = data.plans || [];
     state.billingEvents = data.events || [];
     state.billingSubscriptions = data.subscriptions || [];
+    state.billingConfig = data.config || null;
     state.billingLoaded = !data.error;
     state.billingError = data.error || '';
     if (state.billingError && !options.silent) toast(state.billingError);
@@ -1696,7 +1747,52 @@ function renderHealth() {
 
 function renderPlatformStatuses(statuses) {
   if (!els.platformStatusGrid) return;
-  els.platformStatusGrid.innerHTML = statuses.length ? statuses.map((item) => `
+  const byKey = new Map((statuses || []).map((item) => [item.key, item]));
+  const resources = [
+    {
+      key: 'api',
+      label: 'API',
+      fallback: { status: 'unknown', message: 'Aplicação ainda não verificada.' }
+    },
+    {
+      key: 'database',
+      label: 'Banco',
+      fallback: { status: 'unknown', message: 'Banco ainda não verificado.' }
+    },
+    {
+      key: 'backup',
+      label: 'Backup',
+      fallback: { status: 'unknown', message: 'Backup ainda não verificado.' }
+    },
+    {
+      key: 'smtp',
+      label: 'SMTP',
+      fallback: { status: 'unknown', message: 'E-mail ainda não verificado.' }
+    },
+    {
+      key: 'billing',
+      label: 'Abacate Pay',
+      fallback: { status: 'unknown', message: 'Billing ainda não verificado.' }
+    },
+    {
+      key: 'webhooks',
+      label: 'Webhooks',
+      fallback: { status: 'unknown', message: 'Webhooks ainda não verificados.' }
+    },
+    platformResourceStatus()
+  ].map((resource) => {
+    if (resource.key === 'resources') return resource;
+    const item = byKey.get(resource.key) || resource.fallback || {};
+    return {
+      key: resource.key,
+      label: resource.label || item.label,
+      status: item.status || 'unknown',
+      message: item.message || resource.fallback?.message || '-',
+      latency_ms: item.latency_ms
+    };
+  });
+
+  els.platformStatusGrid.innerHTML = resources.length ? resources.map((item) => `
     <article class="platform-status-card status-${escapeAttribute(item.status)}">
       <span>${escapeHtml(statusLabelHealth(item.status))}</span>
       <strong>${escapeHtml(item.label)}</strong>
@@ -1704,6 +1800,30 @@ function renderPlatformStatuses(statuses) {
       ${item.latency_ms !== null && item.latency_ms !== undefined ? `<small>${Number(item.latency_ms)} ms</small>` : ''}
     </article>
   `).join('') : '<p class="empty-state">Nenhum status técnico disponível para exibição.</p>';
+}
+
+function platformResourceStatus() {
+  const metrics = state.health?.metrics || {};
+  const memory = metrics.system?.memory || {};
+  const disk = metrics.system?.disk || {};
+  const ramUsed = Number(memory.system_used_percent || 0);
+  const swapUsed = Number(memory.swap_used_bytes || 0);
+  const heapUsed = Number(memory.heap_used_percent || 0);
+  const diskFree = Number(disk.lowest_free_percent ?? 100);
+  let status = 'healthy';
+  if (ramUsed >= 90 || swapUsed >= 1024 * 1024 * 1024 || heapUsed >= 90 || diskFree < 15) status = 'error';
+  else if (ramUsed >= 75 || swapUsed >= 512 * 1024 * 1024 || heapUsed >= 80 || diskFree < 25) status = 'attention';
+  if (!Object.keys(memory).length && !Object.keys(disk).length) status = 'unknown';
+  const message = status === 'unknown'
+    ? 'Uso de recursos ainda não verificado.'
+    : `RAM ${ramUsed || 0}% · Heap ${heapUsed || 0}% · Disco livre ${diskFree || 0}%`;
+  return {
+    key: 'resources',
+    label: 'Disco/RAM',
+    status,
+    message,
+    latency_ms: null
+  };
 }
 
 function renderPlatformMetrics(metrics) {
@@ -1771,7 +1891,9 @@ function renderPlatformChecklist(items) {
 
 function renderPlatformAlerts(alerts) {
   if (!els.platformAlerts) return;
-  els.platformAlerts.innerHTML = alerts.length ? alerts.map((alert) => `
+  const allowed = new Set(['backup', 'backup_delayed', 'webhook', 'smtp', 'smtp_missing', 'disk_low', 'latency', 'api', 'api_5xx']);
+  const importantAlerts = (alerts || []).filter((alert) => allowed.has(alert.type || alert.key));
+  els.platformAlerts.innerHTML = importantAlerts.length ? importantAlerts.map((alert) => `
     <article class="platform-alert-row severity-${escapeAttribute(alert.severity)}">
       <strong>${escapeHtml(alert.title)}</strong>
       <p>${escapeHtml(alert.message || '')}</p>
@@ -1862,6 +1984,7 @@ function renderServices() {
 
 function renderBilling() {
   renderBillingSummary();
+  renderBillingConfig();
   renderBillingSubscriptions();
   renderBillingPlans();
   renderBillingEvents();
@@ -1910,6 +2033,38 @@ function renderBillingSummary() {
       <p>${escapeHtml(hint)}</p>
     </article>
   `).join('');
+}
+
+function renderBillingConfig() {
+  if (!els.platformBillingConfigForm) return;
+  const form = els.platformBillingConfigForm;
+  const config = state.billingConfig || {};
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    if (els.billingConfigStatusText) els.billingConfigStatusText.textContent = 'Abra Billing para carregar a configuração da Abacate Pay.';
+    return;
+  }
+  form.elements.provider.value = config.provider || 'abacatepay';
+  form.elements.public_url.value = config.public_url || window.location.origin;
+  form.elements.api_key.value = '';
+  form.elements.api_key.placeholder = config.has_api_key
+    ? `API key já salva (${config.api_key_masked || 'mascarada'}). Preencha apenas para trocar.`
+    : 'Cole a API key da Abacate Pay';
+  form.elements.webhook_secret.value = '';
+  form.elements.webhook_secret.placeholder = config.has_webhook_secret
+    ? `Segredo já salvo (${config.webhook_secret_masked || 'mascarado'}). Preencha apenas para trocar.`
+    : 'Cole o segredo do webhook';
+  form.elements.password.value = '';
+  form.elements.is_active.checked = config.is_active === true;
+  if (els.billingWebhookUrl) {
+    els.billingWebhookUrl.textContent = config.webhook_url || `${window.location.origin}/api/billing/webhook?provider=abacatepay`;
+  }
+  if (els.billingConfigStatusText) {
+    const status = config.is_active && config.has_api_key ? 'Configurado' : 'Não configurado';
+    const test = config.last_test_status
+      ? ` Último teste: ${config.last_test_status}${config.last_test_at ? ` em ${formatDateTime(config.last_test_at)}` : ''}.`
+      : ' Nenhum teste executado.';
+    els.billingConfigStatusText.textContent = `${status}. API key: ${config.has_api_key ? 'salva' : 'ausente'}. Webhook secret: ${config.has_webhook_secret ? 'salvo' : 'ausente'}.${test}`;
+  }
 }
 
 function renderBillingSubscriptions() {
@@ -2907,7 +3062,7 @@ function renderServiceCards(services = {}) {
       status: backupHealthTone(backup.status),
       value: backup.latest?.created_at ? formatDateTime(backup.latest.created_at) : backupStatusLabel(backup.status),
       detail: backup.latest?.file
-        ? `${backup.latest.file} · ${formatBytes(backup.latest.size_bytes)} · ${Number(backup.retention_days || 14)}d de retenção`
+        ? `${backup.latest.file} · ${formatBytes(backup.latest.size_bytes)} · ${Number(backup.retention_days || 7)}d de retenção`
         : backup.error || 'Nenhum arquivo de backup local registrado.'
     },
     {
@@ -2932,7 +3087,7 @@ function renderServiceCards(services = {}) {
       label: 'Retenção',
       status: latestCleanup?.created_at ? 'healthy' : 'attention',
       value: latestCleanup?.created_at ? `Última: ${new Date(latestCleanup.created_at).toLocaleDateString('pt-BR')}` : 'Sem execução registrada',
-      detail: `Auditoria ${retention.audit_log_days || 180}d · Operacional ${retention.operational_log_days || 90}d · Backups ${retention.backup_days || 14}d`
+      detail: `Auditoria ${retention.audit_log_days || 180}d · Operacional ${retention.operational_log_days || 90}d · Backups ${retention.backup_days || 7}d`
     },
     {
       label: 'Deploy',
@@ -2979,7 +3134,10 @@ function renderPlatformBackupList(backup = {}) {
           <strong>${escapeHtml(entry.file || '-')}</strong>
           <small>${entry.created_at ? formatDateTime(entry.created_at) : '-'}${isLatest ? ' · mais recente' : ''}</small>
         </div>
-        <span>${formatBytes(entry.size_bytes || 0)}</span>
+        <div class="platform-backup-row-actions">
+          <span>${formatBytes(entry.size_bytes || 0)}</span>
+          <button class="ghost-button compact" type="button" data-backup-restore="${escapeAttribute(entry.file || '')}">Restaurar</button>
+        </div>
       </article>
     `;
   }).join('');
@@ -2995,21 +3153,25 @@ function renderPlatformBackupList(backup = {}) {
       </article>
       <article>
         <span>Retenção</span>
-        <strong>${Number(backup.retention_days || 14)} dias</strong>
+        <strong>${Number(backup.retention_days || 7)} dias</strong>
       </article>
       <article>
-        <span>Modo</span>
-        <strong>${escapeHtml(backup.mode || (latest?.file?.endsWith('.sql') ? 'node-sql-fallback' : 'pg_dump'))}</strong>
+        <span>Tamanho</span>
+        <strong>${formatBytes(latest?.size_bytes || 0)}</strong>
       </article>
     </div>
-    <details class="platform-backup-details" open>
+    <details class="platform-backup-details">
       <summary>
-        <strong>Ver arquivos recentes</strong>
+        <strong>Ver histórico de backups</strong>
         <span>${recent.length} arquivo(s)</span>
       </summary>
+      <p class="platform-backup-warning">Restaurar um backup substitui os dados atuais. Antes da restauração, a Central cria um backup preventivo automaticamente.</p>
       <div>${rows}</div>
     </details>
   `;
+  els.platformBackupList.querySelectorAll('[data-backup-restore]').forEach((button) => {
+    button.addEventListener('click', () => openCriticalAction('restore-backup', { file: button.dataset.backupRestore || '' }));
+  });
 }
 
 function renderServiceLogs() {
@@ -3152,6 +3314,12 @@ const criticalActions = {
     endpoint: '/api/platform/services/backup',
     success: 'Backup manual concluído.'
   },
+  'restore-backup': {
+    title: 'Restaurar backup',
+    message: 'Esta ação substitui os dados atuais pelo arquivo selecionado. A Central cria um backup preventivo antes de restaurar.',
+    endpoint: '/api/platform/services/backup/restore',
+    success: 'Backup restaurado com sucesso.'
+  },
   'trial-cleanup': {
     title: 'Executar limpeza de trials',
     message: 'Empresas em teste sem acesso recente poderão ser removidas conforme a regra operacional.',
@@ -3173,14 +3341,19 @@ const criticalActions = {
 };
 
 let pendingCriticalAction = null;
+let pendingCriticalPayload = {};
 let pendingDangerResolve = null;
 
-function openCriticalAction(actionKey) {
+function openCriticalAction(actionKey, payload = {}) {
   const action = criticalActions[actionKey];
   if (!action || !els.platformConfirmBackdrop || !els.platformConfirmForm) return;
   pendingCriticalAction = actionKey;
+  pendingCriticalPayload = payload || {};
   if (els.platformConfirmTitle) els.platformConfirmTitle.textContent = action.title;
-  if (els.platformConfirmMessage) els.platformConfirmMessage.textContent = action.message;
+  if (els.platformConfirmMessage) {
+    const fileInfo = pendingCriticalPayload.file ? ` Arquivo: ${pendingCriticalPayload.file}` : '';
+    els.platformConfirmMessage.textContent = `${action.message}${fileInfo}`;
+  }
   els.platformConfirmForm.reset();
   els.platformConfirmBackdrop.hidden = false;
   els.platformConfirmForm.elements.confirmation?.focus();
@@ -3192,6 +3365,7 @@ function closeCriticalDialog() {
     pendingDangerResolve = null;
   }
   pendingCriticalAction = null;
+  pendingCriticalPayload = {};
   if (els.platformConfirmBackdrop) els.platformConfirmBackdrop.hidden = true;
   if (els.platformConfirmSubmit) {
     els.platformConfirmSubmit.disabled = false;
@@ -3212,7 +3386,7 @@ async function submitCriticalAction(event) {
   }
   const action = criticalActions[pendingCriticalAction];
   if (!action) return;
-  const data = Object.fromEntries(new FormData(els.platformConfirmForm));
+  const data = { ...pendingCriticalPayload, ...Object.fromEntries(new FormData(els.platformConfirmForm)) };
   if (els.platformConfirmSubmit) {
     els.platformConfirmSubmit.disabled = true;
     els.platformConfirmSubmit.textContent = 'Executando...';
@@ -3285,7 +3459,7 @@ function renderBackupStatus() {
     <article>
       <span>Atualizado em</span>
       <strong>${backup.updated_at ? new Date(backup.updated_at).toLocaleString('pt-BR') : '-'}</strong>
-      <p>Retenção configurada: ${Number(backup.retention_days || 14)} dia(s).</p>
+      <p>Retenção configurada: ${Number(backup.retention_days || 7)} dia(s).</p>
     </article>
     <article>
       <span>Histórico recente</span>
@@ -3509,6 +3683,64 @@ async function submitSmtpSettings(event) {
     toast('SMTP salvo com segurança.');
   } catch (error) {
     toast(error.message || 'Não foi possível salvar SMTP.');
+  }
+}
+
+async function submitBillingConfig(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  data.is_active = form.elements.is_active.checked;
+  if (!String(data.api_key || '').trim()) delete data.api_key;
+  if (!String(data.webhook_secret || '').trim()) delete data.webhook_secret;
+  if (els.saveBillingConfigButton) {
+    els.saveBillingConfigButton.disabled = true;
+    els.saveBillingConfigButton.textContent = 'Salvando...';
+  }
+  try {
+    const response = await request('/api/platform/billing/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    state.billingConfig = response.billing;
+    renderBillingConfig();
+    toast('Configuração da Abacate Pay salva.');
+    await loadHealth({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar Abacate Pay.');
+  } finally {
+    if (els.saveBillingConfigButton) {
+      els.saveBillingConfigButton.disabled = false;
+      els.saveBillingConfigButton.textContent = 'Salvar configuração';
+    }
+  }
+}
+
+async function testBillingConfig() {
+  const buttons = [els.testBillingConfigButton, els.testBillingConfigButtonHealth].filter(Boolean);
+  buttons.forEach((button) => {
+    button.disabled = true;
+    button.dataset.originalText = button.dataset.originalText || button.textContent;
+    button.textContent = 'Testando...';
+  });
+  try {
+    const response = await request('/api/platform/billing/config/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    toast(response.message || 'Conexão validada.');
+    await loadBilling({ silent: true, renderBefore: false });
+    await loadHealth({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível testar Abacate Pay.');
+    await loadBilling({ silent: true, renderBefore: false });
+  } finally {
+    buttons.forEach((button) => {
+      button.disabled = false;
+      button.textContent = button.dataset.originalText || 'Testar conexão';
+    });
   }
 }
 

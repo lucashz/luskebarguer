@@ -154,7 +154,7 @@ Retencao recomendada por variavel de ambiente:
 - `AUDIT_LOG_RETENTION_DAYS=180`
 - `OPERATIONAL_LOG_RETENTION_DAYS=90`
 - `SESSION_RETENTION_DAYS=7`
-- `BACKUP_RETENTION_DAYS=14`
+- `BACKUP_RETENTION_DAYS=7`
 - `TMP_RETENTION_DAYS=7`
 
 Cron diario sugerido no servidor:

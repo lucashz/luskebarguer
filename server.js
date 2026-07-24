@@ -451,7 +451,7 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/billing/webhook') {
     const payload = await readJson(req);
-    const provider = url.searchParams.get('provider') || PLATFORM_BILLING_PROVIDER;
+    const provider = url.searchParams.get('provider') || '';
     const webhookSecret = req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || '';
     try {
       json(res, 200, await receiveBillingWebhook(payload, { provider, webhookSecret }));
@@ -818,6 +818,27 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/platform/billing/config') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, { billing: await getPlatformBillingSettings() });
+    return;
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/platform/billing/config') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, { billing: await updatePlatformBillingSettings(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/billing/config/test') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await testPlatformBillingSettings(req, admin));
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/platform/email-templates') {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
     if (!admin) return;
@@ -904,6 +925,13 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     json(res, 200, await runPlatformBackup(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/services/backup/restore') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await restorePlatformBackup(req, admin, await readJson(req)));
     return;
   }
 
@@ -5410,6 +5438,7 @@ async function createBillingCheckout(req, admin, data = {}) {
   const changeType = billingPlanChangeType(currentPlan, plan);
   const downgradeWarnings = await planLimitWarnings(companyId, admin.store_id, plan);
   const amount = moneyCents(plan.monthly_price || 0);
+  const billingConfig = await privatePlatformBillingSettings();
   const reusableCheckout = await findReusablePendingBillingCheckout(companyId, plan.id);
   if (reusableCheckout?.checkout_url) {
     return {
@@ -5417,16 +5446,16 @@ async function createBillingCheckout(req, admin, data = {}) {
       plan,
       payment_transaction: reusableCheckout.transaction,
       checkout_url: reusableCheckout.checkout_url,
-      provider: reusableCheckout.subscription?.billing_provider || PLATFORM_BILLING_PROVIDER,
+      provider: reusableCheckout.subscription?.billing_provider || billingConfig.provider,
       reused: true,
       change_type: reusableCheckout.subscription?.metadata?.change_type || changeType,
       downgrade_warnings: reusableCheckout.subscription?.metadata?.downgrade_warnings || downgradeWarnings
     };
   }
-  if (amount > 0 && PLATFORM_BILLING_PROVIDER !== 'mock' && !PLATFORM_BILLING_API_KEY) {
+  if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
     throw httpError(503, 'Checkout indisponível: configure ABACATEPAY_API_KEY ou PLATFORM_BILLING_API_KEY no servidor.');
   }
-  if (PLATFORM_BILLING_PROVIDER === 'mock' || amount <= 0) {
+  if (billingConfig.provider === 'mock' || amount <= 0) {
     const activated = await activateCompanyPlan(req, admin, company, plan, {
       source: amount <= 0 ? 'free_plan' : 'manual_activation',
       provider: 'manual',
@@ -5443,7 +5472,7 @@ async function createBillingCheckout(req, admin, data = {}) {
       downgrade_warnings: downgradeWarnings
     };
   }
-  const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount });
+  const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount, billingConfig });
   if (!checkout.checkoutUrl) {
     throw httpError(502, 'O provedor de pagamento não retornou a URL do checkout. Confira a configuração da Abacate Pay.');
   }
@@ -5451,7 +5480,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     company_id: companyId,
     plan_id: plan.id,
     status: 'payment_pending',
-    billing_provider: PLATFORM_BILLING_PROVIDER,
+    billing_provider: billingConfig.provider,
     external_subscription_id: checkout.subscriptionId || checkout.transactionId || null,
     payment_due_at: new Date(Date.now() + 3 * 86400000).toISOString(),
     metadata: {
@@ -5467,7 +5496,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     companyId,
     subscriptionId: subscription.id,
     planId: plan.id,
-    provider: PLATFORM_BILLING_PROVIDER,
+    provider: billingConfig.provider,
     externalTransactionId: checkout.subscriptionId || checkout.transactionId || null,
     status: 'pending',
     amountCents: amount,
@@ -5487,7 +5516,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     event_type: 'checkout_created',
     description: `Cobrança criada para o plano ${plan.name}.`,
     metadata: {
-      provider: PLATFORM_BILLING_PROVIDER,
+      provider: billingConfig.provider,
       provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
       payment_transaction_id: transaction?.id || null,
       plan_code: plan.code,
@@ -5505,14 +5534,14 @@ async function createBillingCheckout(req, admin, data = {}) {
     store_id: admin.store_id,
     entity_type: 'company_subscription',
     entity_id: subscription.id,
-    after_data: { plan_code: plan.code, provider: PLATFORM_BILLING_PROVIDER }
+    after_data: { plan_code: plan.code, provider: billingConfig.provider }
   });
   return {
     subscription,
     plan,
     payment_transaction: transaction,
     checkout_url: checkout.checkoutUrl || null,
-    provider: PLATFORM_BILLING_PROVIDER,
+    provider: billingConfig.provider,
     change_type: changeType,
     downgrade_warnings: downgradeWarnings
   };
@@ -5625,18 +5654,19 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
   return { subscription, plan, change_type: changeType, downgrade_warnings: downgradeWarnings };
 }
 
-async function createProviderSubscriptionCheckout({ company, plan, admin, amount }) {
-  if (PLATFORM_BILLING_PROVIDER === 'mock') {
+async function createProviderSubscriptionCheckout({ company, plan, admin, amount, billingConfig = null }) {
+  const config = billingConfig || await privatePlatformBillingSettings();
+  if (config.provider === 'mock') {
     return {
       subscriptionId: `mock_sub_${company.id}_${Date.now()}`,
       checkoutUrl: `/painel?billing=mock&plan=${encodeURIComponent(plan.code)}`
     };
   }
-  if (PLATFORM_BILLING_PROVIDER !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
+  if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
   const origin = process.env.PUBLIC_APP_URL || process.env.APP_URL || 'http://127.0.0.1:3000';
   const data = await providerFetch('https://api.abacatepay.com/v1/billing/create', {
     method: 'POST',
-    token: PLATFORM_BILLING_API_KEY,
+    token: config.api_key,
     body: {
       frequency: 'MONTHLY',
       methods: ['PIX'],
@@ -5741,8 +5771,9 @@ function billingTransactionStatus(subscriptionStatus) {
 }
 
 async function receiveBillingWebhook(data, options = {}) {
-  const provider = cleanSlug(options.provider || inferPaymentProvider(data) || PLATFORM_BILLING_PROVIDER);
-  if (PLATFORM_BILLING_WEBHOOK_SECRET && options.webhookSecret !== PLATFORM_BILLING_WEBHOOK_SECRET) {
+  const config = await privatePlatformBillingSettings();
+  const provider = cleanSlug(options.provider || inferPaymentProvider(data) || config.provider || PLATFORM_BILLING_PROVIDER);
+  if (config.webhook_secret && options.webhookSecret !== config.webhook_secret) {
     throw httpError(401, 'Webhook de assinatura inválido.');
   }
   const payload = data.data || data.billing || data.subscription || data;
@@ -6084,7 +6115,7 @@ async function platformBackupStatus() {
     finished_at: cleanText(manifest?.finished_at || latest?.created_at || ''),
     latest,
     last_output: cleanBackupFileName(manifest?.output || latest?.file || ''),
-    retention_days: clampNumber(Number(manifest?.retention_days || process.env.BACKUP_RETENTION_DAYS || 14), 1, 365),
+    retention_days: clampNumber(Number(manifest?.retention_days || process.env.BACKUP_RETENTION_DAYS || 7), 1, 365),
     mode: cleanText(manifest?.mode || ''),
     error: manifest?.status === 'failed' ? cleanText(manifest.error || '').slice(0, 240) : '',
     recent
@@ -6159,7 +6190,7 @@ function platformRetentionSettings() {
     subscription_event_days: envInt('SUBSCRIPTION_EVENT_RETENTION_DAYS', 365),
     billing_event_days: envInt('BILLING_EVENT_RETENTION_DAYS', 1825),
     support_message_days: envInt('SUPPORT_MESSAGE_RETENTION_DAYS', 730),
-    backup_days: envInt('BACKUP_RETENTION_DAYS', 14),
+    backup_days: envInt('BACKUP_RETENTION_DAYS', 7),
     tmp_days: envInt('TMP_RETENTION_DAYS', 7)
   };
 }
@@ -6260,6 +6291,8 @@ async function platformServicesLogs(params = new URLSearchParams()) {
   const actions = [
     'platform.service.backup',
     'platform.service.backup.failed',
+    'platform.service.backup.restore',
+    'platform.service.backup.restore.failed',
     'platform.service.trial_cleanup',
     'platform.service.trial_cleanup.failed',
     'platform.logs.cleanup',
@@ -6315,6 +6348,71 @@ async function runPlatformBackup(req, admin, data = {}) {
       message: safeCommandOutput(error.message || String(error))
     });
     throw httpError(500, 'Não foi possível executar o backup manual.');
+  }
+}
+
+async function restorePlatformBackup(req, admin, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const file = cleanBackupFileName(data.file || data.backup_file || '');
+  if (!/^postgres-.+\.(dump|sql)$/.test(file)) {
+    await auditPlatformService(req, admin, 'platform.service.backup.restore.failed', 'critical', {
+      status: 'failed',
+      message: 'Arquivo de backup inválido para restauração.',
+      file
+    });
+    throw httpError(422, 'Selecione um backup válido para restaurar.');
+  }
+  const backupPath = path.resolve(BACKUP_DIR, file);
+  if (!backupPath.startsWith(`${path.resolve(BACKUP_DIR)}${path.sep}`)) {
+    throw httpError(422, 'Arquivo de backup inválido.');
+  }
+  const backupInfo = await stat(backupPath).catch(() => null);
+  if (!backupInfo || !backupInfo.isFile()) {
+    throw httpError(404, 'Backup não encontrado.');
+  }
+  const startedAt = Date.now();
+  try {
+    const preRestore = await runNodeScript('scripts/backup-postgres.mjs', [], { timeoutMs: 120000 })
+      .then(() => platformBackupStatus())
+      .catch((error) => ({ error: error.message || String(error), latest: null }));
+    const commandResult = file.endsWith('.sql')
+      ? await runCommand('psql', ['--set', 'ON_ERROR_STOP=1', '--file', backupPath, pgToolConnectionString(DATABASE_URL)], { timeoutMs: 180000 })
+      : await runCommand('pg_restore', ['--clean', '--if-exists', '--no-owner', '--no-privileges', '--dbname', pgToolConnectionString(DATABASE_URL), backupPath], { timeoutMs: 180000 });
+    await writeBackupStatus({
+      status: 'success',
+      finished_at: new Date().toISOString(),
+      output: file,
+      restored_from: file,
+      restore_finished_at: new Date().toISOString(),
+      retention_days: envInt('BACKUP_RETENTION_DAYS', 7),
+      mode: file.endsWith('.sql') ? 'psql-restore' : 'pg_restore'
+    }).catch(() => {});
+    await auditPlatformService(req, admin, 'platform.service.backup.restore', 'critical', {
+      status: 'success',
+      duration_ms: Date.now() - startedAt,
+      file,
+      pre_restore_backup: preRestore.latest ? {
+        file: preRestore.latest.file,
+        size_bytes: preRestore.latest.size_bytes
+      } : null,
+      pre_restore_warning: preRestore.error ? safeCommandOutput(preRestore.error) : '',
+      message: safeCommandOutput(commandResult.stdout || 'Backup restaurado com sucesso.')
+    });
+    return {
+      ok: true,
+      restored_from: file,
+      pre_restore_backup: preRestore.latest || null,
+      output: safeCommandOutput(commandResult.stdout),
+      status: await platformBackupStatus()
+    };
+  } catch (error) {
+    await auditPlatformService(req, admin, 'platform.service.backup.restore.failed', 'critical', {
+      status: 'failed',
+      duration_ms: Date.now() - startedAt,
+      file,
+      message: safeCommandOutput(error.message || String(error))
+    });
+    throw httpError(500, 'Não foi possível restaurar o backup. Verifique o arquivo e os logs operacionais.');
   }
 }
 
@@ -6442,7 +6540,12 @@ async function assertPlatformDangerConfirmation(req, admin, data = {}, expected 
     });
     throw httpError(422, `Digite ${expected} para confirmar esta ação.`);
   }
-  const password = String(data.password || '');
+  await assertPlatformAdminPassword(req, admin, data.password || '');
+  return true;
+}
+
+async function assertPlatformAdminPassword(req, admin, passwordValue) {
+  const password = String(passwordValue || '');
   if (!password) {
     await auditPlatformService(req, admin, 'platform.service.password.failed', 'warning', {
       status: 'failed',
@@ -6481,6 +6584,17 @@ async function auditPlatformService(req, admin, action, severity, payload = {}) 
 
 function runNodeScript(scriptPath, args = [], options = {}) {
   return runCommand(process.execPath, [path.join(__dirname, scriptPath), ...args], options);
+}
+
+function pgToolConnectionString(value) {
+  if (!value) return '';
+  try {
+    const url = new URL(value);
+    url.searchParams.delete('schema');
+    return url.toString();
+  } catch {
+    return value.replace(/([?&])schema=[^&]*&?/, (match, prefix) => prefix === '?' ? '?' : '').replace(/[?&]$/, '');
+  }
 }
 
 function runCommand(command, args = [], options = {}) {
@@ -6572,7 +6686,7 @@ async function platformOperationalHealth(params = new URLSearchParams()) {
     apiHealthStatus(metrics),
     database,
     platformStatus('auth', 'Autenticação', config.items.find((item) => item.key === 'cookie_secret')?.ok === false ? 'attention' : 'healthy', 'Sessões administrativas e cookies operando.', null),
-    billingHealthStatus(),
+    await billingHealthStatus(),
     webhookHealthStatus(operationalLogs),
     backupHealthStatus(backup),
     jobsHealthStatus(),
@@ -6580,7 +6694,7 @@ async function platformOperationalHealth(params = new URLSearchParams()) {
     sslDomainHealthStatus(),
     await smtpHealthStatus()
   ];
-  const alerts = platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs });
+  const alerts = await platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs });
   return normalizePortuguesePayload({
     checked_at: new Date().toISOString(),
     period: period.label,
@@ -6619,7 +6733,7 @@ async function platformOperationalAlertsEndpoint(params = new URLSearchParams())
     apiHealthStatus(metrics),
     database,
     platformStatus('auth', 'Autenticação', config.items.find((item) => item.key === 'cookie_secret')?.ok === false ? 'attention' : 'healthy', 'Sessões administrativas e cookies operando.', null),
-    billingHealthStatus(),
+    await billingHealthStatus(),
     webhookHealthStatus(operationalLogs),
     backupHealthStatus(backup),
     jobsHealthStatus(),
@@ -6630,7 +6744,7 @@ async function platformOperationalAlertsEndpoint(params = new URLSearchParams())
   return normalizePortuguesePayload({
     generated_at: new Date().toISOString(),
     period: period.label,
-    alerts: platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs })
+    alerts: await platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs })
   });
 }
 
@@ -6839,13 +6953,14 @@ function platformStatus(key, label, status, message, latencyMs = null) {
   };
 }
 
-function billingHealthStatus() {
-  const configured = Boolean(PLATFORM_BILLING_API_KEY);
+async function billingHealthStatus() {
+  const billing = await getPlatformBillingSettings().catch(() => null);
+  const configured = Boolean(billing?.is_active && billing?.has_api_key);
   return platformStatus(
     'billing',
     'Billing/Abacate Pay',
     configured ? 'healthy' : 'attention',
-    configured ? 'Provider e API key configurados.' : 'API key de billing não configurada; ativações podem ficar em modo manual/mock.',
+    configured ? `Provider e API key configurados (${billing.source}).` : 'API key de billing não configurada; configure Billing > Configuração Abacate Pay.',
     null
   );
 }
@@ -6907,6 +7022,165 @@ async function smtpServiceStatus() {
       ? `SMTP ativo para ${smtp.from_email}.`
       : `Configuração incompleta: ${missing.join(', ') || 'dados ausentes'}.`
   };
+}
+
+async function getPlatformBillingSettings() {
+  const rows = await dbRequest('GET', 'platform_billing_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const row = rows[0] || null;
+  if (!row) {
+    return publicPlatformBillingSettings({
+      provider: PLATFORM_BILLING_PROVIDER || 'abacatepay',
+      api_key: PLATFORM_BILLING_API_KEY,
+      webhook_secret: PLATFORM_BILLING_WEBHOOK_SECRET,
+      is_active: Boolean(PLATFORM_BILLING_API_KEY),
+      source: PLATFORM_BILLING_API_KEY ? 'env' : 'empty',
+      metadata: {}
+    });
+  }
+  return publicPlatformBillingSettings(row);
+}
+
+async function privatePlatformBillingSettings() {
+  const rows = await dbRequest('GET', 'platform_billing_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const row = rows[0] || null;
+  if (!row) {
+    return {
+      provider: PLATFORM_BILLING_PROVIDER || 'abacatepay',
+      api_key: PLATFORM_BILLING_API_KEY,
+      webhook_secret: PLATFORM_BILLING_WEBHOOK_SECRET,
+      is_active: Boolean(PLATFORM_BILLING_API_KEY),
+      source: PLATFORM_BILLING_API_KEY ? 'env' : 'empty'
+    };
+  }
+  const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'abacatepay');
+  return {
+    id: row.id || null,
+    provider,
+    api_key: row.is_active === false ? '' : (row.api_key || PLATFORM_BILLING_API_KEY || ''),
+    webhook_secret: row.is_active === false ? '' : (row.webhook_secret || PLATFORM_BILLING_WEBHOOK_SECRET || ''),
+    is_active: row.is_active === true,
+    source: 'database'
+  };
+}
+
+async function updatePlatformBillingSettings(req, admin, data = {}) {
+  await assertPlatformAdminPassword(req, admin, data.password || data.superadmin_password || '');
+  const currentRows = await dbRequest('GET', 'platform_billing_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch((error) => {
+    throw httpError(500, 'Tabela de billing não encontrada. Execute as migrations antes de configurar Abacate Pay.', { cause: error.message });
+  });
+  const current = currentRows[0] || null;
+  const provider = cleanSlug(data.provider || 'abacatepay');
+  if (!['abacatepay', 'mock'].includes(provider)) throw httpError(422, 'Provedor de billing não suportado.');
+  const apiKey = String(data.api_key || data.apiKey || '').trim();
+  const webhookSecret = String(data.webhook_secret || data.webhookSecret || '').trim();
+  const publicUrl = cleanText(data.public_url || data.publicUrl || process.env.PUBLIC_APP_URL || process.env.APP_URL || '').slice(0, 500) || null;
+  const payload = {
+    provider,
+    ...(apiKey ? { api_key: apiKey } : {}),
+    ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
+    public_url: publicUrl,
+    is_active: data.is_active === true || data.is_active === 'true',
+    metadata: { updated_by: admin.id },
+    updated_at: new Date().toISOString()
+  };
+  if (payload.is_active && provider === 'abacatepay' && !apiKey && !current?.api_key && !PLATFORM_BILLING_API_KEY) {
+    throw httpError(422, 'Informe a API key da Abacate Pay para ativar o checkout.');
+  }
+  const [saved] = current
+    ? await dbRequest('PATCH', 'platform_billing_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
+    : await dbRequest('POST', 'platform_billing_settings', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await audit('platform.billing.config.update', {
+    req,
+    actor_admin_id: admin.id,
+    entity_type: 'platform_billing_settings',
+    entity_id: saved.id,
+    severity: 'warning',
+    before_data: current ? publicPlatformBillingSettings(current) : null,
+    after_data: publicPlatformBillingSettings(saved)
+  });
+  return publicPlatformBillingSettings(saved);
+}
+
+function publicPlatformBillingSettings(row = {}) {
+  const origin = cleanText(row.public_url || process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
+  const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'abacatepay') || 'abacatepay';
+  const apiKey = row.api_key || PLATFORM_BILLING_API_KEY || '';
+  const webhookSecret = row.webhook_secret || PLATFORM_BILLING_WEBHOOK_SECRET || '';
+  return {
+    id: row.id || null,
+    provider,
+    is_active: row.is_active === true,
+    has_api_key: Boolean(apiKey),
+    api_key_masked: apiKey ? maskEmailOrToken(apiKey) : '',
+    has_webhook_secret: Boolean(webhookSecret),
+    webhook_secret_masked: webhookSecret ? maskEmailOrToken(webhookSecret) : '',
+    webhook_url: origin ? `${origin}/api/billing/webhook?provider=${encodeURIComponent(provider)}` : '/api/billing/webhook?provider=abacatepay',
+    public_url: origin || '',
+    source: row.source || 'database',
+    last_test_status: row.last_test_status || null,
+    last_test_at: row.last_test_at || null,
+    last_test_message: row.last_test_message || '',
+    updated_at: row.updated_at || null
+  };
+}
+
+async function testPlatformBillingSettings(req, admin) {
+  const config = await privatePlatformBillingSettings();
+  if (!config.is_active || !config.api_key) throw httpError(422, 'Abacate Pay não está ativo ou não possui API key configurada.');
+  if (config.provider === 'mock') {
+    await markPlatformBillingTest('success', 'Provider mock ativo.');
+    return { ok: true, message: 'Provider mock ativo para testes internos.' };
+  }
+  if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de billing não suportado.');
+  try {
+    await providerFetch('https://api.abacatepay.com/v1/customers/list', {
+      method: 'GET',
+      token: config.api_key
+    });
+    await markPlatformBillingTest('success', 'Conexão com Abacate Pay validada.');
+    await audit('platform.billing.config.test', {
+      req,
+      actor_admin_id: admin.id,
+      entity_type: 'platform_billing_settings',
+      severity: 'info',
+      after_data: { status: 'success', provider: config.provider }
+    });
+    return { ok: true, message: 'Conexão com Abacate Pay validada com sucesso.' };
+  } catch (error) {
+    const message = error.message || 'Falha ao testar Abacate Pay.';
+    await markPlatformBillingTest('failed', message).catch(() => {});
+    await audit('platform.billing.config.test', {
+      req,
+      actor_admin_id: admin.id,
+      entity_type: 'platform_billing_settings',
+      severity: 'warning',
+      after_data: { status: 'failed', provider: config.provider, message: safeCommandOutput(message) }
+    });
+    throw httpError(502, 'Não foi possível conectar na Abacate Pay. Verifique a API key e o ambiente.');
+  }
+}
+
+async function markPlatformBillingTest(status, message = '') {
+  const rows = await dbRequest('GET', 'platform_billing_settings', { select: 'id', order: 'created_at.desc', limit: '1' }).catch(() => []);
+  if (!rows[0]) return;
+  await dbRequest('PATCH', 'platform_billing_settings', { id: `eq.${rows[0].id}` }, {
+    last_test_status: status,
+    last_test_at: new Date().toISOString(),
+    last_test_message: cleanText(message).slice(0, 500),
+    updated_at: new Date().toISOString()
+  }).catch(() => {});
 }
 
 async function getPlatformSmtpSettings() {
@@ -7790,6 +8064,7 @@ async function platformConfigChecklist() {
   const uploads = await directoryWritable(UPLOAD_DIR);
   const backups = await directoryWritable(BACKUP_DIR);
   const smtp = await smtpServiceStatus();
+  const billing = await getPlatformBillingSettings().catch(() => null);
   const production = process.env.NODE_ENV === 'production';
   const appUrl = process.env.APP_URL || process.env.PUBLIC_APP_URL || '';
   const apiUrl = process.env.API_URL || appUrl || '';
@@ -7801,8 +8076,8 @@ async function platformConfigChecklist() {
     configItem('jwt_secret', 'Secrets de sessão não padrão', hasStrongSessionSecret(), hasStrongSessionSecret() ? 'Configurado' : 'Configure SESSION_SECRET/COOKIE_SECRET'),
     configItem('cookie_secret', 'COOKIE_SECRET/SESSION_SECRET configurado', Boolean(process.env.COOKIE_SECRET || process.env.SESSION_SECRET), 'Não exibe segredo'),
     configItem('cookie_secure', 'COOKIE_SECURE correto para produção', !production || COOKIE_SECURE === true, String(COOKIE_SECURE)),
-    configItem('abacate_api', 'Abacate Pay configurado', Boolean(PLATFORM_BILLING_API_KEY), PLATFORM_BILLING_API_KEY ? 'Configurado' : 'Ausente'),
-    configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(PLATFORM_BILLING_WEBHOOK_SECRET), PLATFORM_BILLING_WEBHOOK_SECRET ? 'Configurado' : 'Ausente'),
+    configItem('abacate_api', 'Abacate Pay configurado', Boolean(billing?.is_active && billing?.has_api_key), billing?.has_api_key ? `Configurado (${billing.source})` : 'Ausente'),
+    configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(billing?.has_webhook_secret), billing?.has_webhook_secret ? `Configurado (${billing.source})` : 'Ausente'),
     configItem('uploads', 'Upload/storage gravável', uploads, maskConfigValue(UPLOAD_DIR, 'path')),
     configItem('smtp', 'SMTP/e-mail configurado', smtp.status === 'healthy', smtp.status === 'healthy' ? `Configurado (${smtp.source})` : smtp.message, true),
     configItem('proxy', 'Proxy/Nginx compatível', Boolean(process.env.TRUST_PROXY || process.env.PUBLIC_APP_URL || process.env.APP_URL), 'Verifique headers X-Forwarded-* no Nginx'),
@@ -7861,7 +8136,7 @@ function bytesLabel(value) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-function platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs }) {
+async function platformHealthAlerts({ statuses, metrics, config, backup, operationalLogs }) {
   const alerts = [];
   const add = (type, severity, title, message, action) => alerts.push({ key: type, type, severity, title, message, action });
   for (const status of statuses) {
@@ -7903,8 +8178,9 @@ function platformHealthAlerts({ statuses, metrics, config, backup, operationalLo
   } else if (heapUsed >= 80) {
     add('node_heap_attention', 'warning', 'Heap do Node exige atenção', `Heap usado: ${heapUsed}%.`, 'Monitore crescimento e avalie NODE_OPTIONS/upgrade de RAM.');
   }
-  if (!PLATFORM_BILLING_API_KEY) {
-    add('abacatepay_missing', 'warning', 'Abacate Pay desconfigurado', 'API key de billing não encontrada.', 'Configure ABACATEPAY_API_KEY no servidor.');
+  const billing = await getPlatformBillingSettings().catch(() => null);
+  if (!billing?.is_active || !billing?.has_api_key) {
+    add('abacatepay_missing', 'warning', 'Abacate Pay desconfigurado', 'API key de billing não encontrada.', 'Configure Billing > Configuração Abacate Pay na Central.');
   }
   if (statuses.some((status) => status.key === 'smtp' && status.status !== 'healthy')) {
     add('smtp_missing', 'attention', 'SMTP exige atenção', 'Envio de e-mails operacionais não está totalmente disponível.', 'Revise Comunicação > SMTP no Platform ou as variáveis SMTP do servidor.');

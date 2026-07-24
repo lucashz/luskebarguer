@@ -118,6 +118,14 @@ try {
   });
   assert(backupBadConfirmation.status === 422, 'Acao critica com confirmacao invalida nao falhou.');
 
+  const restoreBadConfirmation = await request('/api/platform/services/backup/restore', {
+    method: 'POST',
+    cookie: superLogin.cookie,
+    body: { confirmation: 'ERRADO', password, file: 'postgres-smoke.dump' },
+    allowFailure: true
+  });
+  assert(restoreBadConfirmation.status === 422, 'Restore com confirmacao invalida nao falhou.');
+
   const cleanupNoPassword = await request('/api/platform/services/log-cleanup', {
     method: 'POST',
     cookie: superLogin.cookie,

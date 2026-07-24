@@ -14,7 +14,7 @@ if (!connectionString) {
 }
 
 const backupsDir = path.resolve(process.env.BACKUP_DIR || 'backups');
-const retentionDays = Number.parseInt(process.env.BACKUP_RETENTION_DAYS || '14', 10);
+const retentionDays = Number.parseInt(process.env.BACKUP_RETENTION_DAYS || '7', 10);
 await mkdir(backupsDir, { recursive: true });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');

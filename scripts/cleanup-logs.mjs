@@ -21,7 +21,7 @@ const retention = {
   subscriptionEvents: envDays('SUBSCRIPTION_EVENT_RETENTION_DAYS', 365),
   billingEvents: envDays('BILLING_EVENT_RETENTION_DAYS', 1825),
   supportMessages: envDays('SUPPORT_MESSAGE_RETENTION_DAYS', 730),
-  backups: envDays('BACKUP_RETENTION_DAYS', 14),
+  backups: envDays('BACKUP_RETENTION_DAYS', 7),
   tmp: envDays('TMP_RETENTION_DAYS', 7)
 };
 

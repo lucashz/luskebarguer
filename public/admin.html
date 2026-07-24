@@ -1235,7 +1235,8 @@
                     <label>E-mail
                       <input name="email" required type="email" placeholder="E-mail">
                     </label>
-                    <button class="primary-button compact">Salvar conta</button>
+                    <p class="form-message" id="accountFormMessage" role="alert" aria-live="polite"></p>
+                    <button class="primary-button compact" type="submit">Salvar conta</button>
                   </form>
 
                   <form id="passwordForm" class="account-card account-mini-form">
@@ -1253,7 +1254,8 @@
                     <label>Nova senha
                       <input name="new_password" required type="password" minlength="8" autocomplete="new-password" placeholder="Nova senha">
                     </label>
-                    <button class="primary-button compact">Atualizar senha</button>
+                    <p class="form-message" id="passwordFormMessage" role="alert" aria-live="polite"></p>
+                    <button class="primary-button compact" type="submit">Atualizar senha</button>
                   </form>
                 </div>
               </div>
