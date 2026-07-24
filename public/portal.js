@@ -10,6 +10,7 @@ const signupSubmitButton = document.querySelector('#signupSubmitButton');
 const portalLoginForm = document.querySelector('#portalLoginForm');
 const portalRecoverForm = document.querySelector('#portalRecoverForm');
 const portalResetPasswordForm = document.querySelector('#portalResetPasswordForm');
+const portalActivationButton = document.querySelector('#portalActivationButton');
 const onboardingChecklist = document.querySelector('#onboardingChecklist');
 const onboardingProgress = document.querySelector('#onboardingProgress');
 const onboardingPublishButton = document.querySelector('#onboardingPublishButton');
@@ -24,6 +25,7 @@ async function initPortal() {
   if (portalLoginForm) initLogin();
   if (portalRecoverForm) initRecover();
   if (portalResetPasswordForm) await initPasswordReset();
+  if (portalActivationButton) await initAccountActivation();
   if (onboardingChecklist) {
     setupAdminStoreHomeLinks().catch(() => {});
     await loadOnboarding();
@@ -275,6 +277,16 @@ async function submitSignup(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    if (data.needs_activation) {
+      signupMessage.textContent = data.message || 'Conta criada. Confira seu e-mail para ativar o acesso.';
+      signupForm.classList.add('signup-created');
+      setSignupLoading(false);
+      if (signupSubmitButton) {
+        signupSubmitButton.disabled = true;
+        signupSubmitButton.textContent = 'Aguardando ativação por e-mail';
+      }
+      return;
+    }
     signupMessage.textContent = 'Conta criada. Abrindo onboarding...';
     location.href = data.redirect || '/painel';
   } catch (error) {
@@ -286,8 +298,48 @@ async function submitSignup(event) {
 function setSignupLoading(isLoading) {
   if (signupSubmitButton) {
     signupSubmitButton.disabled = isLoading;
-    signupSubmitButton.textContent = isLoading ? 'Criando...' : 'Criar loja e entrar';
+    signupSubmitButton.textContent = isLoading ? 'Criando...' : 'Criar loja';
   }
+}
+
+async function initAccountActivation() {
+  const params = new URLSearchParams(location.search);
+  const token = params.get('token') || '';
+  const intro = document.querySelector('#activationIntro');
+  const message = document.querySelector('#portalActivationMessage');
+  if (!/^[a-f0-9]{32,128}$/i.test(token)) {
+    if (intro) intro.textContent = 'Link de ativação inválido.';
+    portalActivationButton.disabled = true;
+    return;
+  }
+  try {
+    const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`);
+    if (intro) {
+      const email = data.activation?.email ? ` para ${data.activation.email}` : '';
+      intro.textContent = `Link válido${email}. Clique no botão abaixo para liberar o painel.`;
+    }
+    portalActivationButton.disabled = false;
+  } catch (error) {
+    if (intro) intro.textContent = error.message || 'Link inválido ou expirado.';
+    portalActivationButton.disabled = true;
+    return;
+  }
+  portalActivationButton.addEventListener('click', async () => {
+    portalActivationButton.disabled = true;
+    portalActivationButton.textContent = 'Ativando...';
+    if (message) message.textContent = '';
+    try {
+      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, { method: 'POST' });
+      if (message) message.textContent = data.message || 'Conta ativada com sucesso.';
+      setTimeout(() => {
+        location.href = data.redirect || '/painel';
+      }, 500);
+    } catch (error) {
+      if (message) message.textContent = error.message || 'Não foi possível ativar a conta.';
+      portalActivationButton.disabled = false;
+      portalActivationButton.textContent = 'Ativar e entrar';
+    }
+  });
 }
 
 async function loadOnboarding() {

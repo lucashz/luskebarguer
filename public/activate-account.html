@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/assets/tapronto-favicon.svg">
+    <title>Ativar conta - TáPronto</title>
+    <link rel="stylesheet" href="/styles.css?v=20260708-qa-flow">
+  </head>
+  <body class="portal-page signup-page">
+    <header class="portal-topbar">
+      <a class="portal-brand" href="/"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a>
+      <nav>
+        <a href="/entrar">Entrar</a>
+      </nav>
+    </header>
+
+    <main class="signup-shell compact-auth-shell">
+      <section class="signup-intro">
+        <p class="eyebrow">Ativação</p>
+        <h1>Confirme seu e-mail.</h1>
+        <p>Essa etapa protege a plataforma contra spam e garante que você tenha acesso ao e-mail principal da loja.</p>
+      </section>
+
+      <section class="signup-card portal-auth-card">
+        <p class="eyebrow">Conta TáPronto</p>
+        <h2>Ativar acesso</h2>
+        <p class="muted" id="activationIntro">Validando link de ativação...</p>
+        <p id="portalActivationMessage"></p>
+        <div class="signup-submit-row">
+          <a class="ghost-button compact" href="/entrar">Voltar ao login</a>
+          <button class="portal-button" id="portalActivationButton" type="button" disabled>Ativar e entrar</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/portal.js?v=20260724-account-activation" type="module"></script>
+  </body>
+</html>

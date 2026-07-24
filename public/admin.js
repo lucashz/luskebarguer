@@ -5378,7 +5378,7 @@ function openPlanCheckoutModal(planCode = '') {
   document.body.classList.add('plan-checkout-open');
   modal.querySelectorAll('[data-close-plan-checkout]').forEach((button) => button.addEventListener('click', closePlanCheckoutModal));
   modal.querySelector('[data-confirm-plan-checkout]')?.addEventListener('click', (event) => {
-    createBillingCheckout(state.checkoutPlanCode, { redirectToCheckout: true, triggerButton: event.currentTarget });
+    createBillingCheckout(state.checkoutPlanCode, { triggerButton: event.currentTarget });
   });
   modal.querySelector('[data-confirm-plan-checkout]')?.focus();
 }
@@ -5429,13 +5429,9 @@ async function createBillingCheckout(forcedPlanCode = '', options = {}) {
       body: JSON.stringify({ plan_code: planCode })
     });
     if (result.checkout_url) {
-      toast('Redirecionando para o pagamento...');
-      closePlanCheckoutModal();
-      if (options.redirectToCheckout) {
-        window.location.assign(result.checkout_url);
-      } else {
-        window.open(result.checkout_url, '_blank', 'noopener');
-      }
+      openCheckoutWindow(result.checkout_url);
+      renderPlanCheckoutWaiting(result.checkout_url, planCode);
+      toast('Checkout aberto em uma nova aba.');
       return;
     } else if (result.activated) {
       await loadPlanData({ force: true });
@@ -5455,6 +5451,70 @@ async function createBillingCheckout(forcedPlanCode = '', options = {}) {
       triggerButton.textContent = previousTriggerText;
     }
   }
+}
+
+function openCheckoutWindow(url) {
+  const popup = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!popup) {
+    toast('Seu navegador bloqueou a nova aba. Use o botão "Abrir checkout novamente".');
+  }
+}
+
+function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
+  const modal = ensurePlanCheckoutModal();
+  const plan = selectedCheckoutPlan(planCode) || {};
+  modal.innerHTML = `
+    <div class="plan-checkout-modal-card plan-checkout-waiting" role="dialog" aria-modal="true" aria-labelledby="planCheckoutWaitingTitle">
+      <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
+      <div class="plan-checkout-head">
+        <p class="eyebrow">Pagamento seguro</p>
+        <h2 id="planCheckoutWaitingTitle">Finalize o pagamento na aba aberta</h2>
+        <p>Assim que a Abacate Pay confirmar o pagamento, o plano será liberado automaticamente no painel.</p>
+      </div>
+      <div class="plan-checkout-status">
+        <span aria-hidden="true"></span>
+        <div>
+          <strong>Aguardando confirmação</strong>
+          <p>${escapeHtml(plan.name || 'Plano mensal')} ${plan.monthly_price ? `· ${formatPlanPrice(plan.monthly_price)}` : ''}</p>
+        </div>
+      </div>
+      <div class="plan-checkout-note">
+        <strong>Não feche esta tela se quiser acompanhar por aqui</strong>
+        <p>Você pode concluir o pagamento na outra aba e voltar para verificar se a assinatura já foi atualizada.</p>
+      </div>
+      <div class="row-actions plan-checkout-footer">
+        <button class="ghost-button compact" type="button" data-close-plan-checkout>Fechar</button>
+        <button class="ghost-button compact" type="button" data-reopen-checkout>Abrir checkout novamente</button>
+        <button class="primary-button compact" type="button" data-check-payment-status>Já paguei, verificar status</button>
+      </div>
+    </div>
+  `;
+  modal.hidden = false;
+  document.body.classList.add('plan-checkout-open');
+  modal.querySelectorAll('[data-close-plan-checkout]').forEach((button) => button.addEventListener('click', closePlanCheckoutModal));
+  modal.querySelector('[data-reopen-checkout]')?.addEventListener('click', () => openCheckoutWindow(checkoutUrl));
+  modal.querySelector('[data-check-payment-status]')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const oldText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Verificando...';
+    try {
+      await loadPlanData({ force: true });
+      const status = state.plan?.subscription?.status || '';
+      if (['active', 'trial'].includes(status) && !isTrialExpired(state.plan?.subscription)) {
+        toast('Plano atualizado com sucesso.');
+        closePlanCheckoutModal();
+      } else {
+        toast('Pagamento ainda em processamento. Aguarde a confirmação do provedor.');
+      }
+    } catch (error) {
+      toast(error.message || 'Não foi possível verificar o pagamento agora.');
+    } finally {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  });
+  modal.querySelector('[data-check-payment-status]')?.focus();
 }
 
 function planStatusClass(status) {

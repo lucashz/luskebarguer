@@ -158,8 +158,22 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/portal/signup') {
     const result = await createPortalSignup(req, await readJson(req));
-    json(res, 201, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
+    const headers = result.sessionId ? { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) } : {};
+    json(res, 201, result.body, headers);
     return;
+  }
+
+  const portalActivationMatch = url.pathname.match(/^\/api\/portal\/activate\/([a-f0-9]{32,128})$/i);
+  if (portalActivationMatch) {
+    if (method === 'GET') {
+      json(res, 200, { activation: await getPublicAdminActivation(portalActivationMatch[1]) });
+      return;
+    }
+    if (method === 'POST') {
+      const result = await activateAdminAccount(req, portalActivationMatch[1]);
+      json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
+      return;
+    }
   }
 
   if (method === 'GET' && url.pathname === '/api/bootstrap') {
@@ -1894,7 +1908,10 @@ async function loginAdmin(data) {
     throw httpError(404, 'Não existe uma conta administrativa com este e-mail.');
   }
   if (admin.is_active === false) {
-    throw httpError(403, 'Esta conta administrativa está desativada.');
+    const pendingActivation = await hasPendingAdminActivation(admin.id).catch(() => false);
+    throw httpError(403, pendingActivation
+      ? 'Sua conta ainda não foi ativada. Confira seu e-mail e clique no link de ativação.'
+      : 'Esta conta administrativa está desativada.');
   }
   if (!verifyPassword(password, admin.password_hash)) {
     throw httpError(401, 'Senha incorreta.');
@@ -1905,6 +1922,17 @@ async function loginAdmin(data) {
   }, ['Prefer: return=representation']);
 
   return createAdminSession(admin);
+}
+
+async function hasPendingAdminActivation(adminId) {
+  const [token] = await dbRequest('GET', 'admin_activation_tokens', {
+    select: 'id,expires_at',
+    admin_user_id: `eq.${cleanUuid(adminId, 'admin')}`,
+    status: 'eq.pending',
+    order: 'created_at.desc',
+    limit: '1'
+  });
+  return Boolean(token && new Date(token.expires_at).getTime() > Date.now());
 }
 
 async function requestAdminPasswordRecovery(req, data = {}) {
@@ -2024,7 +2052,15 @@ async function resetAdminPassword(req, token, data = {}) {
     severity: 'info',
     after_data: { email: maskEmailOrToken(admin.email) }
   });
-  return createAdminSession(admin);
+  const session = await createAdminSession(admin);
+  return {
+    sessionId: session.sessionId,
+    body: {
+      ...session.body,
+      message: 'Conta ativada com sucesso.',
+      redirect: '/painel'
+    }
+  };
 }
 
 async function findAdminPasswordResetByToken(token) {
@@ -2270,6 +2306,10 @@ function hashInviteToken(token) {
 
 function hashPasswordResetToken(token) {
   return pbkdf2Sync(String(token || ''), 'admin_password_reset', 120000, 32, 'sha256').toString('hex');
+}
+
+function hashAdminActivationToken(token) {
+  return pbkdf2Sync(String(token || ''), 'admin_account_activation', 120000, 32, 'sha256').toString('hex');
 }
 
 async function updateAdminUser(id, data, session) {
@@ -4226,7 +4266,7 @@ async function createPortalSignup(req, data = {}) {
       email: parsed.owner.email,
       password_hash: hashPassword(parsed.owner.password),
       role: 'owner',
-      is_active: true
+      is_active: false
     }, ['Prefer: return=representation']);
     created.admin = admin;
 
@@ -4236,7 +4276,7 @@ async function createPortalSignup(req, data = {}) {
       slug: parsed.store.slug,
       description: parsed.store.description,
       public_url: `/${parsed.store.slug}`,
-      is_active: true
+      is_active: false
     }, ['Prefer: return=representation']);
     created.store = store;
 
@@ -4271,20 +4311,163 @@ async function createPortalSignup(req, data = {}) {
     });
 
     clearAdminUsersCache();
-    const session = await createAdminSession(admin);
+    const activation = await createAdminActivationToken(admin.id);
+    if (shouldSendSignupActivationEmail()) {
+      await sendAdminActivationEmail(req, { admin, company, store, token: activation.token, expiresAt: activation.expiresAt }).catch(async (error) => {
+        await audit('portal.signup.activation_email_failed', {
+          req,
+          actor_admin_id: admin.id,
+          company_id: company.id,
+          store_id: store.id,
+          entity_type: 'admin_user',
+          entity_id: admin.id,
+          severity: 'warning',
+          after_data: { email: maskEmailOrToken(admin.email), message: error.message || 'Falha ao enviar ativação.' }
+        });
+        throw httpError(502, 'Não foi possível enviar o e-mail de ativação. Verifique a configuração SMTP.');
+      });
+    }
     return {
-      sessionId: session.sessionId,
       body: {
-        ...session.body,
+        ok: true,
+        needs_activation: true,
+        message: 'Conta criada. Enviamos um link de ativação para o e-mail informado.',
+        admin: {
+          id: admin.id,
+          company_id: company.id,
+          store_id: store.id,
+          name: admin.name,
+          email: admin.email,
+          role: admin.role,
+          is_active: false
+        },
         company: { id: company.id, name: company.name, status: company.status },
         store: publicStoreRef(store),
-        redirect: '/painel'
+        redirect: '/entrar'
       }
     };
   } catch (error) {
     await rollbackPortalSignup(created).catch(() => {});
     throw error;
   }
+}
+
+async function createAdminActivationToken(adminId) {
+  const token = randomBytes(24).toString('hex');
+  const tokenHash = hashAdminActivationToken(token);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  await dbRequest('PATCH', 'admin_activation_tokens', {
+    admin_user_id: `eq.${cleanUuid(adminId, 'admin')}`,
+    status: 'eq.pending'
+  }, {
+    status: 'cancelled'
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('POST', 'admin_activation_tokens', {}, {
+    admin_user_id: cleanUuid(adminId, 'admin'),
+    token_hash: tokenHash,
+    status: 'pending',
+    expires_at: expiresAt
+  }, ['Prefer: return=minimal']);
+  return { token, expiresAt };
+}
+
+function shouldSendSignupActivationEmail() {
+  return process.env.NODE_ENV !== 'test' && process.env.SKIP_SIGNUP_ACTIVATION_EMAIL !== 'true';
+}
+
+async function sendAdminActivationEmail(req, { admin, company, store, token, expiresAt }) {
+  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === 'account_activation');
+  if (!template?.is_active) throw new Error('Template de ativação desativado.');
+  const activationUrl = absoluteAppUrl(req, `/ativar-conta?token=${token}`);
+  const variables = {
+    customer_name: admin.name || admin.email,
+    company_name: company.name || '',
+    store_name: store.name || '',
+    due_date: formatDateTimePt(expiresAt),
+    dashboard_url: activationUrl,
+    activation_url: activationUrl,
+    support_url: absolutePublicUrl('/entrar'),
+    payment_url: absolutePublicUrl('/planos'),
+    platform_url: absolutePublicUrl('/central')
+  };
+  await sendPlatformEmail({
+    to: admin.email,
+    templateKey: 'account_activation',
+    subject: renderEmailTemplate(template.subject, variables),
+    body: renderEmailTemplate(template.body, variables)
+  });
+}
+
+async function getPublicAdminActivation(token) {
+  const activation = await findAdminActivationByToken(token);
+  const [admin] = await dbRequest('GET', 'admin_users', {
+    select: 'email,name,is_active',
+    id: `eq.${activation.admin_user_id}`,
+    limit: '1'
+  });
+  if (!admin) throw httpError(404, 'Link de ativação inválido.');
+  return {
+    email: admin.email,
+    name: admin.name || '',
+    is_active: admin.is_active === true,
+    expires_at: activation.expires_at
+  };
+}
+
+async function activateAdminAccount(req, token) {
+  const activation = await findAdminActivationByToken(token);
+  const [admin] = await dbRequest('PATCH', 'admin_users', { id: `eq.${activation.admin_user_id}` }, {
+    is_active: true,
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  if (!admin) throw httpError(404, 'Conta administrativa não encontrada.');
+  await dbRequest('PATCH', 'admin_activation_tokens', { id: `eq.${activation.id}` }, {
+    status: 'used',
+    used_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']);
+  await dbRequest('PATCH', 'admin_activation_tokens', {
+    admin_user_id: `eq.${admin.id}`,
+    status: 'eq.pending'
+  }, {
+    status: 'cancelled'
+  }, ['Prefer: return=minimal']).catch(() => {});
+  if (admin.company_id) {
+    await dbRequest('PATCH', 'stores', { company_id: `eq.${admin.company_id}` }, {
+      is_active: true,
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  clearAdminUsersCache();
+  await audit('portal.signup.activate', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id || null,
+    entity_type: 'admin_user',
+    entity_id: admin.id,
+    severity: 'info',
+    after_data: { email: maskEmailOrToken(admin.email) }
+  });
+  return createAdminSession(admin);
+}
+
+async function findAdminActivationByToken(token) {
+  const value = String(token || '').trim();
+  if (!/^[a-f0-9]{32,128}$/i.test(value)) throw httpError(404, 'Link de ativação inválido.');
+  const tokenHash = hashAdminActivationToken(value);
+  const [activation] = await dbRequest('GET', 'admin_activation_tokens', {
+    select: '*',
+    token_hash: `eq.${tokenHash}`,
+    status: 'eq.pending',
+    limit: '1'
+  });
+  if (!activation) throw httpError(404, 'Link de ativação inválido ou já utilizado.');
+  if (new Date(activation.expires_at).getTime() < Date.now()) {
+    await dbRequest('PATCH', 'admin_activation_tokens', { id: `eq.${activation.id}` }, {
+      status: 'expired'
+    }, ['Prefer: return=minimal']).catch(() => {});
+    throw httpError(410, 'Este link de ativação expirou.');
+  }
+  return activation;
 }
 
 function sanitizePortalSignup(data = {}) {
@@ -7542,6 +7725,7 @@ function smtpSend(settings, message, to) {
 }
 
 const EMAIL_TEMPLATE_DEFINITIONS = [
+  { key: 'account_activation', name: 'Ativação de conta', subject: 'Ative sua conta no TáPronto', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada no TáPronto.\n\nPara liberar o acesso ao painel, ative sua conta pelo link abaixo:\n{{activation_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não criou essa conta, ignore este e-mail.' },
   { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada com sucesso.\n\nAcesse o painel para concluir a configuração, cadastrar produtos e publicar seu cardápio:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
   { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao painel da sua loja.\n\nClique no link abaixo para criar uma nova senha:\n{{reset_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não solicitou isso, ignore este e-mail.' },
   { key: 'onboarding_incomplete', name: 'Onboarding incompleto', subject: 'Finalize a configuração da sua loja', body: 'Olá {{company_name}},\n\nSua loja {{store_name}} ainda não está totalmente configurada.\n\nFinalize o onboarding para ajustar horários, pagamentos, entrega e cardápio inicial:\n{{dashboard_url}}\n\nIsso ajuda sua loja a ficar pronta para receber pedidos sem retrabalho.' },
@@ -7587,6 +7771,7 @@ const EMAIL_TEMPLATE_VARIABLES = [
   'support_url',
   'cardapio_url',
   'platform_url',
+  'activation_url',
   'order_id',
   'order_total',
   'ticket_subject',
@@ -13037,6 +13222,7 @@ function routePath(requestPath, hostHeader = '') {
   if (requestPath === '/privacidade') return '/privacy.html';
   if (requestPath === '/entrar') return '/login.html';
   if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
+  if (requestPath === '/ativar-conta') return '/activate-account.html';
   if (requestPath === '/redefinir-senha') return '/reset-password.html';
   if (requestPath === '/onboarding') return '/admin.html';
   if (requestPath === '/convite') return '/invite.html';

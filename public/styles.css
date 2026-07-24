@@ -6084,6 +6084,42 @@ textarea {
   padding-inline: 18px;
 }
 
+.plan-checkout-waiting {
+  border-color: #bfdbfe;
+}
+
+.plan-checkout-status {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #dbeafe;
+  border-left: 4px solid #2563eb;
+  border-radius: 14px;
+  background: #eff6ff;
+  padding: 14px;
+}
+
+.plan-checkout-status > span {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 6px rgba(37, 99, 235, .12);
+}
+
+.plan-checkout-status strong {
+  display: block;
+  color: #071426;
+  font-size: .98rem;
+}
+
+.plan-checkout-status p {
+  margin: 2px 0 0;
+  color: #475569;
+  font-size: .88rem;
+}
+
 .usage-grid,
 .metric-grid.compact {
   display: grid;
