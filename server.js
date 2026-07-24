@@ -10405,6 +10405,7 @@ async function createOrder(req, data, options = {}) {
   const discount = coupon ? couponDiscountAmount(coupon, subtotal, deliveryFee) : 0;
   const total = roundMoney(Math.max(0, subtotal + deliveryFee - discount));
   validatePaymentDetails(paymentDetails, paymentMethod, total);
+  validateOnlinePaymentAmount(paymentMethod, integrationSettings, total);
 
   if (fulfillmentMethod === 'delivery') {
     await upsertAddress(customerRow.id, address, storeId, options);
@@ -13663,6 +13664,14 @@ function isOnlineCardPayment(paymentMethod) {
 
 function isOnlinePaymentMethod(paymentMethod) {
   return isOnlinePixPayment(paymentMethod) || isOnlineCardPayment(paymentMethod);
+}
+
+function validateOnlinePaymentAmount(paymentMethod, integrations, total) {
+  if (!isOnlinePaymentMethod(paymentMethod)) return;
+  const provider = onlinePaymentProviderFor(paymentMethod, integrations);
+  if (provider === 'abacatepay' && moneyCents(total) < 100) {
+    throw httpError(422, 'Pagamento online via Abacate Pay exige valor mínimo de R$ 1,00.');
+  }
 }
 
 function onlinePaymentProviderFor(paymentMethod, integrations) {
