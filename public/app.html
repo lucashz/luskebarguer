@@ -225,6 +225,42 @@
       </form>
     </dialog>
 
+    <dialog class="dialog payment-checkout-dialog" id="paymentCheckoutDialog">
+      <form method="dialog" class="dialog-header">
+        <div>
+          <p class="eyebrow">Pagamento seguro</p>
+          <h2>Aguardando pagamento</h2>
+        </div>
+        <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+      </form>
+      <section class="payment-checkout-body">
+        <div class="payment-checkout-status" id="paymentCheckoutStatus">
+          <strong>Seu pedido foi reservado.</strong>
+          <p>Finalize o pagamento para enviar o pedido para a loja.</p>
+        </div>
+        <dl class="payment-checkout-summary">
+          <div>
+            <dt>Pedido</dt>
+            <dd id="paymentCheckoutCode">-</dd>
+          </div>
+          <div>
+            <dt>Total</dt>
+            <dd id="paymentCheckoutTotal">R$ 0,00</dd>
+          </div>
+          <div>
+            <dt>Expira em</dt>
+            <dd id="paymentCheckoutExpires">-</dd>
+          </div>
+        </dl>
+        <p class="payment-checkout-hint">A janela segura da Abacate Pay será aberta. Mantenha esta página aberta até a confirmação.</p>
+        <div class="payment-checkout-actions">
+          <button class="primary-button" id="paymentOpenButton" type="button">Abrir pagamento</button>
+          <button class="ghost-button" id="paymentCheckButton" type="button">Já paguei, verificar</button>
+          <button class="text-button" id="paymentCancelButton" type="button">Cancelar</button>
+        </div>
+      </section>
+    </dialog>
+
     <dialog class="dialog demo-order-dialog" id="demoOrderDialog">
       <form method="dialog" class="dialog-header">
         <div>
@@ -281,7 +317,7 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=20260630-multitenant-fix" type="module"></script>
+    <script src="/app.js?v=20260724-payment-popup" type="module"></script>
   </body>
 </html>
 

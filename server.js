@@ -208,7 +208,7 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  if (method === 'POST' && url.pathname === '/api/orders') {
+  if (method === 'POST' && (url.pathname === '/api/orders' || url.pathname === '/api/orders/checkout')) {
     const context = await resolveTenant(req, url);
     json(res, 201, await createOrder(req, await readJson(req), { storeId: context.store.id, db: context.db, tenant: context.tenant }));
     return;
@@ -10975,7 +10975,8 @@ async function listOrders(storeId, options = {}) {
   });
 
   const withItems = await attachOrderItems(orders, options);
-  const data = await attachOrderIntegrationLogs(withItems, options);
+  const data = (await attachOrderIntegrationLogs(withItems, options))
+    .filter((order) => !isOnlineOrderAwaitingRelease(order));
   adminOrdersCache.set(cacheKey, {
     data,
     expiresAt: Date.now() + ADMIN_ORDERS_CACHE_MS
@@ -11658,7 +11659,10 @@ async function publicPaymentStatus(code, options = {}) {
     }, ['Prefer: return=representation']);
     return { order: publicPaymentOrder(updated || order), payment: publicPaymentPayload(updated || order) };
   }
-  return { order: publicPaymentOrder(order), payment: publicPaymentPayload(order) };
+  const store = order.financial_status === 'paid'
+    ? await getStoreSettings(order.store_id, options).catch(() => null)
+    : null;
+  return { order: publicPaymentOrder(order), payment: publicPaymentPayload(order, { store }) };
 }
 
 async function regeneratePixPayment(data, options = {}) {
@@ -11712,10 +11716,14 @@ async function receivePaymentWebhook(data, options = {}) {
     payment_provider: provider,
     payment_transaction_id: transactionId || order.payment_transaction_id,
     paid_amount: status === 'paid' ? amount : order.paid_amount,
-    paid_at: status === 'paid' ? new Date().toISOString() : order.paid_at
+    paid_at: status === 'paid' ? new Date().toISOString() : order.paid_at,
+    ...(status === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new' } : {})
   };
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
   await updatePaymentTransactionIndexStatus(webhookContext.index, status, amount);
+  if (status === 'paid' && updated?.id) {
+    await sendOrderStatusWhatsapp(updated.id, 'new', { manual: false, db, tenant: webhookContext.tenant }).catch(() => null);
+  }
   clearAdminOrdersCache(order.store_id);
   return { ok: true, order: publicPaymentOrder(updated) };
 }
@@ -12017,7 +12025,7 @@ function publicPaymentOrder(order) {
   };
 }
 
-function publicPaymentPayload(order) {
+function publicPaymentPayload(order, options = {}) {
   const details = order.payment_details || {};
   return {
     status: order.financial_status || 'pending',
@@ -12026,8 +12034,21 @@ function publicPaymentPayload(order) {
     expires_at: order.payment_expires_at || null,
     pix_code: details.pix_code || '',
     pix_qr_url: details.pix_qr_url || '',
-    checkout_url: details.checkout_url || ''
+    checkout_url: details.checkout_url || '',
+    whatsapp_url: order.financial_status === 'paid' ? publicOrderStoreWhatsappUrl(order, options) : ''
   };
+}
+
+function publicOrderStoreWhatsappUrl(order, options = {}) {
+  if (!order || !isOnlinePaymentMethod(order.payment_method)) return '';
+  const message = cleanText(order.whatsapp_message || '');
+  if (!message) return '';
+  return whatsappStoreUrlForOrder(order, message, options.store) || '';
+}
+
+function whatsappStoreUrlForOrder(order, message, store = null) {
+  const storePhone = whatsappRecipientPhone(store?.whatsapp_number || STORE_WHATSAPP_NUMBER);
+  return storePhone ? `https://wa.me/${storePhone}?text=${encodeURIComponent(message)}` : '';
 }
 
 function buildMockPixCode(store, order, transactionId) {
@@ -13664,6 +13685,11 @@ function isOnlineCardPayment(paymentMethod) {
 
 function isOnlinePaymentMethod(paymentMethod) {
   return isOnlinePixPayment(paymentMethod) || isOnlineCardPayment(paymentMethod);
+}
+
+function isOnlineOrderAwaitingRelease(order) {
+  if (!order || !isOnlinePaymentMethod(order.payment_method)) return false;
+  return !['paid', 'refunded'].includes(String(order.financial_status || 'pending'));
 }
 
 function validateOnlinePaymentAmount(paymentMethod, integrations, total) {

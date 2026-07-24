@@ -12,6 +12,9 @@
   editingCartKey: null,
   closedStoreNoticeKey: null,
   orderSubmitting: false,
+  paymentCheckout: null,
+  paymentPollTimer: null,
+  paymentPopup: null,
   favorites: loadFavorites(),
   coupon: null,
   diningTable: null,
@@ -113,7 +116,15 @@ const els = {
   closedStoreText: document.querySelector('#closedStoreText'),
   closedStoreRefreshButton: document.querySelector('#closedStoreRefreshButton'),
   demoOrderDialog: document.querySelector('#demoOrderDialog'),
-  demoOrderCode: document.querySelector('#demoOrderCode')
+  demoOrderCode: document.querySelector('#demoOrderCode'),
+  paymentCheckoutDialog: document.querySelector('#paymentCheckoutDialog'),
+  paymentCheckoutStatus: document.querySelector('#paymentCheckoutStatus'),
+  paymentCheckoutCode: document.querySelector('#paymentCheckoutCode'),
+  paymentCheckoutTotal: document.querySelector('#paymentCheckoutTotal'),
+  paymentCheckoutExpires: document.querySelector('#paymentCheckoutExpires'),
+  paymentOpenButton: document.querySelector('#paymentOpenButton'),
+  paymentCheckButton: document.querySelector('#paymentCheckButton'),
+  paymentCancelButton: document.querySelector('#paymentCancelButton')
 };
 
 document.querySelector('#demoNotice')?.toggleAttribute('hidden', !state.isDemoMode);
@@ -165,6 +176,12 @@ els.checkoutForm?.elements?.phone?.addEventListener('input', (event) => {
 
 els.checkoutForm?.addEventListener('submit', submitOrder);
 els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog?.close());
+els.paymentOpenButton?.addEventListener('click', () => openPaymentPopup());
+els.paymentCheckButton?.addEventListener('click', () => checkPaymentStatus({ manual: true }));
+els.paymentCancelButton?.addEventListener('click', closePaymentCheckoutDialog);
+els.paymentCheckoutDialog?.addEventListener('close', () => {
+  if (state.paymentCheckout?.status !== 'paid') stopPaymentPolling();
+});
 els.productForm?.addEventListener('change', renderProductDialogTotal);
 els.productForm?.addEventListener('input', renderProductDialogTotal);
 els.productForm?.addEventListener('submit', submitProductCustomization);
@@ -1322,41 +1339,200 @@ async function submitOrder(event) {
     return;
   }
 
+  const isOnlineCheckout = isOnlineCheckoutPayment(payload.payment_method);
+  const popup = isOnlineCheckout ? openPaymentPopup({ blank: true }) : null;
+
   try {
     setOrderSubmitting(true);
-    const result = await request('/api/orders', {
+    const result = await request(isOnlineCheckout ? '/api/orders/checkout' : '/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    state.cart = [];
-    state.coupon = null;
-    clearCouponFeedback();
-    persistCart();
-    renderCart();
-    els.checkoutDialog.close();
-    setStatus(`Pedido ${result.order.public_code} criado.`);
-
     const checkoutUrl = result.payment?.pix?.checkout_url || result.payment?.card?.checkout_url || result.payment?.checkout_url || '';
     if (checkoutUrl) {
-      window.location.href = checkoutUrl;
+      openPaymentCheckoutDialog(result, checkoutUrl, popup);
       return;
     }
 
     if (result.payment?.pix || result.payment?.card) {
-      window.location.href = storePageUrl('pagamento', `pedido=${encodeURIComponent(result.order.public_code)}`);
+      openPaymentCheckoutDialog(result, storePageUrl('pagamento', `pedido=${encodeURIComponent(result.order.public_code)}`), popup);
       return;
     }
 
+    popup?.close?.();
+    finishCreatedOrder(result);
     if (result.whatsapp_url) {
       window.open(result.whatsapp_url, '_blank', 'noopener');
     }
   } catch (error) {
+    popup?.close?.();
     setStatus(error.message || 'Não foi possível enviar o pedido agora.');
   } finally {
     setOrderSubmitting(false);
   }
+}
+
+function finishCreatedOrder(result = {}) {
+  state.cart = [];
+  state.coupon = null;
+  clearCouponFeedback();
+  persistCart();
+  renderCart();
+  els.checkoutDialog?.close();
+  setStatus(`Pedido ${result.order?.public_code || ''} criado.`.trim());
+}
+
+function openPaymentCheckoutDialog(result, checkoutUrl, popup = null) {
+  const order = result.order || {};
+  const payment = result.payment?.pix || result.payment?.card || result.payment || {};
+  state.paymentCheckout = {
+    code: order.public_code,
+    total: Number(order.total || 0),
+    checkoutUrl,
+    expiresAt: payment.expires_at || order.payment_expires_at || '',
+    status: payment.status || order.financial_status || 'pending',
+    popup
+  };
+  state.paymentPopup = popup || state.paymentPopup;
+  renderPaymentCheckoutDialog('pending');
+  els.checkoutDialog?.close();
+  if (typeof els.paymentCheckoutDialog?.showModal === 'function' && !els.paymentCheckoutDialog.open) {
+    els.paymentCheckoutDialog.showModal();
+  }
+  openPaymentPopup();
+  startPaymentPolling();
+}
+
+function renderPaymentCheckoutDialog(status = state.paymentCheckout?.status || 'pending') {
+  const checkout = state.paymentCheckout;
+  if (!checkout) return;
+  if (els.paymentCheckoutCode) els.paymentCheckoutCode.textContent = checkout.code ? `#${checkout.code}` : '-';
+  if (els.paymentCheckoutTotal) els.paymentCheckoutTotal.textContent = money(checkout.total);
+  if (els.paymentCheckoutExpires) {
+    els.paymentCheckoutExpires.textContent = checkout.expiresAt
+      ? new Date(checkout.expiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : '-';
+  }
+  const copy = paymentCheckoutCopy(status);
+  if (els.paymentCheckoutStatus) {
+    els.paymentCheckoutStatus.className = `payment-checkout-status status-${status}`;
+    els.paymentCheckoutStatus.innerHTML = `<strong>${escapeHtml(copy.title)}</strong><p>${escapeHtml(copy.text)}</p>`;
+  }
+  if (els.paymentOpenButton) els.paymentOpenButton.disabled = status === 'paid' || !checkout.checkoutUrl;
+  if (els.paymentCheckButton) els.paymentCheckButton.disabled = status === 'paid';
+}
+
+function paymentCheckoutCopy(status) {
+  if (status === 'paid') {
+    return {
+      title: 'Pagamento confirmado.',
+      text: 'Seu pedido foi enviado para a loja. Você já pode acompanhar o preparo.'
+    };
+  }
+  if (status === 'expired') {
+    return {
+      title: 'Pagamento expirado.',
+      text: 'Gere um novo pedido para abrir outro checkout seguro.'
+    };
+  }
+  if (status === 'failed' || status === 'cancelled') {
+    return {
+      title: 'Pagamento não concluído.',
+      text: 'O pedido ainda não foi enviado para a loja. Tente novamente ou escolha outra forma de pagamento.'
+    };
+  }
+  return {
+    title: 'Seu pedido foi reservado.',
+    text: 'Finalize o pagamento para enviar o pedido para a loja.'
+  };
+}
+
+function openPaymentPopup(options = {}) {
+  const checkout = state.paymentCheckout || {};
+  const width = 480;
+  const height = 720;
+  const left = Math.max(0, Math.round((window.screen.width - width) / 2));
+  const top = Math.max(0, Math.round((window.screen.height - height) / 2));
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
+  if (options.blank) {
+    state.paymentPopup = window.open('about:blank', 'abacatepay_checkout', features);
+    if (state.paymentPopup) {
+      try {
+        state.paymentPopup.document.write('<p style="font-family:Arial,sans-serif;padding:24px">Preparando pagamento seguro...</p>');
+      } catch (_) {
+        // Alguns navegadores restringem acesso mesmo em popup criado pelo clique.
+      }
+    }
+    return state.paymentPopup;
+  }
+  if (!checkout.checkoutUrl) return null;
+  try {
+    if (state.paymentPopup && !state.paymentPopup.closed) {
+      state.paymentPopup.location.href = checkout.checkoutUrl;
+      state.paymentPopup.focus();
+      return state.paymentPopup;
+    }
+  } catch (_) {
+    // Se o navegador bloquear acesso ao popup, abre uma nova janela segura.
+  }
+  state.paymentPopup = window.open(checkout.checkoutUrl, 'abacatepay_checkout', features);
+  if (!state.paymentPopup) {
+    setStatus('O navegador bloqueou o popup de pagamento. Clique em "Abrir pagamento".');
+  }
+  return state.paymentPopup;
+}
+
+function startPaymentPolling() {
+  stopPaymentPolling();
+  state.paymentPollTimer = window.setInterval(() => checkPaymentStatus(), 4000);
+  window.setTimeout(() => checkPaymentStatus(), 1200);
+}
+
+function stopPaymentPolling() {
+  if (state.paymentPollTimer) {
+    window.clearInterval(state.paymentPollTimer);
+    state.paymentPollTimer = null;
+  }
+}
+
+async function checkPaymentStatus(options = {}) {
+  const checkout = state.paymentCheckout;
+  if (!checkout?.code) return;
+  if (options.manual) setStatus('Verificando pagamento...');
+  try {
+    const data = await request(`/api/payments/order?code=${encodeURIComponent(checkout.code)}`);
+    const status = data.payment?.status || data.order?.financial_status || 'pending';
+    checkout.status = status;
+    checkout.expiresAt = data.payment?.expires_at || data.order?.payment_expires_at || checkout.expiresAt;
+    renderPaymentCheckoutDialog(status);
+    if (status === 'paid') {
+      stopPaymentPolling();
+      try {
+        state.paymentPopup?.close?.();
+      } catch (_) {
+        // O checkout externo pode impedir o fechamento programático em alguns navegadores.
+      }
+      finishCreatedOrder({ order: data.order });
+      setStatus(`Pagamento confirmado. Pedido #${data.order.public_code} enviado para a loja.`);
+      const whatsappUrl = data.payment?.whatsapp_url || '';
+      if (whatsappUrl) window.open(whatsappUrl, '_blank', 'noopener');
+      window.setTimeout(() => closePaymentCheckoutDialog(), 1400);
+    } else if (['expired', 'failed', 'cancelled'].includes(status)) {
+      stopPaymentPolling();
+      setStatus(paymentCheckoutCopy(status).text);
+    } else if (options.manual) {
+      setStatus('Pagamento ainda não confirmado. Aguarde alguns segundos e verifique novamente.');
+    }
+  } catch (error) {
+    if (options.manual) setStatus(error.message || 'Não foi possível verificar o pagamento agora.');
+  }
+}
+
+function closePaymentCheckoutDialog() {
+  stopPaymentPolling();
+  if (els.paymentCheckoutDialog?.open) els.paymentCheckoutDialog.close();
 }
 
 async function applyCoupon() {
@@ -2029,6 +2205,11 @@ function isGenericOnlinePayment(value) {
 function isPixOnlinePayment(value) {
   const normalized = normalizeText(value);
   return isGenericOnlinePayment(value) || (normalized.includes('pix') && normalized.includes('online'));
+}
+
+function isOnlineCheckoutPayment(value) {
+  const normalized = normalizeText(value);
+  return isPixOnlinePayment(value) || (normalized.includes('cartao') && normalized.includes('online'));
 }
 
 function checkoutPaymentMethod(value) {
