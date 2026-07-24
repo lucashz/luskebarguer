@@ -182,6 +182,7 @@ els.paymentCancelButton?.addEventListener('click', closePaymentCheckoutDialog);
 els.paymentCheckoutDialog?.addEventListener('close', () => {
   if (state.paymentCheckout?.status !== 'paid') stopPaymentPolling();
 });
+window.addEventListener('message', handlePaymentWindowMessage);
 els.productForm?.addEventListener('change', renderProductDialogTotal);
 els.productForm?.addEventListener('input', renderProductDialogTotal);
 els.productForm?.addEventListener('submit', submitProductCustomization);
@@ -1528,6 +1529,21 @@ async function checkPaymentStatus(options = {}) {
   } catch (error) {
     if (options.manual) setStatus(error.message || 'Não foi possível verificar o pagamento agora.');
   }
+}
+
+function handlePaymentWindowMessage(event) {
+  if (event.origin !== window.location.origin) return;
+  const data = event.data || {};
+  if (data.type !== 'tapronto:payment-status' || data.status !== 'paid') return;
+  const checkout = state.paymentCheckout;
+  const code = data.code || data.order?.public_code || '';
+  if (checkout?.code && code && checkout.code !== code) return;
+  stopPaymentPolling();
+  if (checkout) checkout.status = 'paid';
+  renderPaymentCheckoutDialog('paid');
+  finishCreatedOrder({ order: data.order || { public_code: code } });
+  setStatus(`Pagamento confirmado. Pedido #${code} enviado para a loja.`);
+  window.setTimeout(() => closePaymentCheckoutDialog(), 1200);
 }
 
 function closePaymentCheckoutDialog() {

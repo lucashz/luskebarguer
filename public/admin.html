@@ -1073,20 +1073,28 @@
                   <h2>Chamados de suporte</h2>
                   <p class="muted">Abra chamados para a equipe da plataforma e acompanhe respostas.</p>
                 </div>
-                <button class="ghost-button compact" id="refreshSupportTicketsButton" type="button">Atualizar chamados</button>
+                <div class="row-actions">
+                  <button class="primary-button compact" id="openSupportTicketFormButton" type="button">Abrir chamado</button>
+                  <button class="ghost-button compact" id="refreshSupportTicketsButton" type="button">Atualizar chamados</button>
+                </div>
               </div>
-              <form id="adminSupportTicketForm" class="stack-form">
-                <div class="two-cols">
-                  <label>Nome para contato<input name="contact_name" required placeholder="Ex: Lucas Daniel"></label>
-                  <label>Assunto<input name="subject" required placeholder="Ex: Preciso de ajuda com domínio"></label>
-                </div>
-                <div class="two-cols">
-                  <label>Categoria<input name="category" placeholder="configuração, cobrança, dúvida"></label>
-                  <label>Prioridade<select name="priority"><option value="low">Baixa</option><option value="medium" selected>Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label>
-                </div>
-                <label>Mensagem<textarea name="message" required rows="4" placeholder="Descreva o que está acontecendo"></textarea></label>
-                <button class="primary-button compact">Abrir chamado</button>
-              </form>
+              <div class="support-create-box" id="supportCreateBox" hidden>
+                <form id="adminSupportTicketForm" class="stack-form support-create-form">
+                  <div class="two-cols">
+                    <label>Nome para contato<input name="contact_name" required placeholder="Ex: Lucas Daniel"></label>
+                    <label>Assunto<input name="subject" required placeholder="Ex: Preciso de ajuda com domínio"></label>
+                  </div>
+                  <div class="two-cols">
+                    <label>Categoria<input name="category" placeholder="configuração, cobrança, dúvida"></label>
+                    <label>Prioridade<select name="priority"><option value="low">Baixa</option><option value="medium" selected>Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></label>
+                  </div>
+                  <label>Mensagem<textarea name="message" required rows="4" placeholder="Descreva o que está acontecendo"></textarea></label>
+                  <div class="support-create-actions">
+                    <button class="ghost-button compact" id="cancelSupportTicketFormButton" type="button">Cancelar</button>
+                    <button class="primary-button compact">Enviar chamado</button>
+                  </div>
+                </form>
+              </div>
             </section>
             <section class="panel">
               <div class="section-actions">

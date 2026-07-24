@@ -3566,7 +3566,7 @@ textarea {
 
 .ifood-layout {
   max-width: 1180px;
-  margin: 18px auto 64px;
+  margin: 18px auto 18px;
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr) 330px;
   gap: 18px;
@@ -3574,19 +3574,20 @@ textarea {
 }
 
 .menu-powered-footer {
-  width: min(1180px, calc(100% - 32px));
-  margin: -34px auto 42px;
+  width: 100%;
+  margin: 0 auto 8px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 14px 18px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--color-button);
-  border-radius: 8px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0;
   background: var(--surface);
-  padding: 14px 16px;
-  box-shadow: 0 12px 26px rgba(24, 24, 27, 0.06);
+  padding: 12px max(16px, calc((100vw - 1180px) / 2 + 16px));
+  box-shadow: none;
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.35;
@@ -3643,7 +3644,10 @@ textarea {
   padding: 0;
   background: transparent;
   color: var(--color-button);
-  font-weight: 800;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -9884,19 +9888,24 @@ body.admin-tour-active {
 }
 
 .payment-shell {
-  width: min(720px, calc(100vw - 24px));
+  width: min(560px, calc(100vw - 24px));
   margin: 0 auto;
-  padding: 28px 0;
+  padding: 22px 0;
 }
 
 .payment-card {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 20px 60px rgba(15, 23, 42, 0.10);
-  padding: 18px;
+  padding: 20px;
+}
+
+.payment-card h1 {
+  font-size: clamp(1.55rem, 4vw, 2.1rem);
+  line-height: 1.08;
 }
 
 .payment-status-box {
@@ -9910,8 +9919,20 @@ body.admin-tour-active {
   gap: 4px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  background: #f8fafc;
+  background: #ffffff;
   padding: 10px;
+}
+
+.payment-status-box .payment-status-paid {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.payment-status-box .payment-status-expired,
+.payment-status-box .payment-status-failed,
+.payment-status-box .payment-status-cancelled {
+  border-color: #fed7aa;
+  background: #fff7ed;
 }
 
 .payment-status-box span {
@@ -9920,11 +9941,53 @@ body.admin-tour-active {
   font-weight: 850;
 }
 
+.payment-provider-box {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #fee2e2;
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: #fffafa;
+  padding: 14px;
+}
+
+.payment-provider-box[hidden] {
+  display: none;
+}
+
+.payment-provider-box strong {
+  font-size: 1.02rem;
+}
+
+.payment-provider-box p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.payment-pix-fallback {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.payment-pix-fallback[hidden] {
+  display: none;
+}
+
+.payment-pix-fallback summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 850;
+}
+
 .payment-qr {
   width: min(320px, 100%);
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   justify-self: center;
+  margin-top: 12px;
 }
 
 .payment-copy-field {
@@ -9932,11 +9995,16 @@ body.admin-tour-active {
   gap: 6px;
   color: var(--muted);
   font-weight: 850;
+  margin-top: 12px;
 }
 
 .payment-copy-field textarea {
   min-height: 110px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.payment-actions {
+  align-items: center;
 }
 
 .orders-empty {
@@ -12425,12 +12493,11 @@ body.admin-tour-active {
 
   .menu-powered-footer {
     width: 100%;
-    margin: -36px auto 92px;
+    margin: 0 auto 74px;
     align-items: stretch;
     border-right: 0;
-    border-left-width: 4px;
     border-radius: 0;
-    padding: 14px 16px;
+    padding: 12px 16px;
   }
 
   .menu-powered-brand {
@@ -12556,6 +12623,10 @@ body.admin-tour-active {
   }
 
   .payment-checkout-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-status-box {
     grid-template-columns: 1fr;
   }
 
@@ -14886,6 +14957,29 @@ body.admin-tour-active {
   min-height: 44px;
 }
 
+.support-create-box {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.support-create-box[hidden] {
+  display: none;
+}
+
+.support-create-form {
+  padding: 16px;
+}
+
+.support-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 640px) {
   .support-filter-tabs {
     flex-wrap: nowrap;
@@ -14896,6 +14990,15 @@ body.admin-tour-active {
 
   .support-filter-tabs button {
     flex: 0 0 auto;
+  }
+
+  .support-create-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .support-create-actions > * {
+    width: 100%;
+    text-align: center;
   }
 }
 

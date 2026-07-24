@@ -7,23 +7,29 @@ const els = {
   status: document.querySelector('#paymentStatusBox'),
   qr: document.querySelector('#paymentQr'),
   pixCode: document.querySelector('#paymentPixCode'),
+  pixFallback: document.querySelector('#paymentPixFallback'),
+  providerBox: document.querySelector('#paymentProviderBox'),
   checkoutLink: document.querySelector('#paymentCheckoutLink'),
   copy: document.querySelector('#copyPixButton'),
   refresh: document.querySelector('#refreshPaymentButton'),
   newPix: document.querySelector('#newPixButton')
 };
 
-els.copy.addEventListener('click', async () => {
-  await navigator.clipboard?.writeText(els.pixCode.value || '');
-  setStatus('Codigo Pix copiado.');
-});
-els.refresh.addEventListener('click', () => loadPayment());
-els.newPix.addEventListener('click', () => regeneratePix());
+let pollTimer = null;
+let lastPayment = null;
 
+els.copy?.addEventListener('click', async () => {
+  await navigator.clipboard?.writeText(els.pixCode.value || '');
+  setStatus('Código Pix copiado.');
+});
+els.refresh?.addEventListener('click', () => loadPayment({ manual: true }));
+els.newPix?.addEventListener('click', () => regeneratePix());
+
+document.body.classList.toggle('payment-popup-mode', Boolean(window.opener));
 loadPayment();
 loadStoreIdentity().catch(() => {});
 
-async function loadPayment() {
+async function loadPayment(options = {}) {
   if (!code) {
     setStatus('Pedido não informado.');
     return;
@@ -31,6 +37,11 @@ async function loadPayment() {
   try {
     const data = await request(`/api/payments/order?code=${encodeURIComponent(code)}`);
     renderPayment(data);
+    startPollingIfNeeded(data);
+    notifyOpenerIfPaid(data);
+    if (options.manual && data.order?.financial_status !== 'paid') {
+      setStatus('Pagamento ainda não confirmado. Aguarde alguns segundos e tente novamente.');
+    }
   } catch (error) {
     setStatus(error.message || 'Não foi possível carregar o pagamento.');
   }
@@ -52,7 +63,7 @@ async function regeneratePix() {
       body: JSON.stringify({ code })
     });
     renderPayment(data);
-    setStatus('Novo Pix gerado.');
+    setStatus('Novo pagamento gerado. Abra o checkout seguro para continuar.');
   } catch (error) {
     setStatus(error.message || 'Não foi possível gerar um novo Pix.');
   }
@@ -61,28 +72,85 @@ async function regeneratePix() {
 function renderPayment(data) {
   const order = data.order || {};
   const payment = data.payment || {};
+  lastPayment = { order, payment };
   const qrUrl = safeImageUrl(payment.pix_qr_url);
   const checkoutUrl = safeHttpUrl(payment.checkout_url);
   const hasPix = Boolean(payment.pix_code || qrUrl);
   const hasCheckout = Boolean(checkoutUrl);
+  const status = order.financial_status || payment.status || 'pending';
 
-  els.title.textContent = `Pedido #${order.public_code || code}`;
-  els.subtitle.textContent = `${money(order.total || 0)} - ${financialStatusLabel(order.financial_status)}`;
+  els.title.textContent = status === 'paid'
+    ? `Pedido #${order.public_code || code} confirmado`
+    : `Pedido #${order.public_code || code}`;
+  els.subtitle.textContent = paymentSubtitle(status, order);
   els.status.innerHTML = `
-    <div><span>Status</span><strong>${financialStatusLabel(order.financial_status)}</strong></div>
-    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleString('pt-BR') : 'Não informado'}</strong></div>
-    <div><span>Transacao</span><strong>${escapeHtml(payment.transaction_id || 'Aguardando')}</strong></div>
+    <div class="payment-status-${escapeAttribute(status)}"><span>Status</span><strong>${financialStatusLabel(status)}</strong></div>
+    <div><span>Valor</span><strong>${money(order.total || 0)}</strong></div>
+    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'Não informado'}</strong></div>
   `;
-  els.pixCode.value = payment.pix_code || '';
-  els.pixCode.closest('label').hidden = !hasPix;
-  els.copy.hidden = !hasPix;
-  els.qr.hidden = !qrUrl;
-  els.qr.src = qrUrl || '';
+
+  if (els.providerBox) {
+    els.providerBox.hidden = !hasCheckout || status === 'paid';
+  }
   if (els.checkoutLink) {
-    els.checkoutLink.hidden = !hasCheckout;
     els.checkoutLink.href = checkoutUrl || '#';
   }
-  els.newPix.hidden = order.financial_status !== 'expired' || !hasPix;
+
+  els.pixCode.value = payment.pix_code || '';
+  if (els.pixFallback) {
+    els.pixFallback.hidden = !hasPix || status === 'paid';
+    if (hasCheckout && hasPix && !els.pixFallback.open) {
+      els.pixFallback.removeAttribute('open');
+    }
+  }
+  if (els.copy) els.copy.hidden = !hasPix;
+  if (els.qr) {
+    els.qr.hidden = !qrUrl;
+    els.qr.src = qrUrl || '';
+  }
+  if (els.newPix) els.newPix.hidden = status !== 'expired' || !hasPix;
+}
+
+function paymentSubtitle(status, order) {
+  if (status === 'paid') return 'Pagamento confirmado. Seu pedido foi enviado para a loja.';
+  if (status === 'expired') return 'Este pagamento expirou. Gere um novo Pix ou refaça o pedido.';
+  if (status === 'failed' || status === 'cancelled') return 'O pagamento não foi concluído. O pedido ainda não foi enviado para a loja.';
+  return `${money(order.total || 0)} aguardando confirmação. Mantenha esta janela aberta.`;
+}
+
+function startPollingIfNeeded(data) {
+  const status = data.order?.financial_status || data.payment?.status || 'pending';
+  if (status === 'paid' || ['expired', 'failed', 'cancelled'].includes(status)) {
+    stopPolling();
+    return;
+  }
+  if (!pollTimer) {
+    pollTimer = window.setInterval(() => loadPayment(), 4000);
+  }
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function notifyOpenerIfPaid(data) {
+  const status = data.order?.financial_status || data.payment?.status || 'pending';
+  if (status !== 'paid' || !window.opener) return;
+  try {
+    window.opener.postMessage({
+      type: 'tapronto:payment-status',
+      code: data.order.public_code || code,
+      status: 'paid',
+      order: data.order,
+      payment: data.payment
+    }, window.location.origin);
+    window.setTimeout(() => window.close(), 900);
+  } catch (_) {
+    // Se o navegador bloquear a comunicação, mantém a tela de sucesso aberta.
+  }
 }
 
 function setStatus(message) {
@@ -92,7 +160,7 @@ function setStatus(message) {
 async function request(url, options = {}) {
   const response = await fetch(storeApiUrl(url), options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Erro na requisicao.');
+  if (!response.ok) throw new Error(data.error || 'Erro na requisição.');
   return data;
 }
 
@@ -107,19 +175,19 @@ function storeApiUrl(url) {
 
 function currentStoreSlug() {
   const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
-  if (!firstSegment || ['admin', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
+  if (!firstSegment || ['admin', 'painel', 'central', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
   return firstSegment;
 }
 
 function financialStatusLabel(status) {
   return ({
-    pending: 'Pendente',
+    pending: 'Aguardando pagamento',
     paid: 'Pago',
     failed: 'Falhou',
     expired: 'Expirado',
     cancelled: 'Cancelado',
     refunded: 'Estornado'
-  })[status] || 'Pendente';
+  })[status] || 'Aguardando pagamento';
 }
 
 function money(value) {
@@ -134,6 +202,10 @@ function escapeHtml(value) {
     '"': '&quot;',
     "'": '&#039;'
   })[char]);
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, '&#096;');
 }
 
 function safeHttpUrl(value) {

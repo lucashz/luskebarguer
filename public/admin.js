@@ -424,6 +424,9 @@ const els = {
   planCompare: document.querySelector('#planCompare'),
   planHistory: document.querySelector('#planHistory'),
   adminSupportTicketForm: document.querySelector('#adminSupportTicketForm'),
+  supportCreateBox: document.querySelector('#supportCreateBox'),
+  openSupportTicketFormButton: document.querySelector('#openSupportTicketFormButton'),
+  cancelSupportTicketFormButton: document.querySelector('#cancelSupportTicketFormButton'),
   adminSupportTicketList: document.querySelector('#adminSupportTicketList'),
   adminSupportStatusFilters: document.querySelector('#adminSupportStatusFilters'),
   adminSupportSearch: document.querySelector('#adminSupportSearch'),
@@ -588,6 +591,8 @@ els.adminUserRoleFilter?.addEventListener('change', renderAdminUsers);
 els.selectAllAdminUsers?.addEventListener('change', toggleVisibleAdminUsersSelection);
 els.deleteSelectedAdminUsersButton?.addEventListener('click', deleteSelectedAdminUsers);
 els.adminSupportTicketForm?.addEventListener('submit', submitAdminSupportTicket);
+els.openSupportTicketFormButton?.addEventListener('click', openAdminSupportTicketForm);
+els.cancelSupportTicketFormButton?.addEventListener('click', closeAdminSupportTicketForm);
 els.refreshSupportTicketsButton?.addEventListener('click', () => loadSupportTickets({ force: true }));
 els.adminSupportSearch?.addEventListener('input', () => {
   state.supportSearch = els.adminSupportSearch.value.trim().toLowerCase();
@@ -4552,6 +4557,7 @@ async function submitAdminSupportTicket(event) {
     });
     form.reset();
     toast('Chamado aberto com sucesso.');
+    closeAdminSupportTicketForm();
     state.loadedAdminTabs.delete('support');
     await loadSupportTickets({ force: true });
   } catch (error) {
@@ -4566,7 +4572,7 @@ function renderSupportTickets() {
     state.selectedSupportTicketId = null;
     els.adminSupportTicketList.innerHTML = supportTicketsEmptyState();
     els.adminSupportTicketList.querySelector('[data-focus-support-form]')?.addEventListener('click', () => {
-      els.adminSupportTicketForm?.querySelector('input[name="subject"]')?.focus();
+      openAdminSupportTicketForm();
     });
     return;
   }
@@ -4598,6 +4604,17 @@ function renderSupportTickets() {
   els.adminSupportTicketList.querySelectorAll('[data-close-support-ticket]').forEach((button) => {
     button.addEventListener('click', () => closeAdminSupportTicket(button.dataset.closeSupportTicket));
   });
+}
+
+function openAdminSupportTicketForm() {
+  if (els.supportCreateBox) els.supportCreateBox.hidden = false;
+  window.requestAnimationFrame(() => {
+    els.adminSupportTicketForm?.querySelector('input[name="contact_name"], input[name="subject"]')?.focus({ preventScroll: false });
+  });
+}
+
+function closeAdminSupportTicketForm() {
+  if (els.supportCreateBox) els.supportCreateBox.hidden = true;
 }
 
 function renderSupportTicketQueueItem(ticket, selectedId) {

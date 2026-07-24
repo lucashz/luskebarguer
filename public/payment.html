@@ -3,27 +3,35 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pagamento Pix</title>
-    <link rel="stylesheet" href="/styles.css?v=20260708-qa-flow">
+    <title>Pagamento online</title>
+    <link rel="stylesheet" href="/styles.css?v=20260724-payment-fallback">
   </head>
   <body class="client-page payment-page">
     <main class="payment-shell">
       <section class="payment-card">
         <p class="eyebrow">Pagamento online</p>
-        <h1 id="paymentTitle">Pix do pedido</h1>
+        <h1 id="paymentTitle">Finalizando pagamento</h1>
         <p class="muted" id="paymentSubtitle">Carregando dados do pagamento...</p>
 
         <div class="payment-status-box" id="paymentStatusBox"></div>
-        <img class="payment-qr" id="paymentQr" alt="QR Code Pix" hidden>
 
-        <label class="payment-copy-field">
-          Código Pix copia e cola
-          <textarea id="paymentPixCode" readonly></textarea>
-        </label>
+        <section class="payment-provider-box" id="paymentProviderBox" hidden>
+          <strong>Pague pelo checkout seguro da Abacate Pay</strong>
+          <p>Ao concluir, esta janela avisa o cardápio automaticamente e seu pedido é enviado para a loja.</p>
+          <a class="primary-button wide" id="paymentCheckoutLink" href="#" target="_blank" rel="noopener">Abrir Abacate Pay</a>
+        </section>
+
+        <details class="payment-pix-fallback" id="paymentPixFallback">
+          <summary>Usar Pix copia e cola como alternativa</summary>
+          <img class="payment-qr" id="paymentQr" alt="QR Code Pix" hidden>
+          <label class="payment-copy-field">
+            Código Pix copia e cola
+            <textarea id="paymentPixCode" readonly></textarea>
+          </label>
+          <button class="ghost-button compact" id="copyPixButton" type="button">Copiar código Pix</button>
+        </details>
 
         <div class="row-actions payment-actions">
-          <a class="primary-button compact" id="paymentCheckoutLink" href="#" target="_blank" rel="noopener" hidden>Abrir checkout seguro</a>
-          <button class="primary-button compact" id="copyPixButton" type="button">Copiar código</button>
           <button class="ghost-button compact" id="refreshPaymentButton" type="button">Atualizar status</button>
           <button class="ghost-button compact" id="newPixButton" type="button" hidden>Gerar novo Pix</button>
         </div>
@@ -31,6 +39,6 @@
         <a class="text-button" href="/pedidos">Ver meus pedidos</a>
       </section>
     </main>
-    <script src="/payment.js?v=20260630-multitenant-fix" type="module"></script>
+    <script src="/payment.js?v=20260724-payment-fallback" type="module"></script>
   </body>
 </html>
