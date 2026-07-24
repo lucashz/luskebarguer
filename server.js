@@ -36,6 +36,7 @@ const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false)
 const PLATFORM_BILLING_PROVIDER = cleanText(process.env.PLATFORM_BILLING_PROVIDER || 'abacatepay').toLowerCase();
 const PLATFORM_BILLING_API_KEY = process.env.PLATFORM_BILLING_API_KEY || process.env.ABACATEPAY_API_KEY || '';
 const PLATFORM_BILLING_WEBHOOK_SECRET = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.ABACATEPAY_WEBHOOK_SECRET || '';
+const ABACATEPAY_API_BASE = 'https://api.abacatepay.com/v2';
 const BILLING_GRACE_DAYS = clampNumber(Number(process.env.BILLING_GRACE_DAYS || 7), 1, 30);
 const PUBLIC_BOOTSTRAP_CACHE_MS = 1000 * 20;
 const STORE_SETTINGS_CACHE_MS = 1000 * 10;
@@ -5663,35 +5664,82 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
     };
   }
   if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
-  const origin = process.env.PUBLIC_APP_URL || process.env.APP_URL || 'http://127.0.0.1:3000';
-  const data = await providerFetch('https://api.abacatepay.com/v1/billing/create', {
+  const origin = cleanText(config.public_url || process.env.PUBLIC_APP_URL || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const productId = await ensureAbacateSubscriptionProduct({ plan, amount, token: config.api_key });
+  const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
+  const externalId = cleanExternalId(`tapronto-sub-${company.id}-${plan.code}-${Date.now()}`);
+  const body = {
+    items: [{ id: productId, quantity: 1 }],
+    methods: ['CARD'],
+    returnUrl: `${origin}/painel?billing=cancelled`,
+    completionUrl: `${origin}/painel?billing=success`,
+    externalId,
+    metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_subscription' }
+  };
+  if (customerId) body.customerId = customerId;
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/subscriptions/create`, {
     method: 'POST',
     token: config.api_key,
+    body
+  });
+  const payload = data.data || data;
+  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
+  if (!checkoutUrl) {
+    throw httpError(502, 'A Abacate Pay criou a assinatura, mas não retornou a URL de checkout.');
+  }
+  return {
+    subscriptionId: String(payload.id || payload.subscriptionId || payload.billingId || ''),
+    transactionId: externalId,
+    checkoutUrl
+  };
+}
+
+async function ensureAbacateSubscriptionProduct({ plan, amount, token }) {
+  const externalId = cleanExternalId(`tapronto-plan-${plan.code}-${amount}`);
+  const existing = await findAbacateProductByExternalId(externalId, token).catch(() => null);
+  if (existing?.id) return String(existing.id);
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/products/create`, {
+    method: 'POST',
+    token,
     body: {
-      frequency: 'MONTHLY',
-      methods: ['PIX'],
-      products: [{
-        externalId: plan.code,
-        name: `Assinatura ${plan.name}`,
-        description: plan.description || 'Assinatura mensal da plataforma',
-        quantity: 1,
-        price: amount
-      }],
-      returnUrl: `${origin}/painel?billing=cancelled`,
-      completionUrl: `${origin}/painel?billing=success`,
-      customer: {
-        name: admin.name || company.name,
-        email: admin.email || company.billing_email || `empresa-${company.id}@local.test`,
-        cellphone: company.phone || ''
-      },
-      metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_subscription' }
+      externalId,
+      name: `Assinatura ${plan.name}`,
+      description: plan.description || 'Assinatura mensal da plataforma TáPronto',
+      price: amount,
+      currency: 'BRL',
+      cycle: 'MONTHLY'
     }
   });
   const payload = data.data || data;
-  return {
-    subscriptionId: String(payload.id || payload.billingId || ''),
-    checkoutUrl: payload.url || payload.checkoutUrl || ''
-  };
+  const productId = payload.id || payload.product?.id || '';
+  if (!productId) throw httpError(502, 'A Abacate Pay não retornou o identificador do produto mensal.');
+  return String(productId);
+}
+
+async function findAbacateProductByExternalId(externalId, token) {
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/products/list`, { method: 'GET', token });
+  const payload = data.data || data;
+  const items = Array.isArray(payload)
+    ? payload
+    : (Array.isArray(payload.items) ? payload.items : (Array.isArray(payload.products) ? payload.products : []));
+  return items.find((item) => item?.externalId === externalId || item?.external_id === externalId) || null;
+}
+
+async function createAbacateSubscriptionCustomer({ company, admin, token }) {
+  const email = cleanText(admin.email || company.billing_email || '');
+  if (!email) return '';
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/customers/create`, {
+    method: 'POST',
+    token,
+    body: {
+      name: cleanText(admin.name || company.name || 'Cliente TáPronto'),
+      email,
+      cellphone: onlyDigits(company.phone || admin.phone || ''),
+      metadata: { companyId: company.id, kind: 'platform_subscription' }
+    }
+  });
+  const payload = data.data || data;
+  return String(payload.id || payload.customer?.id || '');
 }
 
 async function createSubscriptionPaymentTransaction(data = {}) {
@@ -7057,7 +7105,8 @@ async function privatePlatformBillingSettings() {
       api_key: PLATFORM_BILLING_API_KEY,
       webhook_secret: PLATFORM_BILLING_WEBHOOK_SECRET,
       is_active: Boolean(PLATFORM_BILLING_API_KEY),
-      source: PLATFORM_BILLING_API_KEY ? 'env' : 'empty'
+      source: PLATFORM_BILLING_API_KEY ? 'env' : 'empty',
+      public_url: cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '')
     };
   }
   const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'abacatepay');
@@ -7067,6 +7116,7 @@ async function privatePlatformBillingSettings() {
     api_key: row.is_active === false ? '' : (row.api_key || PLATFORM_BILLING_API_KEY || ''),
     webhook_secret: row.is_active === false ? '' : (row.webhook_secret || PLATFORM_BILLING_WEBHOOK_SECRET || ''),
     is_active: row.is_active === true,
+    public_url: cleanText(row.public_url || process.env.PUBLIC_APP_URL || process.env.APP_URL || ''),
     source: 'database'
   };
 }
@@ -7145,7 +7195,7 @@ async function testPlatformBillingSettings(req, admin) {
   }
   if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de billing não suportado.');
   try {
-    await providerFetch('https://api.abacatepay.com/v1/customers/list', {
+    await providerFetch(`${ABACATEPAY_API_BASE}/store/get`, {
       method: 'GET',
       token: config.api_key
     });
@@ -11343,8 +11393,25 @@ async function providerFetch(url, { method = 'GET', token, body } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const data = await safeResponse(response);
-  if (!response.ok) throw httpError(response.status, 'Erro no provedor de pagamento.', data);
+  if (!response.ok) throw httpError(response.status, providerErrorMessage(data), sanitizeProviderErrorDetail(data));
   return data;
+}
+
+function providerErrorMessage(data) {
+  const detail = sanitizeProviderErrorDetail(data);
+  const raw = detail?.message || detail?.error || detail?.code || '';
+  return raw ? `Erro no provedor de pagamento: ${String(raw).slice(0, 180)}` : 'Erro no provedor de pagamento.';
+}
+
+function sanitizeProviderErrorDetail(data) {
+  if (!data || typeof data !== 'object') return data;
+  const error = data.error && typeof data.error === 'object' ? data.error : {};
+  return {
+    code: cleanText(data.code || error.code || ''),
+    message: cleanText(data.message || error.message || (typeof data.error === 'string' ? data.error : '') || ''),
+    status: cleanText(data.status || error.status || ''),
+    success: data.success === true ? true : (data.success === false ? false : undefined)
+  };
 }
 
 function providerSplitPayload(integrations, provider) {
