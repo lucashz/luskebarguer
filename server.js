@@ -10460,7 +10460,10 @@ async function createOrder(req, data, options = {}) {
     payment = await createCardPayment(updatedOrder, options);
     finalOrder = payment.order;
   }
-  await sendOrderStatusWhatsapp(order.id, 'new', { manual: false, db, tenant: options.tenant }).catch(() => null);
+  const hasOnlinePayment = isOnlinePaymentMethod(paymentMethod);
+  if (!hasOnlinePayment) {
+    await sendOrderStatusWhatsapp(order.id, 'new', { manual: false, db, tenant: options.tenant }).catch(() => null);
+  }
   if (['table', 'tab'].includes(fulfillmentMethod)) clearAdminTablesCache();
   if (customerRow?.id) clearAdminCustomersCache();
 
@@ -10472,7 +10475,7 @@ async function createOrder(req, data, options = {}) {
   return {
     order: { ...finalOrder, items: itemsWithOrder },
     payment,
-    whatsapp_url: whatsappUrl,
+    whatsapp_url: hasOnlinePayment ? null : whatsappUrl,
     whatsapp_message: whatsappMessage
   };
 }
@@ -11453,51 +11456,82 @@ async function createAbacatePayPayment({ store, order, type, integrations }) {
   const amount = moneyCents(order.total);
 
   if (type === 'pix') {
-    const data = await providerFetch('https://api.abacatepay.com/v1/pixQrCode/create', {
-      method: 'POST',
-      token,
-      body: {
-        amount,
-        expiresIn: integrations.pix.expirationMinutes * 60,
-        description: `Pedido #${order.public_code} - ${store.name || 'Cardápio'}`,
-        customer,
-        metadata: { orderCode: order.public_code, storeId: order.store_id || null }
-      }
-    });
-    const payload = data.data || data;
-    return {
-      transactionId: String(payload.id || ''),
-      pixCode: payload.brCode || payload.pixCode || '',
-      pixQrUrl: normalizeQrImage(payload.brCodeBase64 || payload.qrCodeBase64 || ''),
-      checkoutUrl: payload.url || null
-    };
+    return createAbacateOrderCheckout({ store, order, token, amount, methods: ['PIX'], customer });
   }
 
-  const returnUrl = integrations.card.returnUrl || integrations.pix.returnUrl || '';
-  const data = await providerFetch('https://api.abacatepay.com/v1/billing/create', {
+  return createAbacateOrderCheckout({ store, order, token, amount, methods: ['CARD'], customer });
+}
+
+async function createAbacateOrderCheckout({ store, order, token, amount, methods, customer }) {
+  const productId = await ensureAbacateOrderProduct({ store, order, amount, token });
+  const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
+  const storeSlug = cleanSlug(store.slug || '');
+  const paymentPath = `${storeSlug ? `/${storeSlug}` : ''}/pagamento?pedido=${encodeURIComponent(order.public_code)}`;
+  const fallbackUrl = origin ? `${origin}${paymentPath}` : '';
+  const externalId = cleanExternalId(`tapronto-order-${order.public_code}-${Date.now()}`);
+  const body = {
+    items: [{ id: productId, quantity: 1 }],
+    methods,
+    externalId,
+    metadata: { orderCode: order.public_code, storeId: order.store_id || null, kind: 'store_order' }
+  };
+  if (fallbackUrl) {
+    body.returnUrl = fallbackUrl;
+    body.completionUrl = fallbackUrl;
+  }
+  const customerId = await createAbacateOrderCustomer({ customer, order, token }).catch(() => '');
+  if (customerId) body.customerId = customerId;
+
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
+    method: 'POST',
+    token,
+    body
+  });
+  const payload = data.data || data;
+  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || '';
+  if (!checkoutUrl) throw httpError(502, 'A Abacate Pay criou o pagamento, mas não retornou a URL de checkout.');
+  return {
+    transactionId: String(payload.id || payload.checkoutId || externalId),
+    checkoutUrl
+  };
+}
+
+async function ensureAbacateOrderProduct({ store, order, amount, token }) {
+  const externalId = cleanExternalId(`tapronto-order-${order.public_code}-${amount}`);
+  const existing = await findAbacateProductByExternalId(externalId, token).catch(() => null);
+  if (existing?.id) return String(existing.id);
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/products/create`, {
     method: 'POST',
     token,
     body: {
-      frequency: 'ONE_TIME',
-      methods: ['CREDIT_CARD'],
-      products: [{
-        externalId: order.public_code,
-        name: `Pedido #${order.public_code}`,
-        description: `Pedido realizado em ${store.name || 'Cardápio'}`,
-        quantity: 1,
-        price: amount
-      }],
-      returnUrl,
-      completionUrl: returnUrl,
-      customer,
-      metadata: { orderCode: order.public_code, storeId: order.store_id || null }
+      externalId,
+      name: `Pedido #${order.public_code}`,
+      description: `Pedido realizado em ${store.name || 'Cardápio'}`,
+      price: amount,
+      currency: 'BRL'
     }
   });
   const payload = data.data || data;
-  return {
-    transactionId: String(payload.id || ''),
-    checkoutUrl: payload.url || payload.checkoutUrl || ''
-  };
+  const productId = payload.id || payload.product?.id || '';
+  if (!productId) throw httpError(502, 'A Abacate Pay não retornou o identificador do produto do pedido.');
+  return String(productId);
+}
+
+async function createAbacateOrderCustomer({ customer, order, token }) {
+  const email = cleanText(order.customer_snapshot?.email || '');
+  if (!email) return '';
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/customers/create`, {
+    method: 'POST',
+    token,
+    body: {
+      name: cleanText(customer?.name || order.customer_snapshot?.name || 'Cliente TáPronto'),
+      email,
+      cellphone: onlyDigits(customer?.phone || order.customer_snapshot?.phone || ''),
+      metadata: { orderCode: order.public_code, storeId: order.store_id || null, kind: 'store_order' }
+    }
+  });
+  const payload = data.data || data;
+  return String(payload.id || payload.customer?.id || '');
 }
 
 async function createMercadoPagoPayment({ order, type, integrations }) {
@@ -11787,7 +11821,15 @@ async function normalizeProviderWebhook(data) {
 
 function inferWebhookProvider(data) {
   const event = String(data.event || '').toLowerCase();
-  if (event.includes('abacate') || event.startsWith('billing.') || event.startsWith('pixqrcode.') || data.pixQrCode || data.billing) return 'abacatepay';
+  if (
+    event.includes('abacate')
+    || event.startsWith('billing.')
+    || event.startsWith('pixqrcode.')
+    || event.startsWith('checkout.')
+    || event.startsWith('transparent.')
+    || data.pixQrCode
+    || data.billing
+  ) return 'abacatepay';
   if (data.action || data.type === 'payment' || data.data?.id) return 'mercadopago';
   if (String(data.event || '').startsWith('PAYMENT_') || data.payment) return 'asaas';
   if (data.pix || data.txid) return 'efi';
@@ -13604,12 +13646,16 @@ function isCashPayment(paymentMethod) {
 
 function isOnlinePixPayment(paymentMethod) {
   const normalized = normalizeName(paymentMethod);
-  return normalized.includes('pix') && (normalized.includes('online') || normalized.includes('pagamento online'));
+  return normalized === 'pagamento online' || (normalized.includes('pix') && (normalized.includes('online') || normalized.includes('pagamento online')));
 }
 
 function isOnlineCardPayment(paymentMethod) {
   const normalized = normalizeName(paymentMethod);
   return normalized.includes('cartao') && (normalized.includes('online') || normalized.includes('pagamento online'));
+}
+
+function isOnlinePaymentMethod(paymentMethod) {
+  return isOnlinePixPayment(paymentMethod) || isOnlineCardPayment(paymentMethod);
 }
 
 function onlinePaymentProviderFor(paymentMethod, integrations) {

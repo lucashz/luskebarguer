@@ -10437,10 +10437,23 @@ body.admin-tour-active {
   color: var(--muted);
   font-size: 0.84rem;
   font-weight: 850;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .editor-wide {
   grid-column: 1 / -1;
+}
+
+.editor-grid input,
+.editor-grid select,
+.editor-grid textarea {
+  min-width: 0;
+  width: 100%;
+}
+
+.product-price-field {
+  min-width: min(100%, 150px);
 }
 
 .product-editor-card {
@@ -10926,7 +10939,13 @@ body.admin-tour-active {
 }
 
 .product-main-grid {
-  grid-template-columns: minmax(180px, 0.9fr) minmax(260px, 1.5fr) minmax(140px, 0.55fr);
+  grid-template-columns: minmax(190px, 0.85fr) minmax(260px, 1.3fr) minmax(170px, 0.75fr);
+  align-items: end;
+}
+
+.product-main-grid .product-price-field input {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .product-form-copy,

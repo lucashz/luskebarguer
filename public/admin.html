@@ -186,7 +186,7 @@
               <label>Categoria<select name="category_id" id="onboardingProductCategory"></select></label>
               <label>Nome do produto<input name="name" required placeholder="Ex: Burger da Casa"></label>
               <label>Descrição<textarea name="description" placeholder="Ex: Pão brioche, burger artesanal, queijo e molho da casa"></textarea></label>
-              <label>Preço<input name="price" required type="number" min="0" step="0.01" value="29.90"></label>
+              <label class="product-price-field">Preço<input name="price" required type="number" min="0" step="0.01" value="29.90"></label>
               <label class="media-upload-card onboarding-product-image">
                 <span>Imagem do produto</span>
                 <small>Envie uma foto para deixar o primeiro item mais atrativo.</small>
@@ -1363,7 +1363,7 @@
                   <div class="editor-grid product-main-grid">
                     <label>Categoria<select name="category_id" required id="itemCategory"></select></label>
                     <label>Nome do produto<input name="name" required placeholder="Ex: X-Burger"></label>
-                    <label>Preço de venda<input name="price" required type="number" min="0" step="0.01" placeholder="0,00"></label>
+                    <label class="product-price-field">Preço de venda<input name="price" required type="number" min="0" step="0.01" placeholder="0,00"></label>
                     <label class="editor-wide">Descrição para o cliente<textarea name="description" placeholder="Ex: Pão brioche, burger artesanal, queijo e molho da casa."></textarea></label>
                   </div>
                 </section>

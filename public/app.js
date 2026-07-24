@@ -1305,7 +1305,7 @@ async function submitOrder(event) {
       complement: normalizedData.get('complement') || selectedAddress?.complement,
       reference: normalizedData.get('reference') || selectedAddress?.reference
     } : null,
-    payment_method: method === 'tab' ? 'Pagamento no fechamento' : normalizedData.get('payment_method'),
+    payment_method: method === 'tab' ? 'Pagamento no fechamento' : checkoutPaymentMethod(normalizedData.get('payment_method')),
     payment_details: paymentDetailsFromForm(normalizedData),
     coupon_code: state.coupon?.code || normalizedData.get('coupon_code') || '',
     notes: normalizedData.get('notes'),
@@ -1337,6 +1337,12 @@ async function submitOrder(event) {
     renderCart();
     els.checkoutDialog.close();
     setStatus(`Pedido ${result.order.public_code} criado.`);
+
+    const checkoutUrl = result.payment?.pix?.checkout_url || result.payment?.card?.checkout_url || result.payment?.checkout_url || '';
+    if (checkoutUrl) {
+      window.location.href = checkoutUrl;
+      return;
+    }
 
     if (result.payment?.pix || result.payment?.card) {
       window.location.href = storePageUrl('pagamento', `pedido=${encodeURIComponent(result.order.public_code)}`);
@@ -1424,7 +1430,7 @@ function renderCheckoutSnapshot(totals) {
 
 function renderPaymentOptions() {
   const methods = state.store?.payment_methods?.length ? [...state.store.payment_methods] : ['Pix', 'Cartão', 'Dinheiro'];
-  if (state.store?.integration_settings?.pix?.enabled && !methods.includes('Pix online')) {
+  if (state.store?.integration_settings?.pix?.enabled && !methods.some((method) => isPixOnlinePayment(method))) {
     methods.unshift('Pix online');
   }
   if (state.store?.integration_settings?.card?.enabled && !methods.includes('Cartão online')) {
@@ -2014,6 +2020,20 @@ function paymentDetailsFromForm(data) {
 
 function isCashPayment(value) {
   return normalizeText(value).includes('dinheiro');
+}
+
+function isGenericOnlinePayment(value) {
+  return normalizeText(value) === 'pagamento online';
+}
+
+function isPixOnlinePayment(value) {
+  const normalized = normalizeText(value);
+  return isGenericOnlinePayment(value) || (normalized.includes('pix') && normalized.includes('online'));
+}
+
+function checkoutPaymentMethod(value) {
+  if (isGenericOnlinePayment(value) && state.store?.integration_settings?.pix?.enabled) return 'Pix online';
+  return value || '';
 }
 
 function parseMoneyInput(value) {
