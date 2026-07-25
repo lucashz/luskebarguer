@@ -12101,8 +12101,12 @@ async function fetchProviderPaymentStatus(order, integrations) {
     const checkoutUrl = String(details.checkout_url || '');
     const isHostedCheckout = transactionId.startsWith('bill_') || checkoutUrl.includes('app.abacatepay.com/pay/');
     const endpoint = isHostedCheckout ? 'checkouts/get' : 'transparents/check';
-    const data = await providerFetch(`${ABACATEPAY_API_BASE}/${endpoint}?id=${encodeURIComponent(transactionId)}`, { token });
-    const payload = data.data || data;
+    let data = await providerFetch(`${ABACATEPAY_API_BASE}/${endpoint}?id=${encodeURIComponent(transactionId)}`, { token });
+    let payload = data.data || data;
+    if (isHostedCheckout && abacatePayStatusToFinancial(payload.status) === 'pending') {
+      const listed = await findAbacateCheckoutInList(transactionId, token).catch(() => null);
+      if (listed && abacatePayStatusToFinancial(listed.status) !== 'pending') payload = listed;
+    }
     const providerAmount = Number(payload.paidAmount ?? payload.amount ?? payload.value ?? moneyCents(order.total));
     return {
       status: abacatePayStatusToFinancial(payload.status),
@@ -12122,6 +12126,14 @@ async function fetchProviderPaymentStatus(order, integrations) {
     return { status: asaasStatusToFinancial(data.status), amount: data.value };
   }
   return { status: order.financial_status, amount: order.total };
+}
+
+async function findAbacateCheckoutInList(transactionId, token) {
+  if (!transactionId || !token) return null;
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/list?limit=100`, { token });
+  const payload = data.data || data;
+  const items = Array.isArray(payload) ? payload : (Array.isArray(payload.items) ? payload.items : []);
+  return items.find((item) => cleanExternalId(item.id || '') === transactionId) || null;
 }
 
 async function getOrderByPublicCode(code, options = {}) {
