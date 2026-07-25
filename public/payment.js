@@ -17,6 +17,7 @@ const els = {
 
 let pollTimer = null;
 let lastPayment = null;
+const PAYMENT_POLL_INTERVAL_MS = 10000;
 
 els.copy?.addEventListener('click', async () => {
   await navigator.clipboard?.writeText(els.pixCode.value || '');
@@ -130,7 +131,7 @@ function startPollingIfNeeded(data) {
     return;
   }
   if (!pollTimer) {
-    pollTimer = window.setInterval(() => loadPayment(), 4000);
+    pollTimer = window.setInterval(() => loadPayment(), PAYMENT_POLL_INTERVAL_MS);
   }
 }
 

@@ -1491,7 +1491,7 @@ function openPaymentPopup(options = {}) {
 
 function startPaymentPolling() {
   stopPaymentPolling();
-  state.paymentPollTimer = window.setInterval(() => checkPaymentStatus(), 4000);
+  state.paymentPollTimer = window.setInterval(() => checkPaymentStatus(), 10000);
   window.setTimeout(() => checkPaymentStatus(), 1200);
 }
 
