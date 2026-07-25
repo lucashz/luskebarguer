@@ -12061,9 +12061,10 @@ async function fetchProviderPaymentStatus(order, integrations) {
     const endpoint = isHostedCheckout ? 'checkouts/get' : 'transparents/check';
     const data = await providerFetch(`${ABACATEPAY_API_BASE}/${endpoint}?id=${encodeURIComponent(transactionId)}`, { token });
     const payload = data.data || data;
+    const providerAmount = Number(payload.paidAmount ?? payload.amount ?? payload.value ?? moneyCents(order.total));
     return {
       status: abacatePayStatusToFinancial(payload.status),
-      amount: centsToMoney(payload.paidAmount || payload.amount || payload.value || order.total),
+      amount: Number.isFinite(providerAmount) ? roundMoney(providerAmount / 100) : moneyNumber(order.total),
       provider_event_id: cleanExternalId(`abacatepay_${payload.id || transactionId}_${payload.status || 'status'}`),
       raw: payload
     };
