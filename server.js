@@ -11659,7 +11659,7 @@ async function publicPaymentStatus(code, options = {}) {
   if (
     order.payment_provider === 'abacatepay'
     && order.payment_transaction_id
-    && ['pending', 'failed'].includes(sanitizeFinancialStatus(order.financial_status))
+    && ['pending', 'failed', 'expired'].includes(sanitizeFinancialStatus(order.financial_status))
   ) {
     order = await reconcileOrderPaymentWithProvider(order, options).catch((error) => {
       console.warn('Falha ao consultar pagamento na Abacate Pay:', error.message || error);
