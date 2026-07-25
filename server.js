@@ -10603,20 +10603,21 @@ async function ensureUniqueModifierName(groupId, name, options = {}) {
 async function upsertCustomer(customer, storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId) || null;
+  const { document: _document, ...customerProfile } = customer || {};
   const existing = await db('GET', 'customers', {
     select: '*',
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
-    phone: `eq.${customer.phone}`,
+    phone: `eq.${customerProfile.phone}`,
     limit: '1'
   });
 
   if (existing[0]) {
-    const [updated] = await db('PATCH', 'customers', { id: `eq.${existing[0].id}` }, customer, ['Prefer: return=representation']);
+    const [updated] = await db('PATCH', 'customers', { id: `eq.${existing[0].id}` }, customerProfile, ['Prefer: return=representation']);
     return updated;
   }
 
   const [created] = await db('POST', 'customers', {}, {
-    ...customer,
+    ...customerProfile,
     store_id: resolvedStoreId
   }, ['Prefer: return=representation']);
   return created;
