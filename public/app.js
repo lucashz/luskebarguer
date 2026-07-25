@@ -123,7 +123,6 @@ const els = {
   paymentCheckoutTotal: document.querySelector('#paymentCheckoutTotal'),
   paymentCheckoutExpires: document.querySelector('#paymentCheckoutExpires'),
   paymentOpenButton: document.querySelector('#paymentOpenButton'),
-  paymentCheckButton: document.querySelector('#paymentCheckButton'),
   paymentCancelButton: document.querySelector('#paymentCancelButton'),
   onlinePaymentCustomerDetails: document.querySelector('#onlinePaymentCustomerDetails')
 };
@@ -181,7 +180,6 @@ els.checkoutForm?.elements?.document?.addEventListener('input', (event) => {
 els.checkoutForm?.addEventListener('submit', submitOrder);
 els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog?.close());
 els.paymentOpenButton?.addEventListener('click', () => openPaymentPopup());
-els.paymentCheckButton?.addEventListener('click', () => checkPaymentStatus({ manual: true }));
 els.paymentCancelButton?.addEventListener('click', closePaymentCheckoutDialog);
 els.paymentCheckoutDialog?.addEventListener('close', () => {
   if (state.paymentCheckout?.status !== 'paid') stopPaymentPolling();
@@ -1426,7 +1424,6 @@ function renderPaymentCheckoutDialog(status = state.paymentCheckout?.status || '
     els.paymentCheckoutStatus.innerHTML = `<strong>${escapeHtml(copy.title)}</strong><p>${escapeHtml(copy.text)}</p>`;
   }
   if (els.paymentOpenButton) els.paymentOpenButton.disabled = status === 'paid' || !checkout.checkoutUrl;
-  if (els.paymentCheckButton) els.paymentCheckButton.disabled = status === 'paid';
 }
 
 function paymentCheckoutCopy(status) {

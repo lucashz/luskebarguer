@@ -11,7 +11,6 @@ const els = {
   providerBox: document.querySelector('#paymentProviderBox'),
   checkoutLink: document.querySelector('#paymentCheckoutLink'),
   copy: document.querySelector('#copyPixButton'),
-  refresh: document.querySelector('#refreshPaymentButton'),
   newPix: document.querySelector('#newPixButton')
 };
 
@@ -23,7 +22,6 @@ els.copy?.addEventListener('click', async () => {
   await navigator.clipboard?.writeText(els.pixCode.value || '');
   setStatus('Código Pix copiado.');
 });
-els.refresh?.addEventListener('click', () => loadPayment({ manual: true }));
 els.newPix?.addEventListener('click', () => regeneratePix());
 
 document.body.classList.toggle('payment-popup-mode', Boolean(window.opener));
