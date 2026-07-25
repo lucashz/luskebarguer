@@ -11524,7 +11524,10 @@ async function createAbacateOrderCheckout({ store, order, token, amount, methods
     body.returnUrl = fallbackUrl;
     body.completionUrl = fallbackUrl;
   }
-  const customerId = await createAbacateOrderCustomer({ customer, order, token }).catch(() => '');
+  const customerId = await createAbacateOrderCustomer({ customer, order, token }).catch((error) => {
+    console.warn('Falha ao pre-preencher cliente na Abacate Pay:', error.message || error);
+    return '';
+  });
   if (customerId) body.customerId = customerId;
 
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {

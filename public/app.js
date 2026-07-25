@@ -124,7 +124,8 @@ const els = {
   paymentCheckoutExpires: document.querySelector('#paymentCheckoutExpires'),
   paymentOpenButton: document.querySelector('#paymentOpenButton'),
   paymentCheckButton: document.querySelector('#paymentCheckButton'),
-  paymentCancelButton: document.querySelector('#paymentCancelButton')
+  paymentCancelButton: document.querySelector('#paymentCancelButton'),
+  onlinePaymentCustomerDetails: document.querySelector('#onlinePaymentCustomerDetails')
 };
 
 document.querySelector('#demoNotice')?.toggleAttribute('hidden', !state.isDemoMode);
@@ -2238,9 +2239,9 @@ function updatePaymentDetailsVisibility() {
   els.checkoutForm.elements.change_for.required = false;
   if (method === 'tab' || !isCashPayment(payment)) setValue(els.checkoutForm.elements.change_for, '');
   document.querySelectorAll('.online-payment-customer-field').forEach((field) => {
-    field.hidden = !isOnlinePayment;
     field.disabled = !isOnlinePayment;
   });
+  if (els.onlinePaymentCustomerDetails) els.onlinePaymentCustomerDetails.hidden = !isOnlinePayment;
   if (els.checkoutForm.elements.email) els.checkoutForm.elements.email.required = isOnlinePayment;
   if (els.checkoutForm.elements.document) els.checkoutForm.elements.document.required = isOnlinePayment;
 }
