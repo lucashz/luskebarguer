@@ -11342,7 +11342,10 @@ async function createPixPayment(order, options = {}) {
   const expiresAt = new Date(Date.now() + integrations.pix.expirationMinutes * 60000).toISOString();
   const providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations });
   const transactionId = providerPayment.transactionId || `pix_${order.public_code}_${Date.now()}`;
-  const pixCode = providerPayment.pixCode || buildMockPixCode(store, order, transactionId);
+  const pixCode = providerPayment.pixCode || (providerPayment.checkoutUrl ? '' : buildMockPixCode(store, order, transactionId));
+  const pixQrUrl = providerPayment.pixQrUrl || (pixCode
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`
+    : null);
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'pending',
     payment_provider: integrations.pix.provider,
@@ -11351,7 +11354,7 @@ async function createPixPayment(order, options = {}) {
     payment_details: {
       ...(order.payment_details || {}),
       pix_code: pixCode,
-      pix_qr_url: providerPayment.pixQrUrl || `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`,
+      pix_qr_url: pixQrUrl,
       checkout_url: providerPayment.checkoutUrl || null
     }
   }, ['Prefer: return=representation']);
@@ -11651,8 +11654,18 @@ function providerSplitPayload(integrations, provider) {
 
 async function publicPaymentStatus(code, options = {}) {
   const db = options.db || dbRequest;
-  const order = await getOrderByPublicCode(code, options);
+  let order = await getOrderByPublicCode(code, options);
   if (!order) throw httpError(404, 'Pedido não encontrado.');
+  if (
+    order.payment_provider === 'abacatepay'
+    && order.payment_transaction_id
+    && ['pending', 'failed'].includes(sanitizeFinancialStatus(order.financial_status))
+  ) {
+    order = await reconcileOrderPaymentWithProvider(order, options).catch((error) => {
+      console.warn('Falha ao consultar pagamento na Abacate Pay:', error.message || error);
+      return order;
+    });
+  }
   if (order.financial_status === 'pending' && order.payment_expires_at && new Date(order.payment_expires_at).getTime() < Date.now()) {
     const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}`, financial_status: 'eq.pending' }, {
       financial_status: 'expired'
@@ -11663,6 +11676,66 @@ async function publicPaymentStatus(code, options = {}) {
     ? await getStoreSettings(order.store_id, options).catch(() => null)
     : null;
   return { order: publicPaymentOrder(order), payment: publicPaymentPayload(order, { store }) };
+}
+
+async function reconcileOrderPaymentWithProvider(order, options = {}) {
+  if (!order?.payment_provider || !order.payment_transaction_id) return order;
+  const db = options.db || dbRequest;
+  const store = await getStoreSettings(order.store_id, options);
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  const providerStatus = await fetchProviderPaymentStatus(order, integrations);
+  const expected = sanitizeFinancialStatus(providerStatus?.status || order.financial_status);
+  const current = sanitizeFinancialStatus(order.financial_status);
+  if (!expected || expected === current || expected === 'pending') return order;
+
+  const amount = roundMoney(Number.parseFloat(providerStatus.amount || order.total) || 0);
+  const eventId = cleanExternalId(providerStatus.provider_event_id || `reconcile_${order.payment_provider}_${order.payment_transaction_id}_${expected}`);
+  if (eventId) {
+    const existing = await db('GET', 'order_payment_events', {
+      select: 'id',
+      provider: `eq.${cleanProvider(order.payment_provider)}`,
+      provider_event_id: `eq.${eventId}`,
+      limit: '1'
+    }).catch(() => []);
+    if (!existing[0]) {
+      await db('POST', 'order_payment_events', {}, {
+        order_id: order.id,
+        store_id: order.store_id || null,
+        provider: cleanProvider(order.payment_provider),
+        provider_event_id: eventId,
+        transaction_id: order.payment_transaction_id,
+        financial_status: expected,
+        amount,
+        raw_payload: sanitizeProviderStatusPayload(providerStatus.raw || providerStatus)
+      }, ['Prefer: return=minimal']).catch((error) => {
+        console.warn('Falha ao registrar conciliação de pagamento:', error.message || error);
+      });
+    }
+  }
+
+  const patch = {
+    financial_status: expected,
+    paid_amount: expected === 'paid' ? amount : order.paid_amount,
+    paid_at: expected === 'paid' ? (order.paid_at || new Date().toISOString()) : order.paid_at,
+    ...(expected === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new' } : {})
+  };
+  const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  await registerPaymentTransactionIndex(updated || { ...order, ...patch }, order.payment_provider, order.payment_transaction_id, options).catch(() => null);
+  clearAdminOrdersCache(order.store_id);
+  if (expected === 'paid' && updated?.id) {
+    await sendOrderStatusWhatsapp(updated.id, 'new', { manual: false, db, tenant: options.tenant }).catch(() => null);
+  }
+  return updated || { ...order, ...patch };
+}
+
+function sanitizeProviderStatusPayload(payload) {
+  if (!payload || typeof payload !== 'object') return {};
+  return {
+    id: cleanExternalId(payload.id || payload.checkoutId || payload.transactionId || ''),
+    status: cleanText(payload.status || ''),
+    amount: payload.amount || payload.value || payload.paidAmount || null,
+    externalId: cleanExternalId(payload.externalId || '')
+  };
 }
 
 async function regeneratePixPayment(data, options = {}) {
@@ -11981,10 +12054,19 @@ async function fetchProviderPaymentStatus(order, integrations) {
   if (order.payment_provider === 'abacatepay') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;
     if (!token) throw httpError(422, 'Chave da Abacate Pay não configurada.');
-    const endpoint = isOnlinePixPayment(order.payment_method) ? 'pixQrCode/check' : 'billing/check';
-    const data = await providerFetch(`https://api.abacatepay.com/v1/${endpoint}?id=${encodeURIComponent(order.payment_transaction_id)}`, { token });
+    const details = order.payment_details || {};
+    const transactionId = cleanExternalId(order.payment_transaction_id || '');
+    const checkoutUrl = String(details.checkout_url || '');
+    const isHostedCheckout = transactionId.startsWith('bill_') || checkoutUrl.includes('app.abacatepay.com/pay/');
+    const endpoint = isHostedCheckout ? 'checkouts/get' : 'transparents/check';
+    const data = await providerFetch(`${ABACATEPAY_API_BASE}/${endpoint}?id=${encodeURIComponent(transactionId)}`, { token });
     const payload = data.data || data;
-    return { status: abacatePayStatusToFinancial(payload.status), amount: centsToMoney(payload.amount || payload.value || order.total) };
+    return {
+      status: abacatePayStatusToFinancial(payload.status),
+      amount: centsToMoney(payload.paidAmount || payload.amount || payload.value || order.total),
+      provider_event_id: cleanExternalId(`abacatepay_${payload.id || transactionId}_${payload.status || 'status'}`),
+      raw: payload
+    };
   }
   if (order.payment_provider === 'mercadopago') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;

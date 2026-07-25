@@ -75,8 +75,13 @@ function renderPayment(data) {
   lastPayment = { order, payment };
   const qrUrl = safeImageUrl(payment.pix_qr_url);
   const checkoutUrl = safeHttpUrl(payment.checkout_url);
-  const hasPix = Boolean(payment.pix_code || qrUrl);
   const hasCheckout = Boolean(checkoutUrl);
+  const isHostedCheckout = payment.provider === 'abacatepay' && hasCheckout;
+  const pixCode = String(payment.pix_code || '');
+  const hasRealPix = Boolean(
+    (pixCode && !pixCode.startsWith('PIXONLINE|'))
+    || (qrUrl && !qrUrl.includes('api.qrserver.com'))
+  );
   const status = order.financial_status || payment.status || 'pending';
 
   els.title.textContent = status === 'paid'
@@ -96,19 +101,19 @@ function renderPayment(data) {
     els.checkoutLink.href = checkoutUrl || '#';
   }
 
-  els.pixCode.value = payment.pix_code || '';
+  els.pixCode.value = hasRealPix ? pixCode : '';
   if (els.pixFallback) {
-    els.pixFallback.hidden = !hasPix || status === 'paid';
-    if (hasCheckout && hasPix && !els.pixFallback.open) {
+    els.pixFallback.hidden = !hasRealPix || status === 'paid' || isHostedCheckout;
+    if (hasCheckout && hasRealPix && !els.pixFallback.open) {
       els.pixFallback.removeAttribute('open');
     }
   }
-  if (els.copy) els.copy.hidden = !hasPix;
+  if (els.copy) els.copy.hidden = !hasRealPix;
   if (els.qr) {
-    els.qr.hidden = !qrUrl;
-    els.qr.src = qrUrl || '';
+    els.qr.hidden = !hasRealPix;
+    els.qr.src = hasRealPix ? qrUrl : '';
   }
-  if (els.newPix) els.newPix.hidden = status !== 'expired' || !hasPix;
+  if (els.newPix) els.newPix.hidden = status !== 'expired' || !hasRealPix;
 }
 
 function paymentSubtitle(status, order) {
