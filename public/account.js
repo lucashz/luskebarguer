@@ -73,6 +73,11 @@ document.querySelectorAll('input[inputmode="tel"]').forEach((field) => {
     field.value = formatPhone(field.value);
   });
 });
+document.querySelectorAll('input[name="document"]').forEach((field) => {
+  field.addEventListener('input', () => {
+    field.value = formatDocument(field.value);
+  });
+});
 els.refreshOrdersButton.addEventListener('click', loadOrders);
 els.editProfileButton.addEventListener('click', showEdit);
 els.editProfileInlineButton.addEventListener('click', showEdit);
@@ -325,6 +330,7 @@ function fillProfile() {
   setValue(els.profileForm.elements.name, customer.name);
   setValue(els.profileForm.elements.phone, customer.phone);
   setValue(els.profileForm.elements.email, customer.email);
+  setValue(els.profileForm.elements.document, formatDocument(customer.document || ''));
 }
 
 function renderOrders() {
@@ -592,6 +598,7 @@ function renderAccountSummary(addresses, activeOrders) {
       <strong>${escapeHtml(customer.name || 'Cliente')}</strong>
       <p>${escapeHtml(customer.phone || 'Telefone não informado')}</p>
       <p>${escapeHtml(customer.email || 'E-mail não informado')}</p>
+      <p>${customer.document ? escapeHtml(formatDocument(customer.document)) : 'CPF/CNPJ não informado'}</p>
     </div>
     <div>
       <strong>Endereço principal</strong>
@@ -790,7 +797,8 @@ function customerFromForm(form) {
   return {
     name: form.get('name'),
     phone: form.get('phone'),
-    email: form.get('email')
+    email: form.get('email'),
+    document: onlyDigits(form.get('document')).slice(0, 14)
   };
 }
 
@@ -855,6 +863,20 @@ function formatPhone(value) {
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   }
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatDocument(value) {
+  const digits = onlyDigits(value).slice(0, 14);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+  if (digits.length <= 11) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
 }
 
 function statusLabel(status) {

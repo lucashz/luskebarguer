@@ -9420,7 +9420,7 @@ async function getCustomerProfile(customerId, storeId = null, options = {}) {
   const resolvedStoreId = cleanUuid(storeId);
   const [rows, addresses, loyalty] = await Promise.all([
     db('GET', 'customers', {
-    select: 'id,store_id,name,phone,email,birth_date,notes,created_at,updated_at',
+    select: 'id,store_id,name,phone,email,document,birth_date,notes,created_at,updated_at',
     id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
     limit: '1'
@@ -10603,7 +10603,7 @@ async function ensureUniqueModifierName(groupId, name, options = {}) {
 async function upsertCustomer(customer, storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId) || null;
-  const { document: _document, ...customerProfile } = customer || {};
+  const customerProfile = { ...(customer || {}) };
   const existing = await db('GET', 'customers', {
     select: '*',
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
@@ -10612,6 +10612,7 @@ async function upsertCustomer(customer, storeId, options = {}) {
   });
 
   if (existing[0]) {
+    if (!customerProfile.document) delete customerProfile.document;
     const [updated] = await db('PATCH', 'customers', { id: `eq.${existing[0].id}` }, customerProfile, ['Prefer: return=representation']);
     return updated;
   }

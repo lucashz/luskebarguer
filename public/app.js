@@ -1845,6 +1845,8 @@ function syncLoggedCustomerFields() {
   if (!state.customer) return;
   setValue(els.checkoutForm.elements.name, state.customer.name || '');
   setValue(els.checkoutForm.elements.phone, formatPhone(state.customer.phone || ''));
+  setValue(els.checkoutForm.elements.email, state.customer.email || '');
+  setValue(els.checkoutForm.elements.document, formatDocument(state.customer.document || ''));
 }
 
 function renderCheckoutCustomerSection() {

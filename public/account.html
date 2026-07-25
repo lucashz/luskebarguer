@@ -49,6 +49,7 @@
             <input name="name" required placeholder="Nome completo">
             <input name="phone" required inputmode="tel" maxlength="15" placeholder="Telefone com DDD">
             <input name="email" type="email" placeholder="E-mail opcional">
+            <input name="document" inputmode="numeric" maxlength="18" placeholder="CPF ou CNPJ opcional">
             <input name="password" required type="password" minlength="8" placeholder="Senha">
             <input name="street" placeholder="Rua / Avenida">
             <div class="two-cols">
@@ -146,6 +147,7 @@
             <input name="name" required placeholder="Nome completo">
             <input name="phone" required inputmode="tel" maxlength="15" placeholder="Telefone com DDD">
             <input name="email" type="email" placeholder="E-mail opcional">
+            <input name="document" inputmode="numeric" maxlength="18" placeholder="CPF ou CNPJ para pagamento online">
             <input name="password" type="password" minlength="8" placeholder="Nova senha opcional">
             <div class="row-actions">
               <button class="primary-button">Salvar alterações</button>
@@ -204,7 +206,7 @@
       <div class="toast" id="toast"></div>
     </main>
 
-    <script src="/account.js?v=20260630-multitenant-fix" type="module"></script>
+    <script src="/account.js?v=20260725-payment-prefill" type="module"></script>
   </body>
 </html>
 
