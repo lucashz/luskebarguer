@@ -52,6 +52,7 @@ const menuCache = new Map();
 const sessionCache = new Map();
 const adminStoreAccessCache = new Map();
 const adminOrdersCache = new Map();
+const paymentReconciliationCache = new Map();
 let adminCustomersCache = null;
 let adminPromotionsCache = null;
 let adminTablesCache = null;
@@ -10964,6 +10965,8 @@ async function listOrders(storeId, options = {}) {
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId);
   const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
+  const reconciled = await reconcileRecentOnlinePaymentsForStore(resolvedStoreId, options);
+  if (reconciled) adminOrdersCache.delete(cacheKey);
   const cached = adminOrdersCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
   const orders = await db('GET', 'orders', {
@@ -10982,6 +10985,40 @@ async function listOrders(storeId, options = {}) {
     expiresAt: Date.now() + ADMIN_ORDERS_CACHE_MS
   });
   return data;
+}
+
+async function reconcileRecentOnlinePaymentsForStore(storeId, options = {}) {
+  const db = options.db || dbRequest;
+  const resolvedStoreId = cleanUuid(storeId);
+  const cacheKey = `${resolvedStoreId || 'default'}:${options.tenant?.id || 'central'}`;
+  const now = Date.now();
+  const lastCheck = paymentReconciliationCache.get(cacheKey) || 0;
+  if (now - lastCheck < 12000) return false;
+  paymentReconciliationCache.set(cacheKey, now);
+  const orders = await db('GET', 'orders', {
+    select: '*',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
+    payment_provider: 'eq.abacatepay',
+    payment_transaction_id: 'not.is.null',
+    financial_status: 'in.(pending,failed,expired)',
+    archived_at: 'is.null',
+    order: 'created_at.desc',
+    limit: '8'
+  }).catch((error) => {
+    console.warn('Falha ao buscar pedidos para conciliação:', error.message || error);
+    return [];
+  });
+  let changed = false;
+  for (const order of orders) {
+    const updated = await reconcileOrderPaymentWithProvider(order, options).catch((error) => {
+      console.warn('Falha ao conciliar pedido online:', error.message || error);
+      return null;
+    });
+    if (updated && sanitizeFinancialStatus(updated.financial_status) !== sanitizeFinancialStatus(order.financial_status)) {
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function clearAdminOrdersCache(storeId) {
@@ -11528,13 +11565,13 @@ async function ensureAbacateOrderProduct({ store, order, amount, token }) {
 async function createAbacateOrderCustomer({ customer, order, token }) {
   const email = cleanText(order.customer_snapshot?.email || '');
   if (!email) return '';
+  const customerPayload = abacatePayCustomer({ ...order, customer_snapshot: { ...(order.customer_snapshot || {}), ...customer } });
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/customers/create`, {
     method: 'POST',
     token,
     body: {
-      name: cleanText(customer?.name || order.customer_snapshot?.name || 'Cliente TáPronto'),
+      ...customerPayload,
       email,
-      cellphone: onlyDigits(customer?.phone || order.customer_snapshot?.phone || ''),
       metadata: { orderCode: order.public_code, storeId: order.store_id || null, kind: 'store_order' }
     }
   });
@@ -12140,12 +12177,23 @@ function buildMockPixCode(store, order, transactionId) {
 
 function abacatePayCustomer(order) {
   const customer = order.customer_snapshot || {};
+  const address = order.address_snapshot || {};
   const payload = {
     name: customer.name || `Cliente ${order.public_code}`,
     email: customer.email || `pedido-${order.public_code}@cardapio.local`,
-    cellphone: onlyDigits(customer.phone || '')
+    cellphone: abacatePayPhone(customer.phone || ''),
+    taxId: onlyDigits(customer.document || customer.taxId || ''),
+    zipCode: cleanText(address.postal_code || address.zipCode || '')
   };
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value));
+}
+
+function abacatePayPhone(value) {
+  const digits = onlyDigits(value);
+  if (!digits) return '';
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return `+${digits}`;
+  if (digits.length === 10 || digits.length === 11) return `+55${digits}`;
+  return digits.startsWith('+') ? digits : `+${digits}`;
 }
 
 function moneyCents(value) {
@@ -13616,11 +13664,13 @@ function sanitizeCustomer(data) {
     name: 'string',
     phone: 'phone',
     email: 'nullable_email',
+    document: 'nullable_string',
     birth_date: 'nullable_date',
     notes: 'nullable_string'
   }, ['name', 'phone']);
 
   if (customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido.');
+  if (customer.document) customer.document = onlyDigits(customer.document).slice(0, 14);
   return customer;
 }
 
@@ -13630,18 +13680,22 @@ function sanitizeOrderCustomer(data, fulfillmentMethod) {
     const customer = sanitize(data, {
       name: 'nullable_string',
       phone: 'phone',
-      email: 'nullable_email'
+      email: 'nullable_email',
+      document: 'nullable_string'
     }, []);
     if (customer.phone && customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido ou deixe em branco.');
+    if (customer.document) customer.document = onlyDigits(customer.document).slice(0, 14);
     customer.name = cleanText(customer.name || 'Cliente da mesa');
     return customer;
   }
   const customer = sanitize(data, {
     name: 'string',
     phone: 'phone',
-    email: 'nullable_email'
+    email: 'nullable_email',
+    document: 'nullable_string'
   }, ['name']);
   if (customer.phone && customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido ou deixe em branco.');
+  if (customer.document) customer.document = onlyDigits(customer.document).slice(0, 14);
   return customer;
 }
 

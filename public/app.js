@@ -173,6 +173,9 @@ els.checkoutForm?.addEventListener('input', (event) => {
 els.checkoutForm?.elements?.phone?.addEventListener('input', (event) => {
   event.target.value = formatPhone(event.target.value);
 });
+els.checkoutForm?.elements?.document?.addEventListener('input', (event) => {
+  event.target.value = formatDocument(event.target.value);
+});
 
 els.checkoutForm?.addEventListener('submit', submitOrder);
 els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog?.close());
@@ -1662,10 +1665,18 @@ function updateCheckoutDeliveryFields() {
 
 function validateCheckoutData(data, method, customer = checkoutCustomerFromState(data)) {
   const phone = onlyDigits(customer.phone);
+  const payment = data.get('payment_method');
+  const isOnlinePayment = method !== 'tab' && isOnlineCheckoutPayment(checkoutPaymentMethod(payment));
   if (['delivery', 'pickup'].includes(method) && !isValidBrazilianPhone(phone)) {
     return focusCheckoutField('phone', 'Informe um telefone válido com DDD. Exemplo: (11) 99999-9999.');
   }
   if (!['table', 'tab'].includes(method) && !String(customer.name || '').trim()) return focusCheckoutField('name', 'Informe o nome do cliente.');
+  if (isOnlinePayment && !isValidEmail(customer.email)) {
+    return focusCheckoutField('email', 'Informe um e-mail válido para preencher o checkout seguro.');
+  }
+  if (isOnlinePayment && !isValidBrazilianDocument(customer.document)) {
+    return focusCheckoutField('document', 'Informe um CPF ou CNPJ válido para preencher o checkout seguro.');
+  }
   if (method === 'table' && !state.diningTable) return focusCheckoutField('notes', 'Acesse pelo QR Code da mesa para fazer pedido na mesa.');
   if (method === 'tab' && !state.customerTab && !state.customerTabs.length) return focusCheckoutField('notes', 'Esta mesa não possui comanda aberta.');
 
@@ -1682,7 +1693,6 @@ function validateCheckoutData(data, method, customer = checkoutCustomerFromState
     }
   }
 
-  const payment = data.get('payment_method');
   if (isCashPayment(payment)) {
     const changeFor = parseMoneyInput(data.get('change_for'));
     const total = cartTotals().total;
@@ -1862,14 +1872,16 @@ function checkoutCustomerFromState(data) {
     return {
       name: state.customer.name || data.get('name'),
       phone: state.customer.phone || data.get('phone'),
-      email: state.customer.email || null
+      email: state.customer.email || data.get('email') || null,
+      document: data.get('document') || state.customer.document || null
     };
   }
 
   return {
     name: data.get('name') || (state.diningTable ? `Cliente ${state.diningTable.name}` : 'Cliente'),
     phone: data.get('phone'),
-    email: null
+    email: data.get('email') || null,
+    document: data.get('document') || null
   };
 }
 
@@ -2068,6 +2080,30 @@ function onlyDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function isValidBrazilianDocument(value) {
+  const digits = onlyDigits(value);
+  return digits.length === 11 || digits.length === 14;
+}
+
+function formatDocument(value) {
+  const digits = onlyDigits(value).slice(0, 14);
+  if (digits.length <= 11) {
+    return digits
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1-$2');
+  }
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2');
+}
+
 async function request(url, options = {}) {
   const response = await fetch(storeApiUrl(url), options);
   const data = await response.json().catch(() => ({}));
@@ -2197,9 +2233,16 @@ function updatePaymentDetailsVisibility() {
   if (!els.cashChangeField) return;
   const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
   const payment = els.paymentMethod?.value || '';
+  const isOnlinePayment = method !== 'tab' && isOnlineCheckoutPayment(checkoutPaymentMethod(payment));
   els.cashChangeField.hidden = method === 'tab' || !isCashPayment(payment);
   els.checkoutForm.elements.change_for.required = false;
   if (method === 'tab' || !isCashPayment(payment)) setValue(els.checkoutForm.elements.change_for, '');
+  document.querySelectorAll('.online-payment-customer-field').forEach((field) => {
+    field.hidden = !isOnlinePayment;
+    field.disabled = !isOnlinePayment;
+  });
+  if (els.checkoutForm.elements.email) els.checkoutForm.elements.email.required = isOnlinePayment;
+  if (els.checkoutForm.elements.document) els.checkoutForm.elements.document.required = isOnlinePayment;
 }
 
 function paymentDetailsFromForm(data) {
