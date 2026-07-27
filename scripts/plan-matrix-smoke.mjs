@@ -57,8 +57,8 @@ try {
   expect('professional', 'digital_menu', true, 100);
   expect('professional', 'orders', true, null);
   expect('professional', 'admin_users', true, 5);
-  expect('professional', 'manual_whatsapp', false, null);
-  expect('professional', 'automatic_whatsapp', true, null);
+  expect('professional', 'manual_whatsapp', true, null);
+  expect('professional', 'automatic_whatsapp', false, null);
   expect('professional', 'promotions', true, null);
   expect('professional', 'print_kitchen', true, null);
   expect('professional', 'custom_domain', false, null);

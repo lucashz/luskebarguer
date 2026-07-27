@@ -5065,14 +5065,136 @@ textarea {
 }
 
 .domain-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
+  border: 1px solid #e5e7eb;
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.domain-row-verified,
+.domain-row-active {
+  border-left-color: #16a34a;
+}
+
+.domain-row-failed,
+.domain-row-error {
+  border-left-color: #dc2626;
+}
+
+.domain-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.domain-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.domain-title-line strong {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.domain-main p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.domain-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.domain-status.verified,
+.domain-status.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.domain-status.failed,
+.domain-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.domain-dns-box {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 12px;
+  background: #f9fafb;
+}
+
+.domain-dns-head,
+.domain-dns-line {
+  display: grid;
+  grid-template-columns: 90px minmax(90px, 0.75fr) minmax(180px, 1.4fr);
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+}
+
+.domain-dns-head {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.domain-dns-line {
+  border-top: 1px solid #e5e7eb;
   background: #fff;
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.domain-dns-line code,
+.domain-advanced code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #f3f4f6;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 0.84rem;
+}
+
+.domain-advanced summary {
+  cursor: pointer;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.domain-advanced small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.domain-actions {
+  align-items: flex-start;
 }
 
 .platform-override-form {
@@ -7003,7 +7125,7 @@ textarea {
 
 .store-settings-toggle strong {
   font-size: 1rem;
-  color: color-mix(in srgb, var(--section-accent, var(--accent)) 70%, #111827);
+  color: var(--ink);
 }
 
 .store-settings-toggle small {
@@ -7064,6 +7186,48 @@ textarea {
   color: var(--muted);
   font-size: 0.84rem;
   font-weight: 650;
+}
+
+.store-settings-fields > label::first-line,
+.store-settings-fields .two-cols > label::first-line {
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.store-settings-fields > label:not(.check):not(.payment-option),
+.store-settings-fields .two-cols > label {
+  padding-top: 2px;
+}
+
+.store-editor .store-settings-fields > label:not(.check):not(.payment-option),
+.store-editor .store-settings-fields .two-cols > label,
+.store-editor .print-settings-panel label,
+.store-editor .integration-card label {
+  color: var(--ink);
+}
+
+.store-editor .store-settings-fields input,
+.store-editor .store-settings-fields textarea,
+.store-editor .store-settings-fields select {
+  margin-top: 2px;
+}
+
+.store-editor .settings-callout strong,
+.store-editor .business-hours-grid label > span,
+.store-editor .print-settings-intro span {
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.store-editor .store-path-preview span {
+  color: #991b1b;
+  font-size: 0.9rem;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .store-path-preview {
@@ -12021,7 +12185,7 @@ body.admin-tour-active {
 }
 
 .settings-callout p {
-  color: #7f1d1d;
+  color: var(--muted);
   margin-top: 4px;
   line-height: 1.45;
 }
@@ -12956,6 +13120,20 @@ body.admin-tour-active {
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
+  }
+
+  .domain-row {
+    grid-template-columns: 1fr;
+  }
+
+  .domain-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .domain-dns-head,
+  .domain-dns-line {
+    grid-template-columns: 68px minmax(70px, .8fr) minmax(130px, 1.2fr);
   }
 
   .menu-page {

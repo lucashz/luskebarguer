@@ -185,7 +185,12 @@ body.help-page {
   background: #fff;
   color: var(--help-text);
   padding: 0 14px;
-  font-weight: 800;
+  font-family: var(--help-font);
+  font-size: .95rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
   cursor: pointer;
 }
 

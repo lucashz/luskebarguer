@@ -7044,10 +7044,15 @@ async function addCustomDomain() {
 }
 
 async function verifyCustomDomain(id) {
-  const result = await request(`/api/admin/domains/${id}/verify`, { method: 'POST' });
-  state.storeDomains = state.storeDomains.map((item) => item.id === result.domain.id ? result.domain : item);
-  renderCustomDomains();
-  toast('Domínio verificado.');
+  try {
+    const result = await request(`/api/admin/domains/${id}/verify`, { method: 'POST' });
+    state.storeDomains = state.storeDomains.map((item) => item.id === result.domain.id ? result.domain : item);
+    renderCustomDomains();
+    toast('Domínio verificado.');
+  } catch (error) {
+    renderCustomDomains();
+    toast(error.message || 'Ainda não encontramos o apontamento DNS.');
+  }
 }
 
 async function deleteCustomDomain(id) {
@@ -7063,24 +7068,69 @@ function renderCustomDomains() {
     els.customDomainList.innerHTML = '<p class="empty-state">Nenhum domínio cadastrado.</p>';
     return;
   }
-  els.customDomainList.innerHTML = state.storeDomains.map((domain) => `
-    <article class="domain-row">
-      <div>
-        <strong>${escapeHtml(domain.domain)}</strong>
-        <small>Status: ${escapeHtml(domain.status)} - Token DNS: ${escapeHtml(domain.verification_token || '')}</small>
-      </div>
-      <div class="row-actions">
-        <button class="ghost-button compact" data-domain-verify="${escapeAttribute(domain.id)}" type="button">Verificar</button>
-        <button class="ghost-button compact danger" data-domain-delete="${escapeAttribute(domain.id)}" type="button">Remover</button>
-      </div>
-    </article>
-  `).join('');
+  els.customDomainList.innerHTML = state.storeDomains.map((domain) => renderCustomDomainRow(domain)).join('');
   els.customDomainList.querySelectorAll('[data-domain-verify]').forEach((button) => {
     button.addEventListener('click', () => verifyCustomDomain(button.dataset.domainVerify));
   });
   els.customDomainList.querySelectorAll('[data-domain-delete]').forEach((button) => {
     button.addEventListener('click', () => deleteCustomDomain(button.dataset.domainDelete));
   });
+}
+
+function renderCustomDomainRow(domain) {
+  const setup = domain.setup || {};
+  const status = String(domain.status || 'pending').toLowerCase();
+  const statusLabel = domain.status_label || customDomainStatusLabel(status);
+  const fallback = setup.fallback_type && setup.fallback_value ? `
+    <div class="domain-dns-line">
+      <span>${escapeHtml(setup.fallback_type)}</span>
+      <code>${escapeHtml(setup.name || '@')}</code>
+      <code>${escapeHtml(setup.fallback_value)}</code>
+    </div>
+  ` : '';
+  return `
+    <article class="domain-row domain-row-${escapeAttribute(status)}">
+      <div class="domain-main">
+        <div class="domain-title-line">
+          <strong>${escapeHtml(domain.domain)}</strong>
+          <span class="domain-status ${escapeAttribute(status)}">${escapeHtml(statusLabel)}</span>
+        </div>
+        <p>Configure o DNS abaixo no painel onde o domínio foi comprado e depois clique em verificar.</p>
+        <div class="domain-dns-box" aria-label="Instruções de DNS">
+          <div class="domain-dns-head">
+            <span>Tipo</span>
+            <span>Nome</span>
+            <span>Destino</span>
+          </div>
+          <div class="domain-dns-line">
+            <span>${escapeHtml(setup.recommended_type || 'CNAME')}</span>
+            <code>${escapeHtml(setup.name || '@')}</code>
+            <code>${escapeHtml(setup.value || 'taprontomenu.com.br')}</code>
+          </div>
+          ${fallback}
+        </div>
+        <details class="domain-advanced">
+          <summary>Detalhes técnicos</summary>
+          <small>Token DNS: <code>${escapeHtml(domain.verification_token || setup.txt_value || '')}</code></small>
+        </details>
+      </div>
+      <div class="row-actions domain-actions">
+        <button class="ghost-button compact" data-domain-verify="${escapeAttribute(domain.id)}" type="button">Verificar DNS</button>
+        <button class="ghost-button compact danger" data-domain-delete="${escapeAttribute(domain.id)}" type="button">Remover</button>
+      </div>
+    </article>
+  `;
+}
+
+function customDomainStatusLabel(status) {
+  const labels = {
+    active: 'Ativo',
+    verified: 'Verificado',
+    pending: 'Aguardando DNS',
+    failed: 'DNS não encontrado',
+    error: 'Erro ao verificar'
+  };
+  return labels[status] || 'Aguardando DNS';
 }
 
 async function submitIntegrations(event) {

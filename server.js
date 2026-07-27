@@ -9,6 +9,7 @@ import os from 'node:os';
 import v8 from 'node:v8';
 import net from 'node:net';
 import tls from 'node:tls';
+import dns from 'node:dns/promises';
 import pg from 'pg';
 import { localPostgrestRequest } from './src/lib/local-postgrest-adapter.js';
 
@@ -9833,11 +9834,12 @@ function cleanBackupFileName(value) {
 async function listStoreDomains(storeId) {
   const resolvedStoreId = cleanUuid(storeId);
   if (!resolvedStoreId) return [];
-  return dbRequest('GET', 'store_domains', {
+  const domains = await dbRequest('GET', 'store_domains', {
     select: '*',
     store_id: `eq.${resolvedStoreId}`,
     order: 'created_at.desc'
   });
+  return domains.map(publicStoreDomain);
 }
 
 async function createStoreDomain(data, admin) {
@@ -9859,7 +9861,7 @@ async function createStoreDomain(data, admin) {
     entity_id: created.id,
     after_data: { domain, status: created.status }
   });
-  return created;
+  return publicStoreDomain(created);
 }
 
 async function verifyStoreDomain(id, admin) {
@@ -9871,6 +9873,17 @@ async function verifyStoreDomain(id, admin) {
     limit: '1'
   });
   if (!domain) throw httpError(404, 'Domínio não encontrado nesta loja.');
+  const dnsStatus = await checkStoreDomainDns(domain.domain);
+  if (!dnsStatus.ok) {
+    const [updatedPending] = await dbRequest('PATCH', 'store_domains', { id: `eq.${domain.id}` }, {
+      status: 'pending',
+      verified_at: null
+    }, ['Prefer: return=representation']);
+    throw httpError(422, dnsStatus.message, {
+      domain: publicStoreDomain(updatedPending),
+      dns: dnsStatus
+    });
+  }
   const [updated] = await dbRequest('PATCH', 'store_domains', { id: `eq.${domain.id}` }, {
     status: 'verified',
     verified_at: new Date().toISOString()
@@ -9883,7 +9896,7 @@ async function verifyStoreDomain(id, admin) {
     entity_id: domain.id,
     after_data: { domain: domain.domain, status: 'verified' }
   });
-  return updated;
+  return publicStoreDomain(updated);
 }
 
 async function deleteStoreDomain(id, admin) {
@@ -9905,6 +9918,100 @@ async function deleteStoreDomain(id, admin) {
     severity: 'warning',
     before_data: { domain: domain.domain, status: domain.status }
   });
+}
+
+function customDomainTargetHost() {
+  const explicit = normalizeDomain(process.env.CUSTOM_DOMAIN_TARGET_HOST || process.env.PUBLIC_DOMAIN_TARGET || '');
+  if (explicit) return explicit;
+  try {
+    const base = process.env.PUBLIC_APP_URL || process.env.APP_URL || '';
+    const parsed = base ? new URL(base) : null;
+    const host = normalizeDomain(parsed?.hostname || '');
+    return host || 'taprontomenu.com.br';
+  } catch {
+    return 'taprontomenu.com.br';
+  }
+}
+
+function customDomainTargetIp() {
+  const configured = String(process.env.CUSTOM_DOMAIN_TARGET_IP || process.env.PUBLIC_SERVER_IP || '').trim();
+  if (net.isIP(configured)) return configured;
+  return '';
+}
+
+function publicStoreDomain(domain = {}) {
+  const normalized = normalizeDomain(domain.domain || '');
+  const status = cleanSlug(domain.status || 'pending') || 'pending';
+  const targetHost = customDomainTargetHost();
+  const targetIp = customDomainTargetIp();
+  return {
+    ...domain,
+    domain: normalized,
+    status,
+    status_label: domainStatusLabel(status),
+    setup: {
+      recommended_type: 'CNAME',
+      name: dnsHostLabel(normalized),
+      value: targetHost,
+      fallback_type: targetIp ? 'A' : '',
+      fallback_value: targetIp,
+      txt_name: `_tapronto.${normalized}`,
+      txt_value: domain.verification_token || ''
+    }
+  };
+}
+
+function domainStatusLabel(status) {
+  const labels = {
+    active: 'Ativo',
+    verified: 'Verificado',
+    pending: 'Aguardando DNS',
+    failed: 'DNS não encontrado',
+    error: 'Erro ao verificar'
+  };
+  return labels[status] || 'Aguardando DNS';
+}
+
+function dnsHostLabel(domain) {
+  const targetHost = customDomainTargetHost();
+  if (domain && targetHost && domain.endsWith(`.${targetHost}`)) {
+    return domain.slice(0, -(targetHost.length + 1)) || '@';
+  }
+  const parts = String(domain || '').split('.').filter(Boolean);
+  if (parts.length > 2) return parts.slice(0, -2).join('.');
+  return '@';
+}
+
+async function checkStoreDomainDns(domain) {
+  const normalized = normalizeDomain(domain);
+  if (!isValidDomain(normalized)) return { ok: false, status: 'failed', message: 'Domínio inválido.' };
+  const targetHost = customDomainTargetHost();
+  const targetIp = customDomainTargetIp();
+  const details = { cname: [], a: [], target_host: targetHost, target_ip: targetIp };
+
+  try {
+    details.cname = (await dns.resolveCname(normalized)).map(normalizeDomain);
+  } catch {}
+
+  try {
+    details.a = await dns.resolve4(normalized);
+  } catch {}
+
+  const cnameMatches = details.cname.some((value) => value === targetHost || value.endsWith(`.${targetHost}`));
+  const aMatches = Boolean(targetIp && details.a.includes(targetIp));
+  if (cnameMatches || aMatches) {
+    return { ok: true, status: 'verified', message: 'DNS encontrado corretamente.', details };
+  }
+
+  const expected = targetIp
+    ? `Crie um CNAME para ${targetHost} ou um registro A para ${targetIp}.`
+    : `Crie um CNAME apontando para ${targetHost}.`;
+  return {
+    ok: false,
+    status: 'pending',
+    message: `Ainda não encontramos o apontamento deste domínio. ${expected} Depois aguarde a propagação e tente novamente.`,
+    details
+  };
 }
 
 async function getCompanyById(id) {
@@ -14705,6 +14812,16 @@ async function serveStatic(res, requestPath, hostHeader = '') {
     return;
   }
 
+  const helpRedirectUrl = helpHostRedirectUrl(requestPath, hostHeader);
+  if (helpRedirectUrl) {
+    res.writeHead(302, {
+      Location: helpRedirectUrl,
+      'Cache-Control': 'no-store'
+    });
+    res.end();
+    return;
+  }
+
   const routedPath = routePath(requestPath, hostHeader);
   const filePath = path.normalize(path.join(publicDir, routedPath));
 
@@ -14714,6 +14831,35 @@ async function serveStatic(res, requestPath, hostHeader = '') {
   }
 
   await sendFile(res, filePath);
+}
+
+function helpHostRedirectUrl(requestPath, hostHeader = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  const isHelpHost = isHelpHostname(hostname);
+  if (!isHelpHost) return '';
+
+  const allowedHelpPaths = new Set([
+    '/',
+    '/ajuda',
+    '/help',
+    '/ajuda.html',
+    '/ajuda.css',
+    '/ajuda.js',
+    '/assets/tapronto-favicon.svg',
+    '/favicon.ico',
+    '/robots.txt',
+    '/sitemap.xml'
+  ]);
+  const isAssetPath = requestPath.startsWith('/assets/');
+  if (allowedHelpPaths.has(requestPath) || isAssetPath) return '';
+
+  const baseUrl = publicAppBaseUrl({ headers: {} }) || 'https://taprontomenu.com.br';
+  return `${baseUrl}${requestPath || '/'}`;
+}
+
+function isHelpHostname(hostname = '') {
+  const helpHosts = csvEnv('HELP_HOSTS');
+  return helpHosts.includes(hostname) || hostname.startsWith('ajuda.');
 }
 
 async function serveUpload(res, requestPath) {
@@ -14730,10 +14876,9 @@ function routePath(requestPath, hostHeader = '') {
   const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
   const panelHosts = csvEnv('PANEL_HOSTS');
   const platformHosts = csvEnv('PLATFORM_HOSTS');
-  const helpHosts = csvEnv('HELP_HOSTS');
   const isPanelHost = panelHosts.includes(hostname) || hostname.startsWith('painel.');
   const isPlatformHost = platformHosts.includes(hostname) || hostname.startsWith('platform.');
-  const isHelpHost = helpHosts.includes(hostname) || hostname.startsWith('ajuda.');
+  const isHelpHost = isHelpHostname(hostname);
 
   if (requestPath === '/' && isPanelHost) return '/admin.html';
   if (requestPath === '/' && isPlatformHost) return '/platform.html';

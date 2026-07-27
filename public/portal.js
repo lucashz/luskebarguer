@@ -491,8 +491,8 @@ function portalPlanHighlights(plan) {
   const code = String(plan?.code || '').toLowerCase();
   if (code.includes('trial')) return ['Até 10 produtos', 'Até 3 categorias', 'Até 30 pedidos', '1 usuário'];
   if (code.includes('essential')) return ['Até 25 produtos', 'Até 150 pedidos/mês', '1 usuário', 'WhatsApp manual'];
-  if (code.includes('professional')) return ['Até 100 produtos', 'Pedidos ilimitados', 'Até 5 usuários', 'Mesas, cupons, KDS e relatórios'];
-  if (code.includes('premium')) return ['Produtos ilimitados', 'Automação WhatsApp', 'Fidelidade e domínio próprio', 'Suporte prioritário'];
+  if (code.includes('professional')) return ['Até 100 produtos', 'Pedidos ilimitados', 'WhatsApp manual', 'Automação WhatsApp como adicional'];
+  if (code.includes('premium')) return ['Produtos ilimitados', 'WhatsApp automático incluso', 'Fidelidade e domínio próprio', 'Suporte prioritário'];
   return (plan.features || []).slice(0, 4).map((feature) => {
     const limit = feature.limit_value === null || feature.limit_value === undefined ? '' : ` até ${feature.limit_value}`;
     return `${feature.name || feature.code}${limit}`;
