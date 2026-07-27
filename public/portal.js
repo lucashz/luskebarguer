@@ -7,6 +7,7 @@ const slugInput = document.querySelector('#signupSlug');
 const slugStatus = document.querySelector('#slugStatus');
 const signupMessage = document.querySelector('#signupMessage');
 const signupSubmitButton = document.querySelector('#signupSubmitButton');
+let signupActivationEmail = '';
 const portalResetPasswordForm = document.querySelector('#portalResetPasswordForm');
 const portalActivationButton = document.querySelector('#portalActivationButton');
 const onboardingChecklist = document.querySelector('#onboardingChecklist');
@@ -223,7 +224,9 @@ async function submitSignup(event) {
       body: JSON.stringify(payload)
     });
     if (data.needs_activation) {
+      signupActivationEmail = String(payload.owner.email || '').trim();
       signupMessage.textContent = data.message || 'Conta criada. Confira seu e-mail para ativar o acesso.';
+      renderSignupActivationActions();
       signupForm.classList.add('signup-created');
       setSignupLoading(false);
       if (signupSubmitButton) {
@@ -244,6 +247,48 @@ function setSignupLoading(isLoading) {
   if (signupSubmitButton) {
     signupSubmitButton.disabled = isLoading;
     signupSubmitButton.textContent = isLoading ? 'Criando...' : 'Criar loja';
+  }
+}
+
+function renderSignupActivationActions() {
+  if (!signupMessage || document.querySelector('#resendActivationButton')) return;
+  const actions = document.createElement('div');
+  actions.className = 'portal-activation-actions';
+  actions.innerHTML = `
+    <span>O link expira em 24 horas. Confira também a caixa de spam ou lixo eletrônico.</span>
+    <button class="portal-button small ghost" id="resendActivationButton" type="button">Reenviar confirmação</button>
+  `;
+  signupMessage.insertAdjacentElement('afterend', actions);
+  actions.querySelector('#resendActivationButton')?.addEventListener('click', (event) => {
+    resendSignupActivationEmail(event.currentTarget);
+  });
+}
+
+async function resendSignupActivationEmail(button) {
+  const email = signupActivationEmail || String(signupForm?.elements.owner_email?.value || '').trim();
+  const originalText = button?.textContent || 'Reenviar confirmação';
+  if (!email) {
+    if (signupMessage) signupMessage.textContent = 'Informe o e-mail da conta para reenviar a confirmação.';
+    return;
+  }
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Reenviando...';
+    }
+    const data = await request('/api/portal/resend-activation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    if (signupMessage) signupMessage.textContent = data.message || 'Enviamos um novo link de ativação.';
+  } catch (error) {
+    if (signupMessage) signupMessage.textContent = error.message || 'Não foi possível reenviar a confirmação agora.';
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 }
 

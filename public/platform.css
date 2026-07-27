@@ -17,6 +17,10 @@ body.platform-redesign {
   margin: 0;
   background: var(--pf-bg);
   color: var(--pf-text);
+  font-family: var(--font-sans, "Inter", "Segoe UI Variable Text", "Segoe UI", Arial, ui-sans-serif, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   overflow: hidden;
 }
 
@@ -28,6 +32,34 @@ body.platform-redesign *::after {
 
 body.platform-redesign [hidden] {
   display: none !important;
+}
+
+.platform-redesign h1,
+.platform-redesign h2,
+.platform-redesign h3,
+.platform-redesign h4,
+.platform-redesign strong,
+.platform-redesign b,
+.platform-redesign label,
+.platform-redesign button,
+.platform-redesign select,
+.platform-redesign input,
+.platform-redesign textarea {
+  letter-spacing: 0;
+  font-synthesis-weight: none;
+}
+
+.platform-redesign h1,
+.platform-redesign h2,
+.platform-redesign h3 {
+  font-weight: 750;
+}
+
+.platform-redesign strong,
+.platform-redesign b,
+.platform-redesign label,
+.platform-redesign button {
+  font-weight: 700;
 }
 
 .platform-redesign .platform-shell {
@@ -2385,6 +2417,57 @@ body.platform-redesign [hidden] {
   border-left-color: #94a3b8;
 }
 
+.platform-redesign .platform-provider-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.platform-redesign .platform-whatsapp-economy {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--pf-border);
+  border-radius: 12px;
+  background: var(--pf-soft);
+}
+
+.platform-redesign .platform-whatsapp-economy article {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--pf-border);
+  border-left: 3px solid var(--pf-border-strong);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.platform-redesign .platform-whatsapp-economy article.ok {
+  border-left-color: var(--pf-green);
+}
+
+.platform-redesign .platform-whatsapp-economy article.warn {
+  border-left-color: var(--pf-amber);
+}
+
+.platform-redesign .platform-whatsapp-economy span {
+  color: var(--pf-muted);
+  font-size: .78rem;
+}
+
+.platform-redesign .platform-whatsapp-economy strong {
+  color: var(--pf-text);
+  font-size: 1rem;
+}
+
+.platform-redesign .platform-whatsapp-economy p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--pf-muted);
+  font-size: .84rem;
+}
+
 .platform-redesign .platform-status-card > span {
   width: max-content;
   max-width: 100%;
@@ -2626,7 +2709,9 @@ body.platform-redesign [hidden] {
   .platform-redesign .platform-billing-mini-grid,
   .platform-redesign .platform-billing-payment-grid,
   .platform-redesign .platform-conversion-grid,
-  .platform-redesign .platform-ranking-row {
+  .platform-redesign .platform-ranking-row,
+  .platform-redesign .platform-provider-cost-grid,
+  .platform-redesign .platform-whatsapp-economy {
     grid-template-columns: 1fr;
   }
 

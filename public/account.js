@@ -316,8 +316,8 @@ function applyPageMode() {
   const isOrders = state.view === 'orders';
   const storeTitle = state.store?.page_title || state.store?.name || 'Cardápio';
   document.title = `${isOrders ? 'Meus Pedidos' : 'Minha Conta'} - ${storeTitle}`;
-  if (els.loadingEyebrow) els.loadingEyebrow.textContent = isOrders ? 'Meus pedidos' : 'Minha conta';
-  if (els.pageEyebrow) els.pageEyebrow.textContent = isOrders ? 'Meus pedidos' : 'Minha conta';
+  if (els.loadingEyebrow) els.loadingEyebrow.textContent = isOrders ? 'Meus Pedidos' : 'Minha Conta';
+  if (els.pageEyebrow) els.pageEyebrow.textContent = isOrders ? 'Meus Pedidos' : 'Minha Conta';
   if (els.accountOrdersLink) els.accountOrdersLink.hidden = isOrders;
   if (els.accountDashboardLink) els.accountDashboardLink.hidden = !isOrders;
   if (els.editProfileButton) els.editProfileButton.hidden = isOrders;
@@ -326,7 +326,7 @@ function applyPageMode() {
 
 function fillProfile() {
   const customer = state.customer || {};
-  els.customerName.textContent = state.view === 'orders' ? 'Meus pedidos' : (customer.name || 'Cliente');
+  els.customerName.textContent = state.view === 'orders' ? 'Meus Pedidos' : (customer.name || 'Cliente');
   setValue(els.profileForm.elements.name, customer.name);
   setValue(els.profileForm.elements.phone, customer.phone);
   setValue(els.profileForm.elements.email, customer.email);

@@ -30,6 +30,9 @@ body {
   background: var(--home-soft);
   color: var(--home-text);
   font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
 
@@ -47,6 +50,26 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: 0;
+  font-synthesis-weight: none;
+}
+
+.home-button,
+.home-nav a,
+.home-login,
+.home-badge,
+.home-carousel-controls button,
+.home-float-card strong,
+.home-plan-card strong,
+.faq-container summary {
+  font-weight: 700;
+  letter-spacing: 0;
+  font-synthesis-weight: none;
 }
 
 .sr-only {

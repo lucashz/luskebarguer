@@ -130,6 +130,8 @@ model Company {
   featureOverrides   CompanyFeatureOverride[]
   usageCounters      CompanyUsageCounter[]
   usageEvents        UsageEvent[]
+  whatsappIntegrations StoreWhatsappIntegration[]
+  whatsappMessageLogs WhatsappMessageLog[]
   onboarding         OnboardingProgress[]
   subscriptionEvents SubscriptionEvent[]
   paymentTransactions SubscriptionPaymentTransaction[]
@@ -165,6 +167,8 @@ model Store {
   orderItems    OrderItem[]
   printLogs     OrderPrintLog[]
   whatsappLogs  OrderWhatsappLog[]
+  whatsappIntegrations StoreWhatsappIntegration[]
+  whatsappMessageLogs WhatsappMessageLog[]
   paymentEvents OrderPaymentEvent[]
   tables        DiningTable[]
   tabs          CustomerTab[]
@@ -498,6 +502,7 @@ model Order {
   items         OrderItem[]
   printLogs     OrderPrintLog[]
   whatsappLogs  OrderWhatsappLog[]
+  whatsappMessageLogs WhatsappMessageLog[]
   paymentEvents OrderPaymentEvent[]
 
   @@index([storeId, status, archivedAt, createdAt])
@@ -603,6 +608,110 @@ model OrderWhatsappLog {
 
   @@index([storeId, orderId, createdAt])
   @@map("order_whatsapp_logs")
+}
+
+model PlatformWhatsappSetting {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider        String    @default("evolution")
+  baseUrl         String?   @map("base_url")
+  apiKeyEncrypted String?   @map("api_key_encrypted")
+  isActive        Boolean   @default(false) @map("is_active")
+  lastTestStatus  String?   @map("last_test_status")
+  lastTestAt      DateTime? @map("last_test_at") @db.Timestamptz(6)
+  lastTestMessage String?   @map("last_test_message")
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("platform_whatsapp_settings")
+}
+
+model PlatformWhatsappProviderAccount {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider          String    @default("evolution")
+  status            String    @default("inactive")
+  balanceCents      Int       @default(0) @map("balance_cents")
+  instanceCostCents Int       @default(2990) @map("instance_cost_cents")
+  lowBalanceCents   Int       @default(2990) @map("low_balance_cents")
+  billingCycleDays  Int       @default(30) @map("billing_cycle_days")
+  notes             String?
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([provider, status])
+  @@map("platform_whatsapp_provider_accounts")
+}
+
+model StoreWhatsappIntegration {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId           String?   @map("company_id") @db.Uuid
+  storeId             String    @map("store_id") @db.Uuid
+  provider            String    @default("evolution")
+  instanceName        String    @unique @map("instance_name")
+  instanceId          String?   @map("instance_id")
+  status              String    @default("disconnected")
+  phoneNumber         String?   @map("phone_number")
+  qrCodeBase64        String?   @map("qr_code_base64")
+  lastQrAt            DateTime? @map("last_qr_at") @db.Timestamptz(6)
+  connectedAt         DateTime? @map("connected_at") @db.Timestamptz(6)
+  disconnectedAt      DateTime? @map("disconnected_at") @db.Timestamptz(6)
+  lastError           String?   @map("last_error")
+  monthlyMessageCount Int       @default(0) @map("monthly_message_count")
+  monthlyCostCents    Int       @default(2990) @map("monthly_cost_cents")
+  nextBillingAt       DateTime? @map("next_billing_at") @db.Timestamptz(6)
+  billingStatus       String    @default("pending") @map("billing_status")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, provider])
+  @@index([companyId, status, updatedAt])
+  @@index([storeId, status])
+  @@map("store_whatsapp_integrations")
+}
+
+model WhatsappInstanceEvent {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId    String?  @map("company_id") @db.Uuid
+  storeId      String?  @map("store_id") @db.Uuid
+  integrationId String? @map("integration_id") @db.Uuid
+  provider     String   @default("evolution")
+  eventType    String   @map("event_type")
+  status       String   @default("info")
+  costCents    Int      @default(0) @map("cost_cents")
+  message      String?
+  metadata     Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([storeId, createdAt])
+  @@index([provider, eventType, createdAt])
+  @@map("whatsapp_instance_events")
+}
+
+model WhatsappMessageLog {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId         String?  @map("company_id") @db.Uuid
+  storeId           String?  @map("store_id") @db.Uuid
+  orderId           String?  @map("order_id") @db.Uuid
+  provider          String   @default("evolution")
+  instanceName      String?  @map("instance_name")
+  destinationPhone  String?  @map("destination_phone")
+  messageType       String   @default("order_status") @map("message_type")
+  status            String   @default("pending")
+  errorMessage      String?  @map("error_message")
+  providerMessageId String?  @map("provider_message_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store   Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, createdAt])
+  @@index([orderId, createdAt])
+  @@map("whatsapp_message_logs")
 }
 
 model OrderPaymentEvent {

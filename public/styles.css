@@ -1,4 +1,6 @@
-﻿:root {
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
+
+:root {
   color-scheme: light;
   --color-primary: #d71920;
   --color-secondary: #1f1f1f;
@@ -18,7 +20,10 @@
   --ok: #16834a;
   --warn: #a16207;
   --shadow: 0 16px 38px rgba(24, 24, 27, 0.08);
-  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Inter", Arial, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", Arial, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: "Sora", "Inter", "Segoe UI", Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-weight-strong: 700;
+  --font-weight-heavy: 800;
 }
 
 /* Platform SaaS visual system */
@@ -810,6 +815,101 @@
     max-width: 100%;
     justify-self: stretch;
   }
+}
+
+/* Final typography pass for legacy admin/cardapio screens that define heavier weights later in the file. */
+body:not(.home-page),
+body:not(.home-page) input,
+body:not(.home-page) textarea,
+body:not(.home-page) select,
+body:not(.home-page) button {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body:not(.home-page) h1,
+body:not(.home-page) h2,
+body:not(.home-page) h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+body:not(.home-page) strong,
+body:not(.home-page) b,
+body:not(.home-page) label,
+body:not(.home-page) summary,
+body:not(.home-page) button {
+  font-weight: 700;
+  letter-spacing: 0;
+  font-synthesis-weight: none;
+}
+
+/* Global typography polish: keep text crisp and consistent across admin, auth, menu and checkout pages. */
+body,
+input,
+textarea,
+select,
+button {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+.admin-header h1,
+.section-actions h2,
+.auth-card h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+h4,
+h5,
+h6,
+strong,
+b,
+label,
+summary,
+.primary-button,
+.secondary-button,
+.ghost-button,
+.danger-button,
+.admin-nav button,
+.tab-button,
+.segment-button,
+.platform-tabs button {
+  font-weight: 700;
+  letter-spacing: 0;
+  font-synthesis-weight: none;
+}
+
+.eyebrow,
+.section-kicker,
+.admin-kicker {
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.form-message,
+.toast,
+.badge,
+.pill,
+.status-pill {
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.muted,
+small,
+.hint {
+  font-weight: 400;
 }
 
 /* Platform redesign based on the Figma Make support center. Keep this block last. */
@@ -5603,39 +5703,50 @@ textarea {
   padding: 10px 12px;
 }
 
-.plan-top-grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 1.35fr) minmax(240px, .85fr) minmax(220px, .65fr);
-  gap: 16px;
-  align-items: stretch;
-}
-
-.plan-main-card,
+.plan-summary-card,
 .plan-mini-list {
   display: grid;
   gap: 12px;
 }
 
-.plan-main-card {
-  min-height: 100%;
+.plan-summary-panel {
+  padding: 18px;
+}
+
+.plan-summary-card {
   border-radius: 8px;
+}
+
+.plan-summary-card.has-pending {
+  border-left: 4px solid #dc2626;
+  padding-left: 14px;
+}
+
+.plan-summary-main {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 18px;
+  align-items: start;
 }
 
 .plan-main-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
-.plan-main-card h2,
-.plan-top-grid h2 {
+.plan-main-title h2,
+#planUsage h2 {
   margin: 0;
 }
 
-.plan-main-card > strong {
+.plan-price {
   color: #111827;
-  font-size: 1.55rem;
+  font-size: 1.25rem;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .plan-status {
@@ -5667,6 +5778,55 @@ textarea {
   color: #b91c1c;
 }
 
+.plan-summary-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.plan-summary-meta article {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+  background: #fff;
+}
+
+.plan-summary-meta span,
+.plan-summary-meta small {
+  color: #64748b;
+}
+
+.plan-summary-meta strong {
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.plan-pending-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff5f5;
+  padding: 12px;
+}
+
+.plan-pending-callout div {
+  display: grid;
+  gap: 2px;
+}
+
+.plan-pending-callout strong {
+  color: #b91c1c;
+}
+
+.plan-pending-callout span {
+  color: #7f1d1d;
+}
+
 .plan-actions {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;
@@ -5693,19 +5853,28 @@ textarea {
   color: #111827;
 }
 
+.plan-panel-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
 .plan-usage-list {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
 }
 
 .plan-usage-row {
   display: grid;
-  grid-template-columns: minmax(220px, .4fr) minmax(240px, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 12px;
+  padding: 12px 14px;
   background: #fff;
 }
 
@@ -5719,8 +5888,15 @@ textarea {
   font-weight: 850;
 }
 
+.plan-progress-wrap {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
 .plan-progress {
-  height: 10px;
+  height: 7px;
   border-radius: 999px;
   overflow: hidden;
   background: #f3f4f6;
@@ -5744,12 +5920,175 @@ textarea {
   background: #ef4444;
 }
 
-.feature-list.compact {
-  gap: 6px;
+.plan-unlimited {
+  color: #047857;
+  font-size: .95rem;
 }
 
-.feature-row.compact {
+.feature-list.compact {
+  gap: 12px;
+}
+
+.plan-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.plan-feature-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.plan-feature-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.plan-feature-group-title span {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+}
+
+.plan-feature-group-title div {
+  display: grid;
+  gap: 1px;
+}
+
+.plan-feature-group-title strong {
+  font-size: .95rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.plan-feature-group-title small {
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 600;
+}
+
+.plan-feature-items {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-feature-chip {
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfdff;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.plan-feature-chip.disabled {
+  opacity: .58;
+  background: #f8fafc;
+}
+
+.plan-feature-chip strong,
+.plan-feature-chip small {
+  display: block;
+}
+
+.plan-feature-chip strong {
+  color: #0f172a;
+  font-size: .92rem;
+  font-weight: 750;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.plan-feature-chip small {
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+
+.plan-feature-state {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: .78rem;
+  font-weight: 950;
+}
+
+.plan-feature-chip.disabled .plan-feature-state {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.plan-feature-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(130px, max-content)) minmax(260px, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.plan-feature-summary article {
+  border: 1px solid #dcfce7;
+  border-radius: 8px;
   padding: 10px 12px;
+  background: #f8fffb;
+  display: grid;
+  gap: 2px;
+}
+
+.plan-feature-summary article.has-blocked {
+  border-color: #fed7aa;
+  background: #fffaf0;
+}
+
+.plan-feature-summary strong {
+  color: #0f172a;
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.plan-feature-summary span,
+.plan-feature-summary p {
+  color: #64748b;
+  font-size: .86rem;
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.plan-feature-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.plan-show-features {
+  justify-self: start;
 }
 
 .plan-compare-grid {
@@ -5769,8 +6108,8 @@ textarea {
 
 .plan-compare-card.current {
   border-color: #fecaca;
-  background: linear-gradient(180deg, #fff7f7 0%, #ffffff 42%);
-  box-shadow: 0 12px 30px rgba(220, 38, 38, 0.08);
+  background: #fff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
 }
 
 .plan-compare-card.featured:not(.current) {
@@ -5804,19 +6143,66 @@ textarea {
   width: 100%;
 }
 
-.plan-history-table {
+.plan-compare-details {
   display: grid;
-  gap: 8px;
+  gap: 12px;
 }
 
+.plan-compare-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.plan-compare-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.plan-compare-details summary span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.plan-compare-details summary > span:last-child {
+  color: #dc2626;
+  font-weight: 850;
+}
+
+.plan-compare-details[open] summary {
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.plan-history-table {
+  display: grid;
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.plan-history-header,
 .plan-history-row {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) minmax(100px, .8fr) minmax(120px, .8fr) minmax(100px, .7fr) auto;
   gap: 10px;
   align-items: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
   padding: 10px 12px;
+  min-width: 640px;
+}
+
+.plan-history-header {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: .82rem;
+  font-weight: 850;
+}
+
+.plan-history-row + .plan-history-row {
+  border-top: 1px solid #edf2f7;
 }
 
 .plan-history-row span {
@@ -6206,11 +6592,21 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .plan-top-grid,
   .plan-actions,
-  .plan-usage-row,
+  .plan-summary-main,
+  .plan-summary-meta,
+  .plan-feature-summary,
   .plan-history-row {
     grid-template-columns: 1fr;
+  }
+
+  .plan-price {
+    text-align: left;
+  }
+
+  .plan-panel-head,
+  .plan-pending-callout {
+    display: grid;
   }
 
   .platform-company-head,
@@ -7763,6 +8159,10 @@ legend {
 
 .admin-page .auth-card {
   width: 100%;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .auth-card,
@@ -7772,6 +8172,8 @@ legend {
 
 .auth-card h1 {
   margin: 6px 0 18px;
+  font-weight: 750;
+  letter-spacing: 0;
 }
 
 .admin-recover-box {
@@ -7784,7 +8186,8 @@ legend {
   width: fit-content;
   cursor: pointer;
   color: var(--accent);
-  font-weight: 850;
+  font-size: .94rem;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -7807,6 +8210,17 @@ legend {
   justify-content: center;
   margin-top: 12px;
   text-decoration: none;
+}
+
+.auth-link-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.auth-link-row .auth-home-button {
+  margin-top: 0;
 }
 
 .account-consent-box {
@@ -8038,6 +8452,7 @@ legend {
 .onboarding-final-checklist article {
   display: grid;
   gap: 5px;
+  align-content: start;
 }
 
 .onboarding-welcome-grid span,
@@ -8089,6 +8504,16 @@ legend {
 .onboarding-final-checklist article.done span {
   background: #dcfce7;
   color: #166534;
+}
+
+.onboarding-final-checklist article small {
+  color: #4b5563;
+  line-height: 1.4;
+}
+
+.onboarding-final-checklist article .ghost-button {
+  justify-self: start;
+  margin-top: 4px;
 }
 
 .onboarding-final-actions,
@@ -9795,6 +10220,135 @@ body.admin-tour-active {
   min-height: 0;
   margin: 0;
   padding: 0;
+}
+
+.integration-assisted-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #dc2626;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.integration-assisted-box p {
+  margin: 3px 0 0;
+}
+
+.integration-assisted-box .compact {
+  flex: 0 0 auto;
+}
+
+.integration-flow-note {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-left: 3px solid #16a34a;
+  border-radius: 8px;
+  background: #fbfdfc;
+  color: #334155;
+  padding: 11px 12px;
+}
+
+.integration-flow-note strong {
+  color: #0f172a;
+}
+
+.integration-flow-note span {
+  color: #475569;
+  line-height: 1.4;
+}
+
+.whatsapp-checklist span::before {
+  content: "✓";
+}
+
+.whatsapp-qr-box {
+  grid-template-columns: 280px minmax(0, 1fr);
+  border-color: #bbf7d0;
+  background: #f8fffb;
+}
+
+.whatsapp-qr-box img {
+  width: 280px;
+  border-color: #d1fae5;
+}
+
+.whatsapp-connect-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.whatsapp-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.whatsapp-checklist span {
+  border: 1px solid #dcfce7;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  padding: 9px 10px;
+  font-size: .9rem;
+  font-weight: 700;
+}
+
+.whatsapp-checklist span::before {
+  content: "✓";
+  margin-right: 6px;
+}
+
+.whatsapp-qr-box {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.whatsapp-qr-box img {
+  width: 220px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.whatsapp-qr-box ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.whatsapp-status-connected {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.whatsapp-status-connecting,
+.whatsapp-status-loading {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.whatsapp-status-error,
+.whatsapp-status-disconnected,
+.whatsapp-status-not_connected {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .integration-help-actions {
@@ -12630,6 +13184,10 @@ body.admin-tour-active {
     grid-template-columns: 1fr;
   }
 
+  .whatsapp-qr-box {
+    grid-template-columns: 1fr;
+  }
+
   .payment-checkout-actions {
     display: grid;
     grid-template-columns: 1fr;
@@ -12908,6 +13466,20 @@ body.admin-tour-active {
 .portal-button:disabled {
   opacity: 0.7;
   cursor: wait;
+}
+
+.portal-activation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #fee2e2;
+  border-radius: 10px;
+  background: #fff7f7;
+  color: #4b5563;
+  font-size: 0.92rem;
 }
 
 .portal-hero,
@@ -13271,7 +13843,15 @@ body.admin-tour-active {
 
 .form-message {
   color: #991b1b;
-  font-weight: 800;
+  font-size: .94rem;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.admin-page .auth-card .eyebrow {
+  font-weight: 750;
+  letter-spacing: .04em;
 }
 
 .signup-intro,
@@ -13929,6 +14509,15 @@ body.admin-tour-active {
 
   .signup-submit-row,
   .signup-submit-row .portal-button {
+    width: 100%;
+  }
+
+  .portal-activation-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .portal-activation-actions .portal-button {
     width: 100%;
   }
 
@@ -15372,6 +15961,26 @@ body.admin-tour-active {
   border-top: 1px solid #e5e7eb;
 }
 
+.integration-card .whatsapp-checklist span::before {
+  content: "✓";
+}
+
+.integration-card .whatsapp-qr-box {
+  grid-template-columns: 280px minmax(0, 1fr);
+  border-color: #bbf7d0;
+  background: #f8fffb;
+}
+
+.integration-card .whatsapp-qr-box img {
+  width: 280px;
+  border-color: #d1fae5;
+}
+
+.support-create-box.context-open {
+  border-left-color: #f59e0b;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, .08);
+}
+
 @media (max-width: 820px) {
   .support-desk-layout {
     grid-template-columns: 1fr;
@@ -15413,6 +16022,15 @@ body.admin-tour-active {
 
   .support-ticket-reply-actions .compact {
     width: 100%;
+  }
+
+  .integration-card .whatsapp-qr-box {
+    grid-template-columns: 1fr;
+  }
+
+  .integration-card .whatsapp-qr-box img {
+    width: min(320px, 100%);
+    justify-self: center;
   }
 }
 

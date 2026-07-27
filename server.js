@@ -164,6 +164,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/portal/resend-activation') {
+    json(res, 200, await resendAdminActivationEmail(req, await readJson(req)));
+    return;
+  }
+
   const portalActivationMatch = url.pathname.match(/^\/api\/portal\/activate\/([a-f0-9]{32,128})$/i);
   if (portalActivationMatch) {
     if (method === 'GET') {
@@ -233,6 +238,11 @@ async function handleApi(req, res, url) {
       provider: url.searchParams.get('provider') || '',
       webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || ''
     }));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/integrations/evolution/webhook') {
+    json(res, 200, await receiveEvolutionWebhook(req, await readJson(req)));
     return;
   }
 
@@ -834,6 +844,54 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/platform/whatsapp/settings') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await getPlatformWhatsappSettings() });
+    return;
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/platform/whatsapp/settings') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await updatePlatformWhatsappSettings(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/whatsapp/test') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await testPlatformWhatsappSettings(req, admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/whatsapp/instances') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, await listPlatformWhatsappInstances(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/whatsapp/logs') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.view');
+    if (!admin) return;
+    json(res, 200, await listPlatformWhatsappLogs(url.searchParams));
+    return;
+  }
+
+  const platformWhatsappActionMatch = url.pathname.match(/^\/api\/platform\/whatsapp\/([a-f0-9-]+)\/(reconnect|disconnect)$/i);
+  if (platformWhatsappActionMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const action = platformWhatsappActionMatch[2];
+    json(res, 200, {
+      whatsapp: action === 'reconnect'
+        ? await reconnectPlatformWhatsappStore(req, admin, platformWhatsappActionMatch[1])
+        : await disconnectPlatformWhatsappStore(req, admin, platformWhatsappActionMatch[1])
+    });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/platform/billing/config') {
     const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
     if (!admin) return;
@@ -1283,6 +1341,55 @@ async function handleApi(req, res, url) {
     if (!admin) return;
     const op = await adminOperationalOptions(admin);
     json(res, 200, { result: await testIntegrations(await readJson(req), admin.store_id, op) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/integrations/payment-setup-request') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 201, await requestPaymentSetupSupport(req, admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/integrations/whatsapp') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await getAdminWhatsappIntegration(admin) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/integrations/whatsapp/connect') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await connectAdminWhatsappIntegration(req, admin) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/integrations/whatsapp/qrcode') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await refreshAdminWhatsappQrCode(admin) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/integrations/whatsapp/status') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await refreshAdminWhatsappStatus(admin) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/integrations/whatsapp/test') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, await sendAdminWhatsappTest(admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/integrations/whatsapp/disconnect') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { whatsapp: await disconnectAdminWhatsappIntegration(req, admin) });
     return;
   }
 
@@ -4376,6 +4483,78 @@ function shouldSendSignupActivationEmail() {
   return process.env.NODE_ENV !== 'test' && process.env.SKIP_SIGNUP_ACTIVATION_EMAIL !== 'true';
 }
 
+async function resendAdminActivationEmail(req, data = {}) {
+  const email = cleanEmail(data.email || data.owner_email || '');
+  if (!email) throw httpError(422, 'Informe o e-mail cadastrado para reenviar a ativação.');
+  if (!shouldSendSignupActivationEmail()) {
+    return { ok: true, message: 'Ambiente de teste: envio de ativação desativado.' };
+  }
+  const [admin] = await dbRequest('GET', 'admin_users', {
+    select: 'id,name,email,company_id,is_active',
+    email: `eq.${email}`,
+    limit: '1'
+  });
+  if (!admin) {
+    return { ok: true, message: 'Se existir uma conta pendente com este e-mail, enviaremos um novo link de ativação.' };
+  }
+  if (admin.is_active !== false) {
+    return { ok: true, message: 'Esta conta já está ativa. Você já pode entrar no painel.' };
+  }
+  const recentTokens = await dbRequest('GET', 'admin_activation_tokens', {
+    select: 'id,created_at',
+    admin_user_id: `eq.${admin.id}`,
+    status: 'eq.pending',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const latest = recentTokens[0];
+  if (latest && Date.now() - new Date(latest.created_at).getTime() < 2 * 60 * 1000) {
+    throw httpError(429, 'Aguarde 2 minutos antes de reenviar o e-mail de ativação.');
+  }
+  const [company] = admin.company_id ? await dbRequest('GET', 'companies', {
+    select: 'id,name,status',
+    id: `eq.${admin.company_id}`,
+    limit: '1'
+  }).catch(() => []) : [];
+  const [store] = admin.company_id ? await dbRequest('GET', 'stores', {
+    select: 'id,company_id,name,slug',
+    company_id: `eq.${admin.company_id}`,
+    order: 'created_at.asc',
+    limit: '1'
+  }).catch(() => []) : [];
+  const activation = await createAdminActivationToken(admin.id);
+  await sendAdminActivationEmail(req, {
+    admin,
+    company: company || { name: '' },
+    store: store || { name: '' },
+    token: activation.token,
+    expiresAt: activation.expiresAt
+  }).catch(async (error) => {
+    await audit('portal.signup.activation_resend_failed', {
+      req,
+      actor_admin_id: admin.id,
+      company_id: admin.company_id || null,
+      store_id: store?.id || null,
+      entity_type: 'admin_user',
+      entity_id: admin.id,
+      severity: 'warning',
+      after_data: { email: maskEmailOrToken(admin.email), message: error.message || 'Falha ao reenviar ativação.' }
+    });
+    throw httpError(502, 'Não foi possível reenviar o e-mail de ativação. Verifique a configuração SMTP.');
+  });
+  await audit('portal.signup.activation_resend', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id || null,
+    store_id: store?.id || null,
+    entity_type: 'admin_user',
+    entity_id: admin.id,
+    severity: 'info',
+    after_data: { email: maskEmailOrToken(admin.email) }
+  });
+  return { ok: true, message: 'Enviamos um novo link de ativação. Ele expira em 24 horas.' };
+}
+
 async function sendAdminActivationEmail(req, { admin, company, store, token, expiresAt }) {
   const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === 'account_activation');
   if (!template?.is_active) throw new Error('Template de ativação desativado.');
@@ -5854,14 +6033,14 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
   const externalId = cleanExternalId(`tapronto-sub-${company.id}-${plan.code}-${Date.now()}`);
   const body = {
     items: [{ id: productId, quantity: 1 }],
-    methods: ['CARD'],
+    methods: ['PIX', 'CARD'],
     returnUrl: `${origin}/painel?billing=cancelled`,
     completionUrl: `${origin}/painel?billing=success`,
     externalId,
-    metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_subscription' }
+    metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_monthly_charge' }
   };
   if (customerId) body.customerId = customerId;
-  const data = await providerFetch(`${ABACATEPAY_API_BASE}/subscriptions/create`, {
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
     method: 'POST',
     token: config.api_key,
     body
@@ -5869,10 +6048,10 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
   const payload = data.data || data;
   const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
   if (!checkoutUrl) {
-    throw httpError(502, 'A Abacate Pay criou a assinatura, mas não retornou a URL de checkout.');
+    throw httpError(502, 'A Abacate Pay criou a cobrança mensal, mas não retornou a URL de checkout.');
   }
   return {
-    subscriptionId: String(payload.id || payload.subscriptionId || payload.billingId || ''),
+    subscriptionId: String(payload.id || payload.checkoutId || payload.billingId || ''),
     transactionId: externalId,
     checkoutUrl
   };
@@ -7568,11 +7747,878 @@ async function markSmtpTest(status) {
   }, ['Prefer: return=minimal']).catch(() => {});
 }
 
+async function getPlatformWhatsappSettings() {
+  const rows = await dbRequest('GET', 'platform_whatsapp_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const row = rows[0] || null;
+  if (!row) {
+    const fallback = publicPlatformWhatsappSettings({
+      provider: 'evolution',
+      base_url: process.env.EVOLUTION_API_URL || '',
+      api_key_encrypted: process.env.EVOLUTION_API_KEY || '',
+      is_active: Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
+      source: process.env.EVOLUTION_API_URL ? 'env' : 'empty'
+    });
+    fallback.provider_account = await publicPlatformWhatsappProviderAccount();
+    return fallback;
+  }
+  const settings = publicPlatformWhatsappSettings(row);
+  settings.provider_account = await publicPlatformWhatsappProviderAccount();
+  return settings;
+}
+
+async function privatePlatformWhatsappSettings() {
+  const rows = await dbRequest('GET', 'platform_whatsapp_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const row = rows[0] || {};
+  return {
+    id: row.id || null,
+    provider: cleanText(row.provider || 'evolution').toLowerCase(),
+    base_url: cleanText(row.base_url || process.env.EVOLUTION_API_URL || '').replace(/\/+$/, ''),
+    api_key: row.api_key_encrypted || process.env.EVOLUTION_API_KEY || '',
+    is_active: row.is_active === true || Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
+    webhook_secret: process.env.EVOLUTION_WEBHOOK_SECRET || ''
+  };
+}
+
+function publicPlatformWhatsappSettings(row = {}) {
+  const baseUrl = cleanText(row.base_url || process.env.EVOLUTION_API_URL || '').replace(/\/+$/, '');
+  const apiKey = row.api_key_encrypted || process.env.EVOLUTION_API_KEY || '';
+  const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
+  return {
+    id: row.id || null,
+    provider: cleanText(row.provider || 'evolution') || 'evolution',
+    base_url: baseUrl,
+    has_api_key: Boolean(apiKey),
+    api_key_masked: apiKey ? maskEmailOrToken(apiKey) : '',
+    is_active: row.is_active === true,
+    webhook_url: origin ? `${origin}/api/integrations/evolution/webhook` : '/api/integrations/evolution/webhook',
+    source: row.source || 'database',
+    last_test_status: row.last_test_status || null,
+    last_test_at: row.last_test_at || null,
+    last_test_message: row.last_test_message || '',
+    updated_at: row.updated_at || null
+  };
+}
+
+async function updatePlatformWhatsappSettings(req, admin, data = {}) {
+  await assertPlatformAdminPassword(req, admin, data.password || data.superadmin_password || '');
+  const currentRows = await dbRequest('GET', 'platform_whatsapp_settings', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  const current = currentRows[0] || null;
+  const nextApiKey = cleanText(data.api_key || data.apiKey || '').slice(0, 1000);
+  const payload = {
+    provider: cleanSlug(data.provider || 'evolution') || 'evolution',
+    base_url: cleanText(data.base_url || data.baseUrl || '').replace(/\/+$/, '').slice(0, 500) || null,
+    ...(nextApiKey && !isMaskedSecretValue(nextApiKey) ? { api_key_encrypted: nextApiKey } : {}),
+    is_active: data.is_active === true || data.is_active === 'true',
+    metadata: { updated_by: admin.id },
+    updated_at: new Date().toISOString()
+  };
+  if (!payload.base_url) throw httpError(422, 'Informe a URL base da Evolution API.');
+  const [saved] = current
+    ? await dbRequest('PATCH', 'platform_whatsapp_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
+    : await dbRequest('POST', 'platform_whatsapp_settings', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  const providerAccount = await upsertPlatformWhatsappProviderAccount(data, admin);
+  await audit('platform.whatsapp.settings.update', {
+    req,
+    actor_admin_id: admin.id,
+    entity_type: 'platform_whatsapp_settings',
+    entity_id: saved.id,
+    severity: 'warning',
+    before_data: current ? publicPlatformWhatsappSettings(current) : null,
+    after_data: publicPlatformWhatsappSettings(saved)
+  });
+  const publicSettings = publicPlatformWhatsappSettings(saved);
+  publicSettings.provider_account = providerAccount;
+  return publicSettings;
+}
+
+async function getPlatformWhatsappProviderAccount() {
+  const rows = await dbRequest('GET', 'platform_whatsapp_provider_accounts', {
+    select: '*',
+    provider: 'eq.evolution',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  return rows[0] || null;
+}
+
+async function publicPlatformWhatsappProviderAccount(row = null) {
+  const account = row || await getPlatformWhatsappProviderAccount();
+  const [instances, events] = await Promise.all([
+    dbRequest('GET', 'store_whatsapp_integrations', {
+      select: 'id,status,monthly_cost_cents,next_billing_at,billing_status',
+      provider: 'eq.evolution',
+      limit: '5000'
+    }).catch(() => []),
+    dbRequest('GET', 'whatsapp_instance_events', {
+      select: 'id,event_type,status,cost_cents,message,created_at',
+      provider: 'eq.evolution',
+      order: 'created_at.desc',
+      limit: '5'
+    }).catch(() => [])
+  ]);
+  const billable = instances.filter((entry) => !['cancelled', 'removed', 'deleted'].includes(String(entry.billing_status || '').toLowerCase()));
+  const connected = instances.filter((entry) => ['connected', 'connecting'].includes(normalizeWhatsappIntegrationStatus(entry.status)));
+  const balanceCents = Number(account?.balance_cents || 0);
+  const instanceCostCents = Number(account?.instance_cost_cents || 2990);
+  const monthlyCostCents = billable.reduce((sum, entry) => sum + Number(entry.monthly_cost_cents || instanceCostCents), 0);
+  return {
+    id: account?.id || null,
+    provider: account?.provider || 'evolution',
+    status: account?.status || 'not_configured',
+    balance_cents: balanceCents,
+    instance_cost_cents: instanceCostCents,
+    low_balance_cents: Number(account?.low_balance_cents || instanceCostCents),
+    billing_cycle_days: Number(account?.billing_cycle_days || 30),
+    active_instances: connected.length,
+    billable_instances: billable.length,
+    monthly_cost_cents: monthlyCostCents,
+    balance_after_next_instance_cents: balanceCents - instanceCostCents,
+    has_credit_for_new_instance: balanceCents >= instanceCostCents && ['active', 'ok'].includes(String(account?.status || '').toLowerCase()),
+    low_balance: balanceCents <= Number(account?.low_balance_cents || instanceCostCents),
+    recent_events: events,
+    updated_at: account?.updated_at || null
+  };
+}
+
+async function upsertPlatformWhatsappProviderAccount(data = {}, admin = {}) {
+  const current = await getPlatformWhatsappProviderAccount();
+  const rawBalance = data.provider_balance ?? data.balance_cents ?? data.balance;
+  const rawCost = data.provider_instance_cost ?? data.instance_cost_cents ?? data.instance_cost;
+  const rawLowBalance = data.provider_low_balance ?? data.low_balance_cents ?? data.low_balance;
+  const payload = {
+    provider: 'evolution',
+    status: data.provider_status || data.account_status || (data.provider_is_active === false ? 'inactive' : 'active'),
+    ...(rawBalance !== undefined && rawBalance !== '' ? { balance_cents: platformMoneyInputToCents(rawBalance) } : {}),
+    ...(rawCost !== undefined && rawCost !== '' ? { instance_cost_cents: platformMoneyInputToCents(rawCost) } : {}),
+    ...(rawLowBalance !== undefined && rawLowBalance !== '' ? { low_balance_cents: platformMoneyInputToCents(rawLowBalance) } : {}),
+    billing_cycle_days: clampNumber(Number(data.billing_cycle_days || data.provider_billing_cycle_days || current?.billing_cycle_days || 30), 1, 365),
+    notes: cleanText(data.provider_notes || data.notes || '').slice(0, 1000) || current?.notes || null,
+    metadata: { updated_by: admin.id || null },
+    updated_at: new Date().toISOString()
+  };
+  const [saved] = current
+    ? await dbRequest('PATCH', 'platform_whatsapp_provider_accounts', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
+    : await dbRequest('POST', 'platform_whatsapp_provider_accounts', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  return publicPlatformWhatsappProviderAccount(saved);
+}
+
+function platformMoneyInputToCents(value) {
+  const parsed = parseMoneyInput(value);
+  if (parsed !== null) return Math.round(parsed * 100);
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric * 100) : 0;
+}
+
+async function testPlatformWhatsappSettings(req, admin) {
+  const config = await privatePlatformWhatsappSettings();
+  if (!config.is_active || !config.base_url || !config.api_key) {
+    throw httpError(422, 'Evolution API não está configurada ou ativa.');
+  }
+  try {
+    await evolutionRequest('/instance/fetchInstances', { method: 'GET' }, config).catch(async (error) => {
+      if (![404, 405].includes(Number(error.status))) throw error;
+      return evolutionRequest('/instance/list', { method: 'GET' }, config);
+    });
+    await markPlatformWhatsappTest('success', 'Conexão com Evolution validada.');
+    await audit('platform.whatsapp.settings.test', {
+      req,
+      actor_admin_id: admin.id,
+      entity_type: 'platform_whatsapp_settings',
+      severity: 'info',
+      after_data: { status: 'success', provider: config.provider }
+    });
+    return { ok: true, message: 'Conexão com Evolution API validada.' };
+  } catch (error) {
+    const message = error.message || 'Falha ao testar Evolution API.';
+    await markPlatformWhatsappTest('failed', message).catch(() => {});
+    await audit('platform.whatsapp.settings.test', {
+      req,
+      actor_admin_id: admin.id,
+      entity_type: 'platform_whatsapp_settings',
+      severity: 'warning',
+      after_data: { status: 'failed', message: safeCommandOutput(message) }
+    });
+    throw httpError(502, 'Não foi possível conectar na Evolution API. Verifique URL e API key.');
+  }
+}
+
+async function markPlatformWhatsappTest(status, message = '') {
+  const rows = await dbRequest('GET', 'platform_whatsapp_settings', { select: 'id', order: 'created_at.desc', limit: '1' }).catch(() => []);
+  if (!rows[0]) return;
+  await dbRequest('PATCH', 'platform_whatsapp_settings', { id: `eq.${rows[0].id}` }, {
+    last_test_status: status,
+    last_test_at: new Date().toISOString(),
+    last_test_message: cleanText(message).slice(0, 500),
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']).catch(() => {});
+}
+
+async function listPlatformWhatsappInstances(params = new URLSearchParams()) {
+  const status = cleanText(params.get('status') || '');
+  const query = {
+    select: '*',
+    order: 'updated_at.desc',
+    limit: String(clampNumber(Number(params.get('limit') || 100), 1, 500))
+  };
+  if (status) query.status = `eq.${status}`;
+  const rows = await dbRequest('GET', 'store_whatsapp_integrations', query).catch(() => []);
+  return { instances: rows.map(publicStoreWhatsappIntegration) };
+}
+
+async function listPlatformWhatsappLogs(params = new URLSearchParams()) {
+  const query = {
+    select: '*',
+    order: 'created_at.desc',
+    limit: String(clampNumber(Number(params.get('limit') || 100), 1, 500))
+  };
+  const storeId = cleanUuid(params.get('store_id') || '');
+  if (storeId) query.store_id = `eq.${storeId}`;
+  const rows = await dbRequest('GET', 'whatsapp_message_logs', query).catch(() => []);
+  return { logs: rows.map(publicWhatsappMessageLog) };
+}
+
+async function getAdminWhatsappIntegration(admin) {
+  const store = await getStoreSettings(admin.store_id);
+  const integration = await getStoreWhatsappIntegration(admin.store_id);
+  const settings = await getPlatformWhatsappSettings();
+  return {
+    configured: settings.is_active && settings.has_api_key && Boolean(settings.base_url),
+    store_phone: store.whatsapp_number || '',
+    ...publicStoreWhatsappIntegration(integration),
+    webhook_url: settings.webhook_url
+  };
+}
+
+async function connectAdminWhatsappIntegration(req, admin) {
+  await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
+  const config = await privatePlatformWhatsappSettings();
+  if (!config.is_active || !config.base_url || !config.api_key) throw httpError(503, 'WhatsApp automático ainda não foi configurado pela Central.');
+  const store = await getStoreSettings(admin.store_id);
+  const existing = await getStoreWhatsappIntegration(admin.store_id);
+  const providerReserve = existing ? null : await assertWhatsappProviderCreditForNewInstance(req, admin, store);
+  const instanceName = existing?.instance_name || buildEvolutionInstanceName(store);
+  let providerData = null;
+  try {
+    providerData = existing?.instance_name
+      ? await evolutionConnectInstance(instanceName, config)
+      : await evolutionCreateInstance(instanceName, store, config);
+    await setEvolutionWebhook(instanceName, config).catch(() => null);
+  } catch (error) {
+    await upsertStoreWhatsappIntegration({
+      current: existing,
+      store,
+      instance_name: instanceName,
+      status: 'error',
+      last_error: error.message || 'Falha ao criar instância.'
+    });
+    throw httpError(502, 'Não foi possível gerar o QR Code do WhatsApp. Tente novamente em instantes.');
+  }
+  const saved = await upsertStoreWhatsappIntegration({
+    current: existing,
+    store,
+    instance_name: instanceName,
+    instance_id: providerData.instance_id || existing?.instance_id || null,
+    status: providerData.status || 'connecting',
+    qr_code_base64: providerData.qr_code_base64 || existing?.qr_code_base64 || null,
+    last_qr_at: providerData.qr_code_base64 ? new Date().toISOString() : existing?.last_qr_at || null,
+    last_error: null,
+    monthly_cost_cents: providerReserve?.instance_cost_cents || existing?.monthly_cost_cents || 2990,
+    next_billing_at: providerReserve?.next_billing_at || existing?.next_billing_at || null,
+    billing_status: existing?.billing_status || 'active'
+  });
+  if (!existing && providerReserve) {
+    await registerWhatsappInstanceCreated(req, admin, saved, providerReserve).catch(() => {});
+  }
+  await audit('whatsapp.integration.connect', {
+    req,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    actor_admin_id: admin.id,
+    entity_type: 'store_whatsapp_integrations',
+    entity_id: saved.id,
+    severity: 'info',
+    after_data: publicStoreWhatsappIntegration(saved)
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
+async function refreshAdminWhatsappQrCode(admin) {
+  await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
+  const config = await privatePlatformWhatsappSettings();
+  const integration = await requireStoreWhatsappIntegration(admin.store_id);
+  const data = await evolutionConnectInstance(integration.instance_name, config);
+  const saved = await patchStoreWhatsappIntegration(integration.id, {
+    qr_code_base64: data.qr_code_base64 || integration.qr_code_base64 || null,
+    status: data.status || integration.status || 'connecting',
+    last_qr_at: data.qr_code_base64 ? new Date().toISOString() : integration.last_qr_at,
+    last_error: null,
+    updated_at: new Date().toISOString()
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
+async function refreshAdminWhatsappStatus(admin) {
+  const integration = await getStoreWhatsappIntegration(admin.store_id);
+  if (!integration) return await getAdminWhatsappIntegration(admin);
+  const config = await privatePlatformWhatsappSettings();
+  if (!config.is_active || !config.base_url || !config.api_key) return publicStoreWhatsappIntegration(integration);
+  const providerStatus = await evolutionConnectionStatus(integration.instance_name, config).catch((error) => ({
+    status: 'error',
+    last_error: error.message || 'Falha ao consultar status.'
+  }));
+  const saved = await patchStoreWhatsappIntegration(integration.id, {
+    status: providerStatus.status,
+    phone_number: providerStatus.phone_number || integration.phone_number || null,
+    connected_at: providerStatus.status === 'connected' ? (integration.connected_at || new Date().toISOString()) : integration.connected_at,
+    disconnected_at: providerStatus.status === 'disconnected' ? new Date().toISOString() : integration.disconnected_at,
+    last_error: providerStatus.last_error || null,
+    updated_at: new Date().toISOString()
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
+async function sendAdminWhatsappTest(admin, data = {}) {
+  await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
+  const store = await getStoreSettings(admin.store_id);
+  const phone = whatsappRecipientPhone(data.phone || store.whatsapp_number || '');
+  if (!phone) throw httpError(422, 'Configure o WhatsApp dos pedidos antes de enviar um teste.');
+  const integration = await requireStoreWhatsappIntegration(admin.store_id);
+  if (integration.status !== 'connected') throw httpError(409, 'Conecte o WhatsApp escaneando o QR Code antes do teste.');
+  const text = `Teste do TáPronto: o WhatsApp automático da loja ${store.name || 'sua loja'} está conectado.`;
+  const result = await sendEvolutionStoreMessage(store, integration, phone, text, { messageType: 'test' });
+  return { ok: true, message: 'Mensagem de teste enviada.', log: publicWhatsappMessageLog(result.log) };
+}
+
+async function disconnectAdminWhatsappIntegration(req, admin) {
+  const integration = await requireStoreWhatsappIntegration(admin.store_id);
+  const config = await privatePlatformWhatsappSettings();
+  await evolutionLogoutInstance(integration.instance_name, config).catch(() => null);
+  const saved = await patchStoreWhatsappIntegration(integration.id, {
+    status: 'disconnected',
+    disconnected_at: new Date().toISOString(),
+    qr_code_base64: null,
+    updated_at: new Date().toISOString()
+  });
+  await audit('whatsapp.integration.disconnect', {
+    req,
+    company_id: admin.company_id,
+    store_id: admin.store_id,
+    actor_admin_id: admin.id,
+    entity_type: 'store_whatsapp_integrations',
+    entity_id: saved.id,
+    severity: 'warning'
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
+async function reconnectPlatformWhatsappStore(req, admin, storeId) {
+  const store = await getStoreSettings(storeId);
+  const integration = await getStoreWhatsappIntegration(storeId);
+  if (!integration) throw httpError(404, 'Integração de WhatsApp não encontrada para esta loja.');
+  const config = await privatePlatformWhatsappSettings();
+  const data = await evolutionConnectInstance(integration.instance_name, config);
+  const saved = await patchStoreWhatsappIntegration(integration.id, {
+    status: data.status || 'connecting',
+    qr_code_base64: data.qr_code_base64 || null,
+    last_qr_at: data.qr_code_base64 ? new Date().toISOString() : null,
+    last_error: null,
+    updated_at: new Date().toISOString()
+  });
+  await audit('platform.whatsapp.reconnect', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: store.company_id,
+    store_id: storeId,
+    entity_type: 'store_whatsapp_integrations',
+    entity_id: saved.id,
+    severity: 'warning'
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
+async function disconnectPlatformWhatsappStore(req, admin, storeId) {
+  const integration = await getStoreWhatsappIntegration(storeId);
+  if (!integration) throw httpError(404, 'Integração de WhatsApp não encontrada para esta loja.');
+  const config = await privatePlatformWhatsappSettings();
+  await evolutionLogoutInstance(integration.instance_name, config).catch(() => null);
+  const saved = await patchStoreWhatsappIntegration(integration.id, {
+    status: 'disconnected',
+    disconnected_at: new Date().toISOString(),
+    qr_code_base64: null,
+    updated_at: new Date().toISOString()
+  });
+  await audit('platform.whatsapp.disconnect', {
+    req,
+    actor_admin_id: admin.id,
+    store_id: storeId,
+    entity_type: 'store_whatsapp_integrations',
+    entity_id: saved.id,
+    severity: 'warning'
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
+async function getStoreWhatsappIntegration(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) return null;
+  const rows = await dbRequest('GET', 'store_whatsapp_integrations', {
+    select: '*',
+    store_id: `eq.${resolvedStoreId}`,
+    provider: 'eq.evolution',
+    limit: '1'
+  }).catch(() => []);
+  return rows[0] || null;
+}
+
+async function requireStoreWhatsappIntegration(storeId) {
+  const integration = await getStoreWhatsappIntegration(storeId);
+  if (!integration) throw httpError(404, 'Clique em Conectar WhatsApp para gerar o QR Code antes de continuar.');
+  return integration;
+}
+
+async function assertWhatsappProviderCreditForNewInstance(req, admin, store) {
+  const account = await getPlatformWhatsappProviderAccount();
+  const publicAccount = await publicPlatformWhatsappProviderAccount(account);
+  const instanceCostCents = Number(publicAccount.instance_cost_cents || 2990);
+  const nextBillingAt = new Date(Date.now() + Number(publicAccount.billing_cycle_days || 30) * 24 * 60 * 60 * 1000).toISOString();
+  if (!publicAccount.has_credit_for_new_instance) {
+    await recordWhatsappInstanceEvent({
+      req,
+      admin,
+      store,
+      event_type: 'create_blocked_no_credit',
+      status: 'blocked',
+      cost_cents: instanceCostCents,
+      message: 'Saldo insuficiente para criar nova instância Evolution.',
+      metadata: {
+        balance_cents: publicAccount.balance_cents,
+        instance_cost_cents: instanceCostCents,
+        account_status: publicAccount.status
+      }
+    }).catch(() => {});
+    throw httpError(402, 'A configuração automática está temporariamente indisponível. Solicite ajuda da equipe TáPronto.', {
+      code: 'WHATSAPP_PROVIDER_CREDIT_REQUIRED',
+      error_code: 'WHATSAPP_PROVIDER_CREDIT_REQUIRED'
+    });
+  }
+  return {
+    instance_cost_cents: instanceCostCents,
+    next_billing_at: nextBillingAt,
+    balance_before_cents: publicAccount.balance_cents
+  };
+}
+
+async function registerWhatsappInstanceCreated(req, admin, integration, reserve = {}) {
+  const account = await getPlatformWhatsappProviderAccount();
+  if (account) {
+    const nextBalance = Math.max(0, Number(account.balance_cents || 0) - Number(reserve.instance_cost_cents || 0));
+    await dbRequest('PATCH', 'platform_whatsapp_provider_accounts', { id: `eq.${account.id}` }, {
+      balance_cents: nextBalance,
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  await recordWhatsappInstanceEvent({
+    req,
+    admin,
+    integration,
+    event_type: 'instance_created',
+    status: 'success',
+    cost_cents: reserve.instance_cost_cents || integration.monthly_cost_cents || 0,
+    message: 'Instância Evolution criada e custo mensal reservado.',
+    metadata: {
+      balance_before_cents: reserve.balance_before_cents,
+      next_billing_at: reserve.next_billing_at
+    }
+  });
+}
+
+async function recordWhatsappInstanceEvent({ req, admin, store, integration, event_type, status = 'info', cost_cents = 0, message = '', metadata = {} }) {
+  const storeId = integration?.store_id || store?.store_id || store?.id || admin?.store_id || null;
+  const companyId = integration?.company_id || store?.company_id || admin?.company_id || null;
+  const [event] = await dbRequest('POST', 'whatsapp_instance_events', {}, {
+    company_id: companyId,
+    store_id: storeId,
+    integration_id: integration?.id || null,
+    provider: 'evolution',
+    event_type: cleanSlug(event_type || 'event'),
+    status: cleanSlug(status || 'info'),
+    cost_cents: Number(cost_cents || 0),
+    message: cleanText(message).slice(0, 500) || null,
+    metadata: metadata || {}
+  }, ['Prefer: return=representation']);
+  await audit(`whatsapp.instance.${cleanSlug(event_type || 'event')}`, {
+    req,
+    actor_admin_id: admin?.id || null,
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: 'whatsapp_instance_events',
+    entity_id: event?.id || null,
+    severity: status === 'blocked' || status === 'failed' ? 'warning' : 'info',
+    after_data: {
+      event_type,
+      status,
+      cost_cents,
+      message: safeCommandOutput(message)
+    }
+  }).catch(() => {});
+  return event;
+}
+
+async function upsertStoreWhatsappIntegration(data = {}) {
+  const current = data.current || null;
+  const payload = {
+    company_id: data.store?.company_id || data.company_id || current?.company_id || null,
+    store_id: data.store?.store_id || data.store?.id || data.store_id || current?.store_id,
+    provider: 'evolution',
+    instance_name: data.instance_name || current?.instance_name,
+    instance_id: data.instance_id || current?.instance_id || null,
+    status: normalizeWhatsappIntegrationStatus(data.status || current?.status || 'disconnected'),
+    phone_number: onlyDigits(data.phone_number || current?.phone_number || ''),
+    qr_code_base64: data.qr_code_base64 || null,
+    last_qr_at: data.last_qr_at || null,
+    connected_at: data.connected_at || current?.connected_at || null,
+    disconnected_at: data.disconnected_at || current?.disconnected_at || null,
+    last_error: data.last_error ? cleanText(data.last_error).slice(0, 500) : null,
+    monthly_cost_cents: Number(data.monthly_cost_cents ?? current?.monthly_cost_cents ?? 2990),
+    next_billing_at: data.next_billing_at || current?.next_billing_at || null,
+    billing_status: cleanSlug(data.billing_status || current?.billing_status || 'pending'),
+    updated_at: new Date().toISOString()
+  };
+  if (!payload.store_id || !payload.instance_name) throw httpError(422, 'Loja ou instância inválida para WhatsApp automático.');
+  const rows = current
+    ? await dbRequest('PATCH', 'store_whatsapp_integrations', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
+    : await dbRequest('POST', 'store_whatsapp_integrations', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  return rows[0];
+}
+
+async function patchStoreWhatsappIntegration(id, payload = {}) {
+  const cleanPayload = removeUndefinedFields({
+    ...payload,
+    status: payload.status ? normalizeWhatsappIntegrationStatus(payload.status) : undefined,
+    updated_at: payload.updated_at || new Date().toISOString()
+  });
+  const [saved] = await dbRequest('PATCH', 'store_whatsapp_integrations', { id: `eq.${id}` }, cleanPayload, ['Prefer: return=representation']);
+  return saved;
+}
+
+function removeUndefinedFields(value = {}) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+}
+
+function publicStoreWhatsappIntegration(row = null) {
+  if (!row) {
+    return {
+      id: null,
+      provider: 'evolution',
+      status: 'not_connected',
+      status_label: 'Não conectado',
+      instance_name: '',
+      phone_number: '',
+      has_qr_code: false,
+      qr_code_base64: '',
+      last_qr_at: null,
+      connected_at: null,
+      disconnected_at: null,
+      last_error: '',
+      monthly_message_count: 0,
+      monthly_cost_cents: 2990,
+      next_billing_at: null,
+      billing_status: 'pending'
+    };
+  }
+  return {
+    id: row.id,
+    provider: row.provider || 'evolution',
+    status: normalizeWhatsappIntegrationStatus(row.status || 'disconnected'),
+    status_label: whatsappIntegrationStatusLabel(row.status),
+    instance_name: row.instance_name || '',
+    instance_id: row.instance_id || '',
+    phone_number: row.phone_number || '',
+    has_qr_code: Boolean(row.qr_code_base64),
+    qr_code_base64: row.qr_code_base64 || '',
+    last_qr_at: row.last_qr_at || null,
+    connected_at: row.connected_at || null,
+    disconnected_at: row.disconnected_at || null,
+    last_error: row.last_error || '',
+    monthly_message_count: Number(row.monthly_message_count || 0),
+    monthly_cost_cents: Number(row.monthly_cost_cents || 2990),
+    next_billing_at: row.next_billing_at || null,
+    billing_status: row.billing_status || 'pending',
+    updated_at: row.updated_at || null
+  };
+}
+
+function normalizeWhatsappIntegrationStatus(status = '') {
+  const value = String(status || '').toLowerCase();
+  if (['open', 'connected', 'online'].includes(value)) return 'connected';
+  if (['connecting', 'qrcode', 'qr', 'pairing'].includes(value)) return 'connecting';
+  if (['close', 'closed', 'disconnected', 'offline', 'logout'].includes(value)) return 'disconnected';
+  if (['error', 'failed'].includes(value)) return 'error';
+  if (value === 'not_connected') return 'not_connected';
+  return 'unknown';
+}
+
+function whatsappIntegrationStatusLabel(status = '') {
+  return ({
+    connected: 'Conectado',
+    connecting: 'Aguardando QR Code',
+    disconnected: 'Desconectado',
+    error: 'Erro',
+    not_connected: 'Não conectado',
+    unknown: 'Desconhecido'
+  })[normalizeWhatsappIntegrationStatus(status)] || 'Desconhecido';
+}
+
+function buildEvolutionInstanceName(store = {}) {
+  const slug = cleanSlug(store.slug || store.name || 'loja') || 'loja';
+  const shortId = cleanText(store.store_id || store.id || '').replace(/-/g, '').slice(0, 6) || randomBytes(3).toString('hex');
+  return `tapronto_${slug.replace(/-/g, '_')}_${shortId}`.slice(0, 80);
+}
+
+async function evolutionCreateInstance(instanceName, store, config) {
+  const data = await evolutionRequest('/instance/create', {
+    method: 'POST',
+    body: {
+      instanceName,
+      qrcode: true,
+      integration: 'WHATSAPP-BAILEYS',
+      token: randomBytes(16).toString('hex'),
+      number: whatsappRecipientPhone(store.whatsapp_number || ''),
+      webhook: {
+        url: absolutePublicUrl('/api/integrations/evolution/webhook'),
+        byEvents: false,
+        base64: true,
+        events: ['CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_UPDATE', 'SEND_MESSAGE']
+      }
+    }
+  }, config);
+  return normalizeEvolutionQrResponse(data);
+}
+
+async function evolutionConnectInstance(instanceName, config) {
+  const data = await evolutionRequest(`/instance/connect/${encodeURIComponent(instanceName)}`, {
+    method: 'GET'
+  }, config);
+  return normalizeEvolutionQrResponse(data);
+}
+
+async function evolutionConnectionStatus(instanceName, config) {
+  const data = await evolutionRequest(`/instance/connectionState/${encodeURIComponent(instanceName)}`, {
+    method: 'GET'
+  }, config);
+  const instance = data?.instance || data;
+  const rawState = instance?.state || data?.state || data?.connectionState || '';
+  return {
+    status: normalizeWhatsappIntegrationStatus(rawState),
+    phone_number: onlyDigits(instance?.owner || instance?.profileName || instance?.number || data?.number || '')
+  };
+}
+
+async function setEvolutionWebhook(instanceName, config) {
+  return evolutionRequest(`/webhook/set/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    body: {
+      enabled: true,
+      url: absolutePublicUrl('/api/integrations/evolution/webhook'),
+      webhook_by_events: false,
+      webhook_base64: true,
+      events: ['CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_UPDATE', 'SEND_MESSAGE'],
+      headers: config.webhook_secret ? { 'x-evolution-webhook-secret': config.webhook_secret } : {}
+    }
+  }, config);
+}
+
+async function evolutionLogoutInstance(instanceName, config) {
+  if (!config.is_active || !config.base_url || !config.api_key) return null;
+  return evolutionRequest(`/instance/logout/${encodeURIComponent(instanceName)}`, {
+    method: 'DELETE'
+  }, config).catch(async (error) => {
+    if ([404, 405].includes(Number(error.status))) {
+      return evolutionRequest(`/instance/logout/${encodeURIComponent(instanceName)}`, { method: 'POST' }, config);
+    }
+    throw error;
+  });
+}
+
+async function evolutionSendText(instanceName, phone, message, config) {
+  const data = await evolutionRequest(`/message/sendText/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    body: {
+      number: phone,
+      text: message,
+      options: { delay: 1200, presence: 'composing', linkPreview: false }
+    }
+  }, config);
+  return { id: data?.key?.id || data?.message?.key?.id || data?.id || data?.messageId || `evolution_${Date.now()}` };
+}
+
+async function evolutionRequest(endpoint, options = {}, config = null) {
+  const settings = config || await privatePlatformWhatsappSettings();
+  if (!settings.base_url || !settings.api_key) throw httpError(503, 'Evolution API não configurada.');
+  const response = await fetchWithTimeout(`${settings.base_url}${endpoint}`, {
+    method: options.method || 'GET',
+    headers: {
+      apikey: settings.api_key,
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    },
+    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {})
+  }, 12000);
+  const data = await safeResponse(response);
+  if (!response.ok) throw httpError(response.status, whatsappProviderError('Erro na Evolution API.', data), data);
+  return data;
+}
+
+function normalizeEvolutionQrResponse(data = {}) {
+  const qrcode = data?.qrcode || data?.qrCode || data?.base64 || data?.code || {};
+  const base64 = typeof qrcode === 'string'
+    ? qrcode
+    : qrcode?.base64 || qrcode?.image || data?.base64 || data?.qr || '';
+  const instance = data?.instance || data;
+  return {
+    instance_id: instance?.instanceId || instance?.instance_id || instance?.id || data?.hash || null,
+    status: normalizeWhatsappIntegrationStatus(instance?.state || data?.state || (base64 ? 'connecting' : 'unknown')),
+    qr_code_base64: normalizeQrBase64(base64)
+  };
+}
+
+function normalizeQrBase64(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text.startsWith('data:image')) return text;
+  return `data:image/png;base64,${text.replace(/^base64,/, '')}`;
+}
+
+async function sendEvolutionStoreMessage(store, integration, phone, message, options = {}) {
+  const config = await privatePlatformWhatsappSettings();
+  const statusBefore = normalizeWhatsappIntegrationStatus(integration.status);
+  if (statusBefore !== 'connected') throw httpError(409, 'WhatsApp da loja não está conectado.');
+  const logPayload = {
+    company_id: store.company_id || integration.company_id || null,
+    store_id: store.store_id || store.id || integration.store_id || null,
+    order_id: options.orderId || null,
+    provider: 'evolution',
+    instance_name: integration.instance_name,
+    destination_phone: phone,
+    message_type: options.messageType || 'order',
+    status: 'pending'
+  };
+  let log = await createWhatsappMessageLog(logPayload);
+  try {
+    const result = await evolutionSendText(integration.instance_name, phone, message, config);
+    log = await patchWhatsappMessageLog(log.id, {
+      status: 'sent',
+      provider_message_id: result.id
+    });
+    await dbRequest('PATCH', 'store_whatsapp_integrations', { id: `eq.${integration.id}` }, {
+      monthly_message_count: Number(integration.monthly_message_count || 0) + 1,
+      last_error: null,
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']).catch(() => {});
+    return { id: result.id, log };
+  } catch (error) {
+    log = await patchWhatsappMessageLog(log.id, {
+      status: 'failed',
+      error_message: cleanText(error.message || 'Falha ao enviar mensagem.').slice(0, 500)
+    });
+    await patchStoreWhatsappIntegration(integration.id, {
+      last_error: error.message || 'Falha ao enviar mensagem.',
+      updated_at: new Date().toISOString()
+    }).catch(() => {});
+    throw Object.assign(error, { whatsappLog: log });
+  }
+}
+
+async function createWhatsappMessageLog(data = {}) {
+  const [log] = await dbRequest('POST', 'whatsapp_message_logs', {}, {
+    company_id: data.company_id || null,
+    store_id: data.store_id || null,
+    order_id: data.order_id || null,
+    provider: data.provider || 'evolution',
+    instance_name: data.instance_name || null,
+    destination_phone: data.destination_phone || null,
+    message_type: data.message_type || 'order',
+    status: data.status || 'pending',
+    error_message: data.error_message || null,
+    provider_message_id: data.provider_message_id || null
+  }, ['Prefer: return=representation']);
+  return log;
+}
+
+async function patchWhatsappMessageLog(id, payload = {}) {
+  const [log] = await dbRequest('PATCH', 'whatsapp_message_logs', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
+  return log;
+}
+
+function publicWhatsappMessageLog(row = {}) {
+  return {
+    id: row.id || null,
+    company_id: row.company_id || null,
+    store_id: row.store_id || null,
+    order_id: row.order_id || null,
+    provider: row.provider || 'evolution',
+    instance_name: row.instance_name || '',
+    destination_phone: row.destination_phone ? maskPhone(row.destination_phone) : '',
+    message_type: row.message_type || '',
+    status: row.status || '',
+    error_message: row.error_message || '',
+    provider_message_id: row.provider_message_id || '',
+    created_at: row.created_at || null
+  };
+}
+
+function maskPhone(value = '') {
+  const digits = onlyDigits(value);
+  if (digits.length <= 4) return digits ? '****' : '';
+  return `${digits.slice(0, 4)}***${digits.slice(-4)}`;
+}
+
+async function receiveEvolutionWebhook(req, payload = {}) {
+  const config = await privatePlatformWhatsappSettings();
+  const expectedSecret = config.webhook_secret;
+  const receivedSecret = req.headers['x-evolution-webhook-secret'] || req.headers['x-webhook-secret'] || '';
+  if (expectedSecret && receivedSecret !== expectedSecret) throw httpError(401, 'Webhook Evolution não autorizado.');
+  const instanceName = payload?.instance || payload?.instanceName || payload?.instance_name || payload?.data?.instance || payload?.data?.instanceName || '';
+  if (!instanceName) return { ok: true, ignored: true };
+  const rows = await dbRequest('GET', 'store_whatsapp_integrations', {
+    select: '*',
+    instance_name: `eq.${cleanText(instanceName)}`,
+    limit: '1'
+  }).catch(() => []);
+  const integration = rows[0] || null;
+  if (!integration) return { ok: true, ignored: true };
+  const event = String(payload?.event || payload?.type || '').toUpperCase();
+  const state = payload?.data?.state || payload?.state || payload?.connection || '';
+  const status = event.includes('CONNECTION') || state ? normalizeWhatsappIntegrationStatus(state) : integration.status;
+  await patchStoreWhatsappIntegration(integration.id, {
+    status,
+    connected_at: status === 'connected' ? (integration.connected_at || new Date().toISOString()) : integration.connected_at,
+    disconnected_at: status === 'disconnected' ? new Date().toISOString() : integration.disconnected_at,
+    last_error: status === 'error' ? cleanText(payload?.data?.message || payload?.message || 'Erro recebido no webhook.').slice(0, 500) : null,
+    updated_at: new Date().toISOString()
+  });
+  return { ok: true };
+}
+
 const PLATFORM_SYSTEM_EMAIL_RECIPIENT = 'lucasbulow@hotmail.com';
 const PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS = new Set([
   'backup_failed',
   'webhook_failed',
   'smtp_failed',
+  'internal_support_ticket_opened',
+  'internal_support_ticket_replied',
   'critical_support_ticket',
   'delinquent_support_ticket',
   'cancellation_received',
@@ -7751,6 +8797,8 @@ const EMAIL_TEMPLATE_DEFINITIONS = [
   { key: 'backup_failed', name: 'Backup falhou', subject: 'Alerta: falha no backup da plataforma', body: 'Alerta operacional do TáPronto.\n\nA rotina de backup falhou ou está atrasada.\n\nResumo: {{error_summary}}\nPeríodo: {{period}}\n\nAcesse o Platform para verificar Saúde e Serviços:\n{{platform_url}}' },
   { key: 'webhook_failed', name: 'Webhook falhou', subject: 'Alerta: webhook com falha', body: 'Alerta operacional do TáPronto.\n\nUm webhook apresentou falha de processamento.\n\nProvedor: {{provider}}\nEvento: {{event_id}}\nResumo: {{error_summary}}\n\nVerifique logs, assinatura do webhook e eventos financeiros no Platform:\n{{platform_url}}' },
   { key: 'smtp_failed', name: 'SMTP com erro', subject: 'Alerta: envio de e-mail com falha', body: 'Alerta operacional do TáPronto.\n\nO SMTP apresentou falha no envio ou teste de entrega.\n\nResumo: {{error_summary}}\n\nAcesse Comunicação no Platform para revisar host, porta, TLS, usuário e senha de app:\n{{platform_url}}' },
+  { key: 'internal_support_ticket_opened', name: 'Interno: novo chamado', subject: 'Novo chamado recebido: {{ticket_subject}}', body: 'Novo chamado recebido na Central TáPronto.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nCategoria: {{ticket_category}}\nPrioridade: {{ticket_priority}}\nAssunto: {{ticket_subject}}\nResumo: {{message_preview}}\n\nAcesse a fila de atendimentos para responder rapidamente:\n{{support_url}}' },
+  { key: 'internal_support_ticket_replied', name: 'Interno: cliente respondeu chamado', subject: 'Cliente respondeu chamado: {{ticket_subject}}', body: 'Um cliente respondeu um chamado na Central TáPronto.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nCategoria: {{ticket_category}}\nPrioridade: {{ticket_priority}}\nAssunto: {{ticket_subject}}\nResumo: {{message_preview}}\n\nAcesse a fila de atendimentos:\n{{support_url}}' },
   { key: 'critical_support_ticket', name: 'Chamado crítico aberto', subject: 'Chamado crítico aberto no suporte', body: 'Um chamado crítico foi aberto no Platform.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nAssunto: {{ticket_subject}}\n\nAcesse a central de atendimentos para responder com prioridade:\n{{support_url}}' },
   { key: 'delinquent_support_ticket', name: 'Inadimplente abriu chamado', subject: 'Cliente inadimplente abriu chamado', body: 'Um cliente com pendência financeira abriu chamado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nAssunto: {{ticket_subject}}\n\nVerifique cobrança, assinatura e atendimento:\n{{support_url}}' },
   { key: 'internal_payment_refused', name: 'Interno: pagamento recusado', subject: 'Alerta interno: pagamento recusado', body: 'Alerta comercial do TáPronto.\n\nUm pagamento foi recusado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nVerifique a assinatura, cobrança e eventos do provedor no Platform:\n{{platform_url}}' },
@@ -7776,6 +8824,9 @@ const EMAIL_TEMPLATE_VARIABLES = [
   'order_id',
   'order_total',
   'ticket_subject',
+  'ticket_category',
+  'ticket_priority',
+  'message_preview',
   'rating_url',
   'limit_name',
   'usage_count',
@@ -7999,7 +9050,147 @@ async function createAdminSupportTicket(req, admin, data = {}) {
     entity_id: ticket.id,
     after_data: { subject, priority: ticket.priority, contact_name: contactName }
   });
+  await notifyPlatformSupportActivity(ticket, 'internal_support_ticket_opened', {
+    messagePreview: message,
+    req
+  }).catch(async (error) => {
+    await audit('admin.support.ticket.notify_failed', {
+      req,
+      actor_admin_id: admin.id,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      entity_type: 'support_ticket',
+      entity_id: ticket.id,
+      severity: 'warning',
+      after_data: { error: error.message || 'Falha ao enviar notificação interna.' }
+    }).catch(() => {});
+  });
   return publicSupportTicket(ticket, { messages: [{ message: messageWithContact, author_type: 'admin', created_at: new Date().toISOString() }] });
+}
+
+async function requestPaymentSetupSupport(req, admin) {
+  const companyId = cleanOptionalUuid(admin.company_id || '') || null;
+  const storeId = cleanOptionalUuid(admin.store_id || '') || null;
+  if (!companyId || !storeId) throw httpError(403, 'Sua conta precisa estar vinculada a uma loja para solicitar a configuração.');
+
+  const existingTickets = await dbRequest('GET', 'support_tickets', {
+    select: '*',
+    company_id: `eq.${companyId}`,
+    store_id: `eq.${storeId}`,
+    category: 'eq.Pagamento online',
+    order: 'updated_at.desc',
+    limit: '20'
+  }).catch(() => []);
+  const openTicket = existingTickets.find((ticket) => !['closed', 'resolved'].includes(ticket.status));
+  if (openTicket) {
+    const enriched = await enrichSupportTickets([openTicket], false).catch(() => ({ tickets: [publicSupportTicket(openTicket)] }));
+    return {
+      ticket: enriched.tickets[0] || publicSupportTicket(openTicket),
+      message: 'Já existe uma solicitação aberta para pagamento online. Abrimos o chamado para você acompanhar.'
+    };
+  }
+
+  const [company, store, subscription] = await Promise.all([
+    dbRequest('GET', 'companies', { select: 'id,name,billing_email,phone', id: `eq.${companyId}`, limit: '1' }).then((rows) => rows[0] || null).catch(() => null),
+    dbRequest('GET', 'stores', { select: 'id,name,slug', id: `eq.${storeId}`, limit: '1' }).then((rows) => rows[0] || null).catch(() => null),
+    dbRequest('GET', 'company_subscriptions', { select: '*', company_id: `eq.${companyId}`, order: 'created_at.desc', limit: '20' })
+      .then((rows) => pickCurrentCompanySubscription(rows) || rows[0] || null)
+      .catch(() => null)
+  ]);
+  const plan = subscription?.plan_id
+    ? await dbRequest('GET', 'subscription_plans', { select: 'id,name,code,slug,monthly_price', id: `eq.${subscription.plan_id}`, limit: '1' })
+      .then((rows) => rows[0] || null)
+      .catch(() => null)
+    : null;
+
+  const storeUrl = store?.slug ? `${publicAppBaseUrl(req)}/${store.slug}` : '';
+  const message = [
+    `Contato: ${admin.name || company?.name || 'Administrador'}`,
+    '',
+    'Quero ajuda da equipe TáPronto para configurar pagamento online com Abacate Pay.',
+    '',
+    `Empresa: ${company?.name || 'Não identificada'}`,
+    `Loja: ${store?.name || admin.active_store?.name || 'Loja atual'}`,
+    `Slug: ${store?.slug || '-'}`,
+    `Plano atual: ${plan?.name || 'Sem plano identificado'}`,
+    `Status da assinatura: ${subscription?.status || 'Sem assinatura'}`,
+    `E-mail do administrador: ${admin.email || '-'}`,
+    `Contato financeiro: ${company?.billing_email || company?.phone || '-'}`,
+    storeUrl ? `Cardápio: ${storeUrl}` : '',
+    '',
+    'Observação interna para a Central: configuração assistida é um serviço comercial do Premium. Se a loja ainda não estiver no Premium, orientar contratação ou upgrade antes de ativar.'
+  ].filter((line) => line !== '').join('\n');
+
+  const now = new Date().toISOString();
+  const [ticket] = await dbRequest('POST', 'support_tickets', {}, {
+    company_id: companyId,
+    store_id: storeId,
+    admin_user_id: admin.id,
+    created_by_admin_id: admin.id,
+    subject: 'Configurar pagamento online com Abacate Pay',
+    category: 'Pagamento online',
+    priority: planCodeIsPremium(plan) ? 'high' : 'medium',
+    status: 'open',
+    source: 'admin',
+    last_message_at: now
+  }, ['Prefer: return=representation']);
+  await dbRequest('POST', 'support_ticket_messages', {}, {
+    ticket_id: ticket.id,
+    author_admin_id: admin.id,
+    author_type: 'admin',
+    message,
+    is_internal: false
+  }, ['Prefer: return=minimal']);
+  await audit('admin.support.payment_setup_request', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id,
+    after_data: {
+      subject: ticket.subject,
+      category: ticket.category,
+      plan_code: plan?.code || plan?.slug || null
+    }
+  });
+  await notifyPlatformSupportActivity(ticket, 'internal_support_ticket_opened', {
+    messagePreview: 'Solicitação de configuração assistida do pagamento online com Abacate Pay.',
+    company,
+    store,
+    req
+  }).catch(async (error) => {
+    await audit('admin.support.payment_setup_notify_failed', {
+      req,
+      actor_admin_id: admin.id,
+      company_id: companyId,
+      store_id: storeId,
+      entity_type: 'support_ticket',
+      entity_id: ticket.id,
+      severity: 'warning',
+      after_data: { error: error.message || 'Falha ao enviar notificação interna.' }
+    }).catch(() => {});
+  });
+  const enriched = await enrichSupportTickets([ticket], false).catch(() => ({ tickets: [publicSupportTicket(ticket)] }));
+  return {
+    ticket: enriched.tickets[0] || publicSupportTicket(ticket),
+    message: 'Solicitação enviada. A equipe TáPronto vai orientar a configuração do pagamento online.'
+  };
+}
+
+function planCodeIsPremium(plan = {}) {
+  const value = cleanSlug(plan?.code || plan?.slug || plan?.name || '');
+  return value.includes('premium');
+}
+
+function publicAppBaseUrl(req) {
+  return String(process.env.PUBLIC_APP_URL || process.env.APP_URL || requestOrigin(req) || '').replace(/\/+$/, '');
+}
+
+function requestOrigin(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
 }
 
 async function createAdminSupportMessage(req, admin, ticketId, data = {}) {
@@ -8045,6 +9236,21 @@ async function createAdminSupportMessage(req, admin, ticketId, data = {}) {
     store_id: admin.store_id,
     entity_type: 'support_ticket',
     entity_id: ticket.id
+  });
+  await notifyPlatformSupportActivity(ticket, 'internal_support_ticket_replied', {
+    messagePreview: messageText,
+    req
+  }).catch(async (error) => {
+    await audit('admin.support.ticket.reply_notify_failed', {
+      req,
+      actor_admin_id: admin.id,
+      company_id: admin.company_id,
+      store_id: admin.store_id,
+      entity_type: 'support_ticket',
+      entity_id: ticket.id,
+      severity: 'warning',
+      after_data: { error: error.message || 'Falha ao enviar notificação interna.' }
+    }).catch(() => {});
   });
   return publicSupportMessage(message, [admin]);
 }
@@ -8253,6 +9459,55 @@ async function notifySupportTicket(ticket, templateKey) {
     subject: renderEmailTemplate(template.subject, variables),
     body: renderEmailTemplate(template.body, variables)
   });
+}
+
+async function notifyPlatformSupportActivity(ticket = {}, templateKey, options = {}) {
+  const [company] = options.company
+    ? [options.company]
+    : ticket.company_id
+      ? await dbRequest('GET', 'companies', { select: 'name,billing_email,phone', id: `eq.${ticket.company_id}`, limit: '1' }).catch(() => [])
+      : [];
+  const [store] = options.store
+    ? [options.store]
+    : ticket.store_id
+      ? await dbRequest('GET', 'stores', { select: 'name,slug', id: `eq.${ticket.store_id}`, limit: '1' }).catch(() => [])
+      : [];
+  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === templateKey);
+  if (!template?.is_active) return;
+  const baseUrl = publicAppBaseUrl(options.req || { headers: {} });
+  const variables = {
+    company_name: company?.name || 'Cliente sem empresa',
+    store_name: store?.name || 'Loja não identificada',
+    ticket_subject: ticket.subject || 'Chamado sem assunto',
+    ticket_category: ticket.category || 'Sem categoria',
+    ticket_priority: priorityLabelForEmail(ticket.priority || 'medium'),
+    message_preview: supportEmailPreview(options.messagePreview || ''),
+    support_url: baseUrl ? `${baseUrl}/central` : '/central',
+    platform_url: baseUrl ? `${baseUrl}/central` : '/central'
+  };
+  await sendPlatformEmail({
+    to: PLATFORM_SYSTEM_EMAIL_RECIPIENT,
+    templateKey,
+    subject: renderEmailTemplate(template.subject, variables),
+    body: renderEmailTemplate(template.body, variables)
+  });
+}
+
+function priorityLabelForEmail(priority = '') {
+  return ({
+    low: 'Baixa',
+    medium: 'Média',
+    high: 'Alta',
+    critical: 'Crítica'
+  })[cleanSlug(priority || 'medium')] || 'Média';
+}
+
+function supportEmailPreview(message = '') {
+  const text = String(message || '')
+    .replace(/^Contato:\s*[^\n]+\n*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 320) || 'Sem descrição informada.';
 }
 
 function renderEmailTemplate(text, variables = {}) {
@@ -10898,6 +12153,7 @@ function rateLimitRule(method, pathname) {
   if (method === 'POST' && pathname === '/api/customer/login') return limitRule('customer-login', 10, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/customer/reset-password') return limitRule('customer-reset', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/portal/recover-password') return limitRule('admin-recover', 5, 30 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/portal/resend-activation') return limitRule('activation-resend', 3, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/orders') return limitRule('order-create', 20, 10 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 120 * 1000);
   if (method === 'POST' && pathname === '/api/portal/signup') return limitRule('portal-signup', 5, 120 * 1000);
@@ -11108,6 +12364,53 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
   }
   const store = await getStoreSettings(order.store_id, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  if (!manual && targetStatus === 'new') {
+    const storePhone = whatsappRecipientPhone(store.whatsapp_number || STORE_WHATSAPP_NUMBER || '');
+    const integration = await getStoreWhatsappIntegration(order.store_id);
+    if (integration && normalizeWhatsappIntegrationStatus(integration.status) === 'connected') {
+      const storeOrderMessage = cleanText(order.whatsapp_message || '') || orderStatusWhatsappMessage(store, order, targetStatus);
+      if (!storePhone) {
+        return createWhatsappLogWithUsage(order, targetStatus, storeOrderMessage, featureCode, {
+          recipient_phone: '',
+          delivery_status: 'skipped',
+          error_message: 'WhatsApp dos pedidos não configurado na loja.',
+          is_manual: false,
+          provider: 'evolution'
+        }, options);
+      }
+      try {
+        const providerResult = await sendEvolutionStoreMessage(store, integration, storePhone, storeOrderMessage, {
+          orderId: order.id,
+          messageType: 'order_created'
+        });
+        return createWhatsappLogWithUsage(order, targetStatus, storeOrderMessage, featureCode, {
+          recipient_phone: storePhone,
+          delivery_status: 'sent',
+          provider: 'evolution',
+          provider_message_id: providerResult.id,
+          is_manual: false
+        }, options);
+      } catch (error) {
+        return createWhatsappLogWithUsage(order, targetStatus, storeOrderMessage, featureCode, {
+          recipient_phone: storePhone,
+          delivery_status: 'failed',
+          error_message: error.message || 'Falha no WhatsApp automático.',
+          is_manual: false,
+          provider: 'evolution'
+        }, options);
+      }
+    }
+    const platformWhatsapp = await getPlatformWhatsappSettings();
+    if (platformWhatsapp.is_active && platformWhatsapp.has_api_key && platformWhatsapp.base_url && !integrations.whatsapp.enabled) {
+      return createWhatsappLogWithUsage(order, targetStatus, cleanText(order.whatsapp_message || ''), featureCode, {
+        recipient_phone: storePhone,
+        delivery_status: 'skipped',
+        error_message: 'WhatsApp automático ainda não conectado por QR Code.',
+        is_manual: false,
+        provider: 'evolution'
+      }, options);
+    }
+  }
   const phone = whatsappRecipientPhone(order.customer_snapshot?.phone || '');
   const message = orderStatusWhatsappMessage(store, order, targetStatus);
   if (!phone) {
@@ -12208,9 +13511,8 @@ function abacatePayCustomer(order) {
 function abacatePayPhone(value) {
   const digits = onlyDigits(value);
   if (!digits) return '';
-  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return `+${digits}`;
-  if (digits.length === 10 || digits.length === 11) return `+55${digits}`;
-  return digits.startsWith('+') ? digits : `+${digits}`;
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return digits.slice(2);
+  return digits.slice(0, 11);
 }
 
 function moneyCents(value) {
@@ -13428,12 +14730,16 @@ function routePath(requestPath, hostHeader = '') {
   const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
   const panelHosts = csvEnv('PANEL_HOSTS');
   const platformHosts = csvEnv('PLATFORM_HOSTS');
+  const helpHosts = csvEnv('HELP_HOSTS');
   const isPanelHost = panelHosts.includes(hostname) || hostname.startsWith('painel.');
   const isPlatformHost = platformHosts.includes(hostname) || hostname.startsWith('platform.');
+  const isHelpHost = helpHosts.includes(hostname) || hostname.startsWith('ajuda.');
 
   if (requestPath === '/' && isPanelHost) return '/admin.html';
   if (requestPath === '/' && isPlatformHost) return '/platform.html';
+  if (requestPath === '/' && isHelpHost) return '/ajuda.html';
   if (requestPath === '/') return '/home.html';
+  if (requestPath === '/ajuda' || requestPath === '/help') return '/ajuda.html';
   if (requestPath === '/cardapio') return '/app.html';
   if (requestPath === '/planos') return '/plans.html';
   if (['/recursos', '/demonstracao'].includes(requestPath)) return '/home.html';

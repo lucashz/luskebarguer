@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Painel - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
-    <link rel="stylesheet" href="/styles.css?v=20260708-qa-flow">
+    <link rel="stylesheet" href="/styles.css?v=20260727-evolution-whatsapp">
   </head>
   <body class="admin-page">
     <main class="admin-layout auth-only" id="adminLayout">
@@ -25,7 +25,7 @@
           <button data-admin-tab="integrations" type="button">Integrações</button>
           <button data-admin-tab="plan" type="button">Plano</button>
           <button data-admin-tab="support" type="button">Suporte</button>
-          <button data-admin-tab="account" type="button">Conta e usuários</button>
+          <button data-admin-tab="account" type="button">Conta e Usuários</button>
         </nav>
       </aside>
 
@@ -34,26 +34,29 @@
           <section class="account-loading auth-card" id="adminAuthLoading">
             <span class="loading-dot"></span>
             <div>
-              <p class="eyebrow">Painel da loja</p>
+              <p class="eyebrow">Painel da Loja</p>
               <h1>Carregando painel</h1>
             </div>
           </section>
 
           <div class="auth-card" id="setupCard" hidden>
             <p class="eyebrow">Primeiro acesso</p>
-            <h1>Criar conta</h1>
+            <h1>Criar Conta</h1>
             <form id="setupForm" class="stack-form">
               <input name="name" required placeholder="Nome">
               <input name="email" required type="email" placeholder="E-mail">
               <input name="password" required type="password" minlength="8" placeholder="Senha">
               <button class="primary-button wide">Criar e entrar</button>
             </form>
-            <a class="ghost-button compact auth-home-button" href="/">Início</a>
+            <div class="auth-link-row">
+              <a class="ghost-button compact auth-home-button" href="/">Início</a>
+              <a class="ghost-button compact auth-home-button" href="/ajuda">Ajuda</a>
+            </div>
           </div>
 
           <div class="auth-card" id="loginCard" hidden>
-            <p class="eyebrow">Painel da loja</p>
-            <h1>Entrar no painel</h1>
+            <p class="eyebrow">Painel da Loja</p>
+            <h1>Entrar no Painel</h1>
             <form id="loginForm" class="stack-form">
               <input name="email" required type="email" placeholder="E-mail">
               <input name="password" required type="password" placeholder="Senha">
@@ -69,7 +72,10 @@
                 <p class="form-message" id="adminRecoverMessage" role="alert" aria-live="polite"></p>
               </form>
             </details>
-            <a class="ghost-button compact auth-home-button" href="/">Início</a>
+            <div class="auth-link-row">
+              <a class="ghost-button compact auth-home-button" href="/">Início</a>
+              <a class="ghost-button compact auth-home-button" href="/ajuda">Ajuda</a>
+            </div>
           </div>
         </section>
 
@@ -376,6 +382,7 @@
                 <a class="ghost-button compact" href="/cozinha" target="_blank" rel="noopener">Tela cozinha</a>
                 <button class="ghost-button compact" id="autoPrintButton" type="button">Auto imprimir</button>
                 <button class="ghost-button compact" id="archiveClosedOrdersButton" type="button">Limpar finalizados</button>
+                <button class="ghost-button compact" type="button" data-open-support-context="orders">Preciso de ajuda</button>
                 <button class="ghost-button compact" id="refreshAdminButton" type="button">Atualizar</button>
                 <button class="danger-button compact" id="clearQueueButton" type="button">Fechar operação</button>
               </div>
@@ -471,6 +478,7 @@
                         <option value="inactive">Pausadas</option>
                       </select>
                       <button class="primary-button compact" id="newCategoryButton" type="button">Nova categoria</button>
+                      <button class="ghost-button compact" type="button" data-open-support-context="menu">Preciso de ajuda</button>
                       <button class="ghost-button compact" id="refreshCategoriesButton" type="button">Atualizar</button>
                     </div>
                   </div>
@@ -494,6 +502,7 @@
                         <option value="inactive">Pausados</option>
                       </select>
                       <button class="primary-button compact" id="newProductButton" type="button">Novo produto</button>
+                      <button class="ghost-button compact" type="button" data-open-support-context="menu">Preciso de ajuda</button>
                       <button class="ghost-button compact" id="refreshProductsButton" type="button">Atualizar</button>
                     </div>
                   </div>
@@ -701,6 +710,7 @@
                 </div>
                 <div class="row-actions">
                   <button class="ghost-button compact" data-reopen-onboarding type="button">Reabrir onboarding</button>
+                  <button class="ghost-button compact" type="button" data-open-support-context="store">Preciso de ajuda</button>
                   <button class="primary-button compact" type="submit">Salvar loja</button>
                 </div>
               </div>
@@ -945,6 +955,7 @@
                   <p>Configure WhatsApp automático e Pix online com Abacate Pay. As credenciais ficam protegidas no servidor.</p>
                 </div>
                 <div class="row-actions">
+                  <button class="ghost-button compact" type="button" data-open-support-context="integrations">Preciso de ajuda</button>
                   <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar integrações</button>
                   <button class="primary-button compact" type="submit">Salvar integrações</button>
                 </div>
@@ -952,22 +963,39 @@
 
               <div class="integration-settings-grid">
                 <section class="integration-card">
-                  <div>
-                    <strong>WhatsApp automático</strong>
-                    <p>Envia mensagens quando o status do pedido muda. Use API oficial ou webhook próprio. Não usa WhatsApp Web.</p>
+                  <div class="whatsapp-connect-head">
+                    <div>
+                      <p class="eyebrow">WhatsApp automático</p>
+                      <strong>Conectar WhatsApp da loja</strong>
+                      <p>Escaneie um QR Code com o celular da loja. Cada loja conecta o próprio número, sem precisar entender a parte técnica.</p>
+                    </div>
+                    <span class="status-pill" id="whatsappAutoStatus">Não conectado</span>
                   </div>
-                  <label class="check"><input name="integration_whatsapp_enabled" type="checkbox"> Ativar mensagens automáticas</label>
-                  <label>Provedor
-                    <select name="integration_whatsapp_provider">
-                      <option value="whatsevolution">WhatsEvolution</option>
-                      <option value="official">API oficial</option>
-                      <option value="webhook">Webhook próprio</option>
-                      <option value="mock">Simulado/local</option>
-                    </select>
-                  </label>
-                  <label>Instância / ID do número<input name="integration_whatsapp_phoneNumberId" placeholder="Ex: minha-instancia"></label>
-                  <label>Token/API key<input name="integration_whatsapp_accessToken" type="password" autocomplete="new-password" placeholder="Token do provedor"></label>
-                  <label>URL da API/webhook<input name="integration_whatsapp_apiUrl" placeholder="https://..."></label>
+                  <div class="whatsapp-checklist">
+                    <span>Celular da loja em mãos</span>
+                    <span>WhatsApp aberto no celular</span>
+                    <span>Internet ativa</span>
+                  </div>
+                  <div class="whatsapp-qr-box" id="whatsappQrBox" hidden>
+                    <img id="whatsappQrImage" alt="QR Code para conectar o WhatsApp da loja">
+                    <div>
+                      <strong>Como conectar</strong>
+                      <ol>
+                        <li>Abra o WhatsApp no celular da loja.</li>
+                        <li>Toque em Configurações ou nos três pontinhos.</li>
+                        <li>Entre em Aparelhos conectados e toque em Conectar aparelho.</li>
+                        <li>Aponte para este QR Code.</li>
+                      </ol>
+                    </div>
+                  </div>
+                  <p class="muted" id="whatsappAutoMessage">Clique em conectar para iniciar.</p>
+                  <div class="row-actions">
+                    <button class="primary-button compact" id="connectWhatsappButton" type="button">Conectar WhatsApp</button>
+                    <button class="ghost-button compact" id="refreshWhatsappQrButton" type="button">Atualizar QR Code</button>
+                    <button class="ghost-button compact" id="testWhatsappButton" type="button">Enviar teste para minha loja</button>
+                    <button class="ghost-button compact" type="button" data-integration-help="whatsapp-auto">Como funciona?</button>
+                    <button class="danger-button compact" id="disconnectWhatsappButton" type="button">Desconectar</button>
+                  </div>
                 </section>
 
                 <section class="integration-card">
@@ -975,6 +1003,17 @@
                     <p class="eyebrow">Pagamento online</p>
                     <strong>Abacate Pay</strong>
                     <p>Gera Pix copia e cola, QR Code e recebe confirmação automática pelo webhook.</p>
+                  </div>
+                  <div class="integration-assisted-box">
+                    <div>
+                      <strong>Quer ajuda para configurar?</strong>
+                      <p>A equipe TáPronto pode orientar a ativação da Abacate Pay na conta da sua loja e revisar o webhook com você.</p>
+                    </div>
+                    <button class="primary-button compact" id="requestPaymentSetupButton" type="button">Solicitar configuração</button>
+                  </div>
+                  <div class="integration-flow-note">
+                    <strong>Fluxo do Pix online</strong>
+                    <span>Cliente paga no checkout seguro, o pedido é liberado após confirmação e a loja recebe o aviso automaticamente.</span>
                   </div>
                   <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
                   <input name="integration_pix_provider" type="hidden" value="abacatepay">
@@ -1006,32 +1045,30 @@
                 <h2>Meu plano</h2>
                 <p class="muted">Acompanhe recursos liberados, status comercial e uso da loja atual.</p>
               </div>
-              <button class="ghost-button compact" id="refreshPlanButton" type="button">Atualizar</button>
+              <div class="row-actions">
+                <button class="ghost-button compact" type="button" data-open-support-context="plan">Preciso de ajuda</button>
+                <button class="ghost-button compact" id="refreshPlanButton" type="button">Atualizar</button>
+              </div>
             </div>
 
             <div class="plan-alerts" id="planAlerts"></div>
 
-            <div class="plan-top-grid">
-              <section class="panel" id="planSummary">
-                <p class="empty-state">Carregando plano...</p>
-              </section>
-              <section class="panel" id="planBilling">
-                <p class="empty-state">Carregando cobrança...</p>
-              </section>
-              <section class="panel" id="planRenewal">
-                <p class="empty-state">Carregando renovação...</p>
-              </section>
-            </div>
+            <section class="panel plan-summary-panel" id="planSummary">
+              <p class="empty-state">Carregando plano...</p>
+            </section>
+            <section id="planBilling" hidden></section>
+            <section id="planRenewal" hidden></section>
 
             <section class="panel" id="planUsage">
               <p class="empty-state">Carregando uso...</p>
             </section>
 
-            <section class="panel">
+            <section class="panel plan-features-panel">
               <div class="section-actions">
                 <div>
                   <p class="eyebrow">Recursos</p>
                   <h2>O que está incluso</h2>
+                  <p class="muted">Principais recursos liberados para a operação da loja.</p>
                 </div>
               </div>
               <div class="feature-list compact" id="planFeatures">
@@ -1039,17 +1076,18 @@
               </div>
             </section>
 
-            <section class="panel">
-              <div class="section-actions">
-                <div>
-                  <p class="eyebrow">Comparar</p>
-                  <h2>Comparar planos</h2>
-                </div>
-              </div>
+            <details class="panel plan-compare-details">
+              <summary>
+                <span>
+                  <span class="eyebrow">Comparar</span>
+                  <strong>Comparar planos</strong>
+                </span>
+                <span>Ver opções</span>
+              </summary>
               <div class="plan-compare-grid" id="planCompare">
                 <p class="empty-state">Carregando planos...</p>
               </div>
-            </section>
+            </details>
 
             <section class="panel">
               <div class="section-actions">
@@ -1074,6 +1112,7 @@
                   <p class="muted">Abra chamados para a equipe da plataforma e acompanhe respostas.</p>
                 </div>
                 <div class="row-actions">
+                  <a class="ghost-button compact" href="/ajuda#abrir-chamado-suporte" target="_blank" rel="noopener">Ver artigos de ajuda</a>
                   <button class="primary-button compact" id="openSupportTicketFormButton" type="button">Abrir chamado</button>
                   <button class="ghost-button compact" id="refreshSupportTicketsButton" type="button">Atualizar chamados</button>
                 </div>
@@ -1162,7 +1201,7 @@
                   <option value="delivery">Entrega</option>
                   <option value="kitchen">Cozinha</option>
                 </select>
-                <button class="primary-button compact">Criar conta</button>
+                <button class="primary-button compact">Criar Conta</button>
                 <button class="ghost-button compact" id="inviteAdminButton" type="button">Gerar convite</button>
               </form>
               <div class="team-role-preview" id="adminRolePreview"></div>
@@ -1427,7 +1466,7 @@
       </section>
     </main>
 
-    <script src="/admin.js?v=20260708-plan-gates" type="module"></script>
+    <script src="/admin.js?v=20260727-evolution-whatsapp" type="module"></script>
   </body>
 </html>
 

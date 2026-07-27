@@ -26,6 +26,7 @@
   audioContext: null,
   storeFormDirty: false,
   integrationsFormDirty: false,
+  whatsappIntegration: null,
   editingCategoryId: null,
   editingProductId: null,
   editingPromotionId: null,
@@ -385,6 +386,15 @@ const els = {
   printSettingsForm: document.querySelector('#printSettingsForm'),
   testIntegrationsButton: document.querySelector('#testIntegrationsButton'),
   integrationStatusText: document.querySelector('#integrationStatusText'),
+  whatsappAutoStatus: document.querySelector('#whatsappAutoStatus'),
+  whatsappAutoMessage: document.querySelector('#whatsappAutoMessage'),
+  whatsappQrBox: document.querySelector('#whatsappQrBox'),
+  whatsappQrImage: document.querySelector('#whatsappQrImage'),
+  connectWhatsappButton: document.querySelector('#connectWhatsappButton'),
+  refreshWhatsappQrButton: document.querySelector('#refreshWhatsappQrButton'),
+  testWhatsappButton: document.querySelector('#testWhatsappButton'),
+  disconnectWhatsappButton: document.querySelector('#disconnectWhatsappButton'),
+  requestPaymentSetupButton: document.querySelector('#requestPaymentSetupButton'),
   integrationHelpDialog: document.querySelector('#integrationHelpDialog'),
   integrationHelpEyebrow: document.querySelector('#integrationHelpEyebrow'),
   integrationHelpTitle: document.querySelector('#integrationHelpTitle'),
@@ -484,6 +494,9 @@ document.querySelectorAll('[data-onboarding-theme-preset]').forEach((button) => 
 document.querySelectorAll('[data-start-admin-tour]').forEach((button) => {
   button.addEventListener('click', () => startAdminGuidedTour({ force: true }));
 });
+document.querySelectorAll('[data-open-support-context]').forEach((button) => {
+  button.addEventListener('click', () => openSupportTicketWithContext(button.dataset.openSupportContext));
+});
 els.startOperationButton?.addEventListener('click', startOperation);
 els.stopOperationButton?.addEventListener('click', stopOperation);
 els.refreshAdminButton.addEventListener('click', () => loadSummary());
@@ -518,6 +531,11 @@ document.addEventListener('visibilitychange', () => {
 });
 els.refreshCategoriesButton.addEventListener('click', () => loadMenuData({ force: true }));
 els.refreshProductsButton.addEventListener('click', () => loadMenuData({ force: true }));
+els.connectWhatsappButton?.addEventListener('click', connectWhatsapp);
+els.refreshWhatsappQrButton?.addEventListener('click', refreshWhatsappQrCode);
+els.testWhatsappButton?.addEventListener('click', testWhatsappAuto);
+els.disconnectWhatsappButton?.addEventListener('click', disconnectWhatsapp);
+els.requestPaymentSetupButton?.addEventListener('click', requestPaymentSetupSupport);
 els.refreshModifiersButton?.addEventListener('click', () => loadMenuData({ force: true }));
 els.newCategoryButton.addEventListener('click', openNewCategoryDialog);
 els.clearQueueButton.addEventListener('click', clearOrderQueue);
@@ -974,6 +992,7 @@ async function loadAdminTabData(tab, options = {}) {
     }
     if (tab === 'store' || tab === 'integrations') {
       await loadStoreData(options);
+      if (tab === 'integrations') await loadWhatsappIntegration();
       return;
     }
     if (tab === 'plan') {
@@ -1822,20 +1841,26 @@ function canJumpToOnboardingStep(target) {
 function renderOnboardingChecklist() {
   if (!els.onboardingFinalChecklist) return;
   const checks = [
-    ['Dados da loja', Boolean(state.store?.name && state.store?.slug && state.store?.whatsapp_number)],
-    ['Operação configurada', Boolean(state.store?.business_hours && Object.keys(state.store.business_hours || {}).length)],
-    ['Pagamentos definidos', Array.isArray(state.store?.payment_methods) && state.store.payment_methods.length > 0],
-    ['Entrega revisada', state.store?.delivery_fee !== undefined && state.store?.minimum_order !== undefined],
-    ['Categoria criada', state.categories.length > 0],
-    ['Produto criado', state.categories.some((category) => (category.items || []).length > 0)],
-    ['Treinamento visto', (state.onboardingOverview?.progress?.completed_steps || []).includes('training')]
+    { label: 'Loja', hint: 'Nome, link público e WhatsApp dos pedidos.', done: Boolean(state.store?.name && state.store?.slug && state.store?.whatsapp_number), step: 1 },
+    { label: 'Operação', hint: 'Status, tipos de pedido e horários.', done: Boolean(state.store?.business_hours && Object.keys(state.store.business_hours || {}).length), step: 2 },
+    { label: 'Pagamento', hint: 'Formas aceitas e instruções para o cliente.', done: Array.isArray(state.store?.payment_methods) && state.store.payment_methods.length > 0, step: 3 },
+    { label: 'Entrega', hint: 'Taxa, mínimo e bairros atendidos.', done: state.store?.delivery_fee !== undefined && state.store?.minimum_order !== undefined, step: 4 },
+    { label: 'Produto', hint: 'Primeira categoria e primeiro item no cardápio.', done: state.categories.length > 0 && state.categories.some((category) => (category.items || []).length > 0), step: 6 },
+    { label: 'Publicar', hint: 'Revisão final antes de abrir a loja.', done: state.store?.onboarding_completed === true, step: 9 }
   ];
-  els.onboardingFinalChecklist.innerHTML = checks.map(([label, done]) => `
-    <article class="${done ? 'done' : ''}">
-      <span>${done ? 'OK' : 'Pendente'}</span>
-      <strong>${escapeHtml(label)}</strong>
+  els.onboardingFinalChecklist.innerHTML = checks.map((check) => `
+    <article class="${check.done ? 'done' : ''}">
+      <span>${check.done ? 'OK' : 'Pendente'}</span>
+      <strong>${escapeHtml(check.label)}</strong>
+      <small>${escapeHtml(check.hint)}</small>
+      <button class="ghost-button compact" type="button" data-onboarding-check-step="${check.step}">
+        ${check.done ? 'Revisar' : 'Configurar'}
+      </button>
     </article>
   `).join('');
+  els.onboardingFinalChecklist.querySelectorAll('[data-onboarding-check-step]').forEach((button) => {
+    button.addEventListener('click', () => showOnboardingStep(Number(button.dataset.onboardingCheckStep)));
+  });
   if (els.onboardingPublicLink) els.onboardingPublicLink.href = adminStoreHomeUrl();
 }
 
@@ -4614,7 +4639,71 @@ function openAdminSupportTicketForm() {
 }
 
 function closeAdminSupportTicketForm() {
-  if (els.supportCreateBox) els.supportCreateBox.hidden = true;
+  if (els.supportCreateBox) {
+    els.supportCreateBox.hidden = true;
+    els.supportCreateBox.classList.remove('context-open');
+  }
+}
+
+function openSupportTicketWithContext(context = '') {
+  const presets = {
+    integrations: {
+      category: 'Integrações',
+      priority: 'medium',
+      subject: 'Preciso de ajuda com integrações',
+      message: 'Olá, preciso de ajuda para configurar WhatsApp automático ou Pix online na minha loja.'
+    },
+    plan: {
+      category: 'Plano e cobrança',
+      priority: 'medium',
+      subject: 'Preciso de ajuda com meu plano',
+      message: 'Olá, preciso de ajuda para entender meu plano, recursos liberados ou pagamento da assinatura.'
+    },
+    orders: {
+      category: 'Pedidos',
+      priority: 'medium',
+      subject: 'Preciso de ajuda com pedidos',
+      message: 'Olá, preciso de ajuda para acompanhar pedidos, ver detalhes, mudar status ou organizar a operação.'
+    },
+    menu: {
+      category: 'Cardápio',
+      priority: 'medium',
+      subject: 'Preciso de ajuda com o cardápio',
+      message: 'Olá, preciso de ajuda para cadastrar categorias, produtos, fotos, preços ou adicionais do cardápio.'
+    },
+    store: {
+      category: 'Configurações da Loja',
+      priority: 'medium',
+      subject: 'Preciso de ajuda com as configurações da loja',
+      message: 'Olá, preciso de ajuda para revisar dados da loja, WhatsApp dos pedidos, entrega, pagamentos ou tema.'
+    },
+    whatsapp: {
+      category: 'WhatsApp automático',
+      priority: 'medium',
+      subject: 'Preciso de ajuda para conectar o WhatsApp',
+      message: 'Olá, tentei conectar o WhatsApp automático da loja e preciso de orientação.'
+    },
+    payment: {
+      category: 'Pagamento online',
+      priority: 'high',
+      subject: 'Preciso de ajuda com Abacate Pay',
+      message: 'Olá, preciso de ajuda para configurar Pix online e confirmação automática de pagamento.'
+    }
+  };
+  const preset = presets[context] || presets.integrations;
+  activateAdminTab('support');
+  window.setTimeout(() => {
+    openAdminSupportTicketForm();
+    els.supportCreateBox?.classList.add('context-open');
+    const form = els.adminSupportTicketForm;
+    if (!form) return;
+    setValue(form.elements.contact_name, state.admin?.name || '');
+    setValue(form.elements.subject, preset.subject);
+    setValue(form.elements.category, preset.category);
+    setValue(form.elements.priority, preset.priority);
+    setValue(form.elements.message, preset.message);
+    form.elements.message?.focus({ preventScroll: true });
+  }, 80);
 }
 
 function renderSupportTicketQueueItem(ticket, selectedId) {
@@ -5224,20 +5313,46 @@ function renderPlan() {
   updateCommercialBlockFromPlan(status, subscription);
 
   els.planSummary.innerHTML = `
-    <div class="plan-main-card">
-      <p class="eyebrow">Plano atual</p>
-      <div class="plan-main-title">
-        <h2>${escapeHtml(plan.name || 'Sem plano definido')}</h2>
-        <span class="plan-status ${planStatusClass(status)}">${escapeHtml(statusLabel)}</span>
+    <div class="plan-summary-card ${pendingSubscription.id ? 'has-pending' : ''}">
+      <div class="plan-summary-main">
+        <div>
+          <p class="eyebrow">Resumo da assinatura</p>
+          <div class="plan-main-title">
+            <h2>${escapeHtml(plan.name || 'Sem plano definido')}</h2>
+            <span class="plan-status ${planStatusClass(status)}">${escapeHtml(statusLabel)}</span>
+          </div>
+          <p class="muted">${escapeHtml(plan.description || 'Configure o plano pelo painel da plataforma.')}</p>
+        </div>
+        <strong class="plan-price">${formatPlanPrice(plan.monthly_price)}</strong>
       </div>
-      <p class="muted">${escapeHtml(plan.description || 'Configure o plano pelo painel da plataforma.')}</p>
-      <strong>${formatPlanPrice(plan.monthly_price)}</strong>
-      <div class="plan-mini-list">
-        <span>Status <strong>${escapeHtml(statusLabel)}</strong></span>
-        <span>Dias restantes <strong>${daysRemaining === null ? '-' : `${daysRemaining} dia(s)`}</strong></span>
+      <div class="plan-summary-meta">
+        <article>
+          <span>Cobrança</span>
+          <strong>${escapeHtml(billingStatus)}</strong>
+          <small>${pendingSubscription.id ? 'Aguardando regularização' : 'Sem pendência aberta'}</small>
+        </article>
+        <article>
+          <span>Renovação</span>
+          <strong>${dateLabel(nextRenewal) || '-'}</strong>
+          <small>${daysRemaining === null ? renewalMessage(subscription) : `${daysRemaining} dia(s) restante(s)`}</small>
+        </article>
+        <article>
+          <span>Valor</span>
+          <strong>${money(pendingSubscription.metadata?.amount_cents ? Number(pendingSubscription.metadata.amount_cents) / 100 : plan.monthly_price || 0)}</strong>
+          <small>${pendingSubscription.payment_due_at ? `Vence em ${dateLabel(pendingSubscription.payment_due_at)}` : 'Mensalidade atual'}</small>
+        </article>
       </div>
+      ${pendingSubscription.id ? `
+        <div class="plan-pending-callout">
+          <div>
+            <strong>Pagamento pendente</strong>
+            <span>Regularize para manter a assinatura ativa e evitar bloqueios.</span>
+          </div>
+          ${pendingCheckoutUrl ? `<a class="primary-button compact" href="${escapeAttribute(pendingCheckoutUrl)}" target="_blank" rel="noopener">Regularizar pagamento</a>` : `<button class="primary-button compact" id="billingPendingButton" type="button">Regularizar pagamento</button>`}
+        </div>
+      ` : ''}
       <div class="plan-actions">
-        <label>Plano para contratar
+        <label>Alterar para
           <select id="billingPlanSelect">
             ${availablePlans.map((entry) => `<option value="${escapeAttribute(entry.code)}"${entry.code === selectedPlanCode ? ' selected' : ''}>${escapeHtml(entry.name)} - ${money(entry.monthly_price || 0)}/mês</option>`).join('')}
           </select>
@@ -5247,40 +5362,24 @@ function renderPlan() {
     </div>
   `;
   document.querySelector('#billingCheckoutButton')?.addEventListener('click', () => openPlanCheckoutModal());
+  document.querySelector('#billingPendingButton')?.addEventListener('click', () => openPlanCheckoutModal());
 
   if (els.planBilling) {
-    els.planBilling.innerHTML = `
-      <p class="eyebrow">Cobrança</p>
-      <h2>${escapeHtml(billingStatus)}</h2>
-      <p class="muted">${pendingSubscription.id ? 'Finalize o pagamento para ativar ou alterar a assinatura.' : 'Plano sem cobrança em aberto no momento.'}</p>
-      <div class="plan-mini-list">
-        <span>Status <strong>${escapeHtml(pendingSubscription.id ? commercialStatusLabel(pendingSubscription.status) : statusLabel)}</strong></span>
-        <span>Valor <strong>${money(pendingSubscription.metadata?.amount_cents ? Number(pendingSubscription.metadata.amount_cents) / 100 : plan.monthly_price || 0)}</strong></span>
-        <span>Vencimento <strong>${dateLabel(pendingSubscription.payment_due_at) || '-'}</strong></span>
-      </div>
-      <div class="row-actions">
-        ${pendingCheckoutUrl ? `<a class="primary-button compact" href="${escapeAttribute(pendingCheckoutUrl)}" target="_blank" rel="noopener">Abrir pagamento</a>` : ''}
-        <button class="ghost-button compact" id="billingRenewButton" type="button"${availablePlans.length ? '' : ' disabled'}>${pendingSubscription.id ? 'Trocar plano' : 'Ativar/alterar plano'}</button>
-      </div>
-    `;
-    document.querySelector('#billingRenewButton')?.addEventListener('click', () => openPlanCheckoutModal());
+    els.planBilling.innerHTML = '';
   }
 
   if (els.planRenewal) {
-    els.planRenewal.innerHTML = `
-      <p class="eyebrow">Próxima renovação</p>
-      <h2>${dateLabel(nextRenewal) || '-'}</h2>
-      <p class="muted">${renewalMessage(subscription)}</p>
-      <div class="plan-mini-list">
-        <span>Início do ciclo <strong>${dateLabel(subscription.current_period_starts_at) || '-'}</strong></span>
-        <span>Fim do ciclo <strong>${dateLabel(subscription.current_period_ends_at || subscription.trial_ends_at) || '-'}</strong></span>
-      </div>
-    `;
+    els.planRenewal.innerHTML = '';
   }
 
   els.planUsage.innerHTML = `
-    <p class="eyebrow">Uso</p>
-    <h2>Uso e limites</h2>
+    <div class="plan-panel-head">
+      <div>
+        <p class="eyebrow">Uso</p>
+        <h2>Uso e limites</h2>
+      </div>
+      <p class="muted">Barras aparecem apenas quando existe limite no plano.</p>
+    </div>
     <div class="plan-usage-list">
       ${usageBar('Produtos cadastrados', usage.products, featureLimit(features, 'digital_menu'))}
       ${usageBar('Categorias', usage.categories, featureLimit(features, 'menu_categories'))}
@@ -5291,19 +5390,11 @@ function renderPlan() {
       ${usageBar('WhatsApp/mensagens', usage.whatsapp_messages, featureLimit(features, 'automatic_whatsapp') || featureLimit(features, 'manual_whatsapp'))}
     </div>
   `;
-  els.planFeatures.innerHTML = features.length ? features.map((entry) => {
-    const feature = entry.feature || {};
-    const enabled = entry.is_enabled !== false;
-    return `
-      <article class="feature-row compact ${enabled ? 'enabled' : 'disabled'}">
-        <div>
-          <strong>${escapeHtml(feature.name || feature.code || 'Recurso')}</strong>
-          <small>${escapeHtml(feature.description || 'Recurso incluso neste plano.')}</small>
-        </div>
-        <span class="feature-limit">${featureStatusLabel(entry)}</span>
-      </article>
-    `;
-  }).join('') : '<p class="empty-state">Nenhum recurso cadastrado para este plano.</p>';
+  els.planFeatures.innerHTML = planFeatureGroups(features);
+  els.planFeatures.querySelector('[data-plan-show-features]')?.addEventListener('click', (event) => {
+    els.planFeatures.querySelectorAll('[data-plan-extra-feature]').forEach((node) => { node.hidden = false; });
+    event.currentTarget.remove();
+  });
 
   if (els.planCompare) {
     els.planCompare.innerHTML = availablePlans.length ? availablePlans.map((entry) => comparePlanCard(entry, plan.code)).join('') : '<p class="empty-state">Nenhum plano disponível.</p>';
@@ -5316,6 +5407,13 @@ function renderPlan() {
     const visibleBillingHistory = billingHistory.slice(0, 5);
     els.planHistory.innerHTML = billingHistory.length ? `
       <div class="plan-history-table">
+        <div class="plan-history-header">
+          <span>Data</span>
+          <span>Plano</span>
+          <span>Status</span>
+          <span>Valor</span>
+          <span>Ação</span>
+        </div>
         ${visibleBillingHistory.map((event) => billingHistoryRow(event)).join('')}
       </div>
       ${billingHistory.length > visibleBillingHistory.length ? `<p class="muted compact-muted">Mostrando os 5 eventos mais recentes de ${billingHistory.length} registro(s).</p>` : ''}
@@ -5383,7 +5481,7 @@ function openPlanCheckoutModal(planCode = '') {
       </div>
       <div class="plan-checkout-note">
         <strong>Como funciona</strong>
-        <p>Ao continuar, vamos abrir o checkout seguro. O plano é liberado automaticamente assim que o pagamento for confirmado pelo provedor.</p>
+        <p>Ao continuar, vamos abrir o checkout seguro com Pix e cartão. O plano é liberado por 30 dias assim que o pagamento for confirmado.</p>
       </div>
       <div class="row-actions plan-checkout-footer">
         <button class="ghost-button compact" type="button" data-close-plan-checkout>Cancelar</button>
@@ -5486,7 +5584,7 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
       <div class="plan-checkout-head">
         <p class="eyebrow">Pagamento seguro</p>
         <h2 id="planCheckoutWaitingTitle">Finalize o pagamento na aba aberta</h2>
-        <p>Assim que a Abacate Pay confirmar o pagamento, o plano será liberado automaticamente no painel.</p>
+        <p>Escolha Pix ou cartão na Abacate Pay. Quando o pagamento for confirmado, o plano será liberado automaticamente no painel.</p>
       </div>
       <div class="plan-checkout-status">
         <span aria-hidden="true"></span>
@@ -5594,14 +5692,19 @@ function usageBar(label, value, limit) {
   const percent = hasLimit ? Math.min(100, Math.round((current / Number(limit)) * 100)) : 0;
   const tone = !hasLimit || percent < 70 ? 'ok' : percent < 90 ? 'warn' : 'danger';
   return `
-    <article class="plan-usage-row">
+    <article class="plan-usage-row ${hasLimit ? '' : 'unlimited'}">
       <div>
         <strong>${escapeHtml(label)}</strong>
-        <span>${current} ${hasLimit ? `/ ${Number(limit)}` : '/ ilimitado'}</span>
+        <span>${current} ${hasLimit ? `/ ${Number(limit)}` : 'em uso'}</span>
       </div>
-      <div class="plan-progress" aria-label="${escapeAttribute(label)}">
-        <span class="${tone}" style="width:${hasLimit ? percent : 100}%"></span>
-      </div>
+      ${hasLimit ? `
+        <div class="plan-progress-wrap">
+          <div class="plan-progress" aria-label="${escapeAttribute(label)}">
+            <span class="${tone}" style="width:${percent}%"></span>
+          </div>
+          <small>${percent}%</small>
+        </div>
+      ` : '<strong class="plan-unlimited">Ilimitado</strong>'}
     </article>
   `;
 }
@@ -5609,6 +5712,77 @@ function usageBar(label, value, limit) {
 function featureStatusLabel(entry) {
   if (entry.is_enabled === false) return 'Bloqueado';
   return entry.limit_value ? `Até ${Number(entry.limit_value)}` : 'Ilimitado';
+}
+
+function planFeatureGroups(features = []) {
+  if (!features.length) return '<p class="empty-state">Nenhum recurso cadastrado para este plano.</p>';
+  const categories = [
+    { key: 'cardapio', title: 'Cardápio', icon: '🍔', match: /(menu|card[aá]pio|product|produto|categor|additional|adicional)/i },
+    { key: 'pedidos', title: 'Pedidos', icon: '🧾', match: /(order|pedido|whatsapp|coupon|cupom|delivery)/i },
+    { key: 'operacao', title: 'Operação', icon: '⚙', match: /(table|mesa|print|kds|kitchen|cozinha|report|relat|customer|cliente|store|loja)/i },
+    { key: 'crescimento', title: 'Crescimento', icon: '↗', match: /(domain|dom[ií]nio|support|suporte|integration|integra|loyalty|fidelidade|automation|automa)/i }
+  ];
+  const grouped = categories.map((category) => ({ ...category, items: [] }));
+  const enabledCount = features.filter((entry) => entry.is_enabled !== false).length;
+  const blockedCount = Math.max(0, features.length - enabledCount);
+  features.forEach((entry) => {
+    const feature = entry.feature || {};
+    const text = `${feature.code || ''} ${feature.name || ''} ${feature.description || ''}`;
+    const group = grouped.find((category) => category.match.test(text)) || grouped[grouped.length - 1];
+    group.items.push(entry);
+  });
+  const visibleLimit = 8;
+  let renderedCount = 0;
+  const total = features.length;
+  const content = grouped
+    .filter((group) => group.items.length)
+    .map((group) => `
+      <section class="plan-feature-group">
+        <div class="plan-feature-group-title">
+          <span aria-hidden="true">${group.icon}</span>
+          <div>
+            <strong>${escapeHtml(group.title)}</strong>
+            <small>${group.items.filter((entry) => entry.is_enabled !== false).length} liberado(s)</small>
+          </div>
+        </div>
+        <div class="plan-feature-items">
+          ${group.items.map((entry) => {
+            const feature = entry.feature || {};
+            const enabled = entry.is_enabled !== false;
+            const hidden = renderedCount >= visibleLimit;
+            renderedCount += 1;
+            return `
+              <article class="plan-feature-chip ${enabled ? 'enabled' : 'disabled'}" ${hidden ? 'hidden data-plan-extra-feature' : ''}>
+                <span class="plan-feature-state" aria-hidden="true">${enabled ? '✓' : '!'}</span>
+                <div>
+                  <strong>${escapeHtml(feature.name || feature.code || 'Recurso')}</strong>
+                  <small>${escapeHtml(featureStatusLabel(entry))}</small>
+                </div>
+              </article>
+            `;
+          }).join('')}
+        </div>
+      </section>
+    `)
+    .join('');
+  return `
+    <div class="plan-feature-summary">
+      <article>
+        <strong>${enabledCount}</strong>
+        <span>recursos liberados</span>
+      </article>
+      <article class="${blockedCount ? 'has-blocked' : ''}">
+        <strong>${blockedCount}</strong>
+        <span>${blockedCount === 1 ? 'recurso bloqueado' : 'recursos bloqueados'}</span>
+      </article>
+      <p>Use esta área como checklist rápido do que a loja pode usar agora. Para liberar mais funções, compare os planos abaixo.</p>
+    </div>
+    <div class="plan-feature-grid">${content}</div>
+    <div class="plan-feature-actions">
+      ${total > visibleLimit ? `<button class="ghost-button compact plan-show-features" type="button" data-plan-show-features>Ver todos os ${total} recursos</button>` : ''}
+      ${blockedCount ? '<span class="muted">Recursos bloqueados ficam disponíveis em planos superiores.</span>' : '<span class="muted">Todos os recursos deste plano estão liberados.</span>'}
+    </div>
+  `;
 }
 
 function comparePlanCard(plan, currentCode) {
@@ -7023,7 +7197,9 @@ function renderIntegrationStatus(settings = state.store?.integration_settings ||
   if (!els.integrationStatusText) return;
   const whatsapp = settings.whatsapp || {};
   const pix = settings.pix || {};
-  els.integrationStatusText.textContent = `WhatsApp: ${whatsapp.enabled ? 'ativo' : 'desativado'} - Abacate Pay/Pix: ${pix.enabled ? 'ativo' : 'desativado'}.`;
+  const whatsappConnected = state.whatsappIntegration?.status === 'connected';
+  const whatsappLabel = whatsappConnected ? 'automático conectado' : (whatsapp.enabled ? 'ativo' : 'desativado');
+  els.integrationStatusText.textContent = `WhatsApp: ${whatsappLabel} - Abacate Pay/Pix: ${pix.enabled ? 'ativo' : 'desativado'}.`;
 }
 
 async function testIntegrations() {
@@ -7071,6 +7247,158 @@ function integrationTestMessage(label, result) {
   return `${prefix} ${result.message || 'verificado.'}`;
 }
 
+async function loadWhatsappIntegration() {
+  if (!els.whatsappAutoStatus) return;
+  try {
+    renderWhatsappIntegration({ status: 'loading', status_label: 'Carregando...' });
+    const result = await request('/api/admin/integrations/whatsapp');
+    renderWhatsappIntegration(result.whatsapp || {});
+  } catch (error) {
+    renderWhatsappIntegration({ status: 'error', status_label: 'Erro', last_error: error.message || 'Não foi possível carregar o WhatsApp automático.' });
+  }
+}
+
+function renderWhatsappIntegration(data = {}) {
+  if (!els.whatsappAutoStatus) return;
+  const status = data.status || 'not_connected';
+  const label = data.status_label || whatsappAutoStatusLabel(status);
+  state.whatsappIntegration = data;
+  els.whatsappAutoStatus.textContent = label;
+  els.whatsappAutoStatus.className = `status-pill whatsapp-status-${status}`;
+  if (els.whatsappAutoMessage) {
+    if (data.last_error) {
+      els.whatsappAutoMessage.textContent = data.last_error;
+    } else if (data.configured === false) {
+      els.whatsappAutoMessage.textContent = 'A Central TáPronto ainda precisa configurar a Evolution API antes de conectar o WhatsApp da loja.';
+    } else if (status === 'connected') {
+      els.whatsappAutoMessage.textContent = `Conectado${data.phone_number ? ` ao número ${data.phone_number}` : ''}. Pedidos novos serão enviados automaticamente para a loja.`;
+    } else if (status === 'connecting') {
+      els.whatsappAutoMessage.textContent = 'Aguardando leitura do QR Code. Se expirar, clique em Atualizar QR Code e tente novamente.';
+    } else if (status === 'disconnected') {
+      els.whatsappAutoMessage.textContent = 'Sessão desconectada. Clique em Reconectar WhatsApp para gerar um novo QR Code.';
+    } else {
+      els.whatsappAutoMessage.textContent = 'Clique em Conectar WhatsApp e escaneie o QR Code com o celular da loja.';
+    }
+  }
+  const qr = data.qr_code_base64 || '';
+  if (els.whatsappQrBox) els.whatsappQrBox.hidden = !qr;
+  if (els.whatsappQrImage && qr) els.whatsappQrImage.src = qr;
+  if (els.connectWhatsappButton) {
+    els.connectWhatsappButton.textContent = ['connected', 'disconnected', 'error'].includes(status) ? 'Reconectar WhatsApp' : 'Conectar WhatsApp';
+    els.connectWhatsappButton.disabled = data.configured === false || status === 'loading';
+  }
+  if (els.refreshWhatsappQrButton) {
+    els.refreshWhatsappQrButton.hidden = status === 'connected' && !qr;
+    els.refreshWhatsappQrButton.disabled = data.configured === false || status === 'loading';
+  }
+  if (els.testWhatsappButton) {
+    els.testWhatsappButton.disabled = status !== 'connected';
+    els.testWhatsappButton.title = status === 'connected'
+      ? 'Envia uma mensagem de teste para o WhatsApp conectado nesta loja.'
+      : 'Conecte o WhatsApp da loja antes de enviar um teste.';
+  }
+  if (els.disconnectWhatsappButton) {
+    els.disconnectWhatsappButton.hidden = !['connected', 'connecting', 'disconnected', 'error'].includes(status);
+  }
+  renderIntegrationStatus();
+}
+
+function whatsappAutoStatusLabel(status = '') {
+  return ({
+    connected: 'Conectado',
+    connecting: 'Aguardando QR Code',
+    disconnected: 'Desconectado',
+    not_connected: 'Não conectado',
+    error: 'Erro',
+    loading: 'Carregando...'
+  })[status] || 'Desconhecido';
+}
+
+async function connectWhatsapp() {
+  await runWhatsappAction(els.connectWhatsappButton, 'Gerando QR...', async () => {
+    const result = await request('/api/admin/integrations/whatsapp/connect', { method: 'POST' });
+    const whatsapp = result.whatsapp || {};
+    renderWhatsappIntegration(whatsapp);
+    toast(whatsapp.status === 'connected'
+      ? 'WhatsApp automático conectado.'
+      : 'QR Code gerado. Escaneie com o celular da loja.');
+  });
+}
+
+async function refreshWhatsappQrCode() {
+  await runWhatsappAction(els.refreshWhatsappQrButton, 'Atualizando...', async () => {
+    const result = await request('/api/admin/integrations/whatsapp/qrcode');
+    renderWhatsappIntegration(result.whatsapp || {});
+    toast('QR Code atualizado.');
+  });
+}
+
+async function testWhatsappAuto() {
+  await runWhatsappAction(els.testWhatsappButton, 'Enviando...', async () => {
+    const result = await request('/api/admin/integrations/whatsapp/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    toast(result.message || 'Mensagem de teste enviada para o WhatsApp da loja.');
+  });
+}
+
+async function requestPaymentSetupSupport() {
+  const button = els.requestPaymentSetupButton;
+  const previousText = button?.textContent || 'Solicitar configuração';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Solicitando...';
+    }
+    const result = await request('/api/admin/integrations/payment-setup-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    toast(result.message || 'Solicitação enviada. Abrimos um chamado com o contexto da Abacate Pay.');
+    state.loadedAdminTabs.delete('support');
+    state.selectedSupportTicketId = result.ticket?.id || state.selectedSupportTicketId;
+    activateAdminTab('support');
+  } catch (error) {
+    toast(error.message || 'Não foi possível solicitar a configuração.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
+}
+
+async function disconnectWhatsapp() {
+  if (!confirm('Desconectar o WhatsApp automático desta loja?')) return;
+  await runWhatsappAction(els.disconnectWhatsappButton, 'Desconectando...', async () => {
+    const result = await request('/api/admin/integrations/whatsapp/disconnect', { method: 'POST' });
+    renderWhatsappIntegration(result.whatsapp || {});
+    toast('WhatsApp desconectado.');
+  });
+}
+
+async function runWhatsappAction(button, loadingText, action) {
+  const previousText = button?.textContent || '';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = loadingText;
+    }
+    await action();
+  } catch (error) {
+    toast(error.message || 'Não foi possível executar a ação do WhatsApp.');
+    await loadWhatsappIntegration().catch(() => {});
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
+}
+
 function renderAbacateWebhookUrl() {
   if (!els.abacateWebhookUrl) return;
   const origin = window.location.origin || '';
@@ -7081,6 +7409,19 @@ function openIntegrationHelp(type) {
   const origin = window.location.origin || 'https://sua-loja.com';
   const webhookUrl = `${origin}/api/payments/webhook?provider=abacatepay`;
   const content = {
+    'whatsapp-auto': {
+      eyebrow: 'WhatsApp automático',
+      title: 'Como conectar o WhatsApp da loja',
+      body: `
+        <ol>
+          <li>Clique em <strong>Conectar WhatsApp</strong> para gerar o QR Code desta loja.</li>
+          <li>No celular da loja, abra o WhatsApp e entre em <strong>Aparelhos conectados</strong>.</li>
+          <li>Escaneie o QR Code mostrado no painel.</li>
+          <li>Quando aparecer <strong>Conectado</strong>, clique em <strong>Enviar teste para minha loja</strong>.</li>
+        </ol>
+        <p>Cada loja usa o próprio número. Se o celular ficar sem internet ou a sessão expirar, volte aqui e reconecte com um novo QR Code.</p>
+      `
+    },
     'abacate-key': {
       eyebrow: 'Abacate Pay',
       title: 'Onde pegar a API key',
@@ -7449,7 +7790,7 @@ function setFeatureGate(button, alert, allowed, message) {
   }
   if (alert) {
     alert.hidden = allowed;
-    alert.innerHTML = allowed ? '' : `${escapeHtml(message)} <button type="button" data-admin-tab-jump="plan">Ver planos</button>`;
+    alert.innerHTML = allowed ? '' : `${escapeHtml(message)} <button type="button" data-admin-tab-jump="plan">Ver Planos</button>`;
     alert.querySelector('[data-admin-tab-jump]')?.addEventListener('click', () => activateAdminTab('plan'));
   }
 }
@@ -7470,7 +7811,7 @@ function renderPlanBlockedSection(section) {
       <p class="eyebrow">Plano atual</p>
       <h2>Recurso disponível em planos superiores</h2>
       <p>Este recurso não faz parte do plano atual da loja. Acesse Meu plano para comparar opções e liberar esta área.</p>
-      <button class="primary-button compact" type="button" data-admin-tab-jump="plan">Ver planos</button>
+      <button class="primary-button compact" type="button" data-admin-tab-jump="plan">Ver Planos</button>
     </section>
   `;
   section.querySelector('[data-admin-tab-jump]')?.addEventListener('click', () => activateAdminTab('plan'));
@@ -7941,7 +8282,7 @@ async function request(url, options = {}) {
       });
     }
     const detail = typeof data.detail === 'string' ? data.detail : '';
-    const error = new Error(detail || data.error || friendlyRequestError(url, response, data));
+    const error = new Error(humanRequestMessage(url, response, data, detail));
     error.code = data.code || data.error_code || '';
     error.feature = data.feature || '';
     error.usageKey = data.usage_key || '';
@@ -7951,6 +8292,21 @@ async function request(url, options = {}) {
     throw error;
   }
   return data;
+}
+
+function humanRequestMessage(url, response, data = {}, detail = '') {
+  const raw = String(data.error || detail || '').trim();
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('identificador inválido') || normalized.includes('invalid identifier')) {
+    if (String(url).includes('/platform')) return 'Não foi possível carregar estes dados da Central. Atualize a página e tente novamente.';
+    if (String(url).includes('/billing')) return 'Não foi possível localizar a cobrança ou assinatura. Atualize o plano e tente novamente.';
+    if (String(url).includes('/support')) return 'Não foi possível localizar este chamado. Atualize a lista e tente novamente.';
+    return 'Não foi possível localizar este registro. Atualize a página e tente novamente.';
+  }
+  if (normalized.includes('undefined') || normalized.includes('cannot read properties')) {
+    return 'Encontramos um dado incompleto nesta ação. Atualize a página e tente novamente.';
+  }
+  return raw || friendlyRequestError(url, response, data);
 }
 
 function showCommercialBlocker(info = {}, options = {}) {
@@ -7964,8 +8320,8 @@ function showCommercialBlocker(info = {}, options = {}) {
       <h2>${status === 'trial_expired' ? 'Escolha um plano para continuar' : 'Regularize seu plano'}</h2>
       <p>${escapeHtml(message)}</p>
       <div class="commercial-blocker-actions">
-        <button class="primary-button compact" type="button" data-commercial-plan>Ver planos mensais</button>
-        <button class="ghost-button compact" type="button" data-commercial-account>Minha conta</button>
+        <button class="primary-button compact" type="button" data-commercial-plan>Ver Planos Mensais</button>
+        <button class="ghost-button compact" type="button" data-commercial-account>Minha Conta</button>
       </div>
     </section>
   `;

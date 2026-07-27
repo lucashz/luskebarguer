@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
-    <link rel="stylesheet" href="/styles.css?v=20260713-platform-tech">
-    <link rel="stylesheet" href="/platform.css?v=20260721-support-polish">
+    <link rel="stylesheet" href="/styles.css?v=20260727-evolution-whatsapp">
+    <link rel="stylesheet" href="/platform.css?v=20260727-evolution-whatsapp">
   </head>
   <body class="admin-page platform-page platform-redesign">
     <main class="platform-shell">
@@ -21,11 +21,11 @@
         <nav class="platform-tabs" aria-label="Áreas da plataforma">
           <span class="platform-sidebar-label">Menu</span>
           <button class="active" data-platform-view="overview" type="button"><span aria-hidden="true">⌂</span>Visão Geral</button>
-          <button data-platform-view="commercial" type="button"><span aria-hidden="true">▥</span>Métricas comerciais</button>
+          <button data-platform-view="commercial" type="button"><span aria-hidden="true">▥</span>Métricas Comerciais</button>
           <button data-platform-view="clients" type="button"><span aria-hidden="true">◎</span>Clientes</button>
           <button data-platform-view="billing" type="button"><span aria-hidden="true">□</span>Billing</button>
           <button data-platform-view="support" type="button"><span aria-hidden="true">☏</span>Atendimentos</button>
-          <button data-platform-view="health" type="button"><span aria-hidden="true">⌁</span>Operação técnica</button>
+          <button data-platform-view="health" type="button"><span aria-hidden="true">⌁</span>Operação Técnica</button>
           <button data-platform-view="communication" type="button"><span aria-hidden="true">✉</span>Comunicação</button>
           <button data-platform-view="audit" type="button"><span aria-hidden="true">◇</span>Auditoria</button>
         </nav>
@@ -45,7 +45,7 @@
             <p class="muted" id="platformPageSubtitle">Acompanhe clientes, receita, suporte e operação do SaaS em tempo real.</p>
           </div>
           <div class="admin-header-actions">
-            <a class="ghost-button compact" href="/painel">Voltar ao painel</a>
+            <a class="ghost-button compact" href="/painel">Voltar ao Painel</a>
             <button class="ghost-button compact" id="platformLogoutButton" type="button">Sair</button>
           </div>
         </header>
@@ -87,7 +87,7 @@
               <p class="form-message" id="platformRecoverMessage" role="status"></p>
             </form>
           </details>
-          <a class="ghost-button compact" href="/painel">Voltar ao painel</a>
+          <a class="ghost-button compact" href="/painel">Voltar ao Painel</a>
         </div>
       </section>
 
@@ -96,7 +96,7 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Visão Geral</p>
-              <h2>Resumo da plataforma</h2>
+              <h2>Resumo da Plataforma</h2>
               <p class="muted">Veja rapidamente o que cresceu, o que exige atenção e onde agir primeiro.</p>
             </div>
             <div class="row-actions">
@@ -105,7 +105,7 @@
                 <option value="15d">15 dias</option>
                 <option value="30d" selected>30 dias</option>
               </select>
-              <button class="ghost-button compact" id="refreshAnalyticsButton" type="button">Atualizar visão geral</button>
+              <button class="ghost-button compact" id="refreshAnalyticsButton" type="button">Atualizar Visão Geral</button>
             </div>
           </div>
           <section class="platform-kpi-grid" id="platformKpiGrid"></section>
@@ -137,8 +137,8 @@
         <section class="panel platform-commercial-panel" data-platform-section="commercial" hidden>
           <div class="section-actions">
             <div>
-              <p class="eyebrow">Métricas comerciais</p>
-              <h2>Receita e crescimento</h2>
+              <p class="eyebrow">Métricas Comerciais</p>
+              <h2>Receita e Crescimento</h2>
               <p class="muted">Entenda MRR, conversão, expansão, perda de receita e desempenho dos planos.</p>
             </div>
             <div class="row-actions">
@@ -147,7 +147,7 @@
                 <option value="15d">15 dias</option>
                 <option value="30d" selected>30 dias</option>
               </select>
-              <button class="ghost-button compact" id="refreshCommercialMirrorButton" type="button">Atualizar comercial</button>
+              <button class="ghost-button compact" id="refreshCommercialMirrorButton" type="button">Atualizar Comercial</button>
             </div>
           </div>
           <section class="platform-analytics-grid platform-commercial-metrics-grid">
@@ -185,8 +185,8 @@
         <section class="panel platform-health-panel" data-platform-section="health" hidden>
           <div class="section-actions">
             <div>
-              <p class="eyebrow">Operação técnica</p>
-              <h2>Saúde e serviços</h2>
+              <p class="eyebrow">Operação Técnica</p>
+              <h2>Saúde e Serviços</h2>
               <p class="muted">Monitore infraestrutura, backups, webhooks, SMTP, jobs e logs das últimas 24h.</p>
             </div>
             <div class="row-actions">
@@ -202,8 +202,8 @@
           <section class="platform-tech-section">
             <div class="platform-tech-section-title">
               <div>
-                <p class="eyebrow">Visão rápida</p>
-                <h3>Serviços essenciais</h3>
+                <p class="eyebrow">Visão Rápida</p>
+                <h3>Serviços Essenciais</h3>
               </div>
               <span>API, banco, backup, SMTP, Abacate Pay, webhooks e recursos.</span>
             </div>
@@ -234,15 +234,15 @@
                 <p class="eyebrow">Backups</p>
                 <h3>Backup manual</h3>
                 <p>Gere um ponto de segurança antes de mudanças críticas.</p>
-                <button class="primary-button compact" data-critical-action="backup" type="button">Fazer backup agora</button>
+                <button class="primary-button compact" data-critical-action="backup" type="button">Fazer Backup Agora</button>
               </article>
               <article class="platform-service-card">
                 <p class="eyebrow">Retenção</p>
                 <h3>Limpeza de logs</h3>
                 <p>Simule ou aplique a retenção de logs, sessões e backups antigos.</p>
                 <div class="row-actions">
-                  <button class="ghost-button compact" id="previewLogCleanupButton" type="button">Simular limpeza</button>
-                  <button class="danger-button compact" data-critical-action="log-cleanup" type="button">Executar limpeza</button>
+                  <button class="ghost-button compact" id="previewLogCleanupButton" type="button">Simular Limpeza</button>
+                  <button class="danger-button compact" data-critical-action="log-cleanup" type="button">Executar Limpeza</button>
                 </div>
                 <div class="platform-cleanup-result" id="logCleanupResult"></div>
               </article>
@@ -262,7 +262,7 @@
                 <p class="eyebrow">Jobs</p>
                 <h3>Trials inativos</h3>
                 <p>Remove lojas de teste abandonadas pela regra operacional.</p>
-                <button class="ghost-button compact" data-critical-action="trial-cleanup" type="button">Executar limpeza</button>
+                <button class="ghost-button compact" data-critical-action="trial-cleanup" type="button">Executar Limpeza</button>
               </article>
             </section>
           </section>
@@ -357,7 +357,7 @@
                 <p class="eyebrow">Backups</p>
                 <h3>Restaurar backup</h3>
                 <p>A restauração fica dentro da lista de backups para evitar execução acidental.</p>
-                <a class="ghost-button compact" href="#platformBackupList">Ver backups</a>
+                <a class="ghost-button compact" href="#platformBackupList">Ver Backups</a>
               </article>
               <article>
                 <h3>Proteções ativas</h3>
@@ -371,7 +371,7 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Billing</p>
-              <h2>Cobranças e assinaturas</h2>
+              <h2>Cobranças e Assinaturas</h2>
               <p class="muted">Controle planos ativos, vencimentos, inadimplência, eventos financeiros e reativações.</p>
             </div>
             <div class="row-actions">
@@ -392,7 +392,7 @@
               <select class="compact-date" id="billingPlanFilter">
                 <option value="">Todos planos</option>
               </select>
-              <button class="ghost-button compact" id="refreshBillingButton" type="button">Atualizar cobrança</button>
+              <button class="ghost-button compact" id="refreshBillingButton" type="button">Atualizar Cobrança</button>
             </div>
           </div>
           <section class="platform-billing-summary-grid" id="platformBillingSummaryGrid"></section>
@@ -482,10 +482,10 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Comunicação</p>
-              <h2>E-mails da plataforma</h2>
+              <h2>E-mails da Plataforma</h2>
               <p class="muted">Configure remetente, autenticação SMTP, testes de envio e templates automáticos.</p>
             </div>
-            <button class="ghost-button compact" id="refreshCommunicationButton" type="button">Atualizar e-mails</button>
+            <button class="ghost-button compact" id="refreshCommunicationButton" type="button">Atualizar E-mails</button>
           </div>
           <section class="platform-health-grid">
             <form class="platform-service-card stack-form" id="platformSmtpForm">
@@ -518,7 +518,45 @@
               <h3>Teste de entrega</h3>
               <p class="muted">Envie uma mensagem para validar autenticação, remetente, acentos e caixa de entrada.</p>
               <label>Enviar para<input name="email" type="email" placeholder="voce@dominio.com"></label>
-              <button class="ghost-button compact">Enviar e-mail de teste</button>
+              <button class="ghost-button compact">Enviar E-mail de Teste</button>
+            </form>
+            <form class="platform-service-card stack-form" id="platformWhatsappForm">
+              <p class="eyebrow">WhatsApp global</p>
+              <h3>Evolution API</h3>
+              <p class="muted">Configure uma vez na Central. O lojista só escaneia o QR Code no painel.</p>
+              <label>URL base da Evolution
+                <input name="base_url" placeholder="https://evolution.seudominio.com">
+              </label>
+              <label>API key global
+                <input name="api_key" type="password" autocomplete="new-password" placeholder="Preencha apenas para alterar">
+              </label>
+              <label>Senha do superadmin
+                <input name="password" type="password" autocomplete="current-password" required placeholder="Confirme sua senha">
+              </label>
+              <label class="payment-option"><input name="is_active" type="checkbox"> Evolution ativa</label>
+              <div class="platform-provider-cost-grid">
+                <label>Saldo disponível no provedor
+                  <input name="provider_balance" inputmode="decimal" placeholder="Ex: 299,00">
+                </label>
+                <label>Custo por instância / 30 dias
+                  <input name="provider_instance_cost" inputmode="decimal" placeholder="29,90">
+                </label>
+                <label>Alerta de saldo baixo
+                  <input name="provider_low_balance" inputmode="decimal" placeholder="29,90">
+                </label>
+              </div>
+              <div class="platform-whatsapp-economy" id="platformWhatsappEconomy">
+                <p>Informe saldo e custo para impedir criação de instâncias sem margem.</p>
+              </div>
+              <div class="integration-webhook-url">
+                <span>Webhook da Evolution</span>
+                <code id="platformWhatsappWebhookUrl">/api/integrations/evolution/webhook</code>
+              </div>
+              <p class="muted" id="platformWhatsappStatusText">Configuração ainda não carregada.</p>
+              <div class="row-actions">
+                <button class="primary-button compact" id="savePlatformWhatsappButton" type="submit">Salvar Evolution</button>
+                <button class="ghost-button compact" id="testPlatformWhatsappButton" type="button">Testar conexão</button>
+              </div>
             </form>
           </section>
           <section class="platform-chart-card">
@@ -537,7 +575,7 @@
               <button type="button" data-support-tab="metrics">Métricas</button>
               <button type="button" data-support-tab="templates">Templates</button>
             </nav>
-            <button class="primary-button compact" id="refreshSupportButton" type="button">Atualizar fila</button>
+            <button class="primary-button compact" id="refreshSupportButton" type="button">Atualizar Fila</button>
           </div>
           <section class="platform-support-tab-panel active" data-support-panel="queue">
             <section class="platform-support-desk platform-support-desk-v3">
@@ -564,8 +602,8 @@
             <section class="platform-support-metrics-shell">
               <div class="platform-support-metrics-head">
                 <div>
-                  <p class="eyebrow">Métricas de atendimento</p>
-                  <h3>Saúde da fila de chamados</h3>
+                  <p class="eyebrow">Métricas de Atendimento</p>
+                  <h3>Saúde da Fila de Chamados</h3>
                   <p class="muted">Acompanhe volume, SLA, gargalos e clientes que mais exigem suporte.</p>
                 </div>
               </div>
@@ -603,10 +641,10 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Clientes</p>
-              <h2>Clientes e contas</h2>
+              <h2>Clientes e Contas</h2>
               <p class="muted">Acompanhe empresas, lojas, planos, ativação, uso e sinais de risco comercial.</p>
             </div>
-            <button class="ghost-button compact" id="refreshPlatformButton" type="button">Atualizar clientes</button>
+            <button class="ghost-button compact" id="refreshPlatformButton" type="button">Atualizar Clientes</button>
           </div>
           <form class="platform-client-filters" id="clientFilterForm">
             <input name="search" type="search" placeholder="Buscar por empresa, responsável, e-mail, telefone ou slug">
@@ -641,7 +679,7 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Auditoria</p>
-              <h2>Auditoria e rastreabilidade</h2>
+              <h2>Auditoria e Rastreabilidade</h2>
               <p class="muted">Veja ações sensíveis, alterações de cliente, eventos de billing, webhooks e suporte.</p>
             </div>
           </div>
@@ -664,7 +702,7 @@
           <div class="section-actions">
             <div>
               <p class="eyebrow">Backups</p>
-              <h2>Histórico de backups</h2>
+              <h2>Histórico de Backups</h2>
               <p class="muted">Confirme último backup, falhas recentes, tamanho do arquivo e retenção configurada.</p>
             </div>
           </div>
@@ -693,7 +731,7 @@
       </form>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260713-platform-tech"></script>
+    <script src="/platform.js?v=20260727-evolution-whatsapp"></script>
   </body>
 </html>
 

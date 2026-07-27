@@ -19,6 +19,7 @@
   billingLoaded: false,
   billingError: '',
   smtp: null,
+  whatsappSettings: null,
   emailTemplates: [],
   supportTickets: [],
   supportActiveTab: 'queue',
@@ -49,7 +50,7 @@ const PLATFORM_VIEW_META = {
     subtitle: 'Resumo do SaaS: clientes, receita, pedidos, alertas e operação.',
   },
   commercial: {
-    title: 'Métricas comerciais',
+    title: 'Métricas Comerciais',
     subtitle: 'Acompanhe MRR, conversão, retenção e desempenho dos planos.',
   },
   clients: {
@@ -65,7 +66,7 @@ const PLATFORM_VIEW_META = {
     subtitle: 'Atenda clientes com fila, conversa, contexto e SLA.',
   },
   health: {
-    title: 'Operação técnica',
+    title: 'Operação Técnica',
     subtitle: 'Monitore API, banco, backups, SMTP, webhooks, jobs e logs.',
   },
   communication: {
@@ -162,6 +163,12 @@ const els = {
   platformSmtpForm: document.querySelector('#platformSmtpForm'),
   platformSmtpTestForm: document.querySelector('#platformSmtpTestForm'),
   smtpStatusText: document.querySelector('#smtpStatusText'),
+  platformWhatsappForm: document.querySelector('#platformWhatsappForm'),
+  platformWhatsappStatusText: document.querySelector('#platformWhatsappStatusText'),
+  platformWhatsappWebhookUrl: document.querySelector('#platformWhatsappWebhookUrl'),
+  platformWhatsappEconomy: document.querySelector('#platformWhatsappEconomy'),
+  savePlatformWhatsappButton: document.querySelector('#savePlatformWhatsappButton'),
+  testPlatformWhatsappButton: document.querySelector('#testPlatformWhatsappButton'),
   platformEmailTemplateList: document.querySelector('#platformEmailTemplateList'),
   refreshSupportButton: document.querySelector('#refreshSupportButton'),
   platformSupportSummaryGrid: document.querySelector('#platformSupportSummaryGrid'),
@@ -201,6 +208,8 @@ els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshSupportButton?.addEventListener('click', loadSupport);
 els.platformSmtpForm?.addEventListener('submit', submitSmtpSettings);
 els.platformSmtpTestForm?.addEventListener('submit', submitSmtpTest);
+els.platformWhatsappForm?.addEventListener('submit', submitPlatformWhatsappSettings);
+els.testPlatformWhatsappButton?.addEventListener('click', testPlatformWhatsappSettings);
 document.addEventListener('submit', (event) => {
   if (event.target?.matches?.('.platform-support-message-form')) {
     submitSupportTicketMessage(event);
@@ -560,13 +569,14 @@ async function loadBilling(options = {}) {
 
 async function loadCommunicationSnapshot() {
   try {
-    const [smtp, templates] = await Promise.all([
+    const [smtp, templates, whatsapp] = await Promise.all([
       request('/api/platform/smtp'),
-      request('/api/platform/email-templates')
+      request('/api/platform/email-templates'),
+      request('/api/platform/whatsapp/settings')
     ]);
-    return { smtp: smtp.smtp || null, templates: templates.templates || [] };
+    return { smtp: smtp.smtp || null, templates: templates.templates || [], whatsapp: whatsapp.whatsapp || null };
   } catch (error) {
-    return { error: error.message || 'Não foi possível carregar comunicação.', smtp: null, templates: [] };
+    return { error: error.message || 'Não foi possível carregar comunicação.', smtp: null, templates: [], whatsapp: null };
   }
 }
 
@@ -575,6 +585,7 @@ async function loadCommunication(options = {}) {
   try {
     const data = await loadCommunicationSnapshot();
     state.smtp = data.smtp || null;
+    state.whatsappSettings = data.whatsapp || null;
     state.emailTemplates = data.templates || [];
     state.communicationLoaded = !data.error;
     renderCommunication();
@@ -1482,7 +1493,7 @@ function clientAlertsForCompany(company, metrics = {}) {
   const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended']);
   if (trialEndingSoon(subscription)) alerts.push({ type: 'trial', severity: 'warning', title: 'Trial perto do fim', action: 'Entrar em contato e orientar upgrade.' });
   if (delinquent.has(metrics.subscription_status || subscription.status || company.status)) alerts.push({ type: 'billing', severity: 'critical', title: 'Cobrança pendente', action: 'Verificar pagamento e webhook.' });
-  if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar meu cardápio ou unidade.' });
+  if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar meu Cardápio ou unidade.' });
   if (stores.some((store) => store.is_active === false)) alerts.push({ type: 'store', severity: 'attention', title: 'Loja não publicada ou suspensa', action: 'Validar status da loja.' });
   if (Number(metrics.stores_without_whatsapp_count || 0) > 0) alerts.push({ type: 'whatsapp', severity: 'warning', title: 'Loja sem WhatsApp', action: 'Completar configuração de atendimento.' });
   if (stores.length && Number(metrics.products_count || 0) === 0) alerts.push({ type: 'menu', severity: 'critical', title: 'Sem produto cadastrado', action: 'Ajudar o cliente a montar o cardápio.' });
@@ -2201,6 +2212,7 @@ function renderCommunication() {
     return;
   }
   renderSmtpForm();
+  renderPlatformWhatsappForm();
   renderEmailTemplates();
 }
 
@@ -2223,6 +2235,54 @@ function renderSmtpForm() {
   if (els.smtpStatusText) {
     const status = smtp.last_test_status ? `Último teste: ${smtp.last_test_status}${smtp.last_test_at ? ` em ${formatDateTime(smtp.last_test_at)}` : ''}.` : 'Nenhum teste registrado.';
     els.smtpStatusText.textContent = `${smtp.has_password ? 'Senha/token configurado. ' : 'Senha/token ausente. '}${status}`;
+  }
+}
+
+function renderPlatformWhatsappForm() {
+  if (!els.platformWhatsappForm) return;
+  const whatsapp = state.whatsappSettings || {};
+  const account = whatsapp.provider_account || {};
+  const form = els.platformWhatsappForm;
+  form.elements.base_url.value = whatsapp.base_url || '';
+  form.elements.api_key.value = '';
+  form.elements.api_key.placeholder = whatsapp.has_api_key
+    ? 'API key já salva. Preencha apenas para trocar.'
+    : 'Cole a API key da Evolution';
+  form.elements.password.value = '';
+  form.elements.is_active.checked = whatsapp.is_active === true;
+  if (form.elements.provider_balance) form.elements.provider_balance.value = centsInput(account.balance_cents);
+  if (form.elements.provider_instance_cost) form.elements.provider_instance_cost.value = centsInput(account.instance_cost_cents ?? 2990);
+  if (form.elements.provider_low_balance) form.elements.provider_low_balance.value = centsInput(account.low_balance_cents ?? 2990);
+  if (els.platformWhatsappWebhookUrl) {
+    els.platformWhatsappWebhookUrl.textContent = whatsapp.webhook_url || '/api/integrations/evolution/webhook';
+  }
+  if (els.platformWhatsappEconomy) {
+    const hasCredit = account.has_credit_for_new_instance === true;
+    const statusClass = hasCredit ? 'ok' : 'warn';
+    els.platformWhatsappEconomy.innerHTML = `
+      <article class="${statusClass}">
+        <span>Saldo</span>
+        <strong>${moneyCents(account.balance_cents)}</strong>
+      </article>
+      <article>
+        <span>Custo por instância</span>
+        <strong>${moneyCents(account.instance_cost_cents ?? 2990)}</strong>
+      </article>
+      <article>
+        <span>Instâncias cobradas</span>
+        <strong>${Number(account.billable_instances || 0)}</strong>
+      </article>
+      <article>
+        <span>Custo mensal estimado</span>
+        <strong>${moneyCents(account.monthly_cost_cents)}</strong>
+      </article>
+      <p>${hasCredit ? 'Saldo suficiente para criar uma nova instância.' : 'Sem saldo suficiente para criar nova instância. O lojista verá uma mensagem para solicitar ajuda.'}</p>
+    `;
+  }
+  if (els.platformWhatsappStatusText) {
+    const config = whatsapp.is_active && whatsapp.has_api_key && whatsapp.base_url ? 'Configurado' : 'Não configurado';
+    const test = whatsapp.last_test_status ? ` Último teste: ${whatsapp.last_test_status}${whatsapp.last_test_at ? ` em ${formatDateTime(whatsapp.last_test_at)}` : ''}.` : '';
+    els.platformWhatsappStatusText.textContent = `${config}. ${whatsapp.has_api_key ? 'API key salva e mascarada.' : 'API key ausente.'}${test}`;
   }
 }
 
@@ -3286,7 +3346,7 @@ async function previewLogCleanup() {
     toast(error.message || 'Não foi possível simular a limpeza.');
   } finally {
     els.previewLogCleanupButton.disabled = false;
-    els.previewLogCleanupButton.textContent = 'Simular limpeza';
+    els.previewLogCleanupButton.textContent = 'Simular Limpeza';
   }
 }
 
@@ -3309,7 +3369,7 @@ function durationLabel(ms) {
 
 const criticalActions = {
   backup: {
-    title: 'Fazer backup agora',
+    title: 'Fazer Backup Agora',
     message: 'O sistema vai executar um backup manual do banco e registrar a ação na auditoria.',
     endpoint: '/api/platform/services/backup',
     success: 'Backup manual concluído.'
@@ -3321,13 +3381,13 @@ const criticalActions = {
     success: 'Backup restaurado com sucesso.'
   },
   'trial-cleanup': {
-    title: 'Executar limpeza de trials',
+    title: 'Executar Limpeza de Trials',
     message: 'Empresas em teste sem acesso recente poderão ser removidas conforme a regra operacional.',
     endpoint: '/api/platform/services/jobs/trial-cleanup',
     success: 'Limpeza de trials executada.'
   },
   'log-cleanup': {
-    title: 'Executar limpeza de logs',
+    title: 'Executar Limpeza de Logs',
     message: 'O sistema vai remover registros e arquivos fora da política de retenção. Simule antes se quiser conferir o impacto.',
     endpoint: '/api/platform/services/log-cleanup',
     success: 'Limpeza de logs executada.'
@@ -3683,6 +3743,65 @@ async function submitSmtpSettings(event) {
     toast('SMTP salvo com segurança.');
   } catch (error) {
     toast(error.message || 'Não foi possível salvar SMTP.');
+  }
+}
+
+async function submitPlatformWhatsappSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  data.is_active = form.elements.is_active.checked;
+  if (!String(data.api_key || '').trim()) delete data.api_key;
+  const button = els.savePlatformWhatsappButton;
+  const previousText = button?.textContent || 'Salvar Evolution';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Salvando...';
+    }
+    const response = await request('/api/platform/whatsapp/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    state.whatsappSettings = response.whatsapp;
+    renderPlatformWhatsappForm();
+    toast('Evolution API salva com segurança.');
+    await loadHealth({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar Evolution API.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
+}
+
+async function testPlatformWhatsappSettings() {
+  const button = els.testPlatformWhatsappButton;
+  const previousText = button?.textContent || 'Testar conexão';
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Testando...';
+    }
+    const response = await request('/api/platform/whatsapp/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    toast(response.message || 'Evolution API validada.');
+    await loadCommunication({ silent: true });
+    await loadHealth({ silent: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível testar Evolution API.');
+    await loadCommunication({ silent: true });
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
   }
 }
 
@@ -4070,6 +4189,14 @@ function moneyCents(cents, fallbackValue = 0) {
     ? Number(cents || 0) / 100
     : Number(fallbackValue || 0);
   return money(value);
+}
+
+function centsInput(cents) {
+  const numeric = Number(cents || 0) / 100;
+  return numeric.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 }
 
 function normalizeSearch(value) {

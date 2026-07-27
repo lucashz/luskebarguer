@@ -499,7 +499,7 @@ function applyDemoStoreHints() {
     demo_mode: true,
     name: state.store?.name || 'Vitrine Gourmet',
     description: state.store?.description || 'Hamburgueria artesanal de demonstração para testar o cardápio digital.',
-    page_title: state.store?.page_title || 'Loja demonstração - TáPronto'
+    page_title: state.store?.page_title || 'Loja Demonstração - TáPronto'
   };
 }
 
@@ -1447,7 +1447,7 @@ function paymentCheckoutCopy(status) {
   }
   return {
     title: 'Seu pedido foi reservado.',
-    text: 'Finalize o pagamento para enviar o pedido para a loja.'
+    text: 'Pague no checkout seguro. A loja só recebe o pedido e o WhatsApp só é enviado depois da confirmação.'
   };
 }
 
@@ -1481,7 +1481,7 @@ function openPaymentPopup(options = {}) {
   }
   state.paymentPopup = window.open(checkout.checkoutUrl, 'abacatepay_checkout', features);
   if (!state.paymentPopup) {
-    setStatus('O navegador bloqueou o popup de pagamento. Clique em "Abrir pagamento".');
+    setStatus('O navegador bloqueou o popup de pagamento. Clique em "Abrir Pagamento".');
   }
   return state.paymentPopup;
 }
@@ -1834,7 +1834,7 @@ function prefillCheckoutFromCustomer() {
     renderAddressPrefillSummary(selectedSavedAddress(), addresses.length);
   } else {
     els.accountPrefillTitle.textContent = `Olá, ${state.customer.name}`;
-    updatePrefillNotice('Dados da conta carregados. Cadastre um endereço neste pedido ou em Minha conta.');
+    updatePrefillNotice('Dados da conta carregados. Cadastre um endereço neste pedido ou em Minha Conta.');
   }
 }
 
@@ -1898,7 +1898,7 @@ function setOrderSubmitting(isSubmitting) {
   state.orderSubmitting = isSubmitting;
   if (els.confirmOrderButton) {
     els.confirmOrderButton.disabled = isSubmitting;
-    els.confirmOrderButton.textContent = isSubmitting ? 'Enviando pedido...' : 'Confirmar pedido';
+  els.confirmOrderButton.textContent = isSubmitting ? 'Enviando pedido...' : 'Confirmar Pedido';
   }
   if (els.cancelCheckoutButton) els.cancelCheckoutButton.disabled = isSubmitting;
   if (els.checkoutButton) els.checkoutButton.disabled = isSubmitting || state.cart.length === 0 || isStoreClosed();

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Loja demonstração - TáPronto</title>
+    <title>Loja Demonstração - TáPronto</title>
     <meta name="description" content="Demonstração pública do TáPronto com categorias, produtos, adicionais, sacola e checkout simulado.">
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260721-menu-mobile">
@@ -14,10 +14,10 @@
         <img src="/assets/tapronto-logo.png" alt="TáPronto" width="220" height="66">
       </a>
       <div class="public-actions">
-        <a class="link-button" id="customerOrdersLink" href="/pedidos">Meus pedidos</a>
-        <a class="link-button" id="customerAccountLink" href="/conta">Minha conta</a>
+        <a class="link-button" id="customerOrdersLink" href="/pedidos">Meus Pedidos</a>
+        <a class="link-button" id="customerAccountLink" href="/conta">Minha Conta</a>
         <a class="link-button" id="customerLoginLink" href="/conta">Entrar</a>
-        <a class="link-button" id="customerCreateAccountLink" href="/conta">Criar conta</a>
+        <a class="link-button" id="customerCreateAccountLink" href="/conta">Criar Conta</a>
         <button class="text-button" id="customerLogoutButton" type="button" hidden>Sair</button>
       </div>
     </header>
@@ -25,7 +25,7 @@
     <section class="demo-notice" id="demoNotice" hidden>
       <strong>Demonstração do TáPronto.</strong>
       <span>Pedidos simulados, sem afetar a operação real.</span>
-      <a href="/cadastro">Criar meu próprio cardápio no TáPronto</a>
+      <a href="/cadastro">Criar meu Próprio Cardápio no TáPronto</a>
     </section>
 
     <section class="store-not-found" id="storeNotFound" hidden>
@@ -34,8 +34,8 @@
         <h1>Não encontramos uma loja ativa neste endereço.</h1>
         <p id="storeNotFoundMessage">Confira se o link está correto ou fale com o estabelecimento para confirmar o endereço do cardápio.</p>
         <div class="store-not-found-actions">
-          <a class="primary-button" href="/cardapio">Ver loja demonstração</a>
-          <a class="ghost-button" href="/">Voltar ao início</a>
+          <a class="primary-button" href="/cardapio">Ver Loja Demonstração</a>
+          <a class="ghost-button" href="/">Voltar ao Início</a>
         </div>
       </div>
     </section>
@@ -103,7 +103,6 @@
         <div>
           <small>Criado com:</small>
           <strong>TáPronto</strong>
-          <small>Cardápio digital, pedidos organizados.</small>
         </div>
       </div>
       <a href="/" aria-label="Acessar site da TáPronto">taprontomenu.com.br</a>
@@ -146,8 +145,8 @@
           </div>
           <div class="account-prefill-actions">
             <select id="savedAddressSelect" aria-label="Endereços salvos" hidden></select>
-            <button class="text-button" id="editAddressButton" type="button">Informar outro endereço</button>
-            <button class="text-button" id="deleteSavedAddressButton" type="button" hidden>Excluir endereço</button>
+            <button class="text-button" id="editAddressButton" type="button">Informar outro Endereço</button>
+            <button class="text-button" id="deleteSavedAddressButton" type="button" hidden>Excluir Endereço</button>
           </div>
         </section>
 
@@ -226,7 +225,7 @@
 
         <div class="checkout-dialog-footer">
           <button class="ghost-button" type="button" id="cancelCheckoutButton">Cancelar</button>
-          <button class="primary-button" id="confirmOrderButton" type="submit">Confirmar pedido</button>
+          <button class="primary-button" id="confirmOrderButton" type="submit">Confirmar Pedido</button>
         </div>
       </form>
     </dialog>
@@ -235,14 +234,14 @@
       <form method="dialog" class="dialog-header">
         <div>
           <p class="eyebrow">Pagamento seguro</p>
-          <h2>Aguardando pagamento</h2>
+          <h2>Pague para enviar o pedido</h2>
         </div>
         <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
       </form>
       <section class="payment-checkout-body">
         <div class="payment-checkout-status" id="paymentCheckoutStatus">
           <strong>Seu pedido foi reservado.</strong>
-          <p>Finalize o pagamento para enviar o pedido para a loja.</p>
+          <p>A loja só recebe o pedido depois que a Abacate Pay confirmar o pagamento.</p>
         </div>
         <dl class="payment-checkout-summary">
           <div>
@@ -258,9 +257,9 @@
             <dd id="paymentCheckoutExpires">-</dd>
           </div>
         </dl>
-        <p class="payment-checkout-hint">A janela segura da Abacate Pay será aberta. Mantenha esta página aberta até a confirmação.</p>
+        <p class="payment-checkout-hint">A janela segura da Abacate Pay será aberta. Mantenha esta página aberta; após a confirmação, o pedido é enviado para a loja e o WhatsApp é disparado automaticamente.</p>
         <div class="payment-checkout-actions">
-          <button class="primary-button" id="paymentOpenButton" type="button">Abrir pagamento</button>
+          <button class="primary-button" id="paymentOpenButton" type="button">Abrir Pagamento</button>
           <button class="text-button" id="paymentCancelButton" type="button">Cancelar</button>
         </div>
       </section>
@@ -283,8 +282,8 @@
           <li>Status simulado: em preparo</li>
         </ol>
         <div class="demo-order-actions">
-          <a class="primary-button" href="/cadastro">Criar meu próprio cardápio no TáPronto</a>
-          <button class="ghost-button" type="submit">Continuar testando</button>
+          <a class="primary-button" href="/cadastro">Criar meu Próprio Cardápio no TáPronto</a>
+          <button class="ghost-button" type="submit">Continuar Testando</button>
         </div>
       </section>
     </dialog>

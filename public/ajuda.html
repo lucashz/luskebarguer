@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Central de Ajuda TáPronto</title>
+    <meta name="description" content="Aprenda a configurar sua loja, cadastrar produtos, receber pedidos, conectar WhatsApp e usar o TáPronto com tranquilidade.">
+    <meta property="og:title" content="Central de Ajuda TáPronto">
+    <meta property="og:description" content="Guias rápidos para lojistas usarem cardápio digital, pedidos, WhatsApp, Pix online, mesas e planos.">
+    <meta property="og:type" content="website">
+    <link rel="canonical" href="/ajuda">
+    <link rel="icon" href="/assets/tapronto-favicon.svg">
+    <link rel="stylesheet" href="/ajuda.css?v=20260727-help">
+  </head>
+  <body class="help-page">
+    <header class="help-header">
+      <div class="help-container help-nav">
+        <a class="help-brand" href="/" aria-label="Início TáPronto">
+          <img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82">
+        </a>
+        <nav aria-label="Links principais">
+          <a href="/cadastro">Criar Conta</a>
+          <a href="/entrar">Entrar no Painel</a>
+          <a class="help-nav-button" href="/cardapio">Ver Demonstração</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="help-hero">
+        <div class="help-container help-hero-grid">
+          <div>
+            <p class="help-eyebrow">Central de Ajuda TáPronto</p>
+            <h1>Como podemos ajudar?</h1>
+            <p>Guias simples para configurar sua loja, receber pedidos e usar o painel sem complicação.</p>
+          </div>
+          <form class="help-search" role="search">
+            <label for="helpSearch">Buscar artigo</label>
+            <div>
+              <input id="helpSearch" type="search" placeholder="Busque por produto, WhatsApp, Pix, pedidos..." autocomplete="off">
+              <button type="button" id="helpClearSearch">Limpar</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="help-container help-main-grid">
+        <aside class="help-sidebar" aria-label="Categorias de ajuda">
+          <div class="help-sidebar-card">
+            <h2>Categorias</h2>
+            <div class="help-category-list" id="helpCategoryList"></div>
+          </div>
+          <div class="help-sidebar-card subtle">
+            <h2>Precisa de atendimento?</h2>
+            <p>Se o artigo não resolver, abra um chamado pelo painel da sua loja com o contexto do problema.</p>
+            <a class="help-primary-link" href="/entrar">Entrar e abrir chamado</a>
+          </div>
+        </aside>
+
+        <section class="help-content">
+          <div class="help-section-head">
+            <div>
+              <p class="help-eyebrow">Guias rápidos</p>
+              <h2 id="helpResultsTitle">Artigos populares</h2>
+            </div>
+            <span id="helpResultsCount"></span>
+          </div>
+
+          <div class="help-featured-grid" id="helpFeaturedGrid"></div>
+          <div class="help-article-list" id="helpArticleList"></div>
+          <article class="help-empty" id="helpEmpty" hidden>
+            <strong>Nenhum artigo encontrado.</strong>
+            <p>Tente buscar por outra palavra, como “pedido”, “produto”, “WhatsApp” ou “pagamento”.</p>
+          </article>
+          <section class="help-article-panel" id="helpArticlePanel" hidden>
+            <button class="help-back-button" id="helpBackButton" type="button">Voltar para artigos</button>
+            <article id="helpArticleDetail"></article>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <footer class="help-footer">
+      <div class="help-container help-footer-grid">
+        <div>
+          <img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82">
+        </div>
+        <nav aria-label="Links de rodapé">
+          <a href="/cadastro">Criar meu Cardápio</a>
+          <a href="/entrar">Painel da Loja</a>
+          <a href="/terms.html">Termos</a>
+          <a href="/privacy.html">Privacidade</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script src="/ajuda.js?v=20260727-help" defer></script>
+  </body>
+</html>
