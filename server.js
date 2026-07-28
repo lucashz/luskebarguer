@@ -8197,6 +8197,28 @@ async function assertWhatsappProviderCreditForNewInstance(req, admin, store) {
   const publicAccount = await publicPlatformWhatsappProviderAccount(account);
   const instanceCostCents = Number(publicAccount.instance_cost_cents || 2990);
   const nextBillingAt = new Date(Date.now() + Number(publicAccount.billing_cycle_days || 30) * 24 * 60 * 60 * 1000).toISOString();
+  if (process.env.PLATFORM_WHATSAPP_SKIP_CREDIT_CHECK === 'true') {
+    await recordWhatsappInstanceEvent({
+      req,
+      admin,
+      store,
+      event_type: 'create_credit_check_skipped',
+      status: 'info',
+      cost_cents: instanceCostCents,
+      message: 'Trava de saldo Evolution ignorada temporariamente para teste.',
+      metadata: {
+        balance_cents: publicAccount.balance_cents,
+        instance_cost_cents: instanceCostCents,
+        account_status: publicAccount.status
+      }
+    }).catch(() => {});
+    return {
+      instance_cost_cents: instanceCostCents,
+      next_billing_at: nextBillingAt,
+      balance_before_cents: publicAccount.balance_cents,
+      skip_credit_check: true
+    };
+  }
   if (!publicAccount.has_credit_for_new_instance) {
     await recordWhatsappInstanceEvent({
       req,
@@ -8226,7 +8248,7 @@ async function assertWhatsappProviderCreditForNewInstance(req, admin, store) {
 
 async function registerWhatsappInstanceCreated(req, admin, integration, reserve = {}) {
   const account = await getPlatformWhatsappProviderAccount();
-  if (account) {
+  if (account && !reserve.skip_credit_check) {
     const nextBalance = Math.max(0, Number(account.balance_cents || 0) - Number(reserve.instance_cost_cents || 0));
     await dbRequest('PATCH', 'platform_whatsapp_provider_accounts', { id: `eq.${account.id}` }, {
       balance_cents: nextBalance,
