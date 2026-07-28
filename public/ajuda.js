@@ -28,7 +28,7 @@ const HELP_ARTICLES = [
     'Use o botão Reenviar confirmação na tela de cadastro quando necessário.'
   ], 'A confirmação reduz spam e protege o painel contra contas falsas.'),
   article('recuperar-senha', 'Como recuperar sua senha', 'Cadastro e login', 'Receba um link seguro para criar uma nova senha.', [
-    'Acesse /entrar.',
+    'Acesse app.taprontomenu.com.br.',
     'Clique em Esqueceu a senha?.',
     'Informe o e-mail cadastrado.',
     'Abra o link recebido no e-mail.',

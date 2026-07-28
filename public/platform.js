@@ -44,6 +44,25 @@
   activeView: 'overview'
 };
 
+const PUBLIC_SITE_BASE_URL = resolveExternalBaseUrl('https://taprontomenu.com.br');
+const PANEL_BASE_URL = resolveExternalBaseUrl('https://app.taprontomenu.com.br', '/painel');
+const PLATFORM_BASE_URL = resolveExternalBaseUrl('https://central.taprontomenu.com.br', '/platform');
+
+function resolveExternalBaseUrl(productionUrl, localPath = '') {
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '') {
+    return `${window.location.origin}${localPath}`.replace(/\/+$/, '') || window.location.origin;
+  }
+  return productionUrl.replace(/\/+$/, '');
+}
+
+function externalUrl(baseUrl, path = '/') {
+  const cleanPath = String(path || '/').startsWith('/') ? String(path || '/') : `/${path}`;
+  if (cleanPath === '/') return String(baseUrl || '').replace(/\/+$/, '');
+  if (cleanPath.startsWith('/?')) return `${String(baseUrl || '').replace(/\/+$/, '')}${cleanPath.slice(1)}`;
+  return `${String(baseUrl || '').replace(/\/+$/, '')}${cleanPath}`;
+}
+
 const PLATFORM_VIEW_META = {
   overview: {
     title: 'Visão Geral',
@@ -1333,8 +1352,8 @@ function renderCompanies() {
               <button class="ghost-button compact" data-action="save-status" type="submit">Salvar cliente</button>
             </form>
             <div class="platform-client-quick-actions" data-company-id="${escapeAttribute(company.id)}">
-              ${stores[0]?.slug ? `<a class="ghost-button compact" href="/${escapeAttribute(stores[0].slug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
-              <a class="ghost-button compact" href="/painel" target="_blank" rel="noopener">Abrir painel</a>
+              ${stores[0]?.slug ? `<a class="ghost-button compact" href="${escapeAttribute(externalUrl(PUBLIC_SITE_BASE_URL, `/${stores[0].slug}`))}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
+              <a class="ghost-button compact" href="${escapeAttribute(externalUrl(PANEL_BASE_URL, '/'))}" target="_blank" rel="noopener">Abrir painel</a>
               ${stores[0]?.id ? `<button class="ghost-button compact" data-company-action="impersonate" data-store-id="${escapeAttribute(stores[0].id)}" type="button">Entrar como suporte</button>` : ''}
               <button class="ghost-button compact" data-company-action="activate" type="button">Liberar cliente</button>
               <button class="danger-button compact" data-company-action="suspend" type="button">Suspender</button>
@@ -3050,8 +3069,8 @@ function insertSupportQuickReply(template) {
     .replaceAll('{{company_name}}', ticket?.company_name || 'cliente')
     .replaceAll('{{store_name}}', ticket?.store_name || 'loja')
     .replaceAll('{{plan_name}}', context.planName || 'plano atual')
-    .replaceAll('{{dashboard_url}}', `${window.location.origin}/painel`)
-    .replaceAll('{{cardapio_url}}', context.storeSlug ? `${window.location.origin}/${context.storeSlug}` : `${window.location.origin}/cardapio`);
+    .replaceAll('{{dashboard_url}}', externalUrl(PANEL_BASE_URL, '/'))
+    .replaceAll('{{cardapio_url}}', context.storeSlug ? externalUrl(PUBLIC_SITE_BASE_URL, `/${context.storeSlug}`) : externalUrl(PUBLIC_SITE_BASE_URL, '/cardapio'));
   textarea.value = textarea.value ? `${textarea.value}\n\n${text}` : text;
   textarea.focus();
 }
@@ -3079,7 +3098,7 @@ async function openSupportImpersonation(storeId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ store_id: storeId, confirmation: confirmation.confirmation, password: confirmation.password })
     });
-    window.location.href = '/painel';
+    window.location.href = externalUrl(PANEL_BASE_URL, '/');
   } catch (error) {
     toast(error.message || 'Não foi possível entrar como suporte.');
   }
@@ -3628,7 +3647,7 @@ async function submitCompanyQuickAction(event) {
       message: 'Você entrará temporariamente no admin desta loja. A sessão expira automaticamente e tudo será auditado.',
       critical: true,
       success: 'Modo suporte iniciado.',
-      redirect: '/painel',
+      redirect: externalUrl(PANEL_BASE_URL, '/'),
       store_id: button.dataset.storeId || ''
     }
   };

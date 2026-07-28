@@ -8,6 +8,7 @@ const slugStatus = document.querySelector('#slugStatus');
 const signupMessage = document.querySelector('#signupMessage');
 const signupSubmitButton = document.querySelector('#signupSubmitButton');
 let signupActivationEmail = '';
+const EMAIL_DELIVERY_HINT = 'Confira também spam, lixo eletrônico e a aba Promoções. O e-mail pode levar alguns minutos para chegar.';
 const portalResetPasswordForm = document.querySelector('#portalResetPasswordForm');
 const portalActivationButton = document.querySelector('#portalActivationButton');
 const onboardingChecklist = document.querySelector('#onboardingChecklist');
@@ -15,6 +16,31 @@ const onboardingProgress = document.querySelector('#onboardingProgress');
 const onboardingPublishButton = document.querySelector('#onboardingPublishButton');
 const onboardingMessage = document.querySelector('#onboardingMessage');
 const inviteAcceptForm = document.querySelector('#inviteAcceptForm');
+
+const PANEL_BASE_URL = resolveExternalBaseUrl('https://app.taprontomenu.com.br', '/painel');
+
+function resolveExternalBaseUrl(productionUrl, localPath = '') {
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '') {
+    return `${window.location.origin}${localPath}`.replace(/\/+$/, '') || window.location.origin;
+  }
+  return productionUrl.replace(/\/+$/, '');
+}
+
+function panelUrl(path = '/') {
+  const cleanPath = String(path || '/').startsWith('/') ? String(path || '/') : `/${path}`;
+  if (cleanPath === '/') return PANEL_BASE_URL.replace(/\/+$/, '');
+  if (cleanPath.startsWith('/?')) return `${PANEL_BASE_URL.replace(/\/+$/, '')}${cleanPath.slice(1)}`;
+  return `${PANEL_BASE_URL.replace(/\/+$/, '')}${cleanPath}`;
+}
+
+function canonicalPanelRedirect(url) {
+  const text = String(url || '').trim();
+  if (!text || text === '/painel' || text === '/admin' || text === '/entrar') return panelUrl('/');
+  if (text.startsWith('/painel?')) return panelUrl(`/${text.slice('/painel'.length)}`);
+  if (text.startsWith('/')) return text;
+  return text;
+}
 
 initPortal();
 
@@ -151,7 +177,7 @@ async function initPasswordReset() {
       });
       if (message) message.textContent = data.message || 'Senha redefinida com sucesso.';
       setTimeout(() => {
-        location.href = '/painel';
+        location.href = panelUrl('/');
       }, 800);
     } catch (error) {
       if (message) message.textContent = error.message || 'Não foi possível redefinir a senha.';
@@ -225,7 +251,7 @@ async function submitSignup(event) {
     });
     if (data.needs_activation) {
       signupActivationEmail = String(payload.owner.email || '').trim();
-      signupMessage.textContent = data.message || 'Conta criada. Confira seu e-mail para ativar o acesso.';
+      signupMessage.textContent = data.message || `Conta criada. Confira seu e-mail para ativar o acesso. ${EMAIL_DELIVERY_HINT}`;
       renderSignupActivationActions();
       signupForm.classList.add('signup-created');
       setSignupLoading(false);
@@ -236,7 +262,7 @@ async function submitSignup(event) {
       return;
     }
     signupMessage.textContent = 'Conta criada. Abrindo onboarding...';
-    location.href = data.redirect || '/painel';
+    location.href = canonicalPanelRedirect(data.redirect);
   } catch (error) {
     signupMessage.textContent = error.message || 'Não foi possível criar a conta.';
     setSignupLoading(false);
@@ -255,7 +281,7 @@ function renderSignupActivationActions() {
   const actions = document.createElement('div');
   actions.className = 'portal-activation-actions';
   actions.innerHTML = `
-    <span>O link expira em 24 horas. Confira também a caixa de spam ou lixo eletrônico.</span>
+    <span>O link expira em 24 horas. ${EMAIL_DELIVERY_HINT}</span>
     <button class="portal-button small ghost" id="resendActivationButton" type="button">Reenviar confirmação</button>
   `;
   signupMessage.insertAdjacentElement('afterend', actions);
@@ -281,7 +307,7 @@ async function resendSignupActivationEmail(button) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
     });
-    if (signupMessage) signupMessage.textContent = data.message || 'Enviamos um novo link de ativação.';
+    if (signupMessage) signupMessage.textContent = data.message || `Enviamos um novo link de ativação. ${EMAIL_DELIVERY_HINT}`;
   } catch (error) {
     if (signupMessage) signupMessage.textContent = error.message || 'Não foi possível reenviar a confirmação agora.';
   } finally {
@@ -322,7 +348,7 @@ async function initAccountActivation() {
       const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, { method: 'POST' });
       if (message) message.textContent = data.message || 'Conta ativada com sucesso.';
       setTimeout(() => {
-        location.href = data.redirect || '/painel';
+        location.href = canonicalPanelRedirect(data.redirect);
       }, 500);
     } catch (error) {
       if (message) message.textContent = error.message || 'Não foi possível ativar a conta.';
@@ -341,7 +367,7 @@ async function loadOnboarding() {
       <article class="onboarding-empty">
         <strong>Entre para continuar</strong>
         <span>${escapeHtml(error.message || 'Sua sessão expirou.')}</span>
-        <a class="portal-button small" href="/entrar">Entrar</a>
+        <a class="portal-button small" href="${panelUrl('/')}">Entrar</a>
       </article>
     `;
     if (onboardingMessage) onboardingMessage.textContent = 'Faça login para ver seu checklist.';
@@ -446,7 +472,7 @@ async function initInviteAccept() {
           confirm_password: form.get('confirm_password')
         })
       });
-      location.href = '/painel';
+      location.href = panelUrl('/');
     } catch (error) {
       if (message) message.textContent = error.message || 'Não foi possível aceitar o convite.';
       button.disabled = false;

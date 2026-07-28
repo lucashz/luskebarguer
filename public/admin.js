@@ -73,6 +73,9 @@ const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
 const ONBOARDING_SKIPPED_KEY = 'admin_onboarding_skipped_v1';
 const ONBOARDING_STEP_LABELS = ['Boas-vindas', 'Loja', 'Operação', 'Pagamentos', 'Entrega', 'Categoria', 'Produto', 'Aparência', 'Tour guiado', 'Publicar'];
 const ADMIN_PANEL_TOUR_KEY = 'admin-panel';
+const PUBLIC_SITE_BASE_URL = resolveExternalBaseUrl('https://taprontomenu.com.br');
+const PANEL_BASE_URL = resolveExternalBaseUrl('https://app.taprontomenu.com.br', '/painel');
+const PLATFORM_BASE_URL = resolveExternalBaseUrl('https://central.taprontomenu.com.br', '/platform');
 const ADMIN_TOUR_STEPS = [
   {
     key: 'operation',
@@ -131,6 +134,21 @@ const ADMIN_TOUR_STEPS = [
     text: 'Abra chamados, acompanhe respostas e mantenha o histórico de atendimento da sua loja organizado.'
   }
 ];
+
+function resolveExternalBaseUrl(productionUrl, localPath = '') {
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '') {
+    return `${window.location.origin}${localPath}`.replace(/\/+$/, '') || window.location.origin;
+  }
+  return productionUrl.replace(/\/+$/, '');
+}
+
+function externalUrl(baseUrl, path = '/') {
+  const cleanPath = String(path || '/').startsWith('/') ? String(path || '/') : `/${path}`;
+  if (cleanPath === '/') return String(baseUrl || '').replace(/\/+$/, '');
+  if (cleanPath.startsWith('/?')) return `${String(baseUrl || '').replace(/\/+$/, '')}${cleanPath.slice(1)}`;
+  return `${String(baseUrl || '').replace(/\/+$/, '')}${cleanPath}`;
+}
 const PLAN_FEATURE_CODES = [
   'orders',
   'digital_menu',
@@ -379,6 +397,7 @@ const els = {
   modifierGroupForm: document.querySelector('#modifierGroupForm'),
   storeForm: document.querySelector('#storeForm'),
   storePathPreview: document.querySelector('#storePathPreview'),
+  paymentMethodsPreview: document.querySelector('#paymentMethodsPreview'),
   customDomainInput: document.querySelector('#customDomainInput'),
   addDomainButton: document.querySelector('#addDomainButton'),
   customDomainList: document.querySelector('#customDomainList'),
@@ -391,6 +410,7 @@ const els = {
   whatsappQrBox: document.querySelector('#whatsappQrBox'),
   whatsappQrImage: document.querySelector('#whatsappQrImage'),
   connectWhatsappButton: document.querySelector('#connectWhatsappButton'),
+  requestWhatsappSetupButton: document.querySelector('#requestWhatsappSetupButton'),
   refreshWhatsappQrButton: document.querySelector('#refreshWhatsappQrButton'),
   testWhatsappButton: document.querySelector('#testWhatsappButton'),
   disconnectWhatsappButton: document.querySelector('#disconnectWhatsappButton'),
@@ -576,11 +596,13 @@ els.storeForm.addEventListener('input', () => {
   state.storeFormDirty = true;
   renderStorePathPreview();
   renderThemePreview();
+  renderPaymentMethodsPreview();
 });
 els.storeForm.addEventListener('change', () => {
   state.storeFormDirty = true;
   renderStorePathPreview();
   renderThemePreview();
+  renderPaymentMethodsPreview();
 });
 els.integrationsForm?.addEventListener('input', () => {
   state.integrationsFormDirty = true;
@@ -599,6 +621,7 @@ els.storeForm.addEventListener('click', (event) => {
   applyThemePreset(button.dataset.themePreset);
 });
 els.testIntegrationsButton?.addEventListener('click', testIntegrations);
+els.requestWhatsappSetupButton?.addEventListener('click', () => openSupportTicketWithContext('whatsapp'));
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
 els.deleteAccountForm?.addEventListener('submit', submitDeleteAccount);
@@ -794,7 +817,7 @@ async function submitAdminPasswordRecovery(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
     });
-    const message = result.message || 'Se o e-mail existir, enviaremos as instruções de recuperação.';
+    const message = result.message || 'Se o e-mail existir, enviaremos as instruções de recuperação. Confira também spam, lixo eletrônico e a aba Promoções.';
     if (els.adminRecoverMessage) els.adminRecoverMessage.textContent = message;
     toast(message);
   } catch (error) {
@@ -833,7 +856,7 @@ async function endSupportMode() {
     clearAdminCache();
     stopOrderPolling();
     toast('Modo suporte encerrado.');
-    window.location.href = result.restored ? '/platform' : '/painel';
+    window.location.href = result.restored ? externalUrl(PLATFORM_BASE_URL, '/') : externalUrl(PANEL_BASE_URL, '/');
   } catch (error) {
     toast(error.message || 'Não foi possível encerrar o modo suporte.');
   } finally {
@@ -1592,7 +1615,8 @@ function optionElement(value, label) {
 }
 
 function tableQrUrl(table) {
-  return `${window.location.origin}/?mesa=${encodeURIComponent(table.code)}`;
+  const slug = publicSlug(state.store?.slug || state.store?.public_url || 'cardapio');
+  return externalUrl(PUBLIC_SITE_BASE_URL, `/${slug}?mesa=${encodeURIComponent(table.code)}`);
 }
 
 function tableQrImageUrl(table) {
@@ -7312,13 +7336,18 @@ function renderWhatsappIntegration(data = {}) {
   if (!els.whatsappAutoStatus) return;
   const status = data.status || 'not_connected';
   const label = data.status_label || whatsappAutoStatusLabel(status);
+  const featureEnabled = data.feature_enabled !== false;
+  const platformConfigured = data.configured !== false;
+  const canConnect = featureEnabled && platformConfigured;
   state.whatsappIntegration = data;
   els.whatsappAutoStatus.textContent = label;
   els.whatsappAutoStatus.className = `status-pill whatsapp-status-${status}`;
   if (els.whatsappAutoMessage) {
     if (data.last_error) {
       els.whatsappAutoMessage.textContent = data.last_error;
-    } else if (data.configured === false) {
+    } else if (!featureEnabled) {
+      els.whatsappAutoMessage.textContent = `${data.feature_message || 'WhatsApp automático não está disponível no plano atual.'} Se quiser ativar, solicite ajuda da equipe TáPronto.`;
+    } else if (!platformConfigured) {
       els.whatsappAutoMessage.textContent = 'A Central TáPronto ainda precisa configurar a Evolution API antes de conectar o WhatsApp da loja.';
     } else if (status === 'connected') {
       els.whatsappAutoMessage.textContent = `Conectado${data.phone_number ? ` ao número ${data.phone_number}` : ''}. Pedidos novos serão enviados automaticamente para a loja.`;
@@ -7335,11 +7364,18 @@ function renderWhatsappIntegration(data = {}) {
   if (els.whatsappQrImage && qr) els.whatsappQrImage.src = qr;
   if (els.connectWhatsappButton) {
     els.connectWhatsappButton.textContent = ['connected', 'disconnected', 'error'].includes(status) ? 'Reconectar WhatsApp' : 'Conectar WhatsApp';
-    els.connectWhatsappButton.disabled = data.configured === false || status === 'loading';
+    els.connectWhatsappButton.disabled = !canConnect || status === 'loading';
+    els.connectWhatsappButton.title = !featureEnabled
+      ? 'WhatsApp automático está disponível no Premium.'
+      : (!platformConfigured ? 'A Central TáPronto precisa configurar a Evolution API antes.' : '');
+  }
+  if (els.requestWhatsappSetupButton) {
+    els.requestWhatsappSetupButton.hidden = canConnect;
+    els.requestWhatsappSetupButton.textContent = featureEnabled ? 'Solicitar ajuda da TáPronto' : 'Solicitar ativação do WhatsApp';
   }
   if (els.refreshWhatsappQrButton) {
     els.refreshWhatsappQrButton.hidden = status === 'connected' && !qr;
-    els.refreshWhatsappQrButton.disabled = data.configured === false || status === 'loading';
+    els.refreshWhatsappQrButton.disabled = !canConnect || status === 'loading';
   }
   if (els.testWhatsappButton) {
     els.testWhatsappButton.disabled = status !== 'connected';
@@ -7900,7 +7936,7 @@ function fillStoreForm() {
   if (!state.store) return;
   if (state.storeFormDirty) return;
   const store = state.store;
-  const paymentMethods = store.payment_methods || [];
+  const paymentMethods = normalizePaymentMethods(store.payment_methods || []);
   const presetPayments = [...els.storeForm.querySelectorAll('input[name="payment_methods"]')].map((input) => input.value);
   const extraPayments = paymentMethods.filter((method) => !presetPayments.includes(method));
   setValue(els.storeForm.elements.name, store.name);
@@ -7927,6 +7963,7 @@ function fillStoreForm() {
   fillPrintSettingsForm();
   renderStorePathPreview();
   renderThemePreview();
+  renderPaymentMethodsPreview();
 }
 
 function renderStorePathPreview() {
@@ -7942,7 +7979,7 @@ function renderStorePathPreview() {
 
 function storePublicUrl(slug) {
   const clean = publicSlug(slug);
-  return clean ? `${window.location.origin}/${clean}` : `${window.location.origin}/cardapio`;
+  return clean ? externalUrl(PUBLIC_SITE_BASE_URL, `/${clean}`) : externalUrl(PUBLIC_SITE_BASE_URL, '/cardapio');
 }
 
 function publicSlug(value) {
@@ -7957,6 +7994,52 @@ function publicSlug(value) {
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
+}
+
+function paymentMethodsFromStoreForm() {
+  if (!els.storeForm) return [];
+  const data = new FormData(els.storeForm);
+  return normalizePaymentMethods([
+    ...data.getAll('payment_methods'),
+    ...String(data.get('payment_methods_extra') || '').split(',')
+  ]);
+}
+
+function normalizePaymentMethods(methods = []) {
+  const aliases = new Map([
+    ['vale refeicao', 'Vale Refeição'],
+    ['vale refeição', 'Vale Refeição'],
+    ['cartao de debito', 'Cartão de Débito'],
+    ['cartão de débito', 'Cartão de Débito'],
+    ['cartao de credito', 'Cartão de Crédito'],
+    ['cartão de crédito', 'Cartão de Crédito'],
+    ['pagamento online', 'Pagamento Online'],
+    ['pix online', 'Pix Online']
+  ]);
+  const seen = new Set();
+  return methods
+    .map((item) => cleanText(item).replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .map((item) => aliases.get(normalizeName(item)) || item)
+    .filter((item) => {
+      const key = normalizeName(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
+function renderPaymentMethodsPreview() {
+  if (!els.paymentMethodsPreview) return;
+  const methods = paymentMethodsFromStoreForm();
+  if (!methods.length) {
+    els.paymentMethodsPreview.innerHTML = '<span class="muted">Nenhuma forma selecionada.</span>';
+    return;
+  }
+  els.paymentMethodsPreview.innerHTML = methods.map((method) => `
+    <span class="payment-preview-chip">${escapeHtml(method)}</span>
+  `).join('');
 }
 
 function cleanText(value) {
@@ -8186,10 +8269,10 @@ function normalizeName(value) {
 
 function formToStore(form) {
   const data = new FormData(form);
-  const paymentMethods = [
+  const paymentMethods = normalizePaymentMethods([
     ...data.getAll('payment_methods'),
     ...String(data.get('payment_methods_extra') || '').split(',')
-  ].map((item) => item.trim()).filter(Boolean);
+  ]);
   return {
     name: data.get('name'),
     slug: publicSlug(data.get('slug') || data.get('name')),
@@ -8203,7 +8286,7 @@ function formToStore(form) {
     delivery_fee: data.get('delivery_fee'),
     delivery_neighborhood_fees: parseNeighborhoodFees(data.get('delivery_neighborhood_fees')),
     minimum_order: data.get('minimum_order'),
-    payment_methods: [...new Set(paymentMethods)],
+    payment_methods: paymentMethods,
     business_hours: businessHoursFromForm(data),
     theme_settings: themeSettingsFromForm(form),
     print_settings: printSettingsFromForm().print_settings,

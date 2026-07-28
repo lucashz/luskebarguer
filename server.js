@@ -105,7 +105,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    await serveStatic(res, url.pathname, req.headers.host);
+    await serveStatic(res, url.pathname, req.headers.host, url.search);
   } catch (error) {
     logServerError(error, req);
     const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
@@ -363,7 +363,7 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/portal/recover-password') {
     const body = await readJson(req);
     await requestAdminPasswordRecovery(req, body);
-    json(res, 200, { ok: true, message: 'Se o e-mail existir, enviaremos as instruções de recuperação.' });
+    json(res, 200, { ok: true, message: 'Se o e-mail existir, enviaremos as instruções de recuperação. Confira também spam, lixo eletrônico e a aba Promoções.' });
     return;
   }
 
@@ -2104,9 +2104,9 @@ async function sendAdminPasswordRecoveryEmail(req, admin, token, expiresAt) {
     due_date: formatDateTimePt(expiresAt),
     dashboard_url: resetUrl,
     reset_url: resetUrl,
-    support_url: absolutePublicUrl('/painel?tab=support'),
-    payment_url: absolutePublicUrl('/painel?tab=plan'),
-    platform_url: absolutePublicUrl('/platform')
+    support_url: absolutePanelUrl('/?tab=support'),
+    payment_url: absolutePanelUrl('/?tab=plan'),
+    platform_url: absolutePlatformUrl('/')
   };
   await sendPlatformEmail({
     to: admin.email,
@@ -2167,7 +2167,7 @@ async function resetAdminPassword(req, token, data = {}) {
     body: {
       ...session.body,
       message: 'Conta ativada com sucesso.',
-      redirect: '/painel'
+      redirect: absolutePanelUrl('/')
     }
   };
 }
@@ -4440,7 +4440,7 @@ async function createPortalSignup(req, data = {}) {
       body: {
         ok: true,
         needs_activation: true,
-        message: 'Conta criada. Enviamos um link de ativação para o e-mail informado.',
+        message: 'Conta criada. Enviamos um link de ativação para o e-mail informado. Confira também spam, lixo eletrônico e a aba Promoções.',
         admin: {
           id: admin.id,
           company_id: company.id,
@@ -4452,7 +4452,7 @@ async function createPortalSignup(req, data = {}) {
         },
         company: { id: company.id, name: company.name, status: company.status },
         store: publicStoreRef(store),
-        redirect: '/entrar'
+        redirect: absolutePanelUrl('/')
       }
     };
   } catch (error) {
@@ -4496,7 +4496,7 @@ async function resendAdminActivationEmail(req, data = {}) {
     limit: '1'
   });
   if (!admin) {
-    return { ok: true, message: 'Se existir uma conta pendente com este e-mail, enviaremos um novo link de ativação.' };
+    return { ok: true, message: 'Se existir uma conta pendente com este e-mail, enviaremos um novo link de ativação. Confira também spam, lixo eletrônico e a aba Promoções.' };
   }
   if (admin.is_active !== false) {
     return { ok: true, message: 'Esta conta já está ativa. Você já pode entrar no painel.' };
@@ -4553,7 +4553,7 @@ async function resendAdminActivationEmail(req, data = {}) {
     severity: 'info',
     after_data: { email: maskEmailOrToken(admin.email) }
   });
-  return { ok: true, message: 'Enviamos um novo link de ativação. Ele expira em 24 horas.' };
+  return { ok: true, message: 'Enviamos um novo link de ativação. Ele expira em 24 horas. Confira também spam, lixo eletrônico e a aba Promoções.' };
 }
 
 async function sendAdminActivationEmail(req, { admin, company, store, token, expiresAt }) {
@@ -4567,9 +4567,9 @@ async function sendAdminActivationEmail(req, { admin, company, store, token, exp
     due_date: formatDateTimePt(expiresAt),
     dashboard_url: activationUrl,
     activation_url: activationUrl,
-    support_url: absolutePublicUrl('/entrar'),
+    support_url: absolutePanelUrl('/'),
     payment_url: absolutePublicUrl('/planos'),
-    platform_url: absolutePublicUrl('/central')
+    platform_url: absolutePlatformUrl('/')
   };
   await sendPlatformEmail({
     to: admin.email,
@@ -6024,19 +6024,19 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
   if (config.provider === 'mock') {
     return {
       subscriptionId: `mock_sub_${company.id}_${Date.now()}`,
-      checkoutUrl: `/painel?billing=mock&plan=${encodeURIComponent(plan.code)}`
+      checkoutUrl: absolutePanelUrl(`/?billing=mock&plan=${encodeURIComponent(plan.code)}`)
     };
   }
   if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
-  const origin = cleanText(config.public_url || process.env.PUBLIC_APP_URL || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
   const productId = await ensureAbacateSubscriptionProduct({ plan, amount, token: config.api_key });
   const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
   const externalId = cleanExternalId(`tapronto-sub-${company.id}-${plan.code}-${Date.now()}`);
   const body = {
     items: [{ id: productId, quantity: 1 }],
     methods: ['PIX', 'CARD'],
-    returnUrl: `${origin}/painel?billing=cancelled`,
-    completionUrl: `${origin}/painel?billing=success`,
+    returnUrl: `${origin}/?billing=cancelled`,
+    completionUrl: `${origin}/?billing=success`,
     externalId,
     metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_monthly_charge' }
   };
@@ -7994,8 +7994,11 @@ async function getAdminWhatsappIntegration(admin) {
   const store = await getStoreSettings(admin.store_id);
   const integration = await getStoreWhatsappIntegration(admin.store_id);
   const settings = await getPlatformWhatsappSettings();
+  const automaticAccess = await getCompanyFeatureAccess(admin.company_id, 'automatic_whatsapp').catch(() => ({ enabled: false }));
   return {
     configured: settings.is_active && settings.has_api_key && Boolean(settings.base_url),
+    feature_enabled: automaticAccess.enabled === true,
+    feature_message: automaticAccess.enabled === true ? '' : featureBlockedMessage('automatic_whatsapp'),
     store_phone: store.whatsapp_number || '',
     ...publicStoreWhatsappIntegration(integration),
     webhook_url: settings.webhook_url
@@ -9185,7 +9188,11 @@ function planCodeIsPremium(plan = {}) {
 }
 
 function publicAppBaseUrl(req) {
-  return String(process.env.PUBLIC_APP_URL || process.env.APP_URL || requestOrigin(req) || '').replace(/\/+$/, '');
+  return String(process.env.PUBLIC_APP_URL || publicBaseUrl() || process.env.APP_URL || requestOrigin(req) || '').replace(/\/+$/, '');
+}
+
+function publicBaseUrl() {
+  return subdomainBaseUrl('PUBLIC_BASE_URL', 'PUBLIC_HOSTS', 'taprontomenu.com.br');
 }
 
 function requestOrigin(req) {
@@ -9450,9 +9457,9 @@ async function notifySupportTicket(ticket, templateKey) {
     customer_name: admin?.name || company?.name || 'cliente',
     plan_name: '',
     due_date: '',
-    dashboard_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/painel`,
-    payment_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/painel?tab=plan`,
-    support_url: `${process.env.PUBLIC_APP_URL || process.env.APP_URL || ''}/painel?tab=support`
+    dashboard_url: absolutePanelUrl('/'),
+    payment_url: absolutePanelUrl('/?tab=plan'),
+    support_url: absolutePanelUrl('/?tab=support')
   };
   await sendPlatformEmail({
     to,
@@ -9483,8 +9490,8 @@ async function notifyPlatformSupportActivity(ticket = {}, templateKey, options =
     ticket_category: ticket.category || 'Sem categoria',
     ticket_priority: priorityLabelForEmail(ticket.priority || 'medium'),
     message_preview: supportEmailPreview(options.messagePreview || ''),
-    support_url: baseUrl ? `${baseUrl}/central` : '/central',
-    platform_url: baseUrl ? `${baseUrl}/central` : '/central'
+    support_url: platformBaseUrl(),
+    platform_url: platformBaseUrl()
   };
   await sendPlatformEmail({
     to: PLATFORM_SYSTEM_EMAIL_RECIPIENT,
@@ -12289,13 +12296,36 @@ function absoluteFromBase(base, relativePath = '/') {
 }
 
 function absoluteAppUrl(req, relativePath = '/') {
-  const base = process.env.APP_URL || process.env.PUBLIC_APP_URL || absoluteUrl(req, '/');
+  const base = panelBaseUrl() || process.env.APP_URL || process.env.PUBLIC_APP_URL || absoluteUrl(req, '/');
   return absoluteFromBase(base, relativePath);
 }
 
+function panelBaseUrl() {
+  return subdomainBaseUrl('PANEL_BASE_URL', 'PANEL_HOSTS', 'app.taprontomenu.com.br');
+}
+
+function platformBaseUrl() {
+  return subdomainBaseUrl('PLATFORM_BASE_URL', 'PLATFORM_HOSTS', 'central.taprontomenu.com.br');
+}
+
+function subdomainBaseUrl(baseEnv, hostsEnv, fallbackHost) {
+  const explicit = String(process.env[baseEnv] || '').trim().replace(/\/+$/, '');
+  if (explicit) return explicit;
+  const host = csvEnv(hostsEnv)[0] || fallbackHost;
+  return /^https?:\/\//i.test(host) ? host.replace(/\/+$/, '') : `https://${host}`;
+}
+
 function absolutePublicUrl(relativePath = '/') {
-  const base = process.env.PUBLIC_APP_URL || process.env.APP_URL || `http://${HOST}:${PORT}`;
+  const base = process.env.PUBLIC_APP_URL || publicBaseUrl() || process.env.APP_URL || `http://${HOST}:${PORT}`;
   return absoluteFromBase(base, relativePath);
+}
+
+function absolutePanelUrl(relativePath = '/') {
+  return absoluteFromBase(panelBaseUrl(), relativePath);
+}
+
+function absolutePlatformUrl(relativePath = '/') {
+  return absoluteFromBase(platformBaseUrl(), relativePath);
 }
 
 function formatDateTimePt(value) {
@@ -14806,9 +14836,19 @@ async function localDbRequest(config, method, table, query = {}, payload, extraH
     throw httpError(error.status || 500, `Banco local: ${error.message}`, error.detail || error);
   }
 }
-async function serveStatic(res, requestPath, hostHeader = '') {
+async function serveStatic(res, requestPath, hostHeader = '', requestSearch = '') {
   if (requestPath.startsWith('/uploads/')) {
     await serveUpload(res, requestPath);
+    return;
+  }
+
+  const canonicalRedirectUrl = canonicalHostRedirectUrl(requestPath, hostHeader, requestSearch);
+  if (canonicalRedirectUrl) {
+    res.writeHead(302, {
+      Location: canonicalRedirectUrl,
+      'Cache-Control': 'no-store'
+    });
+    res.end();
     return;
   }
 
@@ -14831,6 +14871,41 @@ async function serveStatic(res, requestPath, hostHeader = '') {
   }
 
   await sendFile(res, filePath);
+}
+
+function canonicalHostRedirectUrl(requestPath, hostHeader = '', requestSearch = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  if (!hostname || ['localhost', '127.0.0.1', '0.0.0.0'].includes(hostname)) return '';
+  if (requestPath.startsWith('/api/') || requestPath.startsWith('/assets/') || requestPath.startsWith('/uploads/')) return '';
+  if (path.extname(requestPath)) return '';
+
+  const panelAliases = new Set(['/painel', '/admin', '/entrar', '/onboarding', '/redefinir-senha', '/ativar-conta', '/convite']);
+  const platformAliases = new Set(['/central', '/platform', '/plataform']);
+  const querylessPath = requestPath || '/';
+  const panelHosts = csvEnv('PANEL_HOSTS');
+  const platformHosts = csvEnv('PLATFORM_HOSTS');
+  const isPanelHost = panelHosts.includes(hostname) || hostname.startsWith('painel.') || hostname.startsWith('app.');
+  const isPlatformHost = platformHosts.includes(hostname) || hostname.startsWith('central.') || hostname.startsWith('platform.');
+  const panelRootAliases = new Set(['/painel', '/admin', '/entrar', '/onboarding']);
+
+  if (panelRootAliases.has(querylessPath) && isPanelHost) {
+    return absoluteFromBase(panelBaseUrl(), `/${requestSearch || ''}`);
+  }
+  if (platformAliases.has(querylessPath) && isPlatformHost) {
+    return absoluteFromBase(platformBaseUrl(), `/${requestSearch || ''}`);
+  }
+  if (panelAliases.has(querylessPath) && !isPanelHost) {
+    return absoluteFromBase(panelBaseUrl(), `${panelCanonicalPath(querylessPath)}${requestSearch || ''}`);
+  }
+  if (platformAliases.has(querylessPath) && !isPlatformHost) {
+    return absoluteFromBase(platformBaseUrl(), `/${requestSearch || ''}`);
+  }
+  return '';
+}
+
+function panelCanonicalPath(requestPath = '/') {
+  if (requestPath === '/redefinir-senha' || requestPath === '/ativar-conta' || requestPath === '/convite') return requestPath;
+  return '/';
 }
 
 function helpHostRedirectUrl(requestPath, hostHeader = '') {
@@ -14876,8 +14951,8 @@ function routePath(requestPath, hostHeader = '') {
   const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
   const panelHosts = csvEnv('PANEL_HOSTS');
   const platformHosts = csvEnv('PLATFORM_HOSTS');
-  const isPanelHost = panelHosts.includes(hostname) || hostname.startsWith('painel.');
-  const isPlatformHost = platformHosts.includes(hostname) || hostname.startsWith('platform.');
+  const isPanelHost = panelHosts.includes(hostname) || hostname.startsWith('painel.') || hostname.startsWith('app.');
+  const isPlatformHost = platformHosts.includes(hostname) || hostname.startsWith('platform.') || hostname.startsWith('central.');
   const isHelpHost = isHelpHostname(hostname);
 
   if (requestPath === '/' && isPanelHost) return '/admin.html';
@@ -14897,7 +14972,7 @@ function routePath(requestPath, hostHeader = '') {
   if (requestPath === '/onboarding') return '/admin.html';
   if (requestPath === '/convite') return '/invite.html';
   if (requestPath === '/painel' || requestPath === '/admin') return '/admin.html';
-  if (requestPath === '/platform' || requestPath === '/plataform') return '/platform.html';
+  if (requestPath === '/platform' || requestPath === '/plataform' || requestPath === '/central') return '/platform.html';
   if (requestPath === '/cozinha') return '/kitchen.html';
   if (requestPath === '/pagamento') return '/payment.html';
   if (requestPath === '/conta' || requestPath === '/cliente') return '/account.html';

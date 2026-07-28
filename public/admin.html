@@ -67,6 +67,7 @@
               <summary>Esqueceu a senha?</summary>
               <form id="adminRecoverForm" class="stack-form">
                 <p class="muted">Informe seu e-mail para receber um link seguro de redefinição de senha.</p>
+                <p class="email-delivery-note compact"><strong>Atenção:</strong> confira spam, lixo eletrônico ou Promoções se o e-mail não aparecer na entrada.</p>
                 <input name="email" required type="email" placeholder="E-mail cadastrado">
                 <button class="ghost-button compact" id="adminRecoverButton" type="submit">Enviar link</button>
                 <p class="form-message" id="adminRecoverMessage" role="alert" aria-live="polite"></p>
@@ -807,18 +808,38 @@
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Formas de Pagamento</strong>
-                  <p>Marque as opções aceitas pela loja. Se precisar, adicione outras formas no campo extra.</p>
+                  <p>Escolha o que a loja aceita no pedido. Formas extras aparecem no checkout junto com as opções principais.</p>
                 </div>
                 <div class="store-settings-fields">
-                  <div class="payment-options">
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix"> Pix</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro"> Dinheiro</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de débito"> Cartão de débito</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> Cartão de crédito</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pagamento online"> Pagamento online</label>
-                    <label class="payment-option"><input name="payment_methods" type="checkbox" value="Vale refeicao"> Vale refeição</label>
+                  <div class="payment-settings-card">
+                    <div class="payment-settings-head">
+                      <div>
+                        <strong>Opções Principais</strong>
+                        <small>Marque as formas mais usadas pela sua loja.</small>
+                      </div>
+                    </div>
+                    <div class="payment-options">
+                      <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pix"> <span>Pix</span></label>
+                      <label class="payment-option"><input name="payment_methods" type="checkbox" value="Dinheiro"> <span>Dinheiro</span></label>
+                      <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de débito"> <span>Cartão de Débito</span></label>
+                      <label class="payment-option"><input name="payment_methods" type="checkbox" value="Cartão de crédito"> <span>Cartão de Crédito</span></label>
+                      <label class="payment-option"><input name="payment_methods" type="checkbox" value="Pagamento online"> <span>Pagamento Online</span></label>
+                      <label class="payment-option"><input name="payment_methods" type="checkbox" value="Vale refeição"> <span>Vale Refeição</span></label>
+                    </div>
                   </div>
-                  <label>Outras formas<input name="payment_methods_extra" placeholder="Ex: PicPay, boleto, transferência"></label>
+                  <div class="payment-settings-card">
+                    <label>Adicionar Outras Formas
+                      <input name="payment_methods_extra" placeholder="Ex: PicPay, Alelo, Sodexo, transferência">
+                    </label>
+                    <small class="field-help">Separe cada opção por vírgula. Exemplo: PicPay, Alelo, Sodexo.</small>
+                  </div>
+                  <div class="payment-preview-box">
+                    <div>
+                      <strong>Prévia no Checkout</strong>
+                      <small>O cliente verá essas formas de pagamento ao finalizar o pedido.</small>
+                    </div>
+                    <div class="payment-preview-list" id="paymentMethodsPreview"></div>
+                  </div>
                 </div>
               </section>
 
@@ -991,6 +1012,7 @@
                   <p class="muted" id="whatsappAutoMessage">Clique em conectar para iniciar.</p>
                   <div class="row-actions">
                     <button class="primary-button compact" id="connectWhatsappButton" type="button">Conectar WhatsApp</button>
+                    <button class="ghost-button compact" id="requestWhatsappSetupButton" type="button" hidden>Solicitar ajuda da TáPronto</button>
                     <button class="ghost-button compact" id="refreshWhatsappQrButton" type="button">Atualizar QR Code</button>
                     <button class="ghost-button compact" id="testWhatsappButton" type="button">Enviar teste para minha loja</button>
                     <button class="ghost-button compact" type="button" data-integration-help="whatsapp-auto">Como funciona?</button>
