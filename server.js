@@ -8011,11 +8011,13 @@ async function connectAdminWhatsappIntegration(req, admin) {
   if (!config.is_active || !config.base_url || !config.api_key) throw httpError(503, 'WhatsApp automático ainda não foi configurado pela Central.');
   const store = await getStoreSettings(admin.store_id);
   const existing = await getStoreWhatsappIntegration(admin.store_id);
-  const providerReserve = existing ? null : await assertWhatsappProviderCreditForNewInstance(req, admin, store);
-  const instanceName = existing?.instance_name || buildEvolutionInstanceName(store);
+  const testInstanceName = cleanText(process.env.PLATFORM_WHATSAPP_TEST_INSTANCE_NAME || '');
+  const useTestInstance = process.env.PLATFORM_WHATSAPP_SKIP_CREDIT_CHECK === 'true' && Boolean(testInstanceName);
+  const providerReserve = (existing || useTestInstance) ? null : await assertWhatsappProviderCreditForNewInstance(req, admin, store);
+  const instanceName = useTestInstance ? testInstanceName : (existing?.instance_name || buildEvolutionInstanceName(store));
   let providerData = null;
   try {
-    providerData = existing?.instance_name
+    providerData = (existing?.instance_name || useTestInstance)
       ? await evolutionConnectInstance(instanceName, config)
       : await evolutionCreateInstance(instanceName, store, config);
     await setEvolutionWebhook(instanceName, config).catch(() => null);
