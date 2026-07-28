@@ -8018,7 +8018,7 @@ async function connectAdminWhatsappIntegration(req, admin) {
   let providerData = null;
   try {
     providerData = (existing?.instance_name || useTestInstance)
-      ? await evolutionConnectInstance(instanceName, config)
+      ? await evolutionRestartOrConnectInstance(instanceName, config)
       : await evolutionCreateInstance(instanceName, store, config);
     await setEvolutionWebhook(instanceName, config).catch(() => null);
   } catch (error) {
@@ -8064,7 +8064,7 @@ async function refreshAdminWhatsappQrCode(admin) {
   await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
   const config = await privatePlatformWhatsappSettings();
   const integration = await requireStoreWhatsappIntegration(admin.store_id);
-  const data = await evolutionConnectInstance(integration.instance_name, config);
+  const data = await evolutionRestartOrConnectInstance(integration.instance_name, config);
   const saved = await patchStoreWhatsappIntegration(integration.id, {
     qr_code_base64: data.qr_code_base64 || integration.qr_code_base64 || null,
     status: data.status || integration.status || 'connecting',
@@ -8440,6 +8440,18 @@ async function evolutionConnectInstance(instanceName, config) {
     method: 'GET'
   }, config);
   return normalizeEvolutionQrResponse(data);
+}
+
+async function evolutionRestartOrConnectInstance(instanceName, config) {
+  if (!config.is_active || !config.base_url || !config.api_key) return await evolutionConnectInstance(instanceName, config);
+  return evolutionRequest(`/instance/restart/${encodeURIComponent(instanceName)}`, {
+    method: 'POST'
+  }, config)
+    .then((data) => normalizeEvolutionQrResponse(data))
+    .catch(async (error) => {
+      if ([404, 405].includes(Number(error.status))) return await evolutionConnectInstance(instanceName, config);
+      throw error;
+    });
 }
 
 async function evolutionConnectionStatus(instanceName, config) {
