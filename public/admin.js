@@ -7461,7 +7461,9 @@ function renderWhatsappIntegration(data = {}) {
     } else if (status === 'connecting') {
       els.whatsappAutoMessage.textContent = 'Aguardando leitura do QR Code. Se expirar, clique em Atualizar QR Code e tente novamente.';
     } else if (status === 'disconnected') {
-      els.whatsappAutoMessage.textContent = 'Sessão desconectada. Clique em Reconectar WhatsApp para gerar um novo QR Code.';
+      els.whatsappAutoMessage.textContent = 'WhatsApp desconectado. Clique em Conectar WhatsApp para gerar um novo QR Code.';
+    } else if (status === 'error') {
+      els.whatsappAutoMessage.textContent = 'Não foi possível conectar agora. Tente novamente ou solicite ajuda da equipe TáPronto.';
     } else {
       els.whatsappAutoMessage.textContent = 'Clique em Conectar WhatsApp e escaneie o QR Code com o celular da loja.';
     }
@@ -7470,7 +7472,8 @@ function renderWhatsappIntegration(data = {}) {
   if (els.whatsappQrBox) els.whatsappQrBox.hidden = !qr;
   if (els.whatsappQrImage && qr) els.whatsappQrImage.src = qr;
   if (els.connectWhatsappButton) {
-    els.connectWhatsappButton.textContent = ['connected', 'disconnected', 'error'].includes(status) ? 'Reconectar WhatsApp' : 'Conectar WhatsApp';
+    els.connectWhatsappButton.hidden = !canConnect || ['connected', 'loading', 'connecting'].includes(status);
+    els.connectWhatsappButton.textContent = status === 'error' ? 'Tentar novamente' : 'Conectar WhatsApp';
     els.connectWhatsappButton.disabled = !canConnect || status === 'loading';
     els.connectWhatsappButton.title = !featureEnabled
       ? (canBuyAddon ? 'Contrate o adicional para liberar a conexão.' : 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.')
@@ -7489,17 +7492,19 @@ function renderWhatsappIntegration(data = {}) {
     els.requestWhatsappSetupButton.textContent = featureEnabled ? 'Solicitar ajuda da TáPronto' : 'Solicitar upgrade';
   }
   if (els.refreshWhatsappQrButton) {
-    els.refreshWhatsappQrButton.hidden = status === 'connected' && !qr;
+    els.refreshWhatsappQrButton.hidden = !canConnect || !['connecting', 'error'].includes(status);
     els.refreshWhatsappQrButton.disabled = !canConnect || status === 'loading';
   }
   if (els.testWhatsappButton) {
+    els.testWhatsappButton.hidden = status !== 'connected';
     els.testWhatsappButton.disabled = status !== 'connected';
     els.testWhatsappButton.title = status === 'connected'
       ? 'Envia uma mensagem de teste para o WhatsApp conectado nesta loja.'
       : 'Conecte o WhatsApp da loja antes de enviar um teste.';
   }
   if (els.disconnectWhatsappButton) {
-    els.disconnectWhatsappButton.hidden = !['connected', 'connecting', 'disconnected', 'error'].includes(status);
+    els.disconnectWhatsappButton.hidden = status !== 'connected';
+    els.disconnectWhatsappButton.disabled = status === 'loading';
   }
   renderIntegrationStatus();
 }

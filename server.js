@@ -9000,21 +9000,45 @@ function buildEvolutionInstanceName(store = {}) {
 
 async function evolutionCreateInstance(instanceName, store, config) {
   const instanceToken = randomUUID();
-  const data = await evolutionRequest('/instance/create', {
-    method: 'POST',
-    body: {
-      name: instanceName,
-      token: instanceToken
-    }
-  }, config);
+  let data = null;
+  try {
+    data = await evolutionRequest('/instance/create', {
+      method: 'POST',
+      body: {
+        name: instanceName,
+        token: instanceToken
+      }
+    }, config);
+  } catch (error) {
+    if (!String(error.message || '').toLowerCase().includes('instance already exists')) throw error;
+    const existing = await evolutionFindInstanceByName(instanceName, config);
+    if (!existing?.id || !existing?.token) throw error;
+    const connected = await evolutionConnectInstance(instanceName, config, {
+      store,
+      instanceId: existing.id,
+      instanceToken: existing.token
+    });
+    return {
+      ...connected,
+      instance_token: existing.token,
+      instance_id: existing.id
+    };
+  }
   const instanceId = data?.data?.id || data?.data?.instanceId || data?.instance?.id || data?.instance?.instanceId || data?.id || null;
-  const connected = await evolutionConnectInstance(instanceName, config, { store, instanceToken, instanceId });
+  const resolvedInstanceToken = data?.data?.token || data?.instance?.token || data?.token || instanceToken;
+  const connected = await evolutionConnectInstance(instanceName, config, { store, instanceToken: resolvedInstanceToken, instanceId });
   return {
     ...normalizeEvolutionQrResponse(data),
     ...connected,
-    instance_token: instanceToken,
+    instance_token: resolvedInstanceToken,
     instance_id: instanceId
   };
+}
+
+async function evolutionFindInstanceByName(instanceName, config) {
+  const data = await evolutionRequest('/instance/all', { method: 'GET' }, config);
+  const instances = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+  return instances.find((entry) => cleanText(entry?.name || '') === instanceName) || null;
 }
 
 async function evolutionConnectInstance(instanceName, config, options = {}) {
