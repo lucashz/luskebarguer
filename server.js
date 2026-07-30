@@ -8377,30 +8377,52 @@ async function updatePlatformWhatsappSettings(req, admin, data = {}) {
 }
 
 async function getPlatformWhatsappProviderAccount() {
-  const rows = await dbRequest('GET', 'platform_whatsapp_provider_accounts', {
+  const currentRows = await dbRequest('GET', 'platform_whatsapp_provider_accounts', {
+    select: '*',
+    provider: 'eq.evolution_go',
+    order: 'created_at.desc',
+    limit: '1'
+  }).catch(() => []);
+  if (currentRows[0]) return currentRows[0];
+  const legacyRows = await dbRequest('GET', 'platform_whatsapp_provider_accounts', {
     select: '*',
     provider: 'eq.evolution',
     order: 'created_at.desc',
     limit: '1'
   }).catch(() => []);
-  return rows[0] || null;
+  return legacyRows[0] || null;
 }
 
 async function publicPlatformWhatsappProviderAccount(row = null) {
   const account = row || await getPlatformWhatsappProviderAccount();
-  const [instances, events] = await Promise.all([
+  const [currentInstances, legacyInstances, currentEvents, legacyEvents] = await Promise.all([
     dbRequest('GET', 'store_whatsapp_integrations', {
       select: 'id,status,monthly_cost_cents,next_billing_at,billing_status',
-      or: '(provider.eq.evolution_go,provider.eq.evolution)',
+      provider: 'eq.evolution_go',
+      limit: '5000'
+    }).catch(() => []),
+    dbRequest('GET', 'store_whatsapp_integrations', {
+      select: 'id,status,monthly_cost_cents,next_billing_at,billing_status',
+      provider: 'eq.evolution',
       limit: '5000'
     }).catch(() => []),
     dbRequest('GET', 'whatsapp_instance_events', {
       select: 'id,event_type,status,cost_cents,message,created_at',
-      or: '(provider.eq.evolution_go,provider.eq.evolution)',
+      provider: 'eq.evolution_go',
+      order: 'created_at.desc',
+      limit: '5'
+    }).catch(() => []),
+    dbRequest('GET', 'whatsapp_instance_events', {
+      select: 'id,event_type,status,cost_cents,message,created_at',
+      provider: 'eq.evolution',
       order: 'created_at.desc',
       limit: '5'
     }).catch(() => [])
   ]);
+  const instances = [...currentInstances, ...legacyInstances];
+  const events = [...currentEvents, ...legacyEvents]
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    .slice(0, 5);
   const billable = instances.filter((entry) => !['cancelled', 'removed', 'deleted'].includes(String(entry.billing_status || '').toLowerCase()));
   const connected = instances.filter((entry) => ['connected', 'connecting'].includes(normalizeWhatsappIntegrationStatus(entry.status)));
   const balanceCents = Number(account?.balance_cents || 0);
@@ -8774,13 +8796,20 @@ async function disconnectPlatformWhatsappStore(req, admin, storeId) {
 async function getStoreWhatsappIntegration(storeId) {
   const resolvedStoreId = cleanUuid(storeId);
   if (!resolvedStoreId) return null;
-  const rows = await dbRequest('GET', 'store_whatsapp_integrations', {
+  const currentRows = await dbRequest('GET', 'store_whatsapp_integrations', {
     select: '*',
     store_id: `eq.${resolvedStoreId}`,
-    or: '(provider.eq.evolution_go,provider.eq.evolution)',
+    provider: 'eq.evolution_go',
     limit: '1'
   }).catch(() => []);
-  return rows[0] || null;
+  if (currentRows[0]) return currentRows[0];
+  const legacyRows = await dbRequest('GET', 'store_whatsapp_integrations', {
+    select: '*',
+    store_id: `eq.${resolvedStoreId}`,
+    provider: 'eq.evolution',
+    limit: '1'
+  }).catch(() => []);
+  return legacyRows[0] || null;
 }
 
 async function requireStoreWhatsappIntegration(storeId) {
@@ -8848,7 +8877,7 @@ async function recordWhatsappInstanceEvent({ req, admin, store, integration, eve
 }
 
 async function upsertStoreWhatsappIntegration(data = {}) {
-  const current = data.current || null;
+  const current = data.current || await getStoreWhatsappIntegration(data.store?.store_id || data.store?.id || data.store_id);
   const payload = {
     company_id: data.store?.company_id || data.company_id || current?.company_id || null,
     store_id: data.store?.store_id || data.store?.id || data.store_id || current?.store_id,
@@ -8869,9 +8898,19 @@ async function upsertStoreWhatsappIntegration(data = {}) {
     updated_at: new Date().toISOString()
   };
   if (!payload.store_id || !payload.instance_name) throw httpError(422, 'Loja ou instância inválida para WhatsApp automático.');
-  const rows = current
-    ? await dbRequest('PATCH', 'store_whatsapp_integrations', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
-    : await dbRequest('POST', 'store_whatsapp_integrations', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  let rows;
+  if (current) {
+    rows = await dbRequest('PATCH', 'store_whatsapp_integrations', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation']);
+  } else {
+    try {
+      rows = await dbRequest('POST', 'store_whatsapp_integrations', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
+    } catch (error) {
+      if (error.code !== '23505') throw error;
+      const existing = await getStoreWhatsappIntegration(payload.store_id);
+      if (!existing) throw error;
+      rows = await dbRequest('PATCH', 'store_whatsapp_integrations', { id: `eq.${existing.id}` }, payload, ['Prefer: return=representation']);
+    }
+  }
   return rows[0];
 }
 
@@ -8980,16 +9019,18 @@ async function evolutionCreateInstance(instanceName, store, config) {
 
 async function evolutionConnectInstance(instanceName, config, options = {}) {
   const instanceId = options.instanceId || options.instance_id || config.instance_id || null;
+  const instanceToken = options.instanceToken || options.instance_token || config.instance_token || null;
   await evolutionRequest('/instance/connect', {
     method: 'POST',
     instanceId,
+    instanceToken,
     body: {
       immediate: true,
       subscribe: ['MESSAGE', 'SEND_MESSAGE', 'CONNECTION', 'QRCODE'],
       webhookUrl: absolutePublicUrl('/api/integrations/evolution/webhook')
     }
   }, config);
-  const qr = await evolutionGetQrCode(instanceId, config).catch(() => ({}));
+  const qr = await evolutionGetQrCode(instanceId, config, { instanceToken }).catch(() => ({}));
   return normalizeEvolutionQrResponse({
     ...qr,
     state: qr?.data?.Qrcode || qr?.data?.Code || qr?.qrCode ? 'qrcode' : 'connecting'
@@ -9002,9 +9043,11 @@ async function evolutionRestartOrConnectInstance(instanceName, config, options =
 
 async function evolutionConnectionStatus(instanceName, config, options = {}) {
   const instanceId = options.instanceId || options.instance_id || config.instance_id || null;
+  const instanceToken = options.instanceToken || options.instance_token || config.instance_token || null;
   const data = await evolutionRequest('/instance/status', {
     method: 'GET',
-    instanceId
+    instanceId,
+    instanceToken
   }, config);
   const instance = data?.data || data?.instance || data;
   const rawState = instance?.Connected === true || instance?.connected === true
@@ -9023,6 +9066,7 @@ async function setEvolutionWebhook(instanceName, config, options = {}) {
   return evolutionRequest('/instance/connect', {
     method: 'POST',
     instanceId: options.instanceId || options.instance_id,
+    instanceToken: options.instanceToken || options.instance_token || config.instance_token || null,
     body: {
       immediate: false,
       subscribe: ['MESSAGE', 'SEND_MESSAGE', 'CONNECTION', 'QRCODE'],
@@ -9038,7 +9082,8 @@ async function evolutionLogoutInstance(instanceName, config, options = {}) {
   if (!config.is_active || !config.base_url || !config.api_key) return null;
   return evolutionRequest('/instance/disconnect', {
     method: 'POST',
-    instanceId: options.instanceId || options.instance_id || config.instance_id || null
+    instanceId: options.instanceId || options.instance_id || config.instance_id || null,
+    instanceToken: options.instanceToken || options.instance_token || config.instance_token || null
   }, config).catch(() => null);
 }
 
@@ -9046,6 +9091,7 @@ async function evolutionSendText(instanceName, phone, message, config) {
   const data = await evolutionRequest('/send/text', {
     method: 'POST',
     instanceId: config.instance_id || null,
+    instanceToken: config.instance_token || null,
     body: {
       number: phone,
       text: message,
@@ -9059,10 +9105,11 @@ async function evolutionRequest(endpoint, options = {}, config = null) {
   const settings = config || await privatePlatformWhatsappSettings();
   if (!settings.base_url || !settings.api_key) throw httpError(503, 'Evolution Go não configurada.');
   assertEvolutionGoOnlyBaseUrl(settings.base_url);
+  const apiKey = options.instanceToken || options.instance_token || settings.api_key;
   const response = await fetchWithTimeout(`${settings.base_url}${endpoint}`, {
     method: options.method || 'GET',
     headers: {
-      apikey: settings.api_key,
+      apikey: apiKey,
       ...(options.instanceId ? { instanceId: options.instanceId } : {}),
       'Content-Type': 'application/json',
       ...(options.headers || {})
@@ -9090,10 +9137,11 @@ function normalizeEvolutionQrResponse(data = {}) {
   };
 }
 
-async function evolutionGetQrCode(instanceId, config) {
+async function evolutionGetQrCode(instanceId, config, options = {}) {
   return evolutionRequest('/instance/qr', {
     method: 'GET',
-    instanceId
+    instanceId,
+    instanceToken: options.instanceToken || options.instance_token || config.instance_token || null
   }, config);
 }
 
@@ -9122,6 +9170,7 @@ async function sendEvolutionStoreMessage(store, integration, phone, message, opt
   try {
     const result = await evolutionSendText(integration.instance_name, phone, message, {
       ...config,
+      instance_id: integration.instance_id || null,
       instance_token: integration.instance_token || null
     });
     log = await patchWhatsappMessageLog(log.id, {
@@ -9200,23 +9249,7 @@ async function receiveEvolutionWebhook(req, payload = {}) {
   const instanceId = cleanText(payload?.instanceId || payload?.instance_id || payload?.data?.instanceId || payload?.data?.id || '');
   const instanceToken = cleanText(payload?.instanceToken || payload?.instance_token || payload?.data?.instanceToken || payload?.data?.instance_token || '');
   if (!instanceName && !instanceId && !instanceToken) return { ok: true, ignored: true };
-  const query = {
-    select: '*',
-    limit: '1'
-  };
-  if (instanceName || instanceId || instanceToken) {
-    const filters = [];
-    if (instanceName) filters.push(`instance_name.eq.${instanceName}`);
-    if (instanceId) filters.push(`instance_id.eq.${instanceId}`);
-    if (instanceToken) filters.push(`instance_token.eq.${instanceToken}`);
-    query.or = `(${filters.join(',')})`;
-  } else if (instanceName) {
-    query.instance_name = `eq.${instanceName}`;
-  } else {
-    query.instance_id = `eq.${instanceId}`;
-  }
-  const rows = await dbRequest('GET', 'store_whatsapp_integrations', query).catch(() => []);
-  const integration = rows[0] || null;
+  const integration = await findWhatsappIntegrationByEvolutionIdentity({ instanceName, instanceId, instanceToken });
   if (!integration) return { ok: true, ignored: true };
   const event = String(payload?.event || payload?.type || '').toUpperCase();
   const state = payload?.data?.state || payload?.data?.status || payload?.state || payload?.status || payload?.connection || '';
@@ -9238,6 +9271,30 @@ async function receiveEvolutionWebhook(req, payload = {}) {
     updated_at: new Date().toISOString()
   });
   return { ok: true };
+}
+
+async function findWhatsappIntegrationByEvolutionIdentity({ instanceName = '', instanceId = '', instanceToken = '' } = {}) {
+  const attempts = [];
+  if (instanceName) attempts.push({ instance_name: `eq.${instanceName}` });
+  if (instanceId) attempts.push({ instance_id: `eq.${instanceId}` });
+  if (instanceToken) attempts.push({ instance_token: `eq.${instanceToken}` });
+  for (const filter of attempts) {
+    const currentRows = await dbRequest('GET', 'store_whatsapp_integrations', {
+      select: '*',
+      provider: 'eq.evolution_go',
+      ...filter,
+      limit: '1'
+    }).catch(() => []);
+    if (currentRows[0]) return currentRows[0];
+    const legacyRows = await dbRequest('GET', 'store_whatsapp_integrations', {
+      select: '*',
+      provider: 'eq.evolution',
+      ...filter,
+      limit: '1'
+    }).catch(() => []);
+    if (legacyRows[0]) return legacyRows[0];
+  }
+  return null;
 }
 
 const PLATFORM_SYSTEM_EMAIL_RECIPIENT = 'lucasbulow@hotmail.com';
