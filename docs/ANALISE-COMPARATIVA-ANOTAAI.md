@@ -108,7 +108,7 @@ Nao ha WebSocket, SSE ou Supabase Realtime. A atualizacao ocorre por polling:
 
 ### Integracoes externas
 
-- WhatsEvolution/Evolution API para mensagens WhatsApp.
+- Evolution Go para mensagens WhatsApp.
 - Abacate Pay/Pix em fluxo parcial.
 - Webhooks de pagamento em `/api/payments/webhook`.
 - QR Code por API externa `api.qrserver.com` para mesas.
@@ -584,7 +584,7 @@ Nao gerar migrations ainda. Proposta:
 6. Adiar: nota fiscal, ads, IA completa, split, estoque avancado.
 7. Melhor diferencial: sistema simples, rapido, com mesa/comanda/WhatsApp/impressao, pensado para restaurante pequeno sem complexidade de ERP.
 8. Faz sentido integrar servicos externos para WhatsApp, Pix, fiscal, impressao silenciosa e IA; construir internamente apenas o fluxo operacional.
-9. Integracoes necessarias: WhatsEvolution/Evolution, Abacate Pay, provedor fiscal, servico ESC/POS local, Meta Pixel/CAPI, IA/transcricao.
+9. Integracoes necessarias: Evolution Go, Abacate Pay, provedor fiscal, servico ESC/POS local, Meta Pixel/CAPI, IA/transcricao.
 10. Custos recorrentes: Supabase, dominio/hospedagem, WhatsApp/API, pagamentos, fiscal, SMS/WhatsApp recovery, IA, storage, backups.
 
 Complexidade para equivalencia:

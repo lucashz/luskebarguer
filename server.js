@@ -8288,11 +8288,11 @@ async function getPlatformWhatsappSettings() {
   const row = rows[0] || null;
   if (!row) {
     const fallback = publicPlatformWhatsappSettings({
-      provider: 'evolution',
-      base_url: process.env.EVOLUTION_API_URL || '',
-      api_key_encrypted: process.env.EVOLUTION_API_KEY || '',
-      is_active: Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
-      source: process.env.EVOLUTION_API_URL ? 'env' : 'empty'
+      provider: 'evolution_go',
+      base_url: process.env.EVOLUTION_GO_API_URL || '',
+      api_key_encrypted: process.env.EVOLUTION_GO_GLOBAL_API_KEY || '',
+      is_active: Boolean(process.env.EVOLUTION_GO_API_URL && process.env.EVOLUTION_GO_GLOBAL_API_KEY),
+      source: process.env.EVOLUTION_GO_API_URL ? 'env' : 'empty'
     });
     fallback.provider_account = await publicPlatformWhatsappProviderAccount();
     return fallback;
@@ -8311,21 +8311,21 @@ async function privatePlatformWhatsappSettings() {
   const row = rows[0] || {};
   return {
     id: row.id || null,
-    provider: cleanText(row.provider || 'evolution').toLowerCase(),
-    base_url: cleanText(row.base_url || process.env.EVOLUTION_API_URL || '').replace(/\/+$/, ''),
-    api_key: row.api_key_encrypted || process.env.EVOLUTION_API_KEY || '',
-    is_active: row.is_active === true || Boolean(process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY),
+    provider: cleanText(row.provider || 'evolution_go').toLowerCase(),
+    base_url: cleanText(row.base_url || process.env.EVOLUTION_GO_API_URL || '').replace(/\/+$/, ''),
+    api_key: row.api_key_encrypted || process.env.EVOLUTION_GO_GLOBAL_API_KEY || '',
+    is_active: row.is_active === true || Boolean(process.env.EVOLUTION_GO_API_URL && process.env.EVOLUTION_GO_GLOBAL_API_KEY),
     webhook_secret: process.env.EVOLUTION_WEBHOOK_SECRET || ''
   };
 }
 
 function publicPlatformWhatsappSettings(row = {}) {
-  const baseUrl = cleanText(row.base_url || process.env.EVOLUTION_API_URL || '').replace(/\/+$/, '');
-  const apiKey = row.api_key_encrypted || process.env.EVOLUTION_API_KEY || '';
+  const baseUrl = cleanText(row.base_url || process.env.EVOLUTION_GO_API_URL || '').replace(/\/+$/, '');
+  const apiKey = row.api_key_encrypted || process.env.EVOLUTION_GO_GLOBAL_API_KEY || '';
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   return {
     id: row.id || null,
-    provider: cleanText(row.provider || 'evolution') || 'evolution',
+    provider: cleanText(row.provider || 'evolution_go') || 'evolution_go',
     base_url: baseUrl,
     has_api_key: Boolean(apiKey),
     api_key_masked: apiKey ? maskEmailOrToken(apiKey) : '',
@@ -8349,7 +8349,7 @@ async function updatePlatformWhatsappSettings(req, admin, data = {}) {
   const current = currentRows[0] || null;
   const nextApiKey = cleanText(data.api_key || data.apiKey || '').slice(0, 1000);
   const payload = {
-    provider: cleanSlug(data.provider || 'evolution') || 'evolution',
+    provider: 'evolution_go',
     base_url: cleanText(data.base_url || data.baseUrl || '').replace(/\/+$/, '').slice(0, 500) || null,
     ...(nextApiKey && !isMaskedSecretValue(nextApiKey) ? { api_key_encrypted: nextApiKey } : {}),
     is_active: data.is_active === true || data.is_active === 'true',
@@ -8357,6 +8357,7 @@ async function updatePlatformWhatsappSettings(req, admin, data = {}) {
     updated_at: new Date().toISOString()
   };
   if (!payload.base_url) throw httpError(422, 'Informe a URL base da Evolution Go.');
+  assertEvolutionGoOnlyBaseUrl(payload.base_url);
   const [saved] = current
     ? await dbRequest('PATCH', 'platform_whatsapp_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
     : await dbRequest('POST', 'platform_whatsapp_settings', {}, { ...payload, created_at: new Date().toISOString() }, ['Prefer: return=representation']);
@@ -8390,12 +8391,12 @@ async function publicPlatformWhatsappProviderAccount(row = null) {
   const [instances, events] = await Promise.all([
     dbRequest('GET', 'store_whatsapp_integrations', {
       select: 'id,status,monthly_cost_cents,next_billing_at,billing_status',
-      provider: 'eq.evolution',
+      or: '(provider.eq.evolution_go,provider.eq.evolution)',
       limit: '5000'
     }).catch(() => []),
     dbRequest('GET', 'whatsapp_instance_events', {
       select: 'id,event_type,status,cost_cents,message,created_at',
-      provider: 'eq.evolution',
+      or: '(provider.eq.evolution_go,provider.eq.evolution)',
       order: 'created_at.desc',
       limit: '5'
     }).catch(() => [])
@@ -8407,7 +8408,7 @@ async function publicPlatformWhatsappProviderAccount(row = null) {
   const monthlyCostCents = billable.reduce((sum, entry) => sum + Number(entry.monthly_cost_cents || instanceCostCents), 0);
   return {
     id: account?.id || null,
-    provider: account?.provider || 'evolution',
+    provider: account?.provider || 'evolution_go',
     status: account?.status || 'not_configured',
     balance_cents: balanceCents,
     instance_cost_cents: instanceCostCents,
@@ -8427,7 +8428,7 @@ async function publicPlatformWhatsappProviderAccount(row = null) {
 async function upsertPlatformWhatsappProviderAccount(data = {}, admin = {}) {
   const current = await getPlatformWhatsappProviderAccount();
   const payload = {
-    provider: 'evolution',
+    provider: 'evolution_go',
     status: data.provider_status || data.account_status || (data.provider_is_active === false ? 'inactive' : 'active'),
     billing_cycle_days: clampNumber(Number(data.billing_cycle_days || data.provider_billing_cycle_days || current?.billing_cycle_days || 30), 1, 365),
     notes: cleanText(data.provider_notes || data.notes || '').slice(0, 1000) || current?.notes || null,
@@ -8447,12 +8448,47 @@ function platformMoneyInputToCents(value) {
   return Number.isFinite(numeric) ? Math.round(numeric * 100) : 0;
 }
 
+function assertEvolutionGoOnlyBaseUrl(baseUrl = '') {
+  const url = cleanText(baseUrl).replace(/\/+$/, '');
+  if (!url) throw httpError(422, 'Informe a URL base da Evolution Go.');
+  if (!/^https?:\/\//i.test(url)) throw httpError(422, 'A URL base da Evolution Go deve começar com http:// ou https://.');
+  if (/\/manager\/?$/i.test(url) || /evolution-api/i.test(url)) {
+    throw httpError(422, 'Configure a URL base da Evolution Go, não o painel/URL da Evolution API antiga.');
+  }
+}
+
+function isLegacyEvolutionApiPayload(payload = {}) {
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
+  return /Welcome to the Evolution API/i.test(text)
+    || /Evolution API/i.test(text) && /version["']?\s*:\s*["']?2\./i.test(text)
+    || /Cannot (GET|POST) \/instance\/all/i.test(text);
+}
+
+async function assertEvolutionGoProvider(config = {}) {
+  assertEvolutionGoOnlyBaseUrl(config.base_url);
+  const response = await fetchWithTimeout(config.base_url, {
+    headers: {
+      apikey: config.api_key,
+      Accept: 'application/json'
+    }
+  }, 7000).catch((error) => {
+    if (error.status) throw error;
+    return null;
+  });
+  if (!response) return;
+  const payload = await safeResponse(response);
+  if (isLegacyEvolutionApiPayload(payload)) {
+    throw httpError(422, 'A URL configurada é Evolution API antiga. Use uma instalação/URL da Evolution Go.');
+  }
+}
+
 async function testPlatformWhatsappSettings(req, admin) {
   const config = await privatePlatformWhatsappSettings();
   if (!config.is_active || !config.base_url || !config.api_key) {
     throw httpError(422, 'Evolution Go não está configurada ou ativa.');
   }
   try {
+    await assertEvolutionGoProvider(config);
     await evolutionRequest('/instance/all', { method: 'GET' }, config);
     await markPlatformWhatsappTest('success', 'Conexão com Evolution Go validada.');
     await audit('platform.whatsapp.settings.test', {
@@ -8549,10 +8585,14 @@ async function connectAdminWhatsappIntegration(req, admin) {
   const instanceName = existing?.instance_name || buildEvolutionInstanceName(store);
   let providerData = null;
   try {
-    providerData = existing?.instance_name
-      ? await evolutionRestartOrConnectInstance(instanceName, config, { store, instanceToken: existing.instance_token || null })
+    providerData = existing?.instance_name && existing?.instance_id
+      ? await evolutionRestartOrConnectInstance(instanceName, config, { store, instanceId: existing.instance_id || null, instanceToken: existing.instance_token || null })
       : await evolutionCreateInstance(instanceName, store, config);
-    await setEvolutionWebhook(instanceName, config, { store, instanceToken: providerData.instance_token || existing?.instance_token || null }).catch(() => null);
+    await setEvolutionWebhook(instanceName, config, {
+      store,
+      instanceId: providerData.instance_id || existing?.instance_id || null,
+      instanceToken: providerData.instance_token || existing?.instance_token || null
+    }).catch(() => null);
   } catch (error) {
     await upsertStoreWhatsappIntegration({
       current: existing,
@@ -8602,7 +8642,11 @@ async function refreshAdminWhatsappQrCode(admin) {
   const config = await privatePlatformWhatsappSettings();
   const integration = await requireStoreWhatsappIntegration(admin.store_id);
   const store = await getStoreSettings(admin.store_id);
-  const data = await evolutionRestartOrConnectInstance(integration.instance_name, config, { store, instanceToken: integration.instance_token || null });
+  const data = await evolutionRestartOrConnectInstance(integration.instance_name, config, {
+    store,
+    instanceId: integration.instance_id || null,
+    instanceToken: integration.instance_token || null
+  });
   const saved = await patchStoreWhatsappIntegration(integration.id, {
     qr_code_base64: data.qr_code_base64 || integration.qr_code_base64 || null,
     status: data.status || integration.status || 'connecting',
@@ -8618,7 +8662,10 @@ async function refreshAdminWhatsappStatus(admin) {
   if (!integration) return await getAdminWhatsappIntegration(admin);
   const config = await privatePlatformWhatsappSettings();
   if (!config.is_active || !config.base_url || !config.api_key) return publicStoreWhatsappIntegration(integration);
-  const providerStatus = await evolutionConnectionStatus(integration.instance_name, config, { instanceToken: integration.instance_token || null }).catch((error) => ({
+  const providerStatus = await evolutionConnectionStatus(integration.instance_name, config, {
+    instanceId: integration.instance_id || null,
+    instanceToken: integration.instance_token || null
+  }).catch((error) => ({
     status: 'error',
     last_error: error.message || 'Falha ao consultar status.'
   }));
@@ -8648,7 +8695,10 @@ async function sendAdminWhatsappTest(admin, data = {}) {
 async function disconnectAdminWhatsappIntegration(req, admin) {
   const integration = await requireStoreWhatsappIntegration(admin.store_id);
   const config = await privatePlatformWhatsappSettings();
-  await evolutionLogoutInstance(integration.instance_name, config, { instanceToken: integration.instance_token || null }).catch(() => null);
+  await evolutionLogoutInstance(integration.instance_name, config, {
+    instanceId: integration.instance_id || null,
+    instanceToken: integration.instance_token || null
+  }).catch(() => null);
   const saved = await patchStoreWhatsappIntegration(integration.id, {
     status: 'disconnected',
     disconnected_at: new Date().toISOString(),
@@ -8672,7 +8722,11 @@ async function reconnectPlatformWhatsappStore(req, admin, storeId) {
   const integration = await getStoreWhatsappIntegration(storeId);
   if (!integration) throw httpError(404, 'Integração de WhatsApp não encontrada para esta loja.');
   const config = await privatePlatformWhatsappSettings();
-  const data = await evolutionConnectInstance(integration.instance_name, config, { store, instanceToken: integration.instance_token || null });
+  const data = await evolutionConnectInstance(integration.instance_name, config, {
+    store,
+    instanceId: integration.instance_id || null,
+    instanceToken: integration.instance_token || null
+  });
   const saved = await patchStoreWhatsappIntegration(integration.id, {
     status: data.status || 'connecting',
     qr_code_base64: data.qr_code_base64 || null,
@@ -8696,7 +8750,10 @@ async function disconnectPlatformWhatsappStore(req, admin, storeId) {
   const integration = await getStoreWhatsappIntegration(storeId);
   if (!integration) throw httpError(404, 'Integração de WhatsApp não encontrada para esta loja.');
   const config = await privatePlatformWhatsappSettings();
-  await evolutionLogoutInstance(integration.instance_name, config, { instanceToken: integration.instance_token || null }).catch(() => null);
+  await evolutionLogoutInstance(integration.instance_name, config, {
+    instanceId: integration.instance_id || null,
+    instanceToken: integration.instance_token || null
+  }).catch(() => null);
   const saved = await patchStoreWhatsappIntegration(integration.id, {
     status: 'disconnected',
     disconnected_at: new Date().toISOString(),
@@ -8720,7 +8777,7 @@ async function getStoreWhatsappIntegration(storeId) {
   const rows = await dbRequest('GET', 'store_whatsapp_integrations', {
     select: '*',
     store_id: `eq.${resolvedStoreId}`,
-    provider: 'eq.evolution',
+    or: '(provider.eq.evolution_go,provider.eq.evolution)',
     limit: '1'
   }).catch(() => []);
   return rows[0] || null;
@@ -8765,7 +8822,7 @@ async function recordWhatsappInstanceEvent({ req, admin, store, integration, eve
     company_id: companyId,
     store_id: storeId,
     integration_id: integration?.id || null,
-    provider: 'evolution',
+    provider: 'evolution_go',
     event_type: cleanSlug(event_type || 'event'),
     status: cleanSlug(status || 'info'),
     cost_cents: Number(cost_cents || 0),
@@ -8795,7 +8852,7 @@ async function upsertStoreWhatsappIntegration(data = {}) {
   const payload = {
     company_id: data.store?.company_id || data.company_id || current?.company_id || null,
     store_id: data.store?.store_id || data.store?.id || data.store_id || current?.store_id,
-    provider: 'evolution',
+    provider: current?.provider || 'evolution_go',
     instance_name: data.instance_name || current?.instance_name,
     instance_id: data.instance_id || current?.instance_id || null,
     instance_token: data.instance_token || current?.instance_token || null,
@@ -8836,7 +8893,7 @@ function publicStoreWhatsappIntegration(row = null) {
   if (!row) {
     return {
       id: null,
-      provider: 'evolution',
+      provider: 'evolution_go',
       status: 'not_connected',
       status_label: 'Não conectado',
       instance_name: '',
@@ -8855,7 +8912,7 @@ function publicStoreWhatsappIntegration(row = null) {
   }
   return {
     id: row.id,
-    provider: row.provider || 'evolution',
+    provider: row.provider || 'evolution_go',
     status: normalizeWhatsappIntegrationStatus(row.status || 'disconnected'),
     status_label: whatsappIntegrationStatusLabel(row.status),
     instance_name: row.instance_name || '',
@@ -8911,29 +8968,28 @@ async function evolutionCreateInstance(instanceName, store, config) {
       token: instanceToken
     }
   }, config);
-  const connected = await evolutionConnectInstance(instanceName, config, { store, instanceToken });
+  const instanceId = data?.data?.id || data?.data?.instanceId || data?.instance?.id || data?.instance?.instanceId || data?.id || null;
+  const connected = await evolutionConnectInstance(instanceName, config, { store, instanceToken, instanceId });
   return {
     ...normalizeEvolutionQrResponse(data),
     ...connected,
     instance_token: instanceToken,
-    instance_id: data?.data?.id || data?.instance?.id || data?.instance?.instanceId || data?.id || null
+    instance_id: instanceId
   };
 }
 
 async function evolutionConnectInstance(instanceName, config, options = {}) {
-  const instanceToken = options.instanceToken || config.instance_token || config.api_key;
-  const phone = whatsappRecipientPhone(options.store?.whatsapp_number || options.phone || '');
+  const instanceId = options.instanceId || options.instance_id || config.instance_id || null;
   await evolutionRequest('/instance/connect', {
     method: 'POST',
-    apiKey: instanceToken,
+    instanceId,
     body: {
       immediate: true,
-      ...(phone ? { phone } : {}),
       subscribe: ['MESSAGE', 'SEND_MESSAGE', 'CONNECTION', 'QRCODE'],
       webhookUrl: absolutePublicUrl('/api/integrations/evolution/webhook')
     }
   }, config);
-  const qr = await evolutionGetQrCode(instanceToken, config).catch(() => ({}));
+  const qr = await evolutionGetQrCode(instanceId, config).catch(() => ({}));
   return normalizeEvolutionQrResponse({
     ...qr,
     state: qr?.data?.Qrcode || qr?.data?.Code || qr?.qrCode ? 'qrcode' : 'connecting'
@@ -8945,10 +9001,10 @@ async function evolutionRestartOrConnectInstance(instanceName, config, options =
 }
 
 async function evolutionConnectionStatus(instanceName, config, options = {}) {
-  const instanceToken = options.instanceToken || config.instance_token || config.api_key;
+  const instanceId = options.instanceId || options.instance_id || config.instance_id || null;
   const data = await evolutionRequest('/instance/status', {
     method: 'GET',
-    apiKey: instanceToken
+    instanceId
   }, config);
   const instance = data?.data || data?.instance || data;
   const rawState = instance?.Connected === true || instance?.connected === true
@@ -8963,10 +9019,10 @@ async function evolutionConnectionStatus(instanceName, config, options = {}) {
 }
 
 async function setEvolutionWebhook(instanceName, config, options = {}) {
-  if (!options.instanceToken) return null;
+  if (!options.instanceId && !options.instance_id) return null;
   return evolutionRequest('/instance/connect', {
     method: 'POST',
-    apiKey: options.instanceToken,
+    instanceId: options.instanceId || options.instance_id,
     body: {
       immediate: false,
       subscribe: ['MESSAGE', 'SEND_MESSAGE', 'CONNECTION', 'QRCODE'],
@@ -8982,14 +9038,14 @@ async function evolutionLogoutInstance(instanceName, config, options = {}) {
   if (!config.is_active || !config.base_url || !config.api_key) return null;
   return evolutionRequest('/instance/disconnect', {
     method: 'POST',
-    apiKey: options.instanceToken || config.instance_token || config.api_key
+    instanceId: options.instanceId || options.instance_id || config.instance_id || null
   }, config).catch(() => null);
 }
 
 async function evolutionSendText(instanceName, phone, message, config) {
   const data = await evolutionRequest('/send/text', {
     method: 'POST',
-    apiKey: config.instance_token || config.api_key,
+    instanceId: config.instance_id || null,
     body: {
       number: phone,
       text: message,
@@ -9002,16 +9058,21 @@ async function evolutionSendText(instanceName, phone, message, config) {
 async function evolutionRequest(endpoint, options = {}, config = null) {
   const settings = config || await privatePlatformWhatsappSettings();
   if (!settings.base_url || !settings.api_key) throw httpError(503, 'Evolution Go não configurada.');
+  assertEvolutionGoOnlyBaseUrl(settings.base_url);
   const response = await fetchWithTimeout(`${settings.base_url}${endpoint}`, {
     method: options.method || 'GET',
     headers: {
-      apikey: options.apiKey || settings.api_key,
+      apikey: settings.api_key,
+      ...(options.instanceId ? { instanceId: options.instanceId } : {}),
       'Content-Type': 'application/json',
       ...(options.headers || {})
     },
     ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {})
   }, 12000);
   const data = await safeResponse(response);
+  if (!response.ok && response.status === 404 && isLegacyEvolutionApiPayload(data)) {
+    throw httpError(422, 'A URL configurada parece ser Evolution API antiga. Configure uma URL base da Evolution Go.');
+  }
   if (!response.ok) throw httpError(response.status, whatsappProviderError('Erro na Evolution Go.', data), data);
   return data;
 }
@@ -9029,10 +9090,10 @@ function normalizeEvolutionQrResponse(data = {}) {
   };
 }
 
-async function evolutionGetQrCode(instanceToken, config) {
+async function evolutionGetQrCode(instanceId, config) {
   return evolutionRequest('/instance/qr', {
     method: 'GET',
-    apiKey: instanceToken || config.api_key
+    instanceId
   }, config);
 }
 
@@ -9051,7 +9112,7 @@ async function sendEvolutionStoreMessage(store, integration, phone, message, opt
     company_id: store.company_id || integration.company_id || null,
     store_id: store.store_id || store.id || integration.store_id || null,
     order_id: options.orderId || null,
-    provider: 'evolution',
+    provider: 'evolution_go',
     instance_name: integration.instance_name,
     destination_phone: phone,
     message_type: options.messageType || 'order',
@@ -9091,7 +9152,7 @@ async function createWhatsappMessageLog(data = {}) {
     company_id: data.company_id || null,
     store_id: data.store_id || null,
     order_id: data.order_id || null,
-    provider: data.provider || 'evolution',
+    provider: data.provider || 'evolution_go',
     instance_name: data.instance_name || null,
     destination_phone: data.destination_phone || null,
     message_type: data.message_type || 'order',
@@ -9113,7 +9174,7 @@ function publicWhatsappMessageLog(row = {}) {
     company_id: row.company_id || null,
     store_id: row.store_id || null,
     order_id: row.order_id || null,
-    provider: row.provider || 'evolution',
+    provider: row.provider || 'evolution_go',
     instance_name: row.instance_name || '',
     destination_phone: row.destination_phone ? maskPhone(row.destination_phone) : '',
     message_type: row.message_type || '',
@@ -9137,13 +9198,18 @@ async function receiveEvolutionWebhook(req, payload = {}) {
   if (expectedSecret && receivedSecret !== expectedSecret) throw httpError(401, 'Webhook Evolution não autorizado.');
   const instanceName = cleanText(payload?.instance || payload?.instanceName || payload?.instance_name || payload?.data?.instance || payload?.data?.instanceName || payload?.name || '');
   const instanceId = cleanText(payload?.instanceId || payload?.instance_id || payload?.data?.instanceId || payload?.data?.id || '');
-  if (!instanceName && !instanceId) return { ok: true, ignored: true };
+  const instanceToken = cleanText(payload?.instanceToken || payload?.instance_token || payload?.data?.instanceToken || payload?.data?.instance_token || '');
+  if (!instanceName && !instanceId && !instanceToken) return { ok: true, ignored: true };
   const query = {
     select: '*',
     limit: '1'
   };
-  if (instanceName && instanceId) {
-    query.or = `(instance_name.eq.${instanceName},instance_id.eq.${instanceId})`;
+  if (instanceName || instanceId || instanceToken) {
+    const filters = [];
+    if (instanceName) filters.push(`instance_name.eq.${instanceName}`);
+    if (instanceId) filters.push(`instance_id.eq.${instanceId}`);
+    if (instanceToken) filters.push(`instance_token.eq.${instanceToken}`);
+    query.or = `(${filters.join(',')})`;
   } else if (instanceName) {
     query.instance_name = `eq.${instanceName}`;
   } else {
@@ -9163,6 +9229,7 @@ async function receiveEvolutionWebhook(req, payload = {}) {
   await patchStoreWhatsappIntegration(integration.id, {
     status,
     instance_id: instanceId || integration.instance_id || null,
+    instance_token: instanceToken || integration.instance_token || null,
     qr_code_base64: qrData.qr_code_base64 || integration.qr_code_base64 || null,
     last_qr_at: qrData.qr_code_base64 ? new Date().toISOString() : integration.last_qr_at,
     connected_at: status === 'connected' ? (integration.connected_at || new Date().toISOString()) : integration.connected_at,
@@ -12101,27 +12168,10 @@ async function testIntegrations(data = {}, storeId, options = {}) {
 async function testWhatsappIntegration(settings) {
   if (!settings.enabled) return { ok: true, message: 'WhatsApp automático desativado.' };
   if (settings.provider === 'whatsevolution' || isWhatsEvolutionUrl(settings.apiUrl)) {
-    if (!settings.apiUrl || !settings.accessToken) {
-      return { ok: false, message: 'Informe URL da API e API key da WhatsEvolution.' };
-    }
-    if (!settings.phoneNumberId) {
-      if (isWhatsEvolutionManagedUrl(settings.apiUrl)) {
-        return { ok: true, message: 'WhatsEvolution configurada em modo gerenciado. Envio usará /send-message.' };
-      }
-      return { ok: false, message: 'Informe a instância da WhatsEvolution/Evolution API.' };
-    }
-    const response = await fetchWithTimeout(`${settings.apiUrl.replace(/\/$/, '')}/instance/connectionState/${encodeURIComponent(settings.phoneNumberId)}`, {
-      headers: {
-        apikey: settings.accessToken,
-        'Content-Type': 'application/json'
-      }
-    }, 7000);
-    const payload = await safeResponse(response);
-    if (!response.ok) {
-      return { ok: false, message: whatsappProviderError('Falha ao verificar instância WhatsEvolution.', payload) };
-    }
-    const state = payload?.instance?.state || payload?.state || 'desconhecido';
-    return { ok: String(state).toLowerCase() === 'open', message: `WhatsEvolution: instância ${state}.` };
+    return {
+      ok: false,
+      message: 'Configuração antiga de WhatsApp detectada. Use Evolution Go pela Central e conecte a loja por QR Code.'
+    };
   }
   const hasConfig = Boolean(settings.phoneNumberId || settings.apiUrl || settings.accessToken);
   return {
@@ -13091,7 +13141,7 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
           delivery_status: 'skipped',
           error_message: 'WhatsApp dos pedidos não configurado na loja.',
           is_manual: false,
-          provider: 'evolution'
+          provider: 'evolution_go'
         }, options);
       }
       try {
@@ -13102,7 +13152,7 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
         return createWhatsappLogWithUsage(order, targetStatus, storeOrderMessage, featureCode, {
           recipient_phone: storePhone,
           delivery_status: 'sent',
-          provider: 'evolution',
+          provider: 'evolution_go',
           provider_message_id: providerResult.id,
           is_manual: false
         }, options);
@@ -13112,7 +13162,7 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
           delivery_status: 'failed',
           error_message: error.message || 'Falha no WhatsApp automático.',
           is_manual: false,
-          provider: 'evolution'
+          provider: 'evolution_go'
         }, options);
       }
     }
@@ -13123,7 +13173,7 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
         delivery_status: 'skipped',
         error_message: 'WhatsApp automático ainda não conectado por QR Code.',
         is_manual: false,
-        provider: 'evolution'
+        provider: 'evolution_go'
       }, options);
     }
   }
@@ -13205,7 +13255,7 @@ async function createWhatsappLogWithUsage(order, status, message, featureCode, d
 
 async function sendWhatsappViaProvider(settings, phone, message) {
   if (settings.provider === 'whatsevolution' || isWhatsEvolutionUrl(settings.apiUrl)) {
-    return sendWhatsappViaWhatsEvolution(settings, phone, message);
+    throw httpError(410, 'Configuração antiga de WhatsApp removida. Use Evolution Go pela Central e conecte a loja por QR Code.');
   }
   if (settings.provider === 'mock' || !settings.apiUrl) {
     return { id: `mock_${Date.now()}` };
@@ -13242,81 +13292,9 @@ async function sendWhatsappViaProvider(settings, phone, message) {
   return { id: data?.id || `webhook_${Date.now()}` };
 }
 
-async function sendWhatsappViaWhatsEvolution(settings, phone, message) {
-  if (!settings.apiUrl || !settings.accessToken) {
-    throw httpError(422, 'Configure URL da API e API key da WhatsEvolution.');
-  }
-  const baseUrl = settings.apiUrl.replace(/\/$/, '');
-  const instance = cleanText(settings.phoneNumberId || '');
-  const managedMode = isWhatsEvolutionManagedUrl(baseUrl);
-  if (!instance && !managedMode) {
-    throw httpError(422, 'Informe a instância da WhatsEvolution/Evolution API no campo "Instância / ID do número".');
-  }
-  if (managedMode && !instance) {
-    const endpoint = baseUrl.endsWith('/send-message') ? baseUrl : `${baseUrl}/send-message`;
-    return postWhatsEvolutionMessage(endpoint, {
-      Authorization: `Bearer ${settings.accessToken}`,
-      'Content-Type': 'application/json'
-    }, {
-      api_key: settings.accessToken,
-      number: phone,
-      message
-    });
-  }
-
-  const encodedInstance = encodeURIComponent(instance);
-  const headers = {
-    apikey: settings.accessToken,
-    'Content-Type': 'application/json'
-  };
-  const attempts = [
-    {
-      endpoint: `${baseUrl}/message/sendText/${encodedInstance}`,
-      body: {
-        number: phone,
-        text: message,
-        delay: 1200,
-        linkPreview: false
-      }
-    },
-    {
-      endpoint: `${baseUrl}/message/text/${encodedInstance}`,
-      body: { number: phone, message }
-    }
-  ];
-
-  let lastError = null;
-  for (const attempt of attempts) {
-    try {
-      return await postWhatsEvolutionMessage(attempt.endpoint, headers, attempt.body);
-    } catch (error) {
-      lastError = error;
-      if (![404, 405].includes(Number(error.status))) break;
-    }
-  }
-  throw lastError || httpError(502, 'Erro na WhatsEvolution.');
-}
-
-async function postWhatsEvolutionMessage(endpoint, headers, body) {
-  const response = await fetchWithTimeout(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  }, 10000);
-  const data = await safeResponse(response);
-  if (!response.ok) throw httpError(response.status, whatsappProviderError('Erro na WhatsEvolution.', data), data);
-  if (data?.success === false) throw httpError(422, whatsappProviderError('WhatsEvolution recusou a mensagem.', data), data);
-  return { id: data?.key?.id || data?.key || data?.message_id || data?.id || `whatsevolution_${Date.now()}` };
-}
-
 function isWhatsEvolutionUrl(url = '') {
   const value = String(url || '').toLowerCase();
   return value.includes('whatsevolution') || value.includes('relaxsolucoes');
-}
-
-function isWhatsEvolutionManagedUrl(url = '') {
-  const value = String(url || '').toLowerCase();
-  return value.includes('/functions/v1/send-message') || value.endsWith('/send-message');
 }
 
 function whatsappProviderError(fallback, data) {
