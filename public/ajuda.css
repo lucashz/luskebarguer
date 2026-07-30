@@ -435,6 +435,13 @@ body.help-page {
   padding: 22px 0;
 }
 
+.help-footer-grid > div:first-child {
+  display: inline-flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .help-footer img {
   width: 170px;
   height: auto;
@@ -446,8 +453,12 @@ body.help-page {
 }
 
 .help-footer .company-id {
-  font-size: 12px;
-  font-weight: 700;
+  margin: 0;
+  color: rgba(71, 85, 105, .58);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .help-footer nav {
@@ -481,6 +492,12 @@ body.help-page {
   .help-footer-grid {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .help-footer-grid > div:first-child {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .help-nav nav {

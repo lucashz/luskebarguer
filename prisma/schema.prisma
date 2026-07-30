@@ -654,6 +654,7 @@ model StoreWhatsappIntegration {
   provider            String    @default("evolution")
   instanceName        String    @unique @map("instance_name")
   instanceId          String?   @map("instance_id")
+  instanceToken       String?   @map("instance_token")
   status              String    @default("disconnected")
   phoneNumber         String?   @map("phone_number")
   qrCodeBase64        String?   @map("qr_code_base64")

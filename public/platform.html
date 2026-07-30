@@ -532,9 +532,9 @@
             </form>
             <form class="platform-service-card stack-form" id="platformWhatsappForm">
               <p class="eyebrow">WhatsApp global</p>
-              <h3>Evolution API</h3>
+              <h3>Evolution Go</h3>
               <p class="muted">Configure uma vez na Central. O lojista só escaneia o QR Code no painel.</p>
-              <label>URL base da Evolution
+              <label>URL base da Evolution Go
                 <input name="base_url" placeholder="https://evolution.seudominio.com">
               </label>
               <label>API key global
@@ -543,28 +543,14 @@
               <label>Senha do superadmin
                 <input name="password" type="password" autocomplete="current-password" required placeholder="Confirme sua senha">
               </label>
-              <label class="payment-option"><input name="is_active" type="checkbox"> Evolution ativa</label>
-              <div class="platform-provider-cost-grid">
-                <label>Saldo disponível no provedor
-                  <input name="provider_balance" inputmode="decimal" placeholder="Ex: 299,00">
-                </label>
-                <label>Custo por instância / 30 dias
-                  <input name="provider_instance_cost" inputmode="decimal" placeholder="29,90">
-                </label>
-                <label>Alerta de saldo baixo
-                  <input name="provider_low_balance" inputmode="decimal" placeholder="29,90">
-                </label>
-              </div>
-              <div class="platform-whatsapp-economy" id="platformWhatsappEconomy">
-                <p>Informe saldo e custo para impedir criação de instâncias sem margem.</p>
-              </div>
+              <label class="payment-option"><input name="is_active" type="checkbox"> Evolution Go ativa</label>
               <div class="integration-webhook-url">
-                <span>Webhook da Evolution</span>
+                <span>Webhook da Evolution Go</span>
                 <code id="platformWhatsappWebhookUrl">/api/integrations/evolution/webhook</code>
               </div>
               <p class="muted" id="platformWhatsappStatusText">Configuração ainda não carregada.</p>
               <div class="row-actions">
-                <button class="primary-button compact" id="savePlatformWhatsappButton" type="submit">Salvar Evolution</button>
+                <button class="primary-button compact" id="savePlatformWhatsappButton" type="submit">Salvar Evolution Go</button>
                 <button class="ghost-button compact" id="testPlatformWhatsappButton" type="button">Testar conexão</button>
               </div>
             </form>

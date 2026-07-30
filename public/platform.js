@@ -187,7 +187,6 @@ const els = {
   platformWhatsappForm: document.querySelector('#platformWhatsappForm'),
   platformWhatsappStatusText: document.querySelector('#platformWhatsappStatusText'),
   platformWhatsappWebhookUrl: document.querySelector('#platformWhatsappWebhookUrl'),
-  platformWhatsappEconomy: document.querySelector('#platformWhatsappEconomy'),
   savePlatformWhatsappButton: document.querySelector('#savePlatformWhatsappButton'),
   testPlatformWhatsappButton: document.querySelector('#testPlatformWhatsappButton'),
   platformEmailTemplateList: document.querySelector('#platformEmailTemplateList'),
@@ -2293,43 +2292,16 @@ function renderSmtpForm() {
 function renderPlatformWhatsappForm() {
   if (!els.platformWhatsappForm) return;
   const whatsapp = state.whatsappSettings || {};
-  const account = whatsapp.provider_account || {};
   const form = els.platformWhatsappForm;
   form.elements.base_url.value = whatsapp.base_url || '';
   form.elements.api_key.value = '';
   form.elements.api_key.placeholder = whatsapp.has_api_key
     ? 'API key já salva. Preencha apenas para trocar.'
-    : 'Cole a API key da Evolution';
+    : 'Cole a API key global da Evolution Go';
   form.elements.password.value = '';
   form.elements.is_active.checked = whatsapp.is_active === true;
-  if (form.elements.provider_balance) form.elements.provider_balance.value = centsInput(account.balance_cents);
-  if (form.elements.provider_instance_cost) form.elements.provider_instance_cost.value = centsInput(account.instance_cost_cents ?? 2990);
-  if (form.elements.provider_low_balance) form.elements.provider_low_balance.value = centsInput(account.low_balance_cents ?? 2990);
   if (els.platformWhatsappWebhookUrl) {
     els.platformWhatsappWebhookUrl.textContent = whatsapp.webhook_url || '/api/integrations/evolution/webhook';
-  }
-  if (els.platformWhatsappEconomy) {
-    const hasCredit = account.has_credit_for_new_instance === true;
-    const statusClass = hasCredit ? 'ok' : 'warn';
-    els.platformWhatsappEconomy.innerHTML = `
-      <article class="${statusClass}">
-        <span>Saldo</span>
-        <strong>${moneyCents(account.balance_cents)}</strong>
-      </article>
-      <article>
-        <span>Custo por instância</span>
-        <strong>${moneyCents(account.instance_cost_cents ?? 2990)}</strong>
-      </article>
-      <article>
-        <span>Instâncias cobradas</span>
-        <strong>${Number(account.billable_instances || 0)}</strong>
-      </article>
-      <article>
-        <span>Custo mensal estimado</span>
-        <strong>${moneyCents(account.monthly_cost_cents)}</strong>
-      </article>
-      <p>${hasCredit ? 'Saldo suficiente para criar uma nova instância.' : 'Sem saldo suficiente para criar nova instância. O lojista verá uma mensagem para solicitar ajuda.'}</p>
-    `;
   }
   if (els.platformWhatsappStatusText) {
     const config = whatsapp.is_active && whatsapp.has_api_key && whatsapp.base_url ? 'Configurado' : 'Não configurado';
@@ -3809,7 +3781,7 @@ async function submitPlatformWhatsappSettings(event) {
   data.is_active = form.elements.is_active.checked;
   if (!String(data.api_key || '').trim()) delete data.api_key;
   const button = els.savePlatformWhatsappButton;
-  const previousText = button?.textContent || 'Salvar Evolution';
+  const previousText = button?.textContent || 'Salvar Evolution Go';
   try {
     if (button) {
       button.disabled = true;
@@ -3822,10 +3794,10 @@ async function submitPlatformWhatsappSettings(event) {
     });
     state.whatsappSettings = response.whatsapp;
     renderPlatformWhatsappForm();
-    toast('Evolution API salva com segurança.');
+    toast('Evolution Go salva com segurança.');
     await loadHealth({ silent: true });
   } catch (error) {
-    toast(error.message || 'Não foi possível salvar Evolution API.');
+    toast(error.message || 'Não foi possível salvar Evolution Go.');
   } finally {
     if (button) {
       button.disabled = false;
@@ -3847,11 +3819,11 @@ async function testPlatformWhatsappSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     });
-    toast(response.message || 'Evolution API validada.');
+    toast(response.message || 'Evolution Go validada.');
     await loadCommunication({ silent: true });
     await loadHealth({ silent: true });
   } catch (error) {
-    toast(error.message || 'Não foi possível testar Evolution API.');
+    toast(error.message || 'Não foi possível testar Evolution Go.');
     await loadCommunication({ silent: true });
   } finally {
     if (button) {

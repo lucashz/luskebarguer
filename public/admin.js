@@ -59,7 +59,7 @@
   loadedAdminTabAt: new Map(),
   loadingAdminTabs: new Set(),
   selectedAdminUserIds: new Set(),
-  supportStatusFilter: 'all',
+  supportStatusFilter: 'open',
   supportSearch: '',
   openSupportTicketIds: new Set(),
   selectedSupportTicketId: null,
@@ -236,14 +236,14 @@ const ADMIN_ROLE_DEFINITIONS = {
     permissions: ['Pedidos', 'Mesas', 'Clientes']
   },
   waiter: {
-    label: 'Garcom',
-    short: 'Salao e comandas',
+    label: 'Garçom',
+    short: 'Salão e comandas',
     description: 'Acesso focado em pedidos de mesa, comandas e atendimento no salão.',
     permissions: ['Pedidos', 'Mesas', 'Comandas']
   },
   kitchen: {
     label: 'Cozinha',
-    short: 'Producao',
+    short: 'Produção',
     description: 'Acesso simples para ver pedidos e movimentar preparo na cozinha.',
     permissions: ['Pedidos', 'Modo cozinha']
   },
@@ -256,7 +256,7 @@ const ADMIN_ROLE_DEFINITIONS = {
   superadmin: {
     label: 'Superadmin',
     short: 'Plataforma',
-    description: 'Acesso reservado para gestao da plataforma SaaS.',
+    description: 'Acesso reservado para gestão da plataforma SaaS.',
     permissions: ['Plataforma', 'Todas as lojas', 'Planos']
   }
 };
@@ -673,6 +673,7 @@ els.closeLoyaltyFormButton?.addEventListener('click', hideLoyaltyForm);
 els.loyaltyForm?.addEventListener('submit', submitLoyalty);
 
 initStoreAccordions();
+initReportHourTooltip();
 renderKitchenModeButton();
 renderAutoPrintButton();
 init();
@@ -723,6 +724,67 @@ function initStoreAccordions() {
 
 function storeSettingsAccent(index) {
   return ['#dc2626', '#f97316', '#2563eb', '#7c3aed', '#059669', '#ca8a04', '#0891b2'][index % 7];
+}
+
+function initReportHourTooltip() {
+  let tooltip = null;
+  const ensureTooltip = () => {
+    if (tooltip) return tooltip;
+    tooltip = document.createElement('div');
+    tooltip.className = 'report-floating-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.hidden = true;
+    document.body.appendChild(tooltip);
+    return tooltip;
+  };
+  const showTooltip = (target, event = null) => {
+    const text = target?.dataset?.tooltip || target?.getAttribute('aria-label') || '';
+    if (!text) return;
+    const node = ensureTooltip();
+    node.textContent = text;
+    node.hidden = false;
+    node.classList.add('is-visible');
+    positionReportHourTooltip(target, node, event);
+  };
+  const hideTooltip = () => {
+    if (!tooltip) return;
+    tooltip.classList.remove('is-visible');
+    tooltip.hidden = true;
+  };
+  document.addEventListener('pointerover', (event) => {
+    const target = event.target.closest?.('.report-hour-bar[data-tooltip]');
+    if (target) showTooltip(target, event);
+  });
+  document.addEventListener('pointermove', (event) => {
+    const target = event.target.closest?.('.report-hour-bar[data-tooltip]');
+    if (target && tooltip && !tooltip.hidden) positionReportHourTooltip(target, tooltip, event);
+  });
+  document.addEventListener('pointerout', (event) => {
+    if (event.target.closest?.('.report-hour-bar[data-tooltip]')) hideTooltip();
+  });
+  document.addEventListener('focusin', (event) => {
+    const target = event.target.closest?.('.report-hour-bar[data-tooltip]');
+    if (target) showTooltip(target);
+  });
+  document.addEventListener('focusout', (event) => {
+    if (event.target.closest?.('.report-hour-bar[data-tooltip]')) hideTooltip();
+  });
+  window.addEventListener('scroll', hideTooltip, { passive: true });
+}
+
+function positionReportHourTooltip(target, tooltip, event = null) {
+  const rect = target.getBoundingClientRect();
+  const margin = 12;
+  const width = tooltip.offsetWidth || 240;
+  const height = tooltip.offsetHeight || 56;
+  const anchorX = event?.clientX || rect.left + rect.width / 2;
+  const anchorY = event?.clientY || rect.top + 22;
+  let left = anchorX - width / 2;
+  let top = anchorY - height - 16;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  if (top < margin) top = Math.min(anchorY + 16, window.innerHeight - height - margin);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
 }
 
 async function init() {
@@ -2660,16 +2722,18 @@ function renderDailyReport(report) {
       ${reportHoursCard(hourRows, peakHour, revenueHour)}
       ${reportCashClosingCard(closing)}
     </article>
-    <section class="report-orders-list">
-      <div class="report-card-title-row">
-        <div>
+    <details class="report-orders-list report-orders-dropdown">
+      <summary>
+        <span>
           <span class="report-kicker">Detalhamento</span>
-          <h3>Pedidos do período</h3>
-        </div>
-        <strong>${orders.length} pedido(s)</strong>
+          <strong>Pedidos do período</strong>
+        </span>
+        <span class="report-badge">${orders.length} pedido(s)</span>
+      </summary>
+      <div class="report-orders-dropdown-body">
+        ${orders.map(reportOrderCard).join('') || reportEmptyState('Nenhum pedido listado', 'A lista respeita o período selecionado e os dados da loja atual.')}
       </div>
-      ${orders.map(reportOrderCard).join('') || reportEmptyState('Nenhum pedido listado', 'A lista respeita o período selecionado e os dados da loja atual.')}
-    </section>
+    </details>
   `;
 }
 
@@ -5130,7 +5194,7 @@ function renderAdminUsers() {
     els.adminUsersList.innerHTML = `
       <div class="empty-state account-empty-state">
         <strong>Nenhuma conta encontrada.</strong>
-        <span>Ajuste a busca ou o filtro de funcao para visualizar outros acessos.</span>
+        <span>Ajuste a busca ou o filtro de função para visualizar outros acessos.</span>
       </div>
     `;
     updateAdminUsersBulkActions(users);
@@ -7391,7 +7455,7 @@ function renderWhatsappIntegration(data = {}) {
     } else if (!featureEnabled) {
       els.whatsappAutoMessage.textContent = `${data.feature_message || 'WhatsApp automático não está disponível no plano atual.'} Se quiser ativar, solicite ajuda da equipe TáPronto.`;
     } else if (!platformConfigured) {
-      els.whatsappAutoMessage.textContent = 'A Central TáPronto ainda precisa configurar a Evolution API antes de conectar o WhatsApp da loja.';
+      els.whatsappAutoMessage.textContent = 'A Central TáPronto ainda precisa configurar a Evolution Go antes de conectar o WhatsApp da loja.';
     } else if (status === 'connected') {
       els.whatsappAutoMessage.textContent = `Conectado${data.phone_number ? ` ao número ${data.phone_number}` : ''}. Pedidos novos serão enviados automaticamente para a loja.`;
     } else if (status === 'connecting') {
@@ -7410,7 +7474,7 @@ function renderWhatsappIntegration(data = {}) {
     els.connectWhatsappButton.disabled = !canConnect || status === 'loading';
     els.connectWhatsappButton.title = !featureEnabled
       ? (canBuyAddon ? 'Contrate o adicional para liberar a conexão.' : 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.')
-      : (!platformConfigured ? 'A Central TáPronto precisa configurar a Evolution API antes.' : '');
+      : (!platformConfigured ? 'A Central TáPronto precisa configurar a Evolution Go antes.' : '');
   }
   if (els.checkoutWhatsappAddonButton) {
     els.checkoutWhatsappAddonButton.hidden = !canBuyAddon;
