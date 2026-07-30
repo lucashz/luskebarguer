@@ -738,7 +738,7 @@
               <section class="store-settings-section">
                 <div class="store-settings-copy">
                   <strong>Domínio Personalizado</strong>
-                  <p>Cadastre um domínio próprio para abrir o cardápio sem depender do slug. Configure o DNS apontando para esta hospedagem e depois clique em verificar.</p>
+                  <p>Use um domínio ou subdomínio próprio para abrir o cardápio. A tela mostra exatamente o registro que deve ser criado no painel onde o domínio foi comprado.</p>
                 </div>
                 <div class="store-settings-fields">
                   <div class="inline-form-row">
@@ -782,8 +782,18 @@
                     <label>Taxa de entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
                     <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
                   </div>
-                  <label>Taxa por bairro<textarea name="delivery_neighborhood_fees" placeholder="Centro=5&#10;Bela Vista=8&#10;Interior=12"></textarea></label>
-                  <p class="muted">Use uma linha por bairro. Se o bairro não estiver na lista, vale a taxa padrão acima.</p>
+                  <textarea class="sr-only" name="delivery_neighborhood_fees" id="deliveryNeighborhoodFeesRaw" aria-hidden="true" tabindex="-1"></textarea>
+                  <section class="neighborhood-fees-card" aria-labelledby="neighborhoodFeesTitle">
+                    <div class="neighborhood-fees-head">
+                      <div>
+                        <strong id="neighborhoodFeesTitle">Taxas por Bairro</strong>
+                        <small>Se o bairro não estiver na lista, será usada a taxa padrão acima.</small>
+                      </div>
+                      <button class="ghost-button compact" id="addNeighborhoodFeeButton" type="button">Adicionar Bairro</button>
+                    </div>
+                    <div class="neighborhood-fees-table" id="neighborhoodFeesEditor"></div>
+                    <p class="field-help" id="neighborhoodFeesSummary">Nenhum bairro configurado.</p>
+                  </section>
                 </div>
               </section>
 
@@ -1012,6 +1022,7 @@
                   <p class="muted" id="whatsappAutoMessage">Clique em conectar para iniciar.</p>
                   <div class="row-actions">
                     <button class="primary-button compact" id="connectWhatsappButton" type="button">Conectar WhatsApp</button>
+                    <button class="primary-button compact" id="checkoutWhatsappAddonButton" type="button" hidden>Contratar WhatsApp Automático</button>
                     <button class="ghost-button compact" id="requestWhatsappSetupButton" type="button" hidden>Solicitar ajuda da TáPronto</button>
                     <button class="ghost-button compact" id="refreshWhatsappQrButton" type="button">Atualizar QR Code</button>
                     <button class="ghost-button compact" id="testWhatsappButton" type="button">Enviar teste para minha loja</button>

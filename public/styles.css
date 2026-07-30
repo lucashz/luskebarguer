@@ -947,6 +947,27 @@ small,
   background: var(--platform-bg);
 }
 
+.platform-redesign.platform-guest .platform-shell {
+  display: block;
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+.platform-redesign.platform-guest .platform-sidebar,
+.platform-redesign.platform-guest .platform-topbar {
+  display: none !important;
+}
+
+.platform-redesign.platform-guest .platform-main {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.platform-redesign.platform-blocked-session .platform-tabs {
+  display: none;
+}
+
 .platform-redesign .platform-sidebar {
   min-height: 100vh;
   height: 100vh;
@@ -1150,6 +1171,12 @@ small,
 .platform-redesign #platformBlocked,
 .platform-redesign #platformLoginPanel {
   margin: 24px;
+}
+
+.platform-redesign.platform-guest #platformLoginPanel {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
 }
 
 .platform-redesign .platform-support-panel {
@@ -2259,33 +2286,32 @@ small,
   display: grid;
   min-height: min(720px, calc(100vh - 120px));
   place-items: center;
-  padding: 28px 18px;
-  background:
-    radial-gradient(circle at 20% 10%, rgba(225, 29, 46, .08), transparent 28%),
-    linear-gradient(180deg, #f8fafc, #ffffff);
+  padding: 32px 18px;
+  background: #f8fafc;
 }
 
 .platform-login-card {
   display: grid;
-  width: min(100%, 460px);
-  gap: 16px;
+  width: min(100%, 440px);
+  gap: 18px;
   border: 1px solid var(--platform-border, #e2e8f0);
   border-left: 4px solid var(--platform-primary, #e11d2e);
-  border-radius: 18px;
+  border-radius: 16px;
   background: #fff;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, .12);
-  padding: clamp(22px, 4vw, 34px);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, .10);
+  padding: clamp(22px, 4vw, 32px);
 }
 
 .platform-login-brand img {
-  width: 190px;
+  width: 210px;
   height: auto;
   display: block;
 }
 
 .platform-login-card h2 {
   margin: 4px 0 6px;
-  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  color: #0f172a;
+  font-size: clamp(1.7rem, 3vw, 2.25rem);
   line-height: 1.05;
 }
 
@@ -2332,6 +2358,12 @@ small,
 
 .platform-login-card .ghost-button {
   justify-content: center;
+}
+
+.platform-login-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .platform-recover-box {
@@ -5112,6 +5144,33 @@ textarea {
   line-height: 1.4;
 }
 
+.domain-guidance {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.domain-guidance > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.domain-guidance span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.domain-guidance strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
 .domain-status {
   display: inline-flex;
   align-items: center;
@@ -5148,7 +5207,7 @@ textarea {
 .domain-dns-head,
 .domain-dns-line {
   display: grid;
-  grid-template-columns: 90px minmax(90px, 0.75fr) minmax(180px, 1.4fr);
+  grid-template-columns: 78px minmax(82px, 0.7fr) minmax(170px, 1.2fr) minmax(130px, 1fr);
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
@@ -5167,6 +5226,17 @@ textarea {
   color: var(--ink);
   font-size: 0.86rem;
   font-weight: 750;
+}
+
+.domain-dns-line-muted {
+  background: #fffaf0;
+}
+
+.domain-dns-line small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .domain-dns-line code,
@@ -5191,6 +5261,20 @@ textarea {
   display: block;
   margin-top: 6px;
   color: var(--muted);
+}
+
+.domain-checklist {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.domain-checklist strong {
+  color: var(--ink);
 }
 
 .domain-actions {
@@ -7346,6 +7430,107 @@ textarea {
   color: var(--ink);
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.neighborhood-fees-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.neighborhood-fees-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.neighborhood-fees-head strong {
+  display: block;
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-weight: 900;
+}
+
+.neighborhood-fees-head small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.neighborhood-fees-table {
+  display: grid;
+  gap: 8px;
+}
+
+.neighborhood-fees-header,
+.neighborhood-fee-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.3fr) minmax(120px, 0.7fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.neighborhood-fees-header {
+  align-items: center;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.neighborhood-fee-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 9px;
+  background: #f8fafc;
+}
+
+.neighborhood-fee-row label {
+  display: grid;
+  gap: 5px;
+}
+
+.neighborhood-fee-row label span {
+  color: #111827;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.neighborhood-fees-empty {
+  display: grid;
+  gap: 4px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.neighborhood-fees-empty strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.neighborhood-fees-empty span {
+  font-size: 0.84rem;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 .theme-preset-grid {
@@ -13203,6 +13388,10 @@ body.admin-tour-active {
     grid-template-columns: 1fr;
   }
 
+  .domain-guidance {
+    grid-template-columns: 1fr;
+  }
+
   .domain-actions {
     width: 100%;
     justify-content: flex-start;
@@ -13210,7 +13399,25 @@ body.admin-tour-active {
 
   .domain-dns-head,
   .domain-dns-line {
-    grid-template-columns: 68px minmax(70px, .8fr) minmax(130px, 1.2fr);
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .domain-dns-head {
+    display: none;
+  }
+
+  .neighborhood-fees-head,
+  .neighborhood-fee-row {
+    grid-template-columns: 1fr;
+  }
+
+  .neighborhood-fees-head {
+    display: grid;
+  }
+
+  .neighborhood-fees-header {
+    display: none;
   }
 
   .menu-page {

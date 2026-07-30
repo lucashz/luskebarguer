@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/styles.css?v=20260727-evolution-whatsapp">
     <link rel="stylesheet" href="/platform.css?v=20260727-evolution-whatsapp">
   </head>
-  <body class="admin-page platform-page platform-redesign">
+  <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
       <aside class="platform-sidebar" aria-label="Menu do Admin Master">
         <div class="platform-sidebar-brand">
@@ -56,15 +56,15 @@
         <p class="muted">Use uma conta Admin Master para ver dados globais, ações sensíveis e métricas da plataforma.</p>
       </section>
 
-      <section class="platform-login-panel" id="platformLoginPanel" hidden>
+      <section class="platform-login-panel" id="platformLoginPanel">
         <div class="platform-login-card">
           <div class="platform-login-brand">
             <img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82">
           </div>
           <div>
             <p class="eyebrow">Central TáPronto</p>
-            <h2>Entrar no Admin Master</h2>
-            <p class="muted">Acompanhe clientes, cobranças, suporte e saúde operacional em uma área segura.</p>
+            <h2>Entrar na Central</h2>
+            <p class="muted">Acesse clientes, cobranças, suporte e operação técnica em uma área segura.</p>
           </div>
           <form id="platformLoginForm" class="platform-login-stack">
             <label>E-mail
@@ -87,7 +87,10 @@
               <p class="form-message" id="platformRecoverMessage" role="status"></p>
             </form>
           </details>
-          <a class="ghost-button compact" href="https://app.taprontomenu.com.br/">Voltar ao Painel</a>
+          <div class="platform-login-actions">
+            <a class="ghost-button compact" href="https://taprontomenu.com.br/">Início</a>
+            <a class="ghost-button compact" href="https://app.taprontomenu.com.br/">Painel da Loja</a>
+          </div>
         </div>
       </section>
 
@@ -458,6 +461,13 @@
                 <p class="muted">Clientes ativos e MRR estimado por plano contratado.</p>
               </div>
               <div class="platform-billing-plan-list" id="platformBillingPlanList"></div>
+            </article>
+            <article class="platform-chart-card">
+              <div>
+                <h3>Adicionais ativos</h3>
+                <p class="muted">WhatsApp automático, custo estimado da Evolution e próximas renovações.</p>
+              </div>
+              <div class="platform-billing-plan-list" id="platformBillingAddonList"></div>
             </article>
           </section>
           <section class="platform-analytics-grid">

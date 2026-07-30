@@ -477,6 +477,13 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/admin/billing/addons/checkout') {
+    const admin = await requireAdminPermission(req, res, 'integrations');
+    if (!admin) return;
+    json(res, 200, await createAddonCheckout(req, admin, await readJson(req)));
+    return;
+  }
+
   if (method === 'POST' && url.pathname === '/api/billing/webhook') {
     const payload = await readJson(req);
     const provider = url.searchParams.get('provider') || '';
@@ -620,6 +627,13 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
     if (!admin) return;
     json(res, 200, await platformBillingSubscriptions(url.searchParams));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/billing/addons') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.billing.manage');
+    if (!admin) return;
+    json(res, 200, await platformBillingAddons(url.searchParams));
     return;
   }
 
@@ -2020,7 +2034,7 @@ async function loginAdmin(data) {
   if (admin.is_active === false) {
     const pendingActivation = await hasPendingAdminActivation(admin.id).catch(() => false);
     throw httpError(403, pendingActivation
-      ? 'Sua conta ainda não foi ativada. Confira seu e-mail e clique no link de ativação.'
+      ? 'Sua conta ainda não foi ativada. Confira seu e-mail e clique no link de ativação. Verifique também spam, lixo eletrônico e a aba Promoções.'
       : 'Esta conta administrativa está desativada.');
   }
   if (!verifyPassword(password, admin.password_hash)) {
@@ -3711,6 +3725,64 @@ async function platformBillingSubscriptions(params = new URLSearchParams()) {
     return true;
   });
   return { subscriptions: rows };
+}
+
+async function platformBillingAddons(params = new URLSearchParams()) {
+  const statusFilter = cleanSlug(params.get?.('status') || '');
+  const rows = await dbRequest('GET', 'store_subscription_addons', {
+    select: '*',
+    order: 'created_at.desc',
+    limit: '500'
+  }).catch(() => []);
+  const companyIds = cleanUuidArray(rows.map((entry) => entry.company_id));
+  const storeIds = cleanUuidArray(rows.map((entry) => entry.store_id));
+  const addonIds = cleanUuidArray(rows.map((entry) => entry.addon_id));
+  const subscriptionIds = cleanUuidArray(rows.map((entry) => entry.subscription_id));
+  const [companies, stores, addonsRows, subscriptions] = await Promise.all([
+    companyIds.length ? dbRequest('GET', 'companies', { select: 'id,name,status,billing_email,phone', id: uuidInFilter(companyIds), limit: '500' }).catch(() => []) : [],
+    storeIds.length ? dbRequest('GET', 'stores', { select: 'id,name,slug,is_active', id: uuidInFilter(storeIds), limit: '500' }).catch(() => []) : [],
+    addonIds.length ? dbRequest('GET', 'plan_addons', { select: '*', id: uuidInFilter(addonIds), limit: '100' }).catch(() => []) : [],
+    subscriptionIds.length ? dbRequest('GET', 'company_subscriptions', { select: 'id,status,plan_id', id: uuidInFilter(subscriptionIds), limit: '500' }).catch(() => []) : []
+  ]);
+  const planIds = cleanUuidArray(subscriptions.map((entry) => entry.plan_id));
+  const plans = planIds.length ? await dbRequest('GET', 'subscription_plans', { select: 'id,code,name,monthly_price', id: uuidInFilter(planIds), limit: '100' }).catch(() => []) : [];
+  const companyById = new Map(companies.map((entry) => [entry.id, entry]));
+  const storeById = new Map(stores.map((entry) => [entry.id, entry]));
+  const addonById = new Map(addonsRows.map((entry) => [entry.id, entry]));
+  const subscriptionById = new Map(subscriptions.map((entry) => [entry.id, entry]));
+  const planById = new Map(plans.map((entry) => [entry.id, entry]));
+  const addons = rows.map((entry) => ({
+    id: entry.id,
+    company_id: entry.company_id,
+    company_name: companyById.get(entry.company_id)?.name || 'Cliente',
+    store_id: entry.store_id,
+    store_name: storeById.get(entry.store_id)?.name || 'Loja',
+    store_slug: storeById.get(entry.store_id)?.slug || '',
+    addon_id: entry.addon_id,
+    addon_code: addonById.get(entry.addon_id)?.code || '',
+    addon_name: addonById.get(entry.addon_id)?.name || 'Adicional',
+    status: entry.status || 'unknown',
+    provider: entry.provider || 'manual',
+    price_cents: Number(addonById.get(entry.addon_id)?.monthly_price_cents || 0),
+    provider_cost_cents: Number(addonById.get(entry.addon_id)?.provider_cost_cents || 0),
+    estimated_margin_cents: Number(addonById.get(entry.addon_id)?.monthly_price_cents || 0) - Number(addonById.get(entry.addon_id)?.provider_cost_cents || 0),
+    external_transaction_id: entry.external_transaction_id || null,
+    current_period_ends_at: entry.current_period_ends_at || null,
+    next_renewal_at: entry.next_renewal_at || null,
+    activated_at: entry.activated_at || null,
+    plan_name: planById.get(subscriptionById.get(entry.subscription_id)?.plan_id)?.name || null,
+    plan_code: planById.get(subscriptionById.get(entry.subscription_id)?.plan_id)?.code || null
+  })).filter((entry) => !statusFilter || entry.status === statusFilter);
+  const active = addons.filter((entry) => entry.status === 'active');
+  return {
+    addons,
+    summary: {
+      active_count: active.length,
+      active_revenue_cents: active.reduce((sum, entry) => sum + entry.price_cents, 0),
+      provider_cost_cents: active.reduce((sum, entry) => sum + entry.provider_cost_cents, 0),
+      estimated_margin_cents: active.reduce((sum, entry) => sum + entry.estimated_margin_cents, 0)
+    }
+  };
 }
 
 function platformSubscriptionStatus(subscription, company) {
@@ -5698,11 +5770,12 @@ async function getCompanyPlanOverview(companyId, storeId) {
   if (!resolvedCompanyId) {
     return { company: null, subscription: null, pending_subscription: null, plan: null, features: [], available_plans: [], usage: await companyUsageSnapshot(companyId, storeId) };
   }
-  const [company, subscriptions, availablePlans, billingHistory] = await Promise.all([
+  const [company, subscriptions, availablePlans, billingHistory, storeAddons] = await Promise.all([
     getCompanyById(resolvedCompanyId).catch(() => null),
     listCompanySubscriptions(resolvedCompanyId),
     listPortalPlans().then((data) => data.plans || []).catch(() => []),
-    listBillingHistory(resolvedCompanyId)
+    listBillingHistory(resolvedCompanyId),
+    listStoreSubscriptionAddons(storeId)
   ]);
   const subscription = pickCurrentCompanySubscription(subscriptions);
   const pendingSubscription = subscriptions.find((entry) => entry.status === 'payment_pending') || null;
@@ -5723,6 +5796,15 @@ async function getCompanyPlanOverview(companyId, storeId) {
     plan,
     features,
     available_plans: availablePlans,
+    addons: storeAddons.map((entry) => ({
+      id: entry.id,
+      code: entry.addon?.code || '',
+      name: entry.addon?.name || 'Adicional',
+      status: entry.status,
+      price_cents: Number(entry.addon?.monthly_price_cents || 0),
+      provider_cost_cents: Number(entry.addon?.provider_cost_cents || 0),
+      next_renewal_at: entry.next_renewal_at || null
+    })),
     billing_history: billingHistory,
     usage: await companyUsageSnapshot(resolvedCompanyId, storeId)
   };
@@ -5911,6 +5993,330 @@ async function createBillingCheckout(req, admin, data = {}) {
     change_type: changeType,
     downgrade_warnings: downgradeWarnings
   };
+}
+
+async function createAddonCheckout(req, admin, data = {}) {
+  const companyId = cleanUuid(admin.company_id, 'empresa');
+  const storeId = cleanUuid(admin.store_id, 'loja');
+  const addonCode = cleanSlug(data.addon_code || data.addonCode || 'whatsapp_automatic');
+  const addon = await getPlanAddonByCode(addonCode);
+  if (!addon) throw httpError(404, 'Adicional não encontrado.');
+  const access = await getStoreAddonAccess(admin, addonCode);
+  if (access.included) {
+    return { addon, active_addon: access.active_addon || null, included: true, activated: true, checkout_url: null };
+  }
+  if (!access.available) {
+    throw httpError(403, access.message, planErrorPayload('FEATURE_NOT_AVAILABLE', access.message, { addon: addonCode }));
+  }
+  if (access.active) {
+    return { addon, active_addon: access.active_addon, activated: true, checkout_url: access.active_addon?.checkout_url || null };
+  }
+  const amount = Number(addon.monthly_price_cents || 0);
+  const billingConfig = await privatePlatformBillingSettings();
+  if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
+    throw httpError(503, 'Checkout indisponível: configure Abacate Pay na Central antes de vender adicionais.');
+  }
+  const [company] = await dbRequest('GET', 'companies', {
+    select: '*',
+    id: `eq.${companyId}`,
+    limit: '1'
+  });
+  if (!company) throw httpError(404, 'Empresa não encontrada.');
+  const currentSubscription = pickCurrentCompanySubscription(await listCompanySubscriptions(companyId, 100));
+
+  if (billingConfig.provider === 'mock' || amount <= 0) {
+    const activated = await activateStoreAddon(req, admin, {
+      companyId,
+      storeId,
+      subscriptionId: currentSubscription?.id || null,
+      addon,
+      provider: 'manual',
+      externalTransactionId: null,
+      checkoutUrl: null,
+      source: amount <= 0 ? 'free_addon' : 'manual_activation'
+    });
+    return { addon, active_addon: activated, checkout_url: null, provider: 'manual', activated: true };
+  }
+
+  const checkout = await createProviderAddonCheckout({ company, admin, addon, amount, billingConfig });
+  if (!checkout.checkoutUrl) {
+    throw httpError(502, 'O provedor de pagamento não retornou a URL do checkout do adicional.');
+  }
+  const [subscriptionAddon] = await dbRequest('POST', 'store_subscription_addons', {}, {
+    company_id: companyId,
+    store_id: storeId,
+    subscription_id: currentSubscription?.id || null,
+    addon_id: addon.id,
+    status: 'payment_pending',
+    provider: billingConfig.provider,
+    external_transaction_id: checkout.subscriptionId || checkout.transactionId || null,
+    checkout_url: checkout.checkoutUrl,
+    metadata: {
+      source: 'admin_addon_checkout',
+      addon_code: addon.code,
+      amount_cents: amount,
+      provider_cost_cents: Number(addon.provider_cost_cents || 0)
+    }
+  }, ['Prefer: return=representation']);
+  const transaction = await createSubscriptionPaymentTransaction({
+    companyId,
+    subscriptionId: currentSubscription?.id || null,
+    planId: null,
+    provider: billingConfig.provider,
+    externalTransactionId: checkout.subscriptionId || checkout.transactionId || null,
+    status: 'pending',
+    amountCents: amount,
+    checkoutUrl: checkout.checkoutUrl,
+    expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
+    metadata: {
+      source: 'admin_addon_checkout',
+      kind: 'addon',
+      addon_code: addon.code,
+      addon_id: addon.id,
+      store_id: storeId,
+      store_subscription_addon_id: subscriptionAddon.id
+    }
+  });
+  await recordAddonBillingEvent({
+    companyId,
+    storeId,
+    subscriptionAddonId: subscriptionAddon.id,
+    addonId: addon.id,
+    eventType: 'addon.checkout_created',
+    status: 'pending',
+    amountCents: amount,
+    provider: billingConfig.provider,
+    externalTransactionId: checkout.subscriptionId || checkout.transactionId || null,
+    description: `Cobrança criada para o adicional ${addon.name}.`,
+    metadata: { checkout_url: checkout.checkoutUrl, payment_transaction_id: transaction?.id || null }
+  });
+  await audit('billing.addon.checkout.create', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: 'store_subscription_addon',
+    entity_id: subscriptionAddon.id,
+    after_data: { addon_code: addon.code, provider: billingConfig.provider, amount_cents: amount }
+  });
+  return {
+    addon,
+    active_addon: subscriptionAddon,
+    payment_transaction: transaction,
+    checkout_url: checkout.checkoutUrl,
+    provider: billingConfig.provider
+  };
+}
+
+async function getPlanAddonByCode(code) {
+  const addonCode = cleanSlug(code || '');
+  if (!addonCode) return null;
+  const [addon] = await dbRequest('GET', 'plan_addons', {
+    select: '*',
+    code: `eq.${addonCode}`,
+    is_active: 'eq.true',
+    limit: '1'
+  }).catch(() => []);
+  return addon || null;
+}
+
+async function listStoreSubscriptionAddons(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) return [];
+  const rows = await dbRequest('GET', 'store_subscription_addons', {
+    select: '*',
+    store_id: `eq.${resolvedStoreId}`,
+    status: 'in.(active,payment_pending,grace_period,past_due)',
+    order: 'created_at.desc',
+    limit: '50'
+  }).catch(() => []);
+  const addonIds = cleanUuidArray(rows.map((entry) => entry.addon_id));
+  const addons = addonIds.length
+    ? await dbRequest('GET', 'plan_addons', { select: '*', id: uuidInFilter(addonIds), limit: '50' }).catch(() => [])
+    : [];
+  const addonById = new Map(addons.map((entry) => [entry.id, entry]));
+  return rows.map((entry) => ({ ...entry, addon: addonById.get(entry.addon_id) || null }));
+}
+
+async function getActiveStoreAddon(storeId, addonCode) {
+  const resolvedStoreId = cleanUuid(storeId);
+  const code = cleanSlug(addonCode || '');
+  if (!resolvedStoreId || !code) return null;
+  const rows = (await listStoreSubscriptionAddons(resolvedStoreId)).filter((entry) => entry.status === 'active');
+  return rows.find((entry) => entry.addon?.code === code) || null;
+}
+
+async function getStoreAddonAccess(admin, addonCode) {
+  const addon = await getPlanAddonByCode(addonCode);
+  if (!addon) return { active: false, available: false, included: false, message: 'Adicional não encontrado.' };
+  const { subscription, plan } = await getCurrentPlan(admin.company_id);
+  const planCode = cleanSlug(plan?.code || '');
+  const includedPlans = Array.isArray(addon.included_plan_codes) ? addon.included_plan_codes.map(cleanSlug) : [];
+  const availablePlans = Array.isArray(addon.available_plan_codes) ? addon.available_plan_codes.map(cleanSlug) : [];
+  const activeAddon = await getActiveStoreAddon(admin.store_id, addon.code);
+  const included = includedPlans.includes(planCode);
+  const available = availablePlans.includes(planCode);
+  const active = Boolean(activeAddon) || included;
+  const message = included
+    ? `${addon.name} já está incluso no seu plano.`
+    : available
+      ? `${addon.name} pode ser contratado como adicional por ${formatMoney((Number(addon.monthly_price_cents || 0) / 100))}/mês.`
+      : `${addon.name} está disponível no Profissional como adicional ou incluso no Premium.`;
+  return {
+    addon,
+    plan,
+    subscription,
+    active,
+    available,
+    included,
+    active_addon: activeAddon,
+    message
+  };
+}
+
+async function assertAutomaticWhatsappAccess(admin) {
+  const planAccess = await getCompanyFeatureAccess(admin.company_id, 'automatic_whatsapp').catch(() => ({ enabled: false }));
+  if (planAccess.enabled) return { ...planAccess, source: 'plan' };
+  const addonAccess = await getStoreAddonAccess(admin, 'whatsapp_automatic').catch(() => null);
+  if (addonAccess?.active) return { enabled: true, source: addonAccess.included ? 'included_addon' : 'addon', addon: addonAccess.active_addon || null };
+  const message = addonAccess?.message || featureBlockedMessage('automatic_whatsapp');
+  throw httpError(403, message, planErrorPayload('FEATURE_NOT_AVAILABLE', message, { feature: 'automatic_whatsapp', source: 'addon' }));
+}
+
+async function createProviderAddonCheckout({ company, admin, addon, amount, billingConfig = null }) {
+  const config = billingConfig || await privatePlatformBillingSettings();
+  if (config.provider === 'mock') {
+    return {
+      subscriptionId: `mock_addon_${company.id}_${Date.now()}`,
+      checkoutUrl: absolutePanelUrl(`/?billing=mock&addon=${encodeURIComponent(addon.code)}`)
+    };
+  }
+  if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de adicional não suportado.');
+  const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const productId = await ensureAbacateAddonProduct({ addon, amount, token: config.api_key });
+  const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
+  const externalId = cleanExternalId(`tapronto-addon-${company.id}-${addon.code}-${Date.now()}`);
+  const body = {
+    items: [{ id: productId, quantity: 1 }],
+    methods: ['PIX', 'CARD'],
+    returnUrl: `${origin}/?billing=addon-cancelled`,
+    completionUrl: `${origin}/?billing=addon-success`,
+    externalId,
+    metadata: {
+      companyId: company.id,
+      storeId: admin.store_id,
+      addonCode: addon.code,
+      addonId: addon.id,
+      kind: 'platform_addon_charge'
+    }
+  };
+  if (customerId) body.customerId = customerId;
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
+    method: 'POST',
+    token: config.api_key,
+    body
+  });
+  const payload = data.data || data;
+  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
+  if (!checkoutUrl) throw httpError(502, 'A Abacate Pay criou a cobrança do adicional, mas não retornou a URL de checkout.');
+  return {
+    subscriptionId: String(payload.id || payload.checkoutId || payload.billingId || ''),
+    transactionId: externalId,
+    checkoutUrl
+  };
+}
+
+async function ensureAbacateAddonProduct({ addon, amount, token }) {
+  const externalId = cleanExternalId(`tapronto-addon-${addon.code}-${amount}`);
+  const existing = await findAbacateProductByExternalId(externalId, token).catch(() => null);
+  if (existing?.id) return String(existing.id);
+  const data = await providerFetch(`${ABACATEPAY_API_BASE}/products/create`, {
+    method: 'POST',
+    token,
+    body: {
+      externalId,
+      name: `Adicional ${addon.name}`,
+      description: addon.description || 'Adicional mensal da plataforma TáPronto',
+      price: amount,
+      currency: 'BRL',
+      cycle: 'MONTHLY'
+    }
+  });
+  const payload = data.data || data;
+  const productId = payload.id || payload.product?.id || '';
+  if (!productId) throw httpError(502, 'A Abacate Pay não retornou o identificador do produto adicional.');
+  return String(productId);
+}
+
+async function activateStoreAddon(req, admin, data = {}) {
+  const companyId = cleanUuid(data.companyId || admin.company_id, 'empresa');
+  const storeId = cleanUuid(data.storeId || admin.store_id, 'loja');
+  const addon = data.addon || await getPlanAddonByCode(data.addonCode || data.addon_code);
+  if (!addon) throw httpError(404, 'Adicional não encontrado.');
+  const now = new Date();
+  const periodEnd = new Date(now.getTime() + 30 * 86400000);
+  const existing = await getActiveStoreAddon(storeId, addon.code);
+  if (existing) return existing;
+  const [row] = await dbRequest('POST', 'store_subscription_addons', {}, {
+    company_id: companyId,
+    store_id: storeId,
+    subscription_id: data.subscriptionId || data.subscription_id || null,
+    addon_id: addon.id,
+    status: 'active',
+    provider: data.provider || 'manual',
+    external_transaction_id: data.externalTransactionId || data.external_transaction_id || null,
+    checkout_url: data.checkoutUrl || data.checkout_url || null,
+    current_period_starts_at: now.toISOString(),
+    current_period_ends_at: periodEnd.toISOString(),
+    next_renewal_at: periodEnd.toISOString(),
+    activated_at: now.toISOString(),
+    metadata: {
+      source: data.source || 'addon_activation',
+      amount_cents: Number(addon.monthly_price_cents || 0),
+      provider_cost_cents: Number(addon.provider_cost_cents || 0)
+    }
+  }, ['Prefer: return=representation']);
+  await recordAddonBillingEvent({
+    companyId,
+    storeId,
+    subscriptionAddonId: row.id,
+    addonId: addon.id,
+    eventType: 'addon.activated',
+    status: 'active',
+    amountCents: Number(addon.monthly_price_cents || 0),
+    provider: data.provider || 'manual',
+    externalTransactionId: data.externalTransactionId || data.external_transaction_id || null,
+    description: `${addon.name} ativado para a loja.`
+  }).catch(() => {});
+  await audit('billing.addon.activate', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: 'store_subscription_addon',
+    entity_id: row.id,
+    after_data: { addon_code: addon.code, status: 'active' }
+  }).catch(() => {});
+  return row;
+}
+
+async function recordAddonBillingEvent(data = {}) {
+  const payload = {
+    company_id: cleanUuid(data.companyId || data.company_id, 'empresa'),
+    store_id: cleanUuid(data.storeId || data.store_id || '') || null,
+    subscription_addon_id: cleanUuid(data.subscriptionAddonId || data.subscription_addon_id || '') || null,
+    addon_id: cleanUuid(data.addonId || data.addon_id || '') || null,
+    event_type: cleanText(data.eventType || data.event_type || 'addon.event'),
+    status: cleanSlug(data.status || 'pending') || 'pending',
+    amount_cents: Math.max(0, Number(data.amountCents ?? data.amount_cents ?? 0) || 0),
+    provider: cleanSlug(data.provider || '') || null,
+    external_event_id: cleanExternalId(data.externalEventId || data.external_event_id || '') || null,
+    external_transaction_id: cleanExternalId(data.externalTransactionId || data.external_transaction_id || '') || null,
+    description: cleanText(data.description || ''),
+    metadata: sanitizeAuditPayload(data.metadata || {}) || {}
+  };
+  const [row] = await dbRequest('POST', 'addon_billing_events', {}, payload, ['Prefer: return=representation']);
+  return row || null;
 }
 
 async function findReusablePendingBillingCheckout(companyId, planId) {
@@ -6206,6 +6612,20 @@ async function receiveBillingWebhook(data, options = {}) {
   const duplicateTransaction = await findSubscriptionPaymentTransactionByEvent(provider, eventId);
   if (duplicateTransaction) return { ok: true, duplicate: true, transaction: duplicateTransaction };
 
+  const addonTransaction = externalId ? await findSubscriptionPaymentTransactionByExternalId(provider, externalId) : null;
+  if (addonTransaction?.metadata?.kind === 'addon') {
+    return processAddonBillingWebhook(reqLikeFromWebhook(), {
+      data,
+      payload,
+      provider,
+      eventId,
+      externalId,
+      status,
+      amountCents,
+      transaction: addonTransaction
+    });
+  }
+
   let query = {
     select: '*',
     billing_provider: `eq.${provider}`,
@@ -6218,7 +6638,7 @@ async function receiveBillingWebhook(data, options = {}) {
 
   const [subscription] = await dbRequest('GET', 'company_subscriptions', query);
   if (!subscription) throw httpError(404, 'Assinatura não encontrada.');
-  let transaction = await findSubscriptionPaymentTransactionByExternalId(provider, externalId);
+  let transaction = addonTransaction || await findSubscriptionPaymentTransactionByExternalId(provider, externalId);
   if (!transaction && subscription.id) {
     const [latest] = await dbRequest('GET', 'subscription_payment_transactions', {
       select: '*',
@@ -6322,6 +6742,116 @@ async function receiveBillingWebhook(data, options = {}) {
     }
   }, ['Prefer: return=minimal']);
   return { ok: true, subscription: updated, transaction };
+}
+
+function reqLikeFromWebhook() {
+  return { headers: {}, socket: {} };
+}
+
+async function processAddonBillingWebhook(req, context = {}) {
+  const { data, provider, eventId, externalId, status, amountCents, transaction } = context;
+  const metadata = transaction.metadata || {};
+  const addonId = cleanUuid(metadata.addon_id || '');
+  const addonCode = cleanSlug(metadata.addon_code || '');
+  const storeId = cleanUuid(metadata.store_id || '');
+  const subscriptionAddonId = cleanUuid(metadata.store_subscription_addon_id || '');
+  const [subscriptionAddon] = subscriptionAddonId
+    ? await dbRequest('GET', 'store_subscription_addons', { select: '*', id: `eq.${subscriptionAddonId}`, limit: '1' }).catch(() => [])
+    : [];
+  const addon = addonId
+    ? (await dbRequest('GET', 'plan_addons', { select: '*', id: `eq.${addonId}`, limit: '1' }).catch(() => []))[0]
+    : await getPlanAddonByCode(addonCode);
+  if (!addon) throw httpError(404, 'Adicional do webhook não encontrado.');
+  const companyId = cleanUuid(transaction.company_id || subscriptionAddon?.company_id || '');
+  const resolvedStoreId = storeId || cleanUuid(subscriptionAddon?.store_id || '');
+  if (!companyId || !resolvedStoreId) throw httpError(422, 'Webhook de adicional sem empresa ou loja.');
+  if (transaction.amount_cents && amountCents && Number(transaction.amount_cents) !== Number(amountCents)) {
+    await updateSubscriptionPaymentTransaction(transaction.id, {
+      external_event_id: eventId,
+      status: 'amount_mismatch',
+      raw_payload: sanitizeAuditPayload(data),
+      failed_at: new Date().toISOString()
+    }).catch(() => {});
+    throw httpError(422, 'Valor do pagamento não confere com a cobrança do adicional.');
+  }
+
+  const transactionStatus = billingTransactionStatus(status);
+  const now = new Date();
+  const periodEnd = new Date(now.getTime() + 30 * 86400000);
+  let updatedAddon = subscriptionAddon || null;
+  if (status === 'active') {
+    if (updatedAddon?.id) {
+      [updatedAddon] = await dbRequest('PATCH', 'store_subscription_addons', { id: `eq.${updatedAddon.id}` }, {
+        status: 'active',
+        provider,
+        external_transaction_id: externalId || updatedAddon.external_transaction_id || null,
+        current_period_starts_at: now.toISOString(),
+        current_period_ends_at: periodEnd.toISOString(),
+        next_renewal_at: periodEnd.toISOString(),
+        activated_at: updatedAddon.activated_at || now.toISOString(),
+        updated_at: now.toISOString(),
+        metadata: {
+          ...(updatedAddon.metadata || {}),
+          last_webhook: { eventId, status, received_at: now.toISOString() }
+        }
+      }, ['Prefer: return=representation']);
+    } else {
+      updatedAddon = await activateStoreAddon(req, {
+        id: null,
+        company_id: companyId,
+        store_id: resolvedStoreId
+      }, {
+        companyId,
+        storeId: resolvedStoreId,
+        addon,
+        provider,
+        externalTransactionId: externalId,
+        source: 'billing_webhook'
+      });
+    }
+  } else if (updatedAddon?.id) {
+    [updatedAddon] = await dbRequest('PATCH', 'store_subscription_addons', { id: `eq.${updatedAddon.id}` }, {
+      status: status === 'cancelled' ? 'cancelled' : transactionStatus,
+      updated_at: now.toISOString(),
+      metadata: {
+        ...(updatedAddon.metadata || {}),
+        last_webhook: { eventId, status, received_at: now.toISOString() }
+      }
+    }, ['Prefer: return=representation']);
+  }
+
+  await updateSubscriptionPaymentTransaction(transaction.id, {
+    external_event_id: eventId,
+    external_transaction_id: externalId || transaction.external_transaction_id || null,
+    status: transactionStatus,
+    amount_cents: amountCents || transaction.amount_cents || 0,
+    raw_payload: sanitizeAuditPayload(data),
+    metadata: {
+      ...(transaction.metadata || {}),
+      last_status: status,
+      last_event_id: eventId,
+      received_at: now.toISOString()
+    },
+    paid_at: status === 'active' ? now.toISOString() : transaction.paid_at || null,
+    failed_at: ['past_due', 'cancelled', 'suspended'].includes(status) ? now.toISOString() : transaction.failed_at || null
+  }).catch(() => {});
+
+  await recordAddonBillingEvent({
+    companyId,
+    storeId: resolvedStoreId,
+    subscriptionAddonId: updatedAddon?.id || subscriptionAddonId || null,
+    addonId: addon.id,
+    eventType: `addon.billing.${status}`,
+    status,
+    amountCents: amountCents || transaction.amount_cents || 0,
+    provider,
+    externalEventId: eventId,
+    externalTransactionId: externalId,
+    description: `Evento de cobrança do adicional recebido: ${status}.`,
+    metadata: { payment_transaction_id: transaction.id, payload: sanitizeAuditPayload(data) }
+  }).catch(() => {});
+
+  return { ok: true, addon_subscription: updatedAddon, transaction };
 }
 
 async function recordBillingWebhookFailure(data, options = {}) {
@@ -7995,11 +8525,23 @@ async function getAdminWhatsappIntegration(admin) {
   const store = await getStoreSettings(admin.store_id);
   const integration = await getStoreWhatsappIntegration(admin.store_id);
   const settings = await getPlatformWhatsappSettings();
-  const automaticAccess = await getCompanyFeatureAccess(admin.company_id, 'automatic_whatsapp').catch(() => ({ enabled: false }));
+  const planAccess = await getCompanyFeatureAccess(admin.company_id, 'automatic_whatsapp').catch(() => ({ enabled: false }));
+  const addonAccess = await getStoreAddonAccess(admin, 'whatsapp_automatic').catch(() => null);
+  const automaticEnabled = planAccess.enabled === true || addonAccess?.active === true;
   return {
     configured: settings.is_active && settings.has_api_key && Boolean(settings.base_url),
-    feature_enabled: automaticAccess.enabled === true,
-    feature_message: automaticAccess.enabled === true ? '' : featureBlockedMessage('automatic_whatsapp'),
+    feature_enabled: automaticEnabled,
+    feature_message: automaticEnabled ? '' : (addonAccess?.message || featureBlockedMessage('automatic_whatsapp')),
+    addon: addonAccess ? {
+      code: addonAccess.addon?.code || 'whatsapp_automatic',
+      name: addonAccess.addon?.name || 'WhatsApp Automático',
+      active: addonAccess.active,
+      available: addonAccess.available,
+      included: addonAccess.included,
+      price_cents: Number(addonAccess.addon?.monthly_price_cents || 0),
+      provider_cost_cents: Number(addonAccess.addon?.provider_cost_cents || 0),
+      message: addonAccess.message
+    } : null,
     store_phone: store.whatsapp_number || '',
     ...publicStoreWhatsappIntegration(integration),
     webhook_url: settings.webhook_url
@@ -8007,7 +8549,7 @@ async function getAdminWhatsappIntegration(admin) {
 }
 
 async function connectAdminWhatsappIntegration(req, admin) {
-  await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
+  await assertAutomaticWhatsappAccess(admin);
   const config = await privatePlatformWhatsappSettings();
   if (!config.is_active || !config.base_url || !config.api_key) throw httpError(503, 'WhatsApp automático ainda não foi configurado pela Central.');
   const store = await getStoreSettings(admin.store_id);
@@ -8064,7 +8606,7 @@ async function connectAdminWhatsappIntegration(req, admin) {
 }
 
 async function refreshAdminWhatsappQrCode(admin) {
-  await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
+  await assertAutomaticWhatsappAccess(admin);
   const config = await privatePlatformWhatsappSettings();
   const integration = await requireStoreWhatsappIntegration(admin.store_id);
   const data = await evolutionRestartOrConnectInstance(integration.instance_name, config);
@@ -8099,7 +8641,7 @@ async function refreshAdminWhatsappStatus(admin) {
 }
 
 async function sendAdminWhatsappTest(admin, data = {}) {
-  await assertFeatureEnabled(admin.company_id, 'automatic_whatsapp');
+  await assertAutomaticWhatsappAccess(admin);
   const store = await getStoreSettings(admin.store_id);
   const phone = whatsappRecipientPhone(data.phone || store.whatsapp_number || '');
   if (!phone) throw httpError(422, 'Configure o WhatsApp dos pedidos antes de enviar um teste.');
@@ -9994,6 +10536,8 @@ function publicStoreDomain(domain = {}) {
   const status = cleanSlug(domain.status || 'pending') || 'pending';
   const targetHost = customDomainTargetHost();
   const targetIp = customDomainTargetIp();
+  const dnsName = dnsHostLabel(normalized);
+  const isRootDomain = dnsName === '@';
   return {
     ...domain,
     domain: normalized,
@@ -10001,12 +10545,19 @@ function publicStoreDomain(domain = {}) {
     status_label: domainStatusLabel(status),
     setup: {
       recommended_type: 'CNAME',
-      name: dnsHostLabel(normalized),
+      name: dnsName,
       value: targetHost,
       fallback_type: targetIp ? 'A' : '',
       fallback_value: targetIp,
       txt_name: `_tapronto.${normalized}`,
-      txt_value: domain.verification_token || ''
+      txt_value: domain.verification_token || '',
+      is_root_domain: isRootDomain,
+      target_host: targetHost,
+      target_ip: targetIp,
+      example_label: isRootDomain ? 'domínio raiz' : 'subdomínio',
+      provider_hint: isRootDomain
+        ? 'Para domínio raiz, alguns provedores não aceitam CNAME em @. Se isso acontecer, use o registro A alternativo.'
+        : 'Para subdomínio, use preferencialmente CNAME. Exemplo: cardapio apontando para taprontomenu.com.br.'
     }
   };
 }
@@ -10397,7 +10948,7 @@ function featureBlockedMessage(featureCode) {
     store_settings: 'Configurações da loja não estão disponíveis no plano atual.',
     admin_users: 'Usuários da equipe não estão disponíveis no plano atual.',
     manual_whatsapp: 'WhatsApp manual não está disponível no plano atual.',
-    automatic_whatsapp: 'Automação de WhatsApp está disponível no Premium.',
+    automatic_whatsapp: 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.',
     print_kitchen: 'KDS, impressão e reimpressão estão disponíveis a partir do Profissional.',
     loyalty: 'Fidelidade e recompensas estão disponíveis no Premium.',
     reorder: 'Peça novamente está disponível a partir do Profissional.',
@@ -10637,6 +11188,11 @@ async function assertPublicUsageLimitByStore(storeId, featureCode, usageKey, nex
 async function storeHasFeature(storeId, featureCode) {
   const companyId = await companyIdForStore(storeId);
   if (!companyId) return false;
+  if (featureCode === 'automatic_whatsapp') {
+    const planAccess = await getCompanyFeatureAccess(companyId, featureCode).catch(() => ({ enabled: false }));
+    if (planAccess.enabled) return true;
+    return Boolean(await getActiveStoreAddon(storeId, 'whatsapp_automatic').catch(() => null));
+  }
   return canUseFeature(companyId, featureCode).catch(() => false);
 }
 

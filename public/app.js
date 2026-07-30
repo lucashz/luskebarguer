@@ -84,6 +84,7 @@ const els = {
   checkoutCustomerName: document.querySelector('#checkoutCustomerName'),
   checkoutCustomerPhone: document.querySelector('#checkoutCustomerPhone'),
   deliveryFeeHint: document.querySelector('#deliveryFeeHint'),
+  checkoutNeighborhoodSelect: document.querySelector('#checkoutNeighborhoodSelect'),
   checkoutFulfillmentFieldset: document.querySelector('#checkoutFulfillmentFieldset'),
   checkoutFulfillmentLegend: document.querySelector('#checkoutFulfillmentLegend'),
   fulfillmentMethodSelector: document.querySelector('#fulfillmentMethodSelector'),
@@ -147,6 +148,11 @@ els.clearCartButton?.addEventListener('click', () => {
   renderCart();
 });
 els.applyCouponButton?.addEventListener('click', applyCoupon);
+els.checkoutNeighborhoodSelect?.addEventListener('change', () => {
+  if (!els.checkoutForm?.elements?.neighborhood) return;
+  els.checkoutForm.elements.neighborhood.value = els.checkoutNeighborhoodSelect.value || '';
+  renderCheckoutReview();
+});
 
 els.checkoutForm?.addEventListener('change', (event) => {
   if (event.target.name === 'fulfillment_method') {
@@ -287,6 +293,7 @@ function render() {
   renderFeatured();
   renderMenu();
   renderPaymentOptions();
+  renderDeliveryNeighborhoodOptions();
   renderCart();
 }
 
@@ -1638,6 +1645,42 @@ function renderPaymentOptions() {
   updatePaymentDetailsVisibility();
 }
 
+function renderDeliveryNeighborhoodOptions() {
+  const rules = deliveryNeighborhoodEntries();
+  const method = els.checkoutForm ? (new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery') : 'delivery';
+  const neighborhoodInput = els.checkoutForm?.elements?.neighborhood;
+  if (!els.checkoutNeighborhoodSelect || !neighborhoodInput) return;
+  if (!rules.length) {
+    els.checkoutNeighborhoodSelect.hidden = true;
+    els.checkoutNeighborhoodSelect.disabled = true;
+    neighborhoodInput.hidden = method !== 'delivery';
+    neighborhoodInput.disabled = method !== 'delivery';
+    neighborhoodInput.required = method === 'delivery';
+    return;
+  }
+  const current = neighborhoodInput.value || els.checkoutNeighborhoodSelect.value || '';
+  els.checkoutNeighborhoodSelect.replaceChildren(
+    optionElement('', 'Selecione o bairro'),
+    ...rules.map(([name, fee]) => optionElement(name, `${name} - ${money(fee)}`))
+  );
+  const matched = rules.find(([name]) => normalizeText(name) === normalizeText(current));
+  els.checkoutNeighborhoodSelect.value = matched ? matched[0] : '';
+  if (matched && neighborhoodInput.value !== matched[0]) neighborhoodInput.value = matched[0];
+  if (!matched) neighborhoodInput.value = '';
+  els.checkoutNeighborhoodSelect.hidden = method !== 'delivery';
+  els.checkoutNeighborhoodSelect.disabled = method !== 'delivery';
+  neighborhoodInput.hidden = true;
+  neighborhoodInput.disabled = method !== 'delivery';
+  neighborhoodInput.required = false;
+}
+
+function optionElement(value, label) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
 function updateCheckoutDeliveryFields() {
   const method = new FormData(els.checkoutForm).get('fulfillment_method');
   if (method === 'table' && !state.diningTable) {
@@ -1653,9 +1696,12 @@ function updateCheckoutDeliveryFields() {
   document.querySelectorAll('.delivery-address-field').forEach((element) => {
     element.hidden = method !== 'delivery';
   });
-  ['street', 'number', 'neighborhood', 'city'].forEach((name) => {
+  renderDeliveryNeighborhoodOptions();
+  const hasNeighborhoodMenu = deliveryNeighborhoodEntries().length > 0;
+  ['street', 'number', 'city'].forEach((name) => {
     els.checkoutForm.elements[name].required = method === 'delivery';
   });
+  els.checkoutForm.elements.neighborhood.required = method === 'delivery' && !hasNeighborhoodMenu;
   renderDineInCheckoutMode();
   renderTableContext();
   updateDeliveryFeeHint();
@@ -1679,12 +1725,16 @@ function validateCheckoutData(data, method, customer = checkoutCustomerFromState
   if (method === 'tab' && !state.customerTab && !state.customerTabs.length) return focusCheckoutField('notes', 'Esta mesa não possui comanda aberta.');
 
   if (method === 'delivery') {
+    const hasNeighborhoodMenu = deliveryNeighborhoodEntries().length > 0;
+    if (hasNeighborhoodMenu && !String(data.get('neighborhood') || '').trim()) {
+      return focusCheckoutField('checkout_neighborhood_select', 'Selecione o bairro para entrega.');
+    }
     const labels = {
       street: 'rua ou avenida',
       number: 'número',
-      neighborhood: 'bairro',
       city: 'cidade'
     };
+    if (!hasNeighborhoodMenu) labels.neighborhood = 'bairro';
     const missing = Object.keys(labels).find((name) => !String(data.get(name) || '').trim());
     if (missing) {
       return focusCheckoutField(missing, `Informe ${labels[missing]} para entrega.`);
@@ -1703,7 +1753,9 @@ function validateCheckoutData(data, method, customer = checkoutCustomerFromState
 }
 
 function focusCheckoutField(name, message) {
-  const field = els.checkoutForm.elements[name];
+  const field = name === 'checkout_neighborhood_select'
+    ? els.checkoutNeighborhoodSelect
+    : els.checkoutForm.elements[name];
   if (field && !field.disabled) {
     field.focus();
     field.setCustomValidity(message);
@@ -1976,6 +2028,7 @@ function applySavedCustomerAddress(address = selectedSavedAddress(), options = {
   setAddressField('city', address.city, force);
   setAddressField('complement', address.complement, force);
   setAddressField('reference', address.reference, force);
+  renderDeliveryNeighborhoodOptions();
   els.savedAddressSelect.value = address.id || addressKey(address);
   clearCheckoutValidity();
   renderCheckoutReview();
@@ -2000,6 +2053,7 @@ function clearAddressFields() {
   ['label', 'postal_code', 'street', 'number', 'neighborhood', 'city', 'complement', 'reference'].forEach((name) => {
     setValue(els.checkoutForm.elements[name], '');
   });
+  if (els.checkoutNeighborhoodSelect) els.checkoutNeighborhoodSelect.value = '';
   clearCheckoutValidity();
 }
 
@@ -2207,13 +2261,20 @@ function cartTotals(options = {}) {
 
 function deliveryFeeForNeighborhood(neighborhood) {
   const fallback = Number(state.store?.delivery_fee || 0);
+  const normalized = normalizeText(neighborhood);
+  if (!normalized) return fallback;
+  const match = deliveryNeighborhoodEntries().find(([name]) => normalizeText(name) === normalized);
+  return match ? Number(match[1] || 0) : fallback;
+}
+
+function deliveryNeighborhoodEntries() {
   const rules = state.store?.delivery_neighborhood_fees && typeof state.store.delivery_neighborhood_fees === 'object'
     ? state.store.delivery_neighborhood_fees
     : {};
-  const normalized = normalizeText(neighborhood);
-  if (!normalized) return fallback;
-  const match = Object.entries(rules).find(([name]) => normalizeText(name) === normalized);
-  return match ? Number(match[1] || 0) : fallback;
+  return Object.entries(rules)
+    .map(([name, fee]) => [String(name || '').trim(), Number(fee || 0)])
+    .filter(([name, fee]) => name && Number.isFinite(fee) && fee >= 0)
+    .sort(([a], [b]) => a.localeCompare(b, 'pt-BR'));
 }
 
 function updateDeliveryFeeHint(currentFee = deliveryFeeForNeighborhood(els.checkoutForm.elements.neighborhood?.value)) {
@@ -2224,9 +2285,10 @@ function updateDeliveryFeeHint(currentFee = deliveryFeeForNeighborhood(els.check
     return;
   }
   const neighborhood = els.checkoutForm.elements.neighborhood?.value?.trim();
+  const rules = deliveryNeighborhoodEntries();
   els.deliveryFeeHint.textContent = neighborhood
     ? `Entrega para ${neighborhood}: ${money(currentFee)}.`
-    : 'A taxa de entrega será calculada pelo bairro.';
+    : (rules.length ? 'Escolha um bairro atendido para calcular a taxa de entrega.' : 'A taxa de entrega será calculada pelo bairro.');
 }
 
 function updatePaymentDetailsVisibility() {

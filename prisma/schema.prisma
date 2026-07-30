@@ -135,6 +135,8 @@ model Company {
   onboarding         OnboardingProgress[]
   subscriptionEvents SubscriptionEvent[]
   paymentTransactions SubscriptionPaymentTransaction[]
+  subscriptionAddons StoreSubscriptionAddon[]
+  addonBillingEvents AddonBillingEvent[]
   auditLogs          AuditLog[]
   sessions           AppSession[]
 
@@ -170,6 +172,8 @@ model Store {
   whatsappIntegrations StoreWhatsappIntegration[]
   whatsappMessageLogs WhatsappMessageLog[]
   paymentEvents OrderPaymentEvent[]
+  subscriptionAddons StoreSubscriptionAddon[]
+  addonBillingEvents AddonBillingEvent[]
   tables        DiningTable[]
   tabs          CustomerTab[]
   promotions    Promotion[]
@@ -840,6 +844,28 @@ model SubscriptionPlan {
   @@map("subscription_plans")
 }
 
+model PlanAddon {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code               String   @unique
+  name               String
+  description        String?
+  featureCode        String?  @map("feature_code")
+  monthlyPriceCents  Int      @default(0) @map("monthly_price_cents")
+  providerCostCents  Int      @default(0) @map("provider_cost_cents")
+  availablePlanCodes String[] @default([]) @map("available_plan_codes")
+  includedPlanCodes  String[] @default([]) @map("included_plan_codes")
+  isActive           Boolean  @default(true) @map("is_active")
+  sortOrder          Int      @default(0) @map("sort_order")
+  settings           Json     @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscriptions StoreSubscriptionAddon[]
+  billingEvents AddonBillingEvent[]
+
+  @@map("plan_addons")
+}
+
 model PlanFeature {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   planId     String   @map("plan_id") @db.Uuid
@@ -880,6 +906,7 @@ model CompanySubscription {
   plan    SubscriptionPlan?   @relation(fields: [planId], references: [id], onDelete: SetNull)
   events  SubscriptionEvent[]
   paymentTransactions SubscriptionPaymentTransaction[]
+  addons  StoreSubscriptionAddon[]
 
   @@index([companyId, status, createdAt])
   @@map("company_subscriptions")
@@ -912,6 +939,62 @@ model SubscriptionPaymentTransaction {
   @@index([subscriptionId, createdAt])
   @@index([provider, status, createdAt])
   @@map("subscription_payment_transactions")
+}
+
+model StoreSubscriptionAddon {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId             String    @map("company_id") @db.Uuid
+  storeId               String    @map("store_id") @db.Uuid
+  subscriptionId        String?   @map("subscription_id") @db.Uuid
+  addonId               String    @map("addon_id") @db.Uuid
+  status                String    @default("payment_pending")
+  provider              String?
+  externalTransactionId String?   @map("external_transaction_id")
+  checkoutUrl           String?   @map("checkout_url")
+  currentPeriodStartsAt DateTime? @map("current_period_starts_at") @db.Timestamptz(6)
+  currentPeriodEndsAt   DateTime? @map("current_period_ends_at") @db.Timestamptz(6)
+  nextRenewalAt         DateTime? @map("next_renewal_at") @db.Timestamptz(6)
+  activatedAt           DateTime? @map("activated_at") @db.Timestamptz(6)
+  cancelledAt           DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  metadata              Json      @default("{}")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store         Store                @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  subscription  CompanySubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  addon         PlanAddon            @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  billingEvents AddonBillingEvent[]
+
+  @@index([companyId, status, createdAt])
+  @@index([storeId, status, createdAt])
+  @@map("store_subscription_addons")
+}
+
+model AddonBillingEvent {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId             String   @map("company_id") @db.Uuid
+  storeId               String?  @map("store_id") @db.Uuid
+  subscriptionAddonId   String?  @map("subscription_addon_id") @db.Uuid
+  addonId               String?  @map("addon_id") @db.Uuid
+  eventType             String   @map("event_type")
+  status                String   @default("pending")
+  amountCents           Int      @default(0) @map("amount_cents")
+  provider              String?
+  externalEventId       String?  @map("external_event_id")
+  externalTransactionId String?  @map("external_transaction_id")
+  description           String?
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company           Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store             Store?                  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  subscriptionAddon StoreSubscriptionAddon? @relation(fields: [subscriptionAddonId], references: [id], onDelete: SetNull)
+  addon             PlanAddon?              @relation(fields: [addonId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([storeId, createdAt])
+  @@map("addon_billing_events")
 }
 
 model CompanyFeatureOverride {

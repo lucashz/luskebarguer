@@ -397,6 +397,10 @@ const els = {
   modifierGroupForm: document.querySelector('#modifierGroupForm'),
   storeForm: document.querySelector('#storeForm'),
   storePathPreview: document.querySelector('#storePathPreview'),
+  deliveryNeighborhoodFeesRaw: document.querySelector('#deliveryNeighborhoodFeesRaw'),
+  neighborhoodFeesEditor: document.querySelector('#neighborhoodFeesEditor'),
+  neighborhoodFeesSummary: document.querySelector('#neighborhoodFeesSummary'),
+  addNeighborhoodFeeButton: document.querySelector('#addNeighborhoodFeeButton'),
   paymentMethodsPreview: document.querySelector('#paymentMethodsPreview'),
   customDomainInput: document.querySelector('#customDomainInput'),
   addDomainButton: document.querySelector('#addDomainButton'),
@@ -410,6 +414,7 @@ const els = {
   whatsappQrBox: document.querySelector('#whatsappQrBox'),
   whatsappQrImage: document.querySelector('#whatsappQrImage'),
   connectWhatsappButton: document.querySelector('#connectWhatsappButton'),
+  checkoutWhatsappAddonButton: document.querySelector('#checkoutWhatsappAddonButton'),
   requestWhatsappSetupButton: document.querySelector('#requestWhatsappSetupButton'),
   refreshWhatsappQrButton: document.querySelector('#refreshWhatsappQrButton'),
   testWhatsappButton: document.querySelector('#testWhatsappButton'),
@@ -552,6 +557,7 @@ document.addEventListener('visibilitychange', () => {
 els.refreshCategoriesButton.addEventListener('click', () => loadMenuData({ force: true }));
 els.refreshProductsButton.addEventListener('click', () => loadMenuData({ force: true }));
 els.connectWhatsappButton?.addEventListener('click', connectWhatsapp);
+els.checkoutWhatsappAddonButton?.addEventListener('click', checkoutWhatsappAddon);
 els.refreshWhatsappQrButton?.addEventListener('click', refreshWhatsappQrCode);
 els.testWhatsappButton?.addEventListener('click', testWhatsappAuto);
 els.disconnectWhatsappButton?.addEventListener('click', disconnectWhatsapp);
@@ -591,15 +597,18 @@ els.modifierProductSelect?.addEventListener('change', () => {
 els.modifierGroupForm?.addEventListener('submit', submitModifierGroupFromDialog);
 els.storeForm.addEventListener('submit', submitStore);
 els.addDomainButton?.addEventListener('click', addCustomDomain);
+els.addNeighborhoodFeeButton?.addEventListener('click', () => addNeighborhoodFeeRow());
 els.integrationsForm?.addEventListener('submit', submitIntegrations);
 els.storeForm.addEventListener('input', () => {
   state.storeFormDirty = true;
+  syncNeighborhoodFeesRaw();
   renderStorePathPreview();
   renderThemePreview();
   renderPaymentMethodsPreview();
 });
 els.storeForm.addEventListener('change', () => {
   state.storeFormDirty = true;
+  syncNeighborhoodFeesRaw();
   renderStorePathPreview();
   renderThemePreview();
   renderPaymentMethodsPreview();
@@ -617,8 +626,14 @@ els.integrationsForm?.addEventListener('click', (event) => {
 });
 els.storeForm.addEventListener('click', (event) => {
   const button = event.target.closest('[data-theme-preset]');
-  if (!button) return;
-  applyThemePreset(button.dataset.themePreset);
+  if (button) {
+    applyThemePreset(button.dataset.themePreset);
+    return;
+  }
+  const removeNeighborhoodButton = event.target.closest('[data-remove-neighborhood-fee]');
+  if (removeNeighborhoodButton) {
+    removeNeighborhoodFeeRow(removeNeighborhoodButton.dataset.removeNeighborhoodFee);
+  }
 });
 els.testIntegrationsButton?.addEventListener('click', testIntegrations);
 els.requestWhatsappSetupButton?.addEventListener('click', () => openSupportTicketWithContext('whatsapp'));
@@ -6999,6 +7014,8 @@ async function refreshTablesAfterMutation() {
 
 async function submitStore(event) {
   event.preventDefault();
+  if (!validateNeighborhoodFeesEditor()) return;
+  syncNeighborhoodFeesRaw();
   const payload = formToStore(els.storeForm);
   payload.whatsapp_number = normalizeBrazilLocalWhatsapp(payload.whatsapp_number);
   if (!isBrazilLocalWhatsapp(payload.whatsapp_number)) {
@@ -7105,11 +7122,15 @@ function renderCustomDomainRow(domain) {
   const setup = domain.setup || {};
   const status = String(domain.status || 'pending').toLowerCase();
   const statusLabel = domain.status_label || customDomainStatusLabel(status);
+  const isVerified = status === 'verified' || status === 'active';
+  const isRootDomain = Boolean(setup.is_root_domain || setup.name === '@');
+  const mainRecordLabel = `${setup.recommended_type || 'CNAME'} ${setup.name || '@'} -> ${setup.value || 'taprontomenu.com.br'}`;
   const fallback = setup.fallback_type && setup.fallback_value ? `
-    <div class="domain-dns-line">
+    <div class="domain-dns-line domain-dns-line-muted">
       <span>${escapeHtml(setup.fallback_type)}</span>
       <code>${escapeHtml(setup.name || '@')}</code>
       <code>${escapeHtml(setup.fallback_value)}</code>
+      <small>Alternativa quando o provedor não aceitar CNAME.</small>
     </div>
   ` : '';
   return `
@@ -7119,23 +7140,41 @@ function renderCustomDomainRow(domain) {
           <strong>${escapeHtml(domain.domain)}</strong>
           <span class="domain-status ${escapeAttribute(status)}">${escapeHtml(statusLabel)}</span>
         </div>
-        <p>Configure o DNS abaixo no painel onde o domínio foi comprado e depois clique em verificar.</p>
+        <p>${isVerified ? 'O domínio já foi encontrado no DNS. Se ainda não abrir no navegador, aguarde a propagação ou confira o SSL.' : 'Crie o registro abaixo no painel DNS do seu domínio. Depois aguarde alguns minutos e clique em verificar.'}</p>
+        <div class="domain-guidance">
+          <div>
+            <span>Registro recomendado</span>
+            <strong>${escapeHtml(mainRecordLabel)}</strong>
+          </div>
+          <div>
+            <span>Quando usar</span>
+            <strong>${escapeHtml(isRootDomain ? 'Domínio principal, exemplo: sualoja.com.br' : 'Subdomínio, exemplo: cardapio.sualoja.com.br')}</strong>
+          </div>
+        </div>
         <div class="domain-dns-box" aria-label="Instruções de DNS">
           <div class="domain-dns-head">
             <span>Tipo</span>
             <span>Nome</span>
             <span>Destino</span>
+            <span>Observação</span>
           </div>
           <div class="domain-dns-line">
             <span>${escapeHtml(setup.recommended_type || 'CNAME')}</span>
             <code>${escapeHtml(setup.name || '@')}</code>
             <code>${escapeHtml(setup.value || 'taprontomenu.com.br')}</code>
+            <small>Use este primeiro.</small>
           </div>
           ${fallback}
         </div>
+        <ul class="domain-checklist">
+          <li>Não coloque <strong>https://</strong> nem caminho como <strong>/cardapio</strong>, apenas o domínio.</li>
+          <li>Se existir outro registro com o mesmo nome, remova ou edite para evitar conflito.</li>
+          <li>A propagação pode levar de alguns minutos até algumas horas, dependendo do provedor.</li>
+        </ul>
         <details class="domain-advanced">
           <summary>Detalhes técnicos</summary>
           <small>Token DNS: <code>${escapeHtml(domain.verification_token || setup.txt_value || '')}</code></small>
+          <small>${escapeHtml(setup.provider_hint || '')}</small>
         </details>
       </div>
       <div class="row-actions domain-actions">
@@ -7338,6 +7377,8 @@ function renderWhatsappIntegration(data = {}) {
   const label = data.status_label || whatsappAutoStatusLabel(status);
   const featureEnabled = data.feature_enabled !== false;
   const platformConfigured = data.configured !== false;
+  const addon = data.addon || {};
+  const canBuyAddon = !featureEnabled && addon.available === true && addon.active !== true;
   const canConnect = featureEnabled && platformConfigured;
   state.whatsappIntegration = data;
   els.whatsappAutoStatus.textContent = label;
@@ -7345,6 +7386,8 @@ function renderWhatsappIntegration(data = {}) {
   if (els.whatsappAutoMessage) {
     if (data.last_error) {
       els.whatsappAutoMessage.textContent = data.last_error;
+    } else if (canBuyAddon) {
+      els.whatsappAutoMessage.textContent = addon.message || 'Contrate o WhatsApp automático para liberar a conexão por QR Code nesta loja.';
     } else if (!featureEnabled) {
       els.whatsappAutoMessage.textContent = `${data.feature_message || 'WhatsApp automático não está disponível no plano atual.'} Se quiser ativar, solicite ajuda da equipe TáPronto.`;
     } else if (!platformConfigured) {
@@ -7366,12 +7409,20 @@ function renderWhatsappIntegration(data = {}) {
     els.connectWhatsappButton.textContent = ['connected', 'disconnected', 'error'].includes(status) ? 'Reconectar WhatsApp' : 'Conectar WhatsApp';
     els.connectWhatsappButton.disabled = !canConnect || status === 'loading';
     els.connectWhatsappButton.title = !featureEnabled
-      ? 'WhatsApp automático está disponível no Premium.'
+      ? (canBuyAddon ? 'Contrate o adicional para liberar a conexão.' : 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.')
       : (!platformConfigured ? 'A Central TáPronto precisa configurar a Evolution API antes.' : '');
   }
+  if (els.checkoutWhatsappAddonButton) {
+    els.checkoutWhatsappAddonButton.hidden = !canBuyAddon;
+    els.checkoutWhatsappAddonButton.disabled = status === 'loading';
+    const price = Number(addon.price_cents || 0) / 100;
+    els.checkoutWhatsappAddonButton.textContent = price
+      ? `Contratar WhatsApp Automático - ${money(price)}/mês`
+      : 'Contratar WhatsApp Automático';
+  }
   if (els.requestWhatsappSetupButton) {
-    els.requestWhatsappSetupButton.hidden = canConnect;
-    els.requestWhatsappSetupButton.textContent = featureEnabled ? 'Solicitar ajuda da TáPronto' : 'Solicitar ativação do WhatsApp';
+    els.requestWhatsappSetupButton.hidden = canConnect || canBuyAddon;
+    els.requestWhatsappSetupButton.textContent = featureEnabled ? 'Solicitar ajuda da TáPronto' : 'Solicitar upgrade';
   }
   if (els.refreshWhatsappQrButton) {
     els.refreshWhatsappQrButton.hidden = status === 'connected' && !qr;
@@ -7408,6 +7459,32 @@ async function connectWhatsapp() {
     toast(whatsapp.status === 'connected'
       ? 'WhatsApp automático conectado.'
       : 'QR Code gerado. Escaneie com o celular da loja.');
+  });
+}
+
+async function checkoutWhatsappAddon() {
+  await runWhatsappAction(els.checkoutWhatsappAddonButton, 'Abrindo checkout...', async () => {
+    const result = await request('/api/admin/billing/addons/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addon_code: 'whatsapp_automatic' })
+    });
+    if (result.activated || result.included) {
+      toast('WhatsApp automático liberado para esta loja.');
+      await loadWhatsappIntegration();
+      return;
+    }
+    const checkoutUrl = result.checkout_url || '';
+    if (!checkoutUrl) {
+      toast('Cobrança criada, mas o checkout não retornou URL. Atualize e tente novamente.');
+      return;
+    }
+    const popup = window.open(checkoutUrl, 'tapronto_whatsapp_addon_checkout', 'width=520,height=760,noopener,noreferrer');
+    if (!popup) {
+      window.location.href = checkoutUrl;
+      return;
+    }
+    toast('Conclua o pagamento do adicional. O WhatsApp será liberado após a confirmação.');
   });
 }
 
@@ -7951,6 +8028,7 @@ function fillStoreForm() {
   setValue(els.storeForm.elements.delivery_fee, store.delivery_fee);
   setValue(els.storeForm.elements.minimum_order, store.minimum_order);
   setValue(els.storeForm.elements.delivery_neighborhood_fees, neighborhoodFeesToText(store.delivery_neighborhood_fees));
+  renderNeighborhoodFeesEditor(store.delivery_neighborhood_fees);
   els.storeForm.querySelectorAll('input[name="payment_methods"]').forEach((input) => {
     input.checked = paymentMethods.includes(input.value);
   });
@@ -8341,6 +8419,143 @@ function neighborhoodFeesToText(value) {
   return Object.entries(value)
     .map(([name, price]) => `${name}=${String(price).replace('.', ',')}`)
     .join('\n');
+}
+
+function renderNeighborhoodFeesEditor(value) {
+  if (!els.neighborhoodFeesEditor) return;
+  const entries = Object.entries(parseNeighborhoodFees(neighborhoodFeesToText(value)));
+  if (!entries.length) {
+    els.neighborhoodFeesEditor.innerHTML = `
+      <div class="neighborhood-fees-empty">
+        <strong>Nenhum bairro específico.</strong>
+        <span>A taxa padrão será usada para todos os bairros.</span>
+      </div>
+    `;
+    if (els.deliveryNeighborhoodFeesRaw) els.deliveryNeighborhoodFeesRaw.value = '';
+    updateNeighborhoodFeesSummary(0);
+    return;
+  }
+  els.neighborhoodFeesEditor.innerHTML = `
+    <div class="neighborhood-fees-header" aria-hidden="true">
+      <span>Bairro</span>
+      <span>Taxa</span>
+      <span>Ação</span>
+    </div>
+    ${entries.map(([name, price], index) => renderNeighborhoodFeeRow(name, price, index)).join('')}
+  `;
+  syncNeighborhoodFeesRaw();
+}
+
+function renderNeighborhoodFeeRow(name = '', price = '', index = Date.now()) {
+  return `
+    <div class="neighborhood-fee-row" data-neighborhood-fee-row="${escapeAttribute(index)}">
+      <label>
+        <span>Bairro</span>
+        <input data-neighborhood-fee-name value="${escapeAttribute(name)}" placeholder="Ex: Centro">
+      </label>
+      <label>
+        <span>Taxa</span>
+        <input data-neighborhood-fee-price inputmode="decimal" value="${escapeAttribute(formatFeeInput(price))}" placeholder="0,00">
+      </label>
+      <button class="ghost-button compact danger" data-remove-neighborhood-fee="${escapeAttribute(index)}" type="button">Remover</button>
+    </div>
+  `;
+}
+
+function addNeighborhoodFeeRow(name = '', price = '') {
+  if (!els.neighborhoodFeesEditor) return;
+  const empty = els.neighborhoodFeesEditor.querySelector('.neighborhood-fees-empty');
+  if (empty) {
+    els.neighborhoodFeesEditor.innerHTML = `
+      <div class="neighborhood-fees-header" aria-hidden="true">
+        <span>Bairro</span>
+        <span>Taxa</span>
+        <span>Ação</span>
+      </div>
+    `;
+  }
+  const id = `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  els.neighborhoodFeesEditor.insertAdjacentHTML('beforeend', renderNeighborhoodFeeRow(name, price, id));
+  const row = findNeighborhoodFeeRow(id);
+  row?.querySelector('[data-neighborhood-fee-name]')?.focus();
+  state.storeFormDirty = true;
+  syncNeighborhoodFeesRaw();
+}
+
+function removeNeighborhoodFeeRow(id) {
+  const row = findNeighborhoodFeeRow(id);
+  row?.remove();
+  if (!els.neighborhoodFeesEditor?.querySelector('[data-neighborhood-fee-row]')) {
+    renderNeighborhoodFeesEditor({});
+  } else {
+    state.storeFormDirty = true;
+    syncNeighborhoodFeesRaw();
+  }
+}
+
+function findNeighborhoodFeeRow(id) {
+  return [...(els.neighborhoodFeesEditor?.querySelectorAll('[data-neighborhood-fee-row]') || [])]
+    .find((row) => row.dataset.neighborhoodFeeRow === id) || null;
+}
+
+function syncNeighborhoodFeesRaw() {
+  if (!els.deliveryNeighborhoodFeesRaw || !els.neighborhoodFeesEditor) return;
+  const rows = [...els.neighborhoodFeesEditor.querySelectorAll('[data-neighborhood-fee-row]')];
+  const fees = new Map();
+  rows.forEach((row) => {
+    const name = cleanText(row.querySelector('[data-neighborhood-fee-name]')?.value);
+    const price = parseMoneyInput(row.querySelector('[data-neighborhood-fee-price]')?.value);
+    if (!name || price === null) return;
+    fees.set(normalizeName(name), { name, price });
+  });
+  els.deliveryNeighborhoodFeesRaw.value = [...fees.values()]
+    .map((item) => `${item.name}=${String(item.price).replace('.', ',')}`)
+    .join('\n');
+  updateNeighborhoodFeesSummary(fees.size);
+}
+
+function validateNeighborhoodFeesEditor() {
+  if (!els.neighborhoodFeesEditor) return true;
+  const rows = [...els.neighborhoodFeesEditor.querySelectorAll('[data-neighborhood-fee-row]')];
+  for (const row of rows) {
+    const nameInput = row.querySelector('[data-neighborhood-fee-name]');
+    const priceInput = row.querySelector('[data-neighborhood-fee-price]');
+    const name = cleanText(nameInput?.value);
+    const rawPrice = cleanText(priceInput?.value);
+    if (!name && !rawPrice) continue;
+    if (!name) {
+      toast('Informe o nome do bairro ou remova a linha vazia.');
+      nameInput?.focus();
+      return false;
+    }
+    if (parseMoneyInput(rawPrice) === null) {
+      toast(`Informe uma taxa válida para ${name}.`);
+      priceInput?.focus();
+      return false;
+    }
+  }
+  return true;
+}
+
+function updateNeighborhoodFeesSummary(count) {
+  if (!els.neighborhoodFeesSummary) return;
+  els.neighborhoodFeesSummary.textContent = count
+    ? `${count} bairro${count === 1 ? '' : 's'} com taxa específica. Bairros fora da lista usam a taxa padrão.`
+    : 'Nenhum bairro configurado. A taxa padrão será usada para todos os bairros.';
+}
+
+function parseMoneyInput(value) {
+  const clean = String(value ?? '').trim().replace(',', '.');
+  if (!clean) return null;
+  const number = Number.parseFloat(clean);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.round(number * 100) / 100;
+}
+
+function formatFeeInput(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  return String(Math.round(number * 100) / 100).replace('.', ',');
 }
 
 function parseNeighborhoodFees(value) {

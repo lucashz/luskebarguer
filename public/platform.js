@@ -14,6 +14,7 @@
   billingPlans: [],
   billingEvents: [],
   billingSubscriptions: [],
+  billingAddons: [],
   billingConfig: null,
   billingLoading: false,
   billingLoaded: false,
@@ -169,6 +170,7 @@ const els = {
   platformBillingSummaryGrid: document.querySelector('#platformBillingSummaryGrid'),
   platformSubscriptionList: document.querySelector('#platformSubscriptionList'),
   platformBillingPlanList: document.querySelector('#platformBillingPlanList'),
+  platformBillingAddonList: document.querySelector('#platformBillingAddonList'),
   platformBillingEventList: document.querySelector('#platformBillingEventList'),
   platformBillingAlertList: document.querySelector('#platformBillingAlertList'),
   platformBillingConfigForm: document.querySelector('#platformBillingConfigForm'),
@@ -294,14 +296,18 @@ async function init() {
 
 async function enterPlatformWithAdmin(admin) {
   state.admin = admin;
+  document.body.classList.remove('platform-guest');
+  document.body.classList.add('platform-authenticated');
   if (els.platformUser) els.platformUser.textContent = `${admin.name} - ${admin.email}`;
   if (els.platformSidebarEmail) els.platformSidebarEmail.textContent = admin.email || 'administrador.local';
   if (els.platformSidebarName) els.platformSidebarName.textContent = admin.name || 'Administrador';
   hidePlatformGateways();
   if (!hasPermission('platform')) {
+    document.body.classList.add('platform-blocked-session');
     if (els.platformBlocked) els.platformBlocked.hidden = false;
     return;
   }
+  document.body.classList.remove('platform-blocked-session');
   if (els.platformContent) els.platformContent.hidden = false;
   await loadPlatform();
 }
@@ -314,6 +320,10 @@ function hidePlatformGateways() {
 }
 
 function showPlatformLogin(message = '') {
+  state.admin = null;
+  document.body.classList.add('platform-guest');
+  document.body.classList.remove('platform-authenticated');
+  document.body.classList.remove('platform-blocked-session');
   hidePlatformGateways();
   if (els.platformLoginPanel) els.platformLoginPanel.hidden = false;
   if (els.platformUser) els.platformUser.textContent = 'Central TáPronto';
@@ -546,11 +556,12 @@ async function loadCommercialSnapshot() {
 
 async function loadBillingSnapshot() {
   try {
-    const [summary, plans, events, subscriptions, config] = await Promise.all([
+    const [summary, plans, events, subscriptions, addons, config] = await Promise.all([
       request(billingUrl('/api/platform/billing/summary')),
       request('/api/platform/billing/plans'),
       request(billingUrl('/api/platform/billing/events')),
       request(billingUrl('/api/platform/billing/subscriptions')),
+      request(billingUrl('/api/platform/billing/addons')),
       request('/api/platform/billing/config')
     ]);
     return {
@@ -558,6 +569,7 @@ async function loadBillingSnapshot() {
       plans: plans.plans || [],
       events: events.events || [],
       subscriptions: subscriptions.subscriptions || [],
+      addons: addons.addons || [],
       config: config.billing || null
     };
   } catch (error) {
@@ -575,6 +587,7 @@ async function loadBilling(options = {}) {
     state.billingPlans = data.plans || [];
     state.billingEvents = data.events || [];
     state.billingSubscriptions = data.subscriptions || [];
+    state.billingAddons = data.addons || [];
     state.billingConfig = data.config || null;
     state.billingLoaded = !data.error;
     state.billingError = data.error || '';
@@ -2017,6 +2030,7 @@ function renderBilling() {
   renderBillingConfig();
   renderBillingSubscriptions();
   renderBillingPlans();
+  renderBillingAddons();
   renderBillingEvents();
   renderBillingAlerts();
 }
@@ -2162,6 +2176,25 @@ function renderBillingPlans() {
       <i style="width:${Math.max(8, (Number(row.mrr_cents || 0) / max) * 100)}%"></i>
     </article>
   `).join('') : '<p class="empty-state">Nenhum plano ativo encontrado com os filtros atuais.</p>';
+}
+
+function renderBillingAddons() {
+  if (!els.platformBillingAddonList) return;
+  if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
+    els.platformBillingAddonList.innerHTML = '<p class="empty-state">Os adicionais aparecem após carregar Billing.</p>';
+    return;
+  }
+  const rows = state.billingAddons || [];
+  els.platformBillingAddonList.innerHTML = rows.length ? rows.slice(0, 12).map((row) => `
+    <article class="platform-plan-mrr-row">
+      <div>
+        <strong>${escapeHtml(row.store_name || row.company_name || 'Loja')}</strong>
+        <small>${escapeHtml(row.addon_name || 'Adicional')} · ${escapeHtml(subscriptionStatusLabel(row.status || 'unknown'))}</small>
+      </div>
+      <span>${moneyCents(row.price_cents)}</span>
+      <small>Custo ${moneyCents(row.provider_cost_cents)} · margem ${moneyCents(row.estimated_margin_cents)}</small>
+    </article>
+  `).join('') : '<p class="empty-state">Nenhum adicional ativo ou pendente no momento.</p>';
 }
 
 function renderBillingEvents() {
@@ -4050,6 +4083,9 @@ async function request(url, options = {}) {
     if (!response.ok) {
       const error = new Error(data.detail || data.error || 'Falha na requisição.');
       error.status = response.status;
+      if ((response.status === 401 || response.status === 403) && !String(url).includes('/api/admin/login')) {
+        showPlatformLogin(error.message || 'Faça login para acessar a Central.');
+      }
       throw error;
     }
     return data;
