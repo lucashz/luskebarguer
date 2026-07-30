@@ -14054,6 +14054,13 @@ body.admin-tour-active {
   font-size: clamp(2rem, 5vw, 3.5rem);
 }
 
+.legal-company-id {
+  margin: -6px 0 20px;
+  color: var(--muted);
+  font-size: .86rem;
+  font-weight: 700;
+}
+
 .legal-page h2 {
   margin-top: 28px;
 }

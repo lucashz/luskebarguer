@@ -546,7 +546,13 @@ h3 {
 }
 
 .home-carousel-slide.crop-operacao img {
-  object-position: 82% 0;
+  object-fit: contain;
+  object-position: 54% 0;
+  background: #f4f5f7;
+}
+
+.home-carousel-slide.crop-configuracao img {
+  object-position: 56% 0;
 }
 
 .home-carousel-slide figcaption {
@@ -1066,6 +1072,15 @@ h3 {
   color: var(--home-muted);
   font-size: 14px;
   line-height: 1.6;
+}
+
+.home-footer .company-id {
+  display: block;
+  margin-top: 10px;
+  color: var(--home-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
 }
 
 .home-footer nav {

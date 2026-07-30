@@ -25,6 +25,7 @@ const UPLOAD_DIR = path.resolve(__dirname, process.env.UPLOAD_DIR || 'uploads');
 const BACKUP_DIR = path.resolve(__dirname, process.env.BACKUP_DIR || 'backups');
 const STORE_WHATSAPP_NUMBER = onlyDigits(process.env.STORE_WHATSAPP_NUMBER || '');
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
+const COMPANY_LEGAL_ID = 'TáPronto - CNPJ 68.264.239/0001-02';
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 180), 1, 365);
@@ -8011,13 +8012,11 @@ async function connectAdminWhatsappIntegration(req, admin) {
   if (!config.is_active || !config.base_url || !config.api_key) throw httpError(503, 'WhatsApp automático ainda não foi configurado pela Central.');
   const store = await getStoreSettings(admin.store_id);
   const existing = await getStoreWhatsappIntegration(admin.store_id);
-  const testInstanceName = cleanText(process.env.PLATFORM_WHATSAPP_TEST_INSTANCE_NAME || '');
-  const useTestInstance = process.env.PLATFORM_WHATSAPP_SKIP_CREDIT_CHECK === 'true' && Boolean(testInstanceName);
-  const providerReserve = (existing || useTestInstance) ? null : await assertWhatsappProviderCreditForNewInstance(req, admin, store);
-  const instanceName = useTestInstance ? testInstanceName : (existing?.instance_name || buildEvolutionInstanceName(store));
+  const providerReserve = existing ? null : await assertWhatsappProviderCreditForNewInstance(req, admin, store);
+  const instanceName = existing?.instance_name || buildEvolutionInstanceName(store);
   let providerData = null;
   try {
-    providerData = (existing?.instance_name || useTestInstance)
+    providerData = existing?.instance_name
       ? await evolutionRestartOrConnectInstance(instanceName, config)
       : await evolutionCreateInstance(instanceName, store, config);
     await setEvolutionWebhook(instanceName, config).catch(() => null);
@@ -8029,6 +8028,10 @@ async function connectAdminWhatsappIntegration(req, admin) {
       status: 'error',
       last_error: error.message || 'Falha ao criar instância.'
     });
+    const providerStatus = Number(error.status || error.detail?.status || 0);
+    if ([401, 403].includes(providerStatus)) {
+      throw httpError(502, 'A Evolution recusou a criação da instância. Atualize a API key na Central com permissão para criar instâncias e tente novamente.');
+    }
     throw httpError(502, 'Não foi possível gerar o QR Code do WhatsApp. Tente novamente em instantes.');
   }
   const saved = await upsertStoreWhatsappIntegration({
@@ -8691,7 +8694,11 @@ async function sendPlatformEmail({ to, subject, body, templateKey }) {
 function buildSmtpMessage({ to, subject, body, settings }) {
   const fromName = settings.from_name || 'Suporte TáPronto';
   const ehloDomain = process.env.SMTP_EHLO_DOMAIN || 'cardapio.local';
-  const plainBody = String(body || '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  const rawBody = String(body || '').replace(/\r\n/g, '\n').trimEnd();
+  const bodyWithLegalId = rawBody.includes(COMPANY_LEGAL_ID)
+    ? rawBody
+    : `${rawBody}\n\n--\n${COMPANY_LEGAL_ID}`;
+  const plainBody = bodyWithLegalId.replace(/\n/g, '\r\n');
   const headers = [
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${randomUUID()}@${ehloDomain}>`,
@@ -12344,6 +12351,10 @@ function platformBaseUrl() {
   return subdomainBaseUrl('PLATFORM_BASE_URL', 'PLATFORM_HOSTS', 'central.taprontomenu.com.br');
 }
 
+function helpBaseUrl() {
+  return subdomainBaseUrl('HELP_BASE_URL', 'HELP_HOSTS', 'ajuda.taprontomenu.com.br');
+}
+
 function subdomainBaseUrl(baseEnv, hostsEnv, fallbackHost) {
   const explicit = String(process.env[baseEnv] || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;
@@ -14917,6 +14928,7 @@ function canonicalHostRedirectUrl(requestPath, hostHeader = '', requestSearch = 
 
   const panelAliases = new Set(['/painel', '/admin', '/entrar', '/onboarding', '/redefinir-senha', '/ativar-conta', '/convite']);
   const platformAliases = new Set(['/central', '/platform', '/plataform']);
+  const helpAliases = new Set(['/ajuda', '/help']);
   const querylessPath = requestPath || '/';
   const panelHosts = csvEnv('PANEL_HOSTS');
   const platformHosts = csvEnv('PLATFORM_HOSTS');
@@ -14929,6 +14941,9 @@ function canonicalHostRedirectUrl(requestPath, hostHeader = '', requestSearch = 
   }
   if (platformAliases.has(querylessPath) && isPlatformHost) {
     return absoluteFromBase(platformBaseUrl(), `/${requestSearch || ''}`);
+  }
+  if (helpAliases.has(querylessPath)) {
+    return absoluteFromBase(helpBaseUrl(), `/${requestSearch || ''}`);
   }
   if (panelAliases.has(querylessPath) && !isPanelHost) {
     return absoluteFromBase(panelBaseUrl(), `${panelCanonicalPath(querylessPath)}${requestSearch || ''}`);

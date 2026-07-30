@@ -2688,7 +2688,11 @@ function filteredSupportTickets() {
   const planFilter = els.supportPlanFilter?.value || '';
   const priorityWeight = { critical: 0, high: 1, medium: 2, low: 3 };
   return (state.supportTickets || [])
-    .filter((ticket) => !statusFilter || ticket.status === statusFilter)
+    .filter((ticket) => {
+      if (!statusFilter) return true;
+      if (statusFilter === 'unresolved') return !['resolved', 'closed'].includes(ticket.status);
+      return ticket.status === statusFilter;
+    })
     .filter((ticket) => !priorityFilter || ticket.priority === priorityFilter)
     .filter((ticket) => {
       if (!search) return true;

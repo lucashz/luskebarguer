@@ -445,6 +445,11 @@ body.help-page {
   color: var(--help-muted);
 }
 
+.help-footer .company-id {
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .help-footer nav {
   display: flex;
   flex-wrap: wrap;
