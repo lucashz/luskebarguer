@@ -7,5 +7,10 @@ uploads/
 .tmp/
 npm-debug.log*
 backup-*.tar.gz
+*.zip
+*.dump
+.env.bak*
+.env.ssl.bak*
+thai/
 .DS_Store
 Thumbs.db

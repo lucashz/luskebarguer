@@ -2409,6 +2409,7 @@ function isStoreNotFoundError(error) {
 
 function showStoreNotFound(message) {
   document.body.classList.add('store-unavailable');
+  document.title = 'Cardápio Indisponível - TáPronto';
   if (els.storeNotFound) els.storeNotFound.hidden = false;
   if (els.storeNotFoundMessage) {
     els.storeNotFoundMessage.textContent = message || 'Confira se o link está correto ou fale com o estabelecimento para confirmar o endereço do cardápio.';
