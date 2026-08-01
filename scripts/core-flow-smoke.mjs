@@ -187,16 +187,29 @@ try {
     cookie: adminCookie,
     body: { plan_code: 'professional' }
   });
-  assert(checkout.data.subscription?.id, 'Checkout/ativacao de plano nao retornou assinatura.');
-  const webhook = await request('/api/billing/webhook?provider=manual', {
+  assert(checkout.data.subscription?.id, 'Checkout de plano nao retornou assinatura pendente.');
+  assert(checkout.data.subscription?.status === 'payment_pending', `Checkout deveria manter assinatura pendente, recebeu ${checkout.data.subscription?.status || 'vazio'}.`);
+  assert(checkout.data.checkout_url, 'Checkout de plano pago deveria retornar URL de pagamento.');
+  const webhook = await request('/api/billing/webhook?provider=mock', {
     method: 'POST',
     body: {
       eventId: `smoke-billing-${suffix}`,
+      id: checkout.data.subscription.external_subscription_id,
       status: 'paid',
       metadata: { companyId, planCode: 'professional' }
     }
   });
   assert(webhook.data.ok === true, 'Webhook de billing nao retornou ok.');
+  const planAfterPayment = await client.query(`
+    select p.code, s.status
+      from public.company_subscriptions s
+      join public.subscription_plans p on p.id = s.plan_id
+     where s.company_id = $1
+       and s.status = 'active'
+     order by s.created_at desc
+     limit 1
+  `, [companyId]);
+  assert(planAfterPayment.rows[0]?.code === 'professional', `Pagamento nao ativou o plano professional, recebeu ${planAfterPayment.rows[0]?.code || 'vazio'}.`);
 
   await request('/api/admin/account/delete', {
     method: 'POST',

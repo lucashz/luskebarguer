@@ -5934,9 +5934,9 @@ async function createBillingCheckout(req, admin, data = {}) {
   if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
     throw httpError(503, 'Checkout indisponível: configure ABACATEPAY_API_KEY ou PLATFORM_BILLING_API_KEY no servidor.');
   }
-  if (billingConfig.provider === 'mock' || amount <= 0) {
+  if (amount <= 0) {
     const activated = await activateCompanyPlan(req, admin, company, plan, {
-      source: amount <= 0 ? 'free_plan' : 'manual_activation',
+      source: 'free_plan',
       provider: 'manual',
       currentPlan,
       changeType,
@@ -5965,6 +5965,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     metadata: {
       source: 'admin_billing_checkout',
       checkout_url: checkout.checkoutUrl || null,
+      external_id: checkout.transactionId || null,
       plan_code: plan.code,
       amount_cents: amount,
       change_type: changeType,
@@ -5985,6 +5986,7 @@ async function createBillingCheckout(req, admin, data = {}) {
       source: 'admin_billing_checkout',
       plan_code: plan.code,
       plan_name: plan.name,
+      checkout_external_id: checkout.transactionId || null,
       change_type: changeType,
       downgrade_warnings: downgradeWarnings
     }
@@ -6812,6 +6814,63 @@ async function findSubscriptionPaymentTransactionByExternalId(provider, external
   return row || null;
 }
 
+async function findSubscriptionPaymentTransactionByExternalIds(provider, externalIds = []) {
+  for (const externalId of uniqueCleanExternalIds(externalIds)) {
+    const row = await findSubscriptionPaymentTransactionByExternalId(provider, externalId);
+    if (row) return row;
+  }
+  return null;
+}
+
+function uniqueCleanExternalIds(values = []) {
+  return [...new Set((Array.isArray(values) ? values : [values])
+    .map((value) => cleanExternalId(value || ''))
+    .filter(Boolean))];
+}
+
+function billingWebhookExternalIds(payload = {}, data = {}) {
+  return uniqueCleanExternalIds([
+    payload.id,
+    payload.billingId,
+    payload.subscriptionId,
+    payload.checkoutId,
+    payload.transactionId,
+    payload.externalId,
+    payload.external_id,
+    data.billingId,
+    data.subscriptionId,
+    data.checkoutId,
+    data.transactionId,
+    data.externalId,
+    data.external_id
+  ]);
+}
+
+function companyIdFromBillingExternalId(externalId = '') {
+  const match = cleanExternalId(externalId).match(/^tapronto-sub-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-/i);
+  return match?.[1] ? cleanUuid(match[1]) : '';
+}
+
+async function findPendingCompanySubscriptionByExternalIds(provider, externalIds = [], fallbackCompanyId = '') {
+  const ids = uniqueCleanExternalIds(externalIds);
+  const companyId = cleanOptionalUuid(fallbackCompanyId || ids.map(companyIdFromBillingExternalId).find(Boolean) || '', 'empresa');
+  if (!companyId) return null;
+  const rows = await dbRequest('GET', 'company_subscriptions', {
+    select: '*',
+    company_id: `eq.${companyId}`,
+    billing_provider: `eq.${cleanSlug(provider || '')}`,
+    status: 'in.(payment_pending,trial,active,grace_period,past_due)',
+    order: 'created_at.desc',
+    limit: '20'
+  }).catch(() => []);
+  return rows.find((subscription) => {
+    const metadata = subscription.metadata || {};
+    return ids.includes(cleanExternalId(subscription.external_subscription_id || ''))
+      || ids.includes(cleanExternalId(metadata.external_id || ''))
+      || ids.includes(cleanExternalId(metadata.checkout_external_id || ''));
+  }) || null;
+}
+
 async function updateSubscriptionPaymentTransaction(id, patch = {}) {
   const transactionId = cleanUuid(id);
   if (!transactionId) return null;
@@ -6858,8 +6917,9 @@ async function receiveBillingWebhook(data, options = {}) {
   ) || `billing_${Date.now()}`;
   const eventId = cleanExternalId(rawEventId);
   const externalId = cleanText(payload.id || payload.billingId || payload.subscriptionId || data.billingId || '');
+  const externalIds = billingWebhookExternalIds(payload, data);
   const metadata = payload.metadata || data.metadata || {};
-  const companyId = cleanUuid(metadata.companyId || metadata.company_id || data.companyId || '');
+  const companyId = cleanOptionalUuid(metadata.companyId || metadata.company_id || data.companyId || externalIds.map(companyIdFromBillingExternalId).find(Boolean) || '', 'empresa');
   const planCode = cleanSlug(metadata.planCode || metadata.plan_code || payload.externalId || '');
   const status = billingProviderStatus(payload.status || data.status || data.event);
   const amountCents = billingWebhookAmountCents(payload, data);
@@ -6867,7 +6927,7 @@ async function receiveBillingWebhook(data, options = {}) {
   const duplicateTransaction = await findSubscriptionPaymentTransactionByEvent(provider, eventId);
   if (duplicateTransaction) return { ok: true, duplicate: true, transaction: duplicateTransaction };
 
-  const addonTransaction = externalId ? await findSubscriptionPaymentTransactionByExternalId(provider, externalId) : null;
+  const addonTransaction = await findSubscriptionPaymentTransactionByExternalIds(provider, externalIds);
   if (addonTransaction?.metadata?.kind === 'addon') {
     return processAddonBillingWebhook(reqLikeFromWebhook(), {
       data,
@@ -6891,9 +6951,12 @@ async function receiveBillingWebhook(data, options = {}) {
   else if (companyId) query.company_id = `eq.${companyId}`;
   else throw httpError(422, 'Webhook sem identificador de assinatura.');
 
-  const [subscription] = await dbRequest('GET', 'company_subscriptions', query);
+  let [subscription] = await dbRequest('GET', 'company_subscriptions', query);
+  if (!subscription) {
+    subscription = await findPendingCompanySubscriptionByExternalIds(provider, externalIds, companyId);
+  }
   if (!subscription) throw httpError(404, 'Assinatura não encontrada.');
-  let transaction = addonTransaction || await findSubscriptionPaymentTransactionByExternalId(provider, externalId);
+  let transaction = addonTransaction || await findSubscriptionPaymentTransactionByExternalIds(provider, externalIds);
   if (!transaction && subscription.id) {
     const [latest] = await dbRequest('GET', 'subscription_payment_transactions', {
       select: '*',
@@ -15981,6 +16044,7 @@ function routePath(requestPath, hostHeader = '') {
   if (requestPath === '/privacidade') return '/privacy.html';
   if (requestPath === '/entrar') return '/admin.html';
   if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
+  if (requestPath === '/confirmar-email') return '/confirm-email.html';
   if (requestPath === '/ativar-conta') return '/activate-account.html';
   if (requestPath === '/redefinir-senha') return '/reset-password.html';
   if (requestPath === '/onboarding') return '/admin.html';

@@ -11,6 +11,7 @@ let signupActivationEmail = '';
 const EMAIL_DELIVERY_HINT = 'Confira também spam, lixo eletrônico e a aba Promoções. O e-mail pode levar alguns minutos para chegar.';
 const portalResetPasswordForm = document.querySelector('#portalResetPasswordForm');
 const portalActivationButton = document.querySelector('#portalActivationButton');
+const confirmEmailResendButton = document.querySelector('#confirmEmailResendButton');
 const onboardingChecklist = document.querySelector('#onboardingChecklist');
 const onboardingProgress = document.querySelector('#onboardingProgress');
 const onboardingPublishButton = document.querySelector('#onboardingPublishButton');
@@ -49,6 +50,7 @@ async function initPortal() {
   if (signupForm) initSignup();
   if (portalResetPasswordForm) await initPasswordReset();
   if (portalActivationButton) await initAccountActivation();
+  if (confirmEmailResendButton) initConfirmEmailPage();
   if (onboardingChecklist) {
     setupAdminStoreHomeLinks().catch(() => {});
     await loadOnboarding();
@@ -251,14 +253,7 @@ async function submitSignup(event) {
     });
     if (data.needs_activation) {
       signupActivationEmail = String(payload.owner.email || '').trim();
-      signupMessage.textContent = data.message || `Conta criada. Confira seu e-mail para ativar o acesso. ${EMAIL_DELIVERY_HINT}`;
-      renderSignupActivationActions();
-      signupForm.classList.add('signup-created');
-      setSignupLoading(false);
-      if (signupSubmitButton) {
-        signupSubmitButton.disabled = true;
-        signupSubmitButton.textContent = 'Aguardando ativação por e-mail';
-      }
+      location.href = `/confirmar-email?email=${encodeURIComponent(signupActivationEmail)}`;
       return;
     }
     signupMessage.textContent = 'Conta criada. Abrindo onboarding...';
@@ -316,6 +311,34 @@ async function resendSignupActivationEmail(button) {
       button.textContent = originalText;
     }
   }
+}
+
+function initConfirmEmailPage() {
+  const params = new URLSearchParams(location.search);
+  const email = String(params.get('email') || '').trim();
+  const emailLabel = document.querySelector('#confirmEmailAddress');
+  const message = document.querySelector('#confirmEmailMessage');
+  if (emailLabel && email) emailLabel.textContent = email;
+  confirmEmailResendButton?.addEventListener('click', async () => {
+    const targetEmail = email || window.prompt('Informe o e-mail cadastrado para reenviar a confirmação:');
+    if (!targetEmail) return;
+    const originalText = confirmEmailResendButton.textContent || 'Reenviar confirmação';
+    try {
+      confirmEmailResendButton.disabled = true;
+      confirmEmailResendButton.textContent = 'Reenviando...';
+      const data = await request('/api/portal/resend-activation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail })
+      });
+      if (message) message.textContent = data.message || `Enviamos um novo link de ativação. ${EMAIL_DELIVERY_HINT}`;
+    } catch (error) {
+      if (message) message.textContent = error.message || 'Não foi possível reenviar a confirmação agora.';
+    } finally {
+      confirmEmailResendButton.disabled = false;
+      confirmEmailResendButton.textContent = originalText;
+    }
+  });
 }
 
 async function initAccountActivation() {
