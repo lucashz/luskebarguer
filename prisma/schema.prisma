@@ -616,7 +616,7 @@ model OrderWhatsappLog {
 
 model PlatformWhatsappSetting {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider        String    @default("evolution")
+  provider        String    @default("evolution_go")
   baseUrl         String?   @map("base_url")
   apiKeyEncrypted String?   @map("api_key_encrypted")
   isActive        Boolean   @default(false) @map("is_active")
@@ -632,7 +632,7 @@ model PlatformWhatsappSetting {
 
 model PlatformWhatsappProviderAccount {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider          String    @default("evolution")
+  provider          String    @default("evolution_go")
   status            String    @default("inactive")
   balanceCents      Int       @default(0) @map("balance_cents")
   instanceCostCents Int       @default(2990) @map("instance_cost_cents")
@@ -651,7 +651,7 @@ model StoreWhatsappIntegration {
   id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyId           String?   @map("company_id") @db.Uuid
   storeId             String    @map("store_id") @db.Uuid
-  provider            String    @default("evolution")
+  provider            String    @default("evolution_go")
   instanceName        String    @unique @map("instance_name")
   instanceId          String?   @map("instance_id")
   instanceToken       String?   @map("instance_token")
@@ -683,7 +683,7 @@ model WhatsappInstanceEvent {
   companyId    String?  @map("company_id") @db.Uuid
   storeId      String?  @map("store_id") @db.Uuid
   integrationId String? @map("integration_id") @db.Uuid
-  provider     String   @default("evolution")
+  provider     String   @default("evolution_go")
   eventType    String   @map("event_type")
   status       String   @default("info")
   costCents    Int      @default(0) @map("cost_cents")
@@ -701,7 +701,7 @@ model WhatsappMessageLog {
   companyId         String?  @map("company_id") @db.Uuid
   storeId           String?  @map("store_id") @db.Uuid
   orderId           String?  @map("order_id") @db.Uuid
-  provider          String   @default("evolution")
+  provider          String   @default("evolution_go")
   instanceName      String?  @map("instance_name")
   destinationPhone  String?  @map("destination_phone")
   messageType       String   @default("order_status") @map("message_type")

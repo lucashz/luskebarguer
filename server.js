@@ -478,9 +478,24 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/admin/billing/addons/checkout') {
-    const admin = await requireAdminPermission(req, res, 'integrations');
+    const admin = await requireAdminAnyPermission(req, res, ['plan', 'integrations']);
     if (!admin) return;
     json(res, 200, await createAddonCheckout(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/billing/addons') {
+    const admin = await requireAdminAnyPermission(req, res, ['plan', 'integrations']);
+    if (!admin) return;
+    json(res, 200, await listAdminBillingAddons(admin));
+    return;
+  }
+
+  const adminAddonSupportMatch = url.pathname.match(/^\/api\/admin\/billing\/addons\/([a-z0-9_-]+)\/support-request$/i);
+  if (adminAddonSupportMatch && method === 'POST') {
+    const admin = await requireAdminAnyPermission(req, res, ['plan', 'integrations']);
+    if (!admin) return;
+    json(res, 201, await requestAssistedAddonSupport(req, admin, adminAddonSupportMatch[1]));
     return;
   }
 
@@ -1367,6 +1382,13 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'GET' && url.pathname === '/api/admin/integrations/payment-setup') {
+    const admin = await requireAdminPermission(req, res, 'store');
+    if (!admin) return;
+    json(res, 200, { payment_setup: await getAdminPaymentSetupAssistance(admin) });
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/admin/integrations/whatsapp') {
     const admin = await requireAdminPermission(req, res, 'store');
     if (!admin) return;
@@ -1526,9 +1548,17 @@ async function handleApi(req, res, url) {
     }, patch, ['Prefer: return=representation']);
     if (!updated[0]) throw httpError(404, 'Pedido não encontrado nesta loja.');
     clearAdminOrdersCache(admin.store_id);
-    sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false, ...op }).catch((error) => {
+    let whatsappLog = null;
+    try {
+      whatsappLog = await sendOrderStatusWhatsapp(orderStatusMatch[1], body.status, { manual: false, ...op });
+    } catch (error) {
       console.error('Falha ao enviar WhatsApp de status:', error.message || error);
-    });
+      whatsappLog = {
+        delivery_status: 'skipped',
+        order_status: body.status,
+        error_message: error.message || 'Não foi possível enviar o WhatsApp automático.'
+      };
+    }
     await audit('order.status.update', {
       req,
       company_id: admin.company_id,
@@ -1538,7 +1568,7 @@ async function handleApi(req, res, url) {
       entity_id: updated[0].id,
       after_data: { status: body.status, financial_status: patch.financial_status || updated[0].financial_status }
     });
-    json(res, 200, { order: updated[0] || null, whatsapp_log: null });
+    json(res, 200, { order: updated[0] || null, whatsapp_log: whatsappLog });
     return;
   }
 
@@ -1549,7 +1579,8 @@ async function handleApi(req, res, url) {
     const op = await adminOperationalOptions(admin);
     await assertOrderBelongsToStore(orderWhatsappMatch[1], admin.store_id, op);
     const body = await readJson(req);
-    const log = await sendOrderStatusWhatsapp(orderWhatsappMatch[1], body.status, { manual: true, ...op });
+    const manual = body.manual !== false;
+    const log = await sendOrderStatusWhatsapp(orderWhatsappMatch[1], body.status, { manual, ...op });
     await audit('order.whatsapp.resend', {
       req,
       company_id: admin.company_id,
@@ -6055,7 +6086,10 @@ async function createAddonCheckout(req, admin, data = {}) {
       source: 'admin_addon_checkout',
       addon_code: addon.code,
       amount_cents: amount,
-      provider_cost_cents: Number(addon.provider_cost_cents || 0)
+      provider_cost_cents: Number(addon.provider_cost_cents || 0),
+      billing_type: addonBillingType(addon),
+      service_type: isAssistedServiceAddon(addon) ? 'assisted_setup' : null,
+      service_status: isAssistedServiceAddon(addon) ? 'payment_pending' : null
     }
   }, ['Prefer: return=representation']);
   const transaction = await createSubscriptionPaymentTransaction({
@@ -6108,6 +6142,68 @@ async function createAddonCheckout(req, admin, data = {}) {
   };
 }
 
+async function listAdminBillingAddons(admin) {
+  const storeId = cleanUuid(admin.store_id || '');
+  const rows = await dbRequest('GET', 'plan_addons', {
+    select: '*',
+    is_active: 'eq.true',
+    order: 'sort_order.asc,name.asc',
+    limit: '200'
+  }).catch(() => []);
+  const addons = [];
+  for (const addon of rows) {
+    const assisted = isAssistedServiceAddon(addon);
+    const commercial = ['whatsapp_automatic'].includes(addon.code);
+    if (!assisted && !commercial) continue;
+    const access = await getStoreAddonAccess(admin, addon.code).catch(() => ({ addon, available: false, active: false, included: false }));
+    const activeAddon = access.active_addon || null;
+    addons.push({
+      addon: publicPlanAddon(addon),
+      available: Boolean(access.available),
+      included: Boolean(access.included),
+      active: Boolean(access.active),
+      active_addon: activeAddon ? publicStoreAddon(activeAddon) : null,
+      service_status: activeAddon?.metadata?.service_status || (access.included ? 'included' : ''),
+      support_ticket_id: activeAddon?.metadata?.support_ticket_id || null,
+      message: access.message || '',
+      store_id: storeId || null
+    });
+  }
+  return { addons };
+}
+
+function publicPlanAddon(addon = {}) {
+  return {
+    id: addon.id || null,
+    code: addon.code || '',
+    name: addon.name || '',
+    description: addon.description || '',
+    price_cents: Number(addon.monthly_price_cents || 0),
+    price_label: addonPriceLabel(addon),
+    billing_type: addonBillingType(addon),
+    service_type: addon.settings?.service_type || '',
+    support_category: addon.settings?.support_category || '',
+    sort_order: Number(addon.sort_order || 0)
+  };
+}
+
+function publicStoreAddon(row = {}) {
+  return {
+    id: row.id || null,
+    status: row.status || '',
+    checkout_url: row.checkout_url || '',
+    activated_at: row.activated_at || null,
+    current_period_ends_at: row.current_period_ends_at || null,
+    next_renewal_at: row.next_renewal_at || null,
+    metadata: {
+      billing_type: row.metadata?.billing_type || '',
+      service_type: row.metadata?.service_type || '',
+      service_status: row.metadata?.service_status || '',
+      support_ticket_id: row.metadata?.support_ticket_id || null
+    }
+  };
+}
+
 async function getPlanAddonByCode(code) {
   const addonCode = cleanSlug(code || '');
   if (!addonCode) return null;
@@ -6157,11 +6253,15 @@ async function getStoreAddonAccess(admin, addonCode) {
   const included = includedPlans.includes(planCode);
   const available = availablePlans.includes(planCode);
   const active = Boolean(activeAddon) || included;
+  const priceLabel = addonPriceLabel(addon);
+  const availableLabel = availablePlans.length
+    ? availablePlans.map((code) => code === 'essential' ? 'Essencial' : code === 'professional' ? 'Profissional' : code === 'premium' ? 'Premium' : code).join(', ')
+    : 'planos superiores';
   const message = included
     ? `${addon.name} já está incluso no seu plano.`
     : available
-      ? `${addon.name} pode ser contratado como adicional por ${formatMoney((Number(addon.monthly_price_cents || 0) / 100))}/mês.`
-      : `${addon.name} está disponível no Profissional como adicional ou incluso no Premium.`;
+      ? `${addon.name} pode ser contratado como adicional por ${priceLabel}.`
+      : `${addon.name} está disponível em: ${availableLabel}.`;
   return {
     addon,
     plan,
@@ -6171,6 +6271,34 @@ async function getStoreAddonAccess(admin, addonCode) {
     included,
     active_addon: activeAddon,
     message
+  };
+}
+
+function addonBillingType(addon = {}) {
+  const settings = isPlainObject(addon.settings) ? addon.settings : {};
+  return cleanSlug(settings.billing_type || settings.billingType || 'monthly') || 'monthly';
+}
+
+function isOneTimeAddon(addon = {}) {
+  return addonBillingType(addon) === 'one_time';
+}
+
+function addonPriceLabel(addon = {}) {
+  const amount = Number(addon.monthly_price_cents || 0) / 100;
+  if (!amount) return 'R$ 0,00';
+  return isOneTimeAddon(addon) ? `${formatMoney(amount)} uma vez` : `${formatMoney(amount)}/mês`;
+}
+
+function isAssistedServiceAddon(addon = {}) {
+  const settings = isPlainObject(addon.settings) ? addon.settings : {};
+  return cleanSlug(settings.service_type || settings.serviceType || '') === 'assisted_setup';
+}
+
+function assistedServiceTicketInfo(addon = {}) {
+  const settings = isPlainObject(addon.settings) ? addon.settings : {};
+  return {
+    category: cleanText(settings.support_category || settings.supportCategory || 'Serviço assistido') || 'Serviço assistido',
+    subject: cleanText(settings.support_subject || settings.supportSubject || addon.name || 'Serviço assistido TáPronto') || 'Serviço assistido TáPronto'
   };
 }
 
@@ -6236,10 +6364,10 @@ async function ensureAbacateAddonProduct({ addon, amount, token }) {
     body: {
       externalId,
       name: `Adicional ${addon.name}`,
-      description: addon.description || 'Adicional mensal da plataforma TáPronto',
+      description: addon.description || (isOneTimeAddon(addon) ? 'Serviço adicional da plataforma TáPronto' : 'Adicional mensal da plataforma TáPronto'),
       price: amount,
       currency: 'BRL',
-      cycle: 'MONTHLY'
+      ...(isOneTimeAddon(addon) ? {} : { cycle: 'MONTHLY' })
     }
   });
   const payload = data.data || data;
@@ -6255,6 +6383,7 @@ async function activateStoreAddon(req, admin, data = {}) {
   if (!addon) throw httpError(404, 'Adicional não encontrado.');
   const now = new Date();
   const periodEnd = new Date(now.getTime() + 30 * 86400000);
+  const oneTime = isOneTimeAddon(addon);
   const existing = await getActiveStoreAddon(storeId, addon.code);
   if (existing) return existing;
   const [row] = await dbRequest('POST', 'store_subscription_addons', {}, {
@@ -6267,13 +6396,14 @@ async function activateStoreAddon(req, admin, data = {}) {
     external_transaction_id: data.externalTransactionId || data.external_transaction_id || null,
     checkout_url: data.checkoutUrl || data.checkout_url || null,
     current_period_starts_at: now.toISOString(),
-    current_period_ends_at: periodEnd.toISOString(),
-    next_renewal_at: periodEnd.toISOString(),
+    current_period_ends_at: oneTime ? null : periodEnd.toISOString(),
+    next_renewal_at: oneTime ? null : periodEnd.toISOString(),
     activated_at: now.toISOString(),
     metadata: {
       source: data.source || 'addon_activation',
       amount_cents: Number(addon.monthly_price_cents || 0),
-      provider_cost_cents: Number(addon.provider_cost_cents || 0)
+      provider_cost_cents: Number(addon.provider_cost_cents || 0),
+      billing_type: addonBillingType(addon)
     }
   }, ['Prefer: return=representation']);
   await recordAddonBillingEvent({
@@ -6286,7 +6416,7 @@ async function activateStoreAddon(req, admin, data = {}) {
     amountCents: Number(addon.monthly_price_cents || 0),
     provider: data.provider || 'manual',
     externalTransactionId: data.externalTransactionId || data.external_transaction_id || null,
-    description: `${addon.name} ativado para a loja.`
+    description: oneTime ? `${addon.name} contratado para a loja.` : `${addon.name} ativado para a loja.`
   }).catch(() => {});
   await audit('billing.addon.activate', {
     req,
@@ -6297,7 +6427,132 @@ async function activateStoreAddon(req, admin, data = {}) {
     entity_id: row.id,
     after_data: { addon_code: addon.code, status: 'active' }
   }).catch(() => {});
+  if (isAssistedServiceAddon(addon)) {
+    return ensureAssistedAddonSupportTicket(req, admin, row, addon).catch(() => row);
+  }
   return row;
+}
+
+async function ensureAssistedAddonSupportTicket(req, admin, subscriptionAddon, addon) {
+  if (!isAssistedServiceAddon(addon) || !subscriptionAddon?.id) return subscriptionAddon;
+  const companyId = cleanUuid(subscriptionAddon.company_id || admin.company_id || '', 'empresa');
+  const storeId = cleanUuid(subscriptionAddon.store_id || admin.store_id || '', 'loja');
+  const metadata = subscriptionAddon.metadata || {};
+  if (metadata.support_ticket_id) return subscriptionAddon;
+  const info = assistedServiceTicketInfo(addon);
+  const existingTickets = await dbRequest('GET', 'support_tickets', {
+    select: '*',
+    company_id: `eq.${companyId}`,
+    store_id: `eq.${storeId}`,
+    category: `eq.${info.category}`,
+    order: 'updated_at.desc',
+    limit: '20'
+  }).catch(() => []);
+  let ticket = existingTickets.find((entry) => !['closed', 'resolved'].includes(entry.status) && cleanText(entry.subject || '').toLowerCase() === info.subject.toLowerCase());
+
+  const [company, store, subscription] = await Promise.all([
+    dbRequest('GET', 'companies', { select: 'id,name,billing_email,phone', id: `eq.${companyId}`, limit: '1' }).then((rows) => rows[0] || null).catch(() => null),
+    dbRequest('GET', 'stores', { select: 'id,name,slug', id: `eq.${storeId}`, limit: '1' }).then((rows) => rows[0] || null).catch(() => null),
+    dbRequest('GET', 'company_subscriptions', { select: '*', company_id: `eq.${companyId}`, order: 'created_at.desc', limit: '20' })
+      .then((rows) => pickCurrentCompanySubscription(rows) || rows[0] || null)
+      .catch(() => null)
+  ]);
+  const plan = subscription?.plan_id
+    ? await dbRequest('GET', 'subscription_plans', { select: 'id,name,code,slug,monthly_price', id: `eq.${subscription.plan_id}`, limit: '1' })
+      .then((rows) => rows[0] || null)
+      .catch(() => null)
+    : null;
+
+  if (!ticket) {
+    const now = new Date().toISOString();
+    const message = [
+      `Contato: ${admin.name || company?.name || 'Administrador'}`,
+      '',
+      `Serviço contratado: ${addon.name}`,
+      addon.description ? `Descrição: ${addon.description}` : '',
+      `Valor: ${addonPriceLabel(addon)}`,
+      '',
+      `Empresa: ${company?.name || 'Não identificada'}`,
+      `Loja: ${store?.name || 'Loja atual'}`,
+      `Slug: ${store?.slug || '-'}`,
+      `Plano atual: ${plan?.name || 'Sem plano identificado'}`,
+      `Status da assinatura: ${subscription?.status || 'Sem assinatura'}`,
+      `E-mail do administrador: ${admin.email || '-'}`,
+      `Contato financeiro: ${company?.billing_email || company?.phone || '-'}`,
+      '',
+      'Observação interna para a Central: serviço assistido já está pago/liberado. Entrar em contato com o cliente para combinar a configuração.'
+    ].filter((line) => line !== '').join('\n');
+    [ticket] = await dbRequest('POST', 'support_tickets', {}, {
+      company_id: companyId,
+      store_id: storeId,
+      admin_user_id: admin.id || null,
+      created_by_admin_id: admin.id || null,
+      subject: info.subject,
+      category: info.category,
+      priority: planCodeIsPremium(plan) || addon.code === 'full_implementation_package' ? 'high' : 'medium',
+      status: 'open',
+      source: 'admin',
+      last_message_at: now
+    }, ['Prefer: return=representation']);
+    await dbRequest('POST', 'support_ticket_messages', {}, {
+      ticket_id: ticket.id,
+      author_admin_id: admin.id || null,
+      author_type: 'admin',
+      message,
+      is_internal: false
+    }, ['Prefer: return=minimal']);
+    await notifyPlatformSupportActivity(ticket, 'internal_support_ticket_opened', {
+      messagePreview: `Serviço assistido contratado: ${addon.name}.`,
+      company,
+      store,
+      req
+    }).catch(() => {});
+  }
+
+  const [updated] = await dbRequest('PATCH', 'store_subscription_addons', { id: `eq.${subscriptionAddon.id}` }, {
+    metadata: {
+      ...(metadata || {}),
+      service_type: 'assisted_setup',
+      service_status: 'awaiting_support',
+      support_ticket_id: ticket.id
+    },
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  await audit('billing.addon.support_ticket.create', {
+    req,
+    actor_admin_id: admin.id || null,
+    company_id: companyId,
+    store_id: storeId,
+    entity_type: 'support_ticket',
+    entity_id: ticket.id,
+    after_data: { addon_code: addon.code, subscription_addon_id: subscriptionAddon.id }
+  }).catch(() => {});
+  return updated || subscriptionAddon;
+}
+
+async function requestAssistedAddonSupport(req, admin, addonCode) {
+  const addon = await getPlanAddonByCode(addonCode);
+  if (!addon || !isAssistedServiceAddon(addon)) throw httpError(404, 'Serviço assistido não encontrado.');
+  const access = await getStoreAddonAccess(admin, addon.code);
+  if (!access.active && !access.included) {
+    throw httpError(402, `Contrate ${addon.name} para abrir a solicitação com a equipe TáPronto.`, planErrorPayload('ADDON_REQUIRED', 'Serviço assistido não contratado.', { addon: addon.code }));
+  }
+  let row = access.active_addon;
+  if (!row && access.included) {
+    row = await activateStoreAddon(req, admin, {
+      addon,
+      provider: 'included',
+      source: 'included_assisted_service'
+    });
+  } else {
+    row = await ensureAssistedAddonSupportTicket(req, admin, row, addon);
+  }
+  return {
+    addon: publicPlanAddon(addon),
+    active_addon: publicStoreAddon(row),
+    support_ticket_id: row?.metadata?.support_ticket_id || null,
+    message: 'Solicitação aberta para a equipe TáPronto acompanhar.'
+  };
 }
 
 async function recordAddonBillingEvent(data = {}) {
@@ -6778,6 +7033,7 @@ async function processAddonBillingWebhook(req, context = {}) {
   const transactionStatus = billingTransactionStatus(status);
   const now = new Date();
   const periodEnd = new Date(now.getTime() + 30 * 86400000);
+  const oneTime = isOneTimeAddon(addon);
   let updatedAddon = subscriptionAddon || null;
   if (status === 'active') {
     if (updatedAddon?.id) {
@@ -6786,15 +7042,25 @@ async function processAddonBillingWebhook(req, context = {}) {
         provider,
         external_transaction_id: externalId || updatedAddon.external_transaction_id || null,
         current_period_starts_at: now.toISOString(),
-        current_period_ends_at: periodEnd.toISOString(),
-        next_renewal_at: periodEnd.toISOString(),
+        current_period_ends_at: oneTime ? null : periodEnd.toISOString(),
+        next_renewal_at: oneTime ? null : periodEnd.toISOString(),
         activated_at: updatedAddon.activated_at || now.toISOString(),
         updated_at: now.toISOString(),
         metadata: {
           ...(updatedAddon.metadata || {}),
+          billing_type: addonBillingType(addon),
+          service_type: isAssistedServiceAddon(addon) ? 'assisted_setup' : updatedAddon.metadata?.service_type || null,
+          service_status: isAssistedServiceAddon(addon) ? 'awaiting_support' : updatedAddon.metadata?.service_status || null,
           last_webhook: { eventId, status, received_at: now.toISOString() }
         }
       }, ['Prefer: return=representation']);
+      if (isAssistedServiceAddon(addon)) {
+        updatedAddon = await ensureAssistedAddonSupportTicket(req, {
+          id: null,
+          company_id: companyId,
+          store_id: resolvedStoreId
+        }, updatedAddon, addon).catch(() => updatedAddon);
+      }
     } else {
       updatedAddon = await activateStoreAddon(req, {
         id: null,
@@ -8597,6 +8863,32 @@ async function getAdminWhatsappIntegration(admin) {
   };
 }
 
+async function getAdminPaymentSetupAssistance(admin) {
+  const store = await getStoreSettings(admin.store_id);
+  const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
+  const pix = integrations.pix || {};
+  const addonAccess = await getStoreAddonAccess(admin, 'payment_setup_assisted').catch(() => null);
+  const configured = Boolean(pix.enabled && pix.apiKey && !isMaskedSecretValue(pix.apiKey));
+  const addon = addonAccess?.addon || null;
+  return {
+    configured,
+    pix_enabled: Boolean(pix.enabled),
+    has_api_key: Boolean(pix.apiKey),
+    has_webhook_secret: Boolean(pix.webhookSecret),
+    addon: addonAccess ? {
+      code: addon?.code || 'payment_setup_assisted',
+      name: addon?.name || 'Configuração Assistida do Pix Online',
+      active: addonAccess.active,
+      available: addonAccess.available,
+      included: addonAccess.included,
+      billing_type: addonBillingType(addon || {}),
+      price_cents: Number(addon?.monthly_price_cents || 0),
+      price_label: addonPriceLabel(addon || {}),
+      message: addonAccess.message
+    } : null
+  };
+}
+
 async function connectAdminWhatsappIntegration(req, admin) {
   await assertAutomaticWhatsappAccess(admin);
   const config = await privatePlatformWhatsappSettings();
@@ -9785,6 +10077,14 @@ async function requestPaymentSetupSupport(req, admin) {
   const companyId = cleanOptionalUuid(admin.company_id || '') || null;
   const storeId = cleanOptionalUuid(admin.store_id || '') || null;
   if (!companyId || !storeId) throw httpError(403, 'Sua conta precisa estar vinculada a uma loja para solicitar a configuração.');
+  const addonAccess = await getStoreAddonAccess(admin, 'payment_setup_assisted').catch(() => null);
+  if (!addonAccess?.active) {
+    const addon = addonAccess?.addon || await getPlanAddonByCode('payment_setup_assisted').catch(() => null);
+    const message = addonAccess?.available
+      ? `Contrate ${addon?.name || 'Configuração Assistida do Pix Online'} por ${addonPriceLabel(addon || {})} para a equipe TáPronto configurar com você.`
+      : 'A configuração assistida do pagamento online está inclusa no Premium ou disponível como adicional nos planos pagos.';
+    throw httpError(402, message, planErrorPayload('ADDON_REQUIRED', message, { addon: 'payment_setup_assisted' }));
+  }
 
   const existingTickets = await dbRequest('GET', 'support_tickets', {
     select: '*',
@@ -9831,7 +10131,7 @@ async function requestPaymentSetupSupport(req, admin) {
     `Contato financeiro: ${company?.billing_email || company?.phone || '-'}`,
     storeUrl ? `Cardápio: ${storeUrl}` : '',
     '',
-    'Observação interna para a Central: configuração assistida é um serviço comercial do Premium. Se a loja ainda não estiver no Premium, orientar contratação ou upgrade antes de ativar.'
+    'Observação interna para a Central: configuração assistida já está liberada para esta loja por plano incluso ou adicional contratado. Ajudar com API key, webhook e teste de pagamento.'
   ].filter((line) => line !== '').join('\n');
 
   const now = new Date().toISOString();
@@ -10955,6 +11255,47 @@ async function requireAdminPermission(req, res, permission) {
     admin.stores = access.map((entry) => publicStoreRef(entry.store)).filter(Boolean);
   }
   if (!['account', 'plan'].includes(permission)) {
+    const commercial = await companyCommercialStatus(admin.company_id);
+    if (!commercial.canOperate) {
+      json(res, 402, { error: commercial.message, commercial_status: commercial.status });
+      return null;
+    }
+  }
+  const featureCode = featureForPermission(permission);
+  if (featureCode && !(await canUseFeature(admin.company_id, featureCode))) {
+    json(res, 403, planErrorPayload('FEATURE_NOT_AVAILABLE', featureBlockedMessage(featureCode), { feature: featureCode }));
+    return null;
+  }
+  return admin;
+}
+
+async function requireAdminAnyPermission(req, res, permissions = []) {
+  const admin = await requireAdmin(req, res);
+  if (!admin) return null;
+  const allowed = permissions.some((permission) => adminCan(admin, permission));
+  if (!allowed) {
+    json(res, 403, { error: 'Sua conta não tem permissão para acessar esta área.' });
+    return null;
+  }
+  const permission = permissions.includes('plan') ? 'plan' : permissions[0];
+  if (isSupportModeAdmin(admin) && permissions.some((entry) => supportModeRestrictedPermission(entry))) {
+    json(res, 403, { error: 'Modo suporte não permite executar esta ação sensível.' });
+    return null;
+  }
+  if (!admin.store_id) {
+    json(res, 403, { error: 'Sua conta não possui uma loja ativa vinculada.' });
+    return null;
+  }
+  const access = await getAdminStoreAccess(admin);
+  const activeAccess = access.find((entry) => entry.store_id === admin.store_id);
+  if (!activeAccess) {
+    json(res, 403, { error: 'Sua sessão não possui acesso ativo a esta loja. Entre novamente.' });
+    return null;
+  }
+  admin.company_id = activeAccess.company_id;
+  admin.active_store = publicStoreRef(activeAccess.store);
+  admin.stores = access.map((entry) => publicStoreRef(entry.store)).filter(Boolean);
+  if (!permissions.includes('account') && !permissions.includes('plan') && !permissions.includes('platform')) {
     const commercial = await companyCommercialStatus(admin.company_id);
     if (!commercial.canOperate) {
       json(res, 402, { error: commercial.message, commercial_status: commercial.status });
@@ -12544,15 +12885,10 @@ async function createOrder(req, data, options = {}) {
   if (['table', 'tab'].includes(fulfillmentMethod)) clearAdminTablesCache();
   if (customerRow?.id) clearAdminCustomersCache();
 
-  const whatsappNumber = whatsappRecipientPhone(store.whatsapp_number || STORE_WHATSAPP_NUMBER);
-  const whatsappUrl = whatsappNumber
-    ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}`
-    : null;
-
   return {
     order: { ...finalOrder, items: itemsWithOrder },
     payment,
-    whatsapp_url: hasOnlinePayment ? null : whatsappUrl,
+    whatsapp_url: null,
     whatsapp_message: whatsappMessage
   };
 }
@@ -13269,6 +13605,42 @@ async function sendOrderStatusWhatsapp(orderId, status, options = {}) {
       provider: integrations.whatsapp.provider
     }, options);
   }
+  if (!manual) {
+    const integration = await getStoreWhatsappIntegration(order.store_id);
+    if (integration && normalizeWhatsappIntegrationStatus(integration.status) === 'connected') {
+      try {
+        const providerResult = await sendEvolutionStoreMessage(store, integration, phone, message, {
+          orderId: order.id,
+          messageType: 'order_status'
+        });
+        return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
+          recipient_phone: phone,
+          delivery_status: 'sent',
+          provider: 'evolution_go',
+          provider_message_id: providerResult.id,
+          is_manual: false
+        }, options);
+      } catch (error) {
+        return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
+          recipient_phone: phone,
+          delivery_status: 'failed',
+          error_message: error.message || 'Falha no WhatsApp automático.',
+          is_manual: false,
+          provider: 'evolution_go'
+        }, options);
+      }
+    }
+    const platformWhatsapp = await getPlatformWhatsappSettings();
+    if (platformWhatsapp.is_active && platformWhatsapp.has_api_key && platformWhatsapp.base_url && !integrations.whatsapp.enabled) {
+      return createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
+        recipient_phone: phone,
+        delivery_status: 'skipped',
+        error_message: 'WhatsApp automático ainda não conectado por QR Code.',
+        is_manual: false,
+        provider: 'evolution_go'
+      }, options);
+    }
+  }
   if (manual) {
     const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     const log = await createWhatsappLogWithUsage(order, targetStatus, message, featureCode, {
@@ -13399,16 +13771,16 @@ function orderStatusWhatsappMessage(store, order, status) {
   const storeName = cleanText(store.name || 'Nossa loja') || 'Nossa loja';
   const origin = whatsappOrderOrigin(order);
   const total = formatMoney(order.total);
-  const header = `Olá, ${name}! ${storeName} informa sobre seu pedido #${code}.`;
-  const footer = `\n\nPedido: #${code}\nTipo: ${origin}\nTotal: ${total}`;
+  const header = `Olá, ${name}! Aqui é ${storeName}.`;
+  const footer = `\n\nResumo do pedido\nPedido: #${code}\nTipo: ${origin}\nTotal: ${total}`;
   const messages = {
-    new: `${header}\n\nRecebemos seu pedido e ele está aguardando confirmação da loja.${footer}`,
-    accepted: `${header}\n\nSeu pedido foi aceito e já entrou na fila de preparo.${footer}`,
-    preparing: `${header}\n\nSeu pedido está sendo preparado agora.${footer}`,
+    new: `${header}\n\nRecebemos seu pedido #${code}. Ele está aguardando confirmação da loja.${footer}`,
+    accepted: `${header}\n\nSeu pedido #${code} foi aceito e já entrou na fila de preparo.${footer}`,
+    preparing: `${header}\n\nSeu pedido #${code} está em preparo. Estamos cuidando de tudo por aqui.${footer}`,
     ready: `${header}\n\n${whatsappReadyText(order)}${footer}`,
     out_for_delivery: `${header}\n\n${whatsappOutForDeliveryText(order)}${footer}`,
-    completed: `${header}\n\nSeu pedido foi concluído. Obrigado pela preferência!${footer}`,
-    cancelled: `${header}\n\nSeu pedido foi cancelado. Entre em contato com a loja em caso de dúvida.${footer}`
+    completed: `${header}\n\nSeu pedido #${code} foi concluído. Obrigado pela preferência!${footer}`,
+    cancelled: `${header}\n\nSeu pedido #${code} foi cancelado. Se precisar, fale com a loja para conferir os detalhes.${footer}`
   };
   return messages[status] || `${header}\n\nStatus atualizado: ${status}.${footer}`;
 }
@@ -13433,20 +13805,20 @@ function whatsappOrderOrigin(order) {
 
 function whatsappReadyText(order) {
   const method = order.fulfillment_method || 'delivery';
-  if (method === 'delivery') return 'Seu pedido está pronto e será enviado para entrega em instantes.';
-  if (method === 'pickup') return 'Seu pedido está pronto para retirada no estabelecimento.';
-  if (method === 'counter') return 'Seu pedido está pronto para retirada no balcão.';
-  if (method === 'table' || method === 'tab') return 'Seu pedido está pronto e será levado até sua mesa.';
-  return 'Seu pedido está pronto.';
+  if (method === 'delivery') return `Seu pedido #${order.public_code} ficou pronto e será enviado para entrega em instantes.`;
+  if (method === 'pickup') return `Seu pedido #${order.public_code} está pronto para retirada no estabelecimento.`;
+  if (method === 'counter') return `Seu pedido #${order.public_code} está pronto para retirada no balcão.`;
+  if (method === 'table' || method === 'tab') return `Seu pedido #${order.public_code} está pronto e será levado até sua mesa.`;
+  return `Seu pedido #${order.public_code} está pronto.`;
 }
 
 function whatsappOutForDeliveryText(order) {
   const method = order.fulfillment_method || 'delivery';
-  if (method === 'delivery') return 'Seu pedido saiu para entrega.';
-  if (method === 'pickup') return 'Seu pedido está aguardando retirada no estabelecimento.';
-  if (method === 'counter') return 'Seu pedido está aguardando retirada no balcão.';
-  if (method === 'table' || method === 'tab') return 'Seu pedido saiu da cozinha e será entregue na mesa.';
-  return 'Seu pedido saiu para entrega.';
+  if (method === 'delivery') return `Seu pedido #${order.public_code} saiu para entrega. Fique de olho!`;
+  if (method === 'pickup') return `Seu pedido #${order.public_code} está aguardando retirada no estabelecimento.`;
+  if (method === 'counter') return `Seu pedido #${order.public_code} está aguardando retirada no balcão.`;
+  if (method === 'table' || method === 'tab') return `Seu pedido #${order.public_code} saiu da cozinha e será entregue na mesa.`;
+  return `Seu pedido #${order.public_code} saiu para entrega.`;
 }
 
 async function createPixPayment(order, options = {}) {
@@ -14250,7 +14622,7 @@ function publicPaymentPayload(order, options = {}) {
     pix_code: details.pix_code || '',
     pix_qr_url: details.pix_qr_url || '',
     checkout_url: details.checkout_url || '',
-    whatsapp_url: order.financial_status === 'paid' ? publicOrderStoreWhatsappUrl(order, options) : ''
+    whatsapp_url: ''
   };
 }
 

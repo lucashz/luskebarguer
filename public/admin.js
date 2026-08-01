@@ -308,6 +308,7 @@ const els = {
   onboardingBackButton: document.querySelector('#onboardingBackButton'),
   onboardingNextButton: document.querySelector('#onboardingNextButton'),
   onboardingProductCategory: document.querySelector('#onboardingProductCategory'),
+  adminResendActivationButton: document.querySelector('#adminResendActivationButton'),
   operationTitle: document.querySelector('#operationTitle'),
   operationText: document.querySelector('#operationText'),
   operationBadge: document.querySelector('#operationBadge'),
@@ -419,6 +420,9 @@ const els = {
   refreshWhatsappQrButton: document.querySelector('#refreshWhatsappQrButton'),
   testWhatsappButton: document.querySelector('#testWhatsappButton'),
   disconnectWhatsappButton: document.querySelector('#disconnectWhatsappButton'),
+  paymentSetupStatus: document.querySelector('#paymentSetupStatus'),
+  paymentSetupMessage: document.querySelector('#paymentSetupMessage'),
+  checkoutPaymentSetupButton: document.querySelector('#checkoutPaymentSetupButton'),
   requestPaymentSetupButton: document.querySelector('#requestPaymentSetupButton'),
   integrationHelpDialog: document.querySelector('#integrationHelpDialog'),
   integrationHelpEyebrow: document.querySelector('#integrationHelpEyebrow'),
@@ -455,6 +459,7 @@ const els = {
   planBilling: document.querySelector('#planBilling'),
   planRenewal: document.querySelector('#planRenewal'),
   planUsage: document.querySelector('#planUsage'),
+  planServices: document.querySelector('#planServices'),
   planFeatures: document.querySelector('#planFeatures'),
   planCompare: document.querySelector('#planCompare'),
   planHistory: document.querySelector('#planHistory'),
@@ -499,6 +504,7 @@ document.querySelectorAll('[data-modifier-preset]').forEach((button) => {
 
 els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
+els.adminResendActivationButton?.addEventListener('click', resendAdminActivationFromLogin);
 els.adminRecoverForm?.addEventListener('submit', submitAdminPasswordRecovery);
 els.logoutButton?.addEventListener('click', logout);
 els.adminHeaderLogoutButton?.addEventListener('click', logout);
@@ -561,6 +567,7 @@ els.checkoutWhatsappAddonButton?.addEventListener('click', checkoutWhatsappAddon
 els.refreshWhatsappQrButton?.addEventListener('click', refreshWhatsappQrCode);
 els.testWhatsappButton?.addEventListener('click', testWhatsappAuto);
 els.disconnectWhatsappButton?.addEventListener('click', disconnectWhatsapp);
+els.checkoutPaymentSetupButton?.addEventListener('click', checkoutPaymentSetupAddon);
 els.requestPaymentSetupButton?.addEventListener('click', requestPaymentSetupSupport);
 els.refreshModifiersButton?.addEventListener('click', () => loadMenuData({ force: true }));
 els.newCategoryButton.addEventListener('click', openNewCategoryDialog);
@@ -852,6 +859,7 @@ async function submitLogin(event) {
   const data = Object.fromEntries(new FormData(els.loginForm));
   const button = els.loginForm.querySelector('button[type="submit"], button:not([type])');
   if (els.adminLoginMessage) els.adminLoginMessage.textContent = '';
+  if (els.adminResendActivationButton) els.adminResendActivationButton.hidden = true;
   if (button) {
     button.disabled = true;
     button.textContent = 'Entrando...';
@@ -869,6 +877,9 @@ async function submitLogin(event) {
   } catch (error) {
     const message = error.message || 'Não foi possível entrar. Confira os dados e tente novamente.';
     if (els.adminLoginMessage) els.adminLoginMessage.textContent = message;
+    if (els.adminResendActivationButton) {
+      els.adminResendActivationButton.hidden = !isActivationRequiredMessage(message);
+    }
     toast(message);
   } finally {
     if (button) {
@@ -876,6 +887,45 @@ async function submitLogin(event) {
       button.textContent = 'Entrar';
     }
   }
+}
+
+async function resendAdminActivationFromLogin() {
+  const email = els.loginForm?.elements?.email?.value || '';
+  if (!email) {
+    const message = 'Informe seu e-mail para reenviar a confirmação.';
+    if (els.adminLoginMessage) els.adminLoginMessage.textContent = message;
+    toast(message);
+    return;
+  }
+  const button = els.adminResendActivationButton;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Enviando...';
+  }
+  try {
+    const result = await request('/api/portal/resend-activation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const message = result.message || 'Enviamos um novo link de ativação. Confira também spam, lixo eletrônico e a aba Promoções.';
+    if (els.adminLoginMessage) els.adminLoginMessage.textContent = message;
+    toast(message);
+  } catch (error) {
+    const message = error.message || 'Não foi possível reenviar a confirmação agora.';
+    if (els.adminLoginMessage) els.adminLoginMessage.textContent = message;
+    toast(message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Reenviar confirmação';
+      button.hidden = false;
+    }
+  }
+}
+
+function isActivationRequiredMessage(message = '') {
+  return /ativad|ativa[cç][aã]o|confirme seu e-mail|spam|lixo eletr[oô]nico/i.test(String(message || ''));
 }
 
 async function submitAdminPasswordRecovery(event) {
@@ -1092,7 +1142,12 @@ async function loadAdminTabData(tab, options = {}) {
     }
     if (tab === 'store' || tab === 'integrations') {
       await loadStoreData(options);
-      if (tab === 'integrations') await loadWhatsappIntegration();
+      if (tab === 'integrations') {
+        await Promise.all([
+          loadWhatsappIntegration(),
+          loadPaymentSetupAssistance()
+        ]);
+      }
       return;
     }
     if (tab === 'plan') {
@@ -1234,7 +1289,12 @@ async function loadAdminUsersData(options = {}) {
 async function loadPlanData(options = {}) {
   if (!options.force && state.loadedAdminTabs.has('plan')) return;
   const startedAt = performance.now();
-  const data = await request('/api/admin/plan');
+  const [data, addonData] = await Promise.all([
+    request('/api/admin/plan'),
+    request('/api/admin/billing/addons').catch((error) => ({ addons: [], error: error.message || 'Não foi possível carregar serviços assistidos.' }))
+  ]);
+  data.addons = addonData.addons || [];
+  data.addons_error = addonData.error || '';
   state.plan = data;
   if (state.admin && Array.isArray(data.features)) {
     state.admin.plan_access = planFeaturesToAccess(data.features);
@@ -3292,6 +3352,8 @@ function orderCard(order) {
   const latestWhatsapp = (order.whatsapp_logs || [])[0];
   const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0);
   const canSendManualWhatsapp = canUseManualWhatsapp();
+  const canSendAutomaticWhatsapp = canUseAutomaticWhatsapp();
+  const whatsappStatus = orderWhatsappStatusHtml(order, latestWhatsapp);
   card.innerHTML = `
     <div class="order-card-top">
       <div>
@@ -3324,7 +3386,7 @@ function orderCard(order) {
           ${order.payment_transaction_id ? `<div><dt>Transação</dt><dd>${escapeHtml(order.payment_transaction_id)}</dd></div>` : ''}
           ${order.paid_amount ? `<div><dt>Valor pago</dt><dd>${money(order.paid_amount)}</dd></div>` : ''}
           ${order.paid_at ? `<div><dt>Pago em</dt><dd>${new Date(order.paid_at).toLocaleString('pt-BR')}</dd></div>` : ''}
-          ${latestWhatsapp ? `<div><dt>Último WhatsApp</dt><dd>${whatsappLogLabel(latestWhatsapp)}</dd></div>` : ''}
+          <div><dt>WhatsApp</dt><dd>${whatsappStatus}</dd></div>
           ${order.payment_details?.change_for ? `<div><dt>Troco</dt><dd>Para ${money(order.payment_details.change_for)}</dd></div>` : ''}
           <div><dt>Subtotal</dt><dd>${money(order.subtotal)}</dd></div>
           <div><dt>Entrega</dt><dd>${money(order.delivery_fee)}</dd></div>
@@ -3339,6 +3401,7 @@ function orderCard(order) {
           <button class="ghost-button compact print-order-button" type="button" data-preview-order="${escapeAttribute(order.id)}">Pré-visualizar</button>
           <button class="ghost-button compact print-order-button" type="button" data-reprint-order="${escapeAttribute(order.id)}">Reimprimir</button>
           ${canSendManualWhatsapp ? `<button class="ghost-button compact" type="button" data-whatsapp-status="${escapeAttribute(order.id)}">WhatsApp manual</button>` : ''}
+          ${canSendAutomaticWhatsapp ? `<button class="ghost-button compact" type="button" data-whatsapp-auto-status="${escapeAttribute(order.id)}">Reenviar aviso ao cliente</button>` : ''}
           ${order.financial_status === 'paid' ? `<button class="danger-button compact" type="button" data-refund-order="${escapeAttribute(order.id)}">Estornar pagamento</button>` : ''}
         </div>
       </div>
@@ -3360,6 +3423,7 @@ function orderCard(order) {
   card.querySelector('[data-preview-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', preview: true, reason: 'preview' }));
   card.querySelector('[data-reprint-order]')?.addEventListener('click', () => printOrder(order, { type: 'both', reason: 'retry' }));
   card.querySelector('[data-whatsapp-status]')?.addEventListener('click', () => notifyOrderStatus(order));
+  card.querySelector('[data-whatsapp-auto-status]')?.addEventListener('click', () => notifyOrderStatus(order, { manual: false }));
   card.querySelector('[data-refund-order]')?.addEventListener('click', () => refundOrder(order));
   card.addEventListener('dragstart', (event) => {
     if (event.target.closest('.order-details') || event.target.closest('button') || event.target.closest('select')) {
@@ -3412,6 +3476,27 @@ function whatsappLogLabel(log = {}) {
     manual: 'aberto manualmente',
     pending: 'pendente'
   })[log.delivery_status] || 'registrado';
+}
+
+function whatsappLogHint(log = {}) {
+  if (!log) return 'Sem tentativa registrada para este status.';
+  if (log.error_message) return log.error_message;
+  return ({
+    sent: 'Cliente avisado pelo WhatsApp automático.',
+    failed: 'Não foi possível avisar o cliente.',
+    skipped: 'Mensagem não enviada automaticamente.',
+    manual: 'Mensagem aberta para envio manual.',
+    pending: 'Envio aguardando processamento.'
+  })[log.delivery_status] || 'Registro de WhatsApp criado.';
+}
+
+function orderWhatsappStatusHtml(order, latestWhatsapp) {
+  const status = latestWhatsapp?.delivery_status || 'none';
+  const label = latestWhatsapp ? whatsappLogLabel(latestWhatsapp) : 'sem registro';
+  const detail = latestWhatsapp
+    ? `${statusLabel(latestWhatsapp.order_status || order.status)} - ${whatsappLogHint(latestWhatsapp)}`
+    : 'O próximo status pode gerar uma tentativa automática se o plano e a conexão permitirem.';
+  return `<span class="whatsapp-order-status whatsapp-order-status-${escapeAttribute(status)}" title="${escapeAttribute(detail)}">${escapeHtml(label)}</span>`;
 }
 
 function financialStatusLabel(status) {
@@ -3569,17 +3654,18 @@ async function printOrder(order, options = {}) {
   }
 }
 
-async function notifyOrderStatus(order) {
+async function notifyOrderStatus(order, options = {}) {
+  const manual = options.manual !== false;
   try {
     const result = await request(`/api/admin/orders/${order.id}/whatsapp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: order.status })
+      body: JSON.stringify({ status: order.status, manual })
     });
     if (result.log?.whatsapp_url) {
       window.open(result.log.whatsapp_url, '_blank', 'noopener');
     }
-    toast(`WhatsApp: ${whatsappLogLabel(result.log)}.`);
+    toast(`WhatsApp: ${whatsappLogLabel(result.log)}. ${whatsappLogHint(result.log)}`);
     await refreshOrdersOnly({ skipNotifications: true, silent: true });
   } catch (error) {
     toast(error.message || 'Não foi possível reenviar a mensagem.');
@@ -4070,11 +4156,21 @@ async function updateOrderStatus(orderId, status, options = {}) {
   }
 
   try {
-    await request(`/api/admin/orders/${orderId}/status`, {
+    const result = await request(`/api/admin/orders/${orderId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
+    if (result.whatsapp_log && previousStatus !== status) {
+      const log = result.whatsapp_log;
+      if (log.delivery_status === 'sent') {
+        toast(`Pedido atualizado. Cliente avisado pelo WhatsApp.`);
+      } else if (log.delivery_status === 'failed') {
+        toast(`Pedido atualizado, mas o WhatsApp falhou: ${whatsappLogHint(log)}`);
+      } else if (log.delivery_status === 'skipped') {
+        toast(`Pedido atualizado. WhatsApp não enviado: ${whatsappLogHint(log)}`);
+      }
+    }
     if (shouldAutoPrintKitchen(order, status, previousStatus)) {
       markAutoPrintedKitchen(order.id);
       printOrder({ ...order, status }, { type: 'kitchen', reason: 'auto' });
@@ -5493,6 +5589,7 @@ function renderPlan() {
       ${usageBar('WhatsApp/mensagens', usage.whatsapp_messages, featureLimit(features, 'automatic_whatsapp') || featureLimit(features, 'manual_whatsapp'))}
     </div>
   `;
+  renderPlanServices(data.addons || [], data.addons_error || '');
   els.planFeatures.innerHTML = planFeatureGroups(features);
   els.planFeatures.querySelector('[data-plan-show-features]')?.addEventListener('click', (event) => {
     els.planFeatures.querySelectorAll('[data-plan-extra-feature]').forEach((node) => { node.hidden = false; });
@@ -5522,6 +5619,133 @@ function renderPlan() {
       ${billingHistory.length > visibleBillingHistory.length ? `<p class="muted compact-muted">Mostrando os 5 eventos mais recentes de ${billingHistory.length} registro(s).</p>` : ''}
     ` : '<p class="empty-state">Nenhum evento de cobrança registrado.</p>';
   }
+}
+
+function renderPlanServices(addons = [], error = '') {
+  if (!els.planServices) return;
+  if (error) {
+    els.planServices.innerHTML = `<p class="empty-state">${escapeHtml(error)}</p>`;
+    return;
+  }
+  const services = addons.filter((entry) => entry?.addon?.service_type === 'assisted_setup');
+  if (!services.length) {
+    els.planServices.innerHTML = '<p class="empty-state">Nenhum serviço assistido disponível para este plano.</p>';
+    return;
+  }
+  els.planServices.innerHTML = services.map((entry) => assistedServiceCard(entry)).join('');
+  els.planServices.querySelectorAll('[data-service-addon-checkout]').forEach((button) => {
+    button.addEventListener('click', () => checkoutAssistedService(button.dataset.serviceAddonCheckout, button));
+  });
+  els.planServices.querySelectorAll('[data-service-addon-support]').forEach((button) => {
+    button.addEventListener('click', () => requestAssistedServiceSupport(button.dataset.serviceAddonSupport, button));
+  });
+  els.planServices.querySelectorAll('[data-service-ticket-id]').forEach((button) => {
+    button.addEventListener('click', () => openSupportTicketFromService(button.dataset.serviceTicketId));
+  });
+}
+
+function assistedServiceCard(entry = {}) {
+  const addon = entry.addon || {};
+  const active = Boolean(entry.active || entry.included);
+  const pending = entry.active_addon?.status === 'payment_pending';
+  const supportTicketId = entry.support_ticket_id || entry.active_addon?.metadata?.support_ticket_id || '';
+  const statusText = entry.included ? 'Incluso no plano' : active ? 'Contratado' : pending ? 'Pagamento pendente' : entry.available ? 'Disponível' : 'Indisponível';
+  const statusClass = entry.included || active ? 'ok' : pending ? 'warn' : entry.available ? 'info' : 'muted';
+  const action = supportTicketId
+    ? `<button class="ghost-button compact" type="button" data-service-ticket-id="${escapeAttribute(supportTicketId)}">Ver chamado</button>`
+    : active || entry.included
+      ? `<button class="primary-button compact" type="button" data-service-addon-support="${escapeAttribute(addon.code)}">Solicitar atendimento</button>`
+      : entry.available
+        ? `<button class="primary-button compact" type="button" data-service-addon-checkout="${escapeAttribute(addon.code)}">Contratar</button>`
+        : `<button class="ghost-button compact" type="button" disabled>Faça upgrade</button>`;
+  return `
+    <article class="assisted-service-card ${active ? 'is-active' : ''}">
+      <div class="assisted-service-head">
+        <span class="assisted-service-icon" aria-hidden="true">${assistedServiceIcon(addon.code)}</span>
+        <span class="status-pill ${statusClass}">${escapeHtml(statusText)}</span>
+      </div>
+      <h3>${escapeHtml(addon.name || 'Serviço assistido')}</h3>
+      <p>${escapeHtml(addon.description || 'Conte com a equipe TáPronto para configurar este ponto com você.')}</p>
+      <div class="assisted-service-meta">
+        <strong>${escapeHtml(addon.price_label || money((addon.price_cents || 0) / 100))}</strong>
+        <span>${addon.billing_type === 'one_time' ? 'Pagamento único' : 'Cobrança mensal'}</span>
+      </div>
+      <div class="row-actions">${action}</div>
+    </article>
+  `;
+}
+
+function assistedServiceIcon(code = '') {
+  const icons = {
+    payment_setup_assisted: 'Pix',
+    whatsapp_setup_assisted: 'WA',
+    store_setup_assisted: 'Loja',
+    menu_import_assisted: 'Menu',
+    training_assisted: 'Aula',
+    full_implementation_package: 'Full'
+  };
+  return icons[code] || '+';
+}
+
+async function checkoutAssistedService(addonCode, button) {
+  if (!addonCode) return;
+  const oldText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Abrindo...';
+  }
+  try {
+    const result = await request('/api/admin/billing/addons/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addon_code: addonCode })
+    });
+    if (result.checkout_url) {
+      openCheckoutWindow(result.checkout_url);
+      toast('Checkout do serviço aberto em uma nova aba.');
+    } else if (result.activated) {
+      toast('Serviço assistido liberado.');
+    }
+    await loadPlanData({ force: true });
+  } catch (error) {
+    toast(error.message || 'Não foi possível contratar o serviço.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  }
+}
+
+async function requestAssistedServiceSupport(addonCode, button) {
+  if (!addonCode) return;
+  const oldText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Abrindo...';
+  }
+  try {
+    const result = await request(`/api/admin/billing/addons/${encodeURIComponent(addonCode)}/support-request`, { method: 'POST' });
+    toast(result.message || 'Solicitação aberta.');
+    await loadSupportTickets({ force: true });
+    await loadPlanData({ force: true });
+    if (result.support_ticket_id) openSupportTicketFromService(result.support_ticket_id);
+  } catch (error) {
+    toast(error.message || 'Não foi possível abrir a solicitação.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  }
+}
+
+async function openSupportTicketFromService(ticketId) {
+  if (!ticketId) return;
+  state.selectedSupportTicketId = ticketId;
+  state.openSupportTicketIds.add(ticketId);
+  await activateAdminTab('support');
+  await loadSupportTickets({ force: true }).catch(() => {});
 }
 
 function updateCommercialBlockFromPlan(status, subscription = {}) {
@@ -7557,6 +7781,107 @@ async function checkoutWhatsappAddon() {
   });
 }
 
+async function loadPaymentSetupAssistance() {
+  if (!els.paymentSetupStatus) return;
+  try {
+    renderPaymentSetupAssistance({ loading: true });
+    const result = await request('/api/admin/integrations/payment-setup');
+    renderPaymentSetupAssistance(result.payment_setup || {});
+  } catch (error) {
+    renderPaymentSetupAssistance({ error: error.message || 'Não foi possível carregar a configuração assistida.' });
+  }
+}
+
+function renderPaymentSetupAssistance(data = {}) {
+  if (!els.paymentSetupStatus) return;
+  const addon = data.addon || {};
+  const configured = data.configured === true;
+  const active = addon.active === true;
+  const included = addon.included === true;
+  const available = addon.available === true;
+  const canBuy = available && !active;
+  if (data.loading) {
+    els.paymentSetupStatus.textContent = 'Carregando...';
+    els.paymentSetupStatus.className = 'status-pill whatsapp-status-loading';
+  } else if (data.error) {
+    els.paymentSetupStatus.textContent = 'Erro';
+    els.paymentSetupStatus.className = 'status-pill whatsapp-status-error';
+  } else if (configured) {
+    els.paymentSetupStatus.textContent = 'Pix Configurado';
+    els.paymentSetupStatus.className = 'status-pill whatsapp-status-connected';
+  } else if (active && included) {
+    els.paymentSetupStatus.textContent = 'Incluso No Plano';
+    els.paymentSetupStatus.className = 'status-pill whatsapp-status-connected';
+  } else if (active) {
+    els.paymentSetupStatus.textContent = 'Contratado';
+    els.paymentSetupStatus.className = 'status-pill whatsapp-status-connected';
+  } else if (canBuy) {
+    els.paymentSetupStatus.textContent = 'Opcional';
+    els.paymentSetupStatus.className = 'status-pill whatsapp-status-connecting';
+  } else {
+    els.paymentSetupStatus.textContent = 'Manual';
+    els.paymentSetupStatus.className = 'status-pill';
+  }
+
+  if (els.paymentSetupMessage) {
+    if (data.error) {
+      els.paymentSetupMessage.textContent = data.error;
+    } else if (configured) {
+      els.paymentSetupMessage.textContent = 'Pagamento online já está configurado. Você ainda pode revisar os dados abaixo quando precisar.';
+    } else if (active) {
+      els.paymentSetupMessage.textContent = included
+        ? 'Seu plano inclui configuração assistida. Solicite ajuda para a equipe TáPronto revisar API key, webhook e teste de pagamento.'
+        : 'Configuração assistida contratada. Solicite ajuda para a equipe TáPronto concluir Abacate Pay, webhook e teste de pagamento.';
+    } else if (canBuy) {
+      els.paymentSetupMessage.textContent = `${addon.message || 'Contrate a configuração assistida para a equipe TáPronto configurar com você.'} Você também pode configurar sozinho pelos campos abaixo.`;
+    } else {
+      els.paymentSetupMessage.textContent = 'Você pode configurar sozinho pelos campos abaixo. Para configuração assistida, faça upgrade ou fale com o suporte.';
+    }
+  }
+
+  if (els.checkoutPaymentSetupButton) {
+    els.checkoutPaymentSetupButton.hidden = !canBuy;
+    els.checkoutPaymentSetupButton.disabled = data.loading === true;
+    els.checkoutPaymentSetupButton.textContent = addon.price_label
+      ? `Contratar Configuração - ${addon.price_label}`
+      : 'Contratar Configuração';
+  }
+  if (els.requestPaymentSetupButton) {
+    els.requestPaymentSetupButton.hidden = canBuy;
+    els.requestPaymentSetupButton.disabled = data.loading === true || !active;
+    els.requestPaymentSetupButton.textContent = configured ? 'Solicitar Revisão' : 'Solicitar Configuração';
+    els.requestPaymentSetupButton.title = !active
+      ? 'Contrate o adicional ou configure manualmente antes de solicitar atendimento assistido.'
+      : '';
+  }
+}
+
+async function checkoutPaymentSetupAddon() {
+  await runWhatsappAction(els.checkoutPaymentSetupButton, 'Abrindo checkout...', async () => {
+    const result = await request('/api/admin/billing/addons/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addon_code: 'payment_setup_assisted' })
+    });
+    if (result.activated || result.included) {
+      toast('Configuração assistida liberada para esta loja.');
+      await loadPaymentSetupAssistance();
+      return;
+    }
+    const checkoutUrl = result.checkout_url || '';
+    if (!checkoutUrl) {
+      toast('Cobrança criada, mas o checkout não retornou URL. Atualize e tente novamente.');
+      return;
+    }
+    const popup = window.open(checkoutUrl, 'tapronto_payment_setup_checkout', 'width=520,height=760,noopener,noreferrer');
+    if (!popup) {
+      window.location.href = checkoutUrl;
+      return;
+    }
+    toast('Conclua o pagamento da configuração assistida. Depois solicite a configuração nesta tela.');
+  });
+}
+
 async function refreshWhatsappQrCode() {
   await runWhatsappAction(els.refreshWhatsappQrButton, 'Atualizando...', async () => {
     const result = await request('/api/admin/integrations/whatsapp/qrcode');
@@ -7590,6 +7915,7 @@ async function requestPaymentSetupSupport() {
       body: JSON.stringify({})
     });
     toast(result.message || 'Solicitação enviada. Abrimos um chamado com o contexto da Abacate Pay.');
+    await loadPaymentSetupAssistance().catch(() => {});
     state.loadedAdminTabs.delete('support');
     state.selectedSupportTicketId = result.ticket?.id || state.selectedSupportTicketId;
     activateAdminTab('support');
@@ -7986,6 +8312,11 @@ function canUsePlanFeature(feature) {
 function canUseManualWhatsapp() {
   const access = state.admin?.plan_access || {};
   return access.manual_whatsapp?.enabled === true && access.automatic_whatsapp?.enabled !== true;
+}
+
+function canUseAutomaticWhatsapp() {
+  const access = state.admin?.plan_access || {};
+  return access.automatic_whatsapp?.enabled === true;
 }
 
 function planFeaturesToAccess(features = []) {

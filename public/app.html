@@ -6,7 +6,7 @@
     <title>Loja Demonstração - TáPronto</title>
     <meta name="description" content="Demonstração pública do TáPronto com categorias, produtos, adicionais, sacola e checkout simulado.">
     <link rel="icon" href="/assets/tapronto-favicon.svg">
-    <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
+    <link rel="stylesheet" href="/styles.css?v=20260731-payment-guided">
   </head>
   <body class="menu-page">
     <header class="public-topbar">
@@ -53,7 +53,7 @@
         <div class="store-copy">
           <p class="store-open" id="storeStatus">Carregando</p>
           <h1 id="storeName">TáPronto</h1>
-          <p id="storeDescription">Escolha seus itens e envie o pedido pelo WhatsApp da loja.</p>
+          <p id="storeDescription">Escolha seus itens e envie o pedido direto para a loja.</p>
           <div class="store-meta">
             <span id="deliveryMeta">Entrega</span>
             <span id="minimumMeta">Pedido mínimo</span>
@@ -264,7 +264,11 @@
             <dd id="paymentCheckoutExpires">-</dd>
           </div>
         </dl>
-        <p class="payment-checkout-hint">A janela segura da Abacate Pay será aberta. Mantenha esta página aberta; após a confirmação, o pedido é enviado para a loja e o WhatsApp é disparado automaticamente.</p>
+        <ol class="payment-checkout-steps" aria-label="Como funciona o pagamento online">
+          <li><strong>1. Pague no checkout seguro</strong><span>A Abacate Pay abre em uma janela separada para concluir o Pix.</span></li>
+          <li><strong>2. Aguarde a confirmação</strong><span>Esta tela verifica o pagamento automaticamente a cada poucos segundos.</span></li>
+          <li><strong>3. Pedido enviado para a loja</strong><span>Depois de aprovado, o pedido chega no painel e o WhatsApp é disparado.</span></li>
+        </ol>
         <div class="payment-checkout-actions">
           <button class="primary-button" id="paymentOpenButton" type="button">Abrir Pagamento</button>
           <button class="text-button" id="paymentCancelButton" type="button">Cancelar</button>
@@ -328,7 +332,7 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=20260725-payment-auto-status" type="module"></script>
+    <script src="/app.js?v=20260731-payment-guided" type="module"></script>
   </body>
 </html>
 

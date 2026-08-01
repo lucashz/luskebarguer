@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { pbkdf2Sync } from 'node:crypto';
 import pg from 'pg';
 
 loadEnv(new URL('../.env', import.meta.url));
@@ -51,9 +52,15 @@ try {
     }
   });
 
-  const adminCookie = signup.cookie;
   companyId = signup.data.admin?.company_id || signup.data.company?.id || null;
   assert(companyId, 'Cadastro temporario nao retornou empresa.');
+  assert(signup.data.needs_activation === true, 'Cadastro deveria exigir ativacao por e-mail.');
+
+  const activationToken = await replaceSignupActivationToken(signup.data.admin?.id);
+  await request(`/api/portal/activate/${activationToken}`);
+  const activated = await request(`/api/portal/activate/${activationToken}`, { method: 'POST' });
+  const adminCookie = activated.cookie;
+  assert(adminCookie, 'Ativacao nao retornou cookie de admin.');
 
   await expireTrial(companyId);
 
@@ -95,6 +102,22 @@ async function expireTrial(targetCompanyId) {
      where company_id = $1
   `, [targetCompanyId, plan.rows[0].id]);
   await client.query("update public.companies set status = 'trial' where id = $1", [targetCompanyId]);
+}
+
+async function replaceSignupActivationToken(adminUserId) {
+  assert(adminUserId, 'Cadastro nao retornou admin para ativacao.');
+  const token = `a${Date.now().toString(16)}${Math.random().toString(16).slice(2).padEnd(32, '0')}`.slice(0, 48);
+  const tokenHash = pbkdf2Sync(token, 'admin_account_activation', 120000, 32, 'sha256').toString('hex');
+  await client.query(`
+    update public.admin_activation_tokens
+       set token_hash = $2,
+           status = 'pending',
+           expires_at = now() + interval '1 hour',
+           used_at = null
+     where admin_user_id = $1
+       and status = 'pending'
+  `, [adminUserId, tokenHash]);
+  return token;
 }
 
 async function startServer() {

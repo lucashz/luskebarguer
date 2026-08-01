@@ -119,7 +119,7 @@ function paymentSubtitle(status, order) {
   if (status === 'paid') return 'Pagamento confirmado. Seu pedido foi enviado para a loja.';
   if (status === 'expired') return 'Este pagamento expirou. Gere um novo Pix ou refaça o pedido.';
   if (status === 'failed' || status === 'cancelled') return 'O pagamento não foi concluído. O pedido ainda não foi enviado para a loja.';
-  return `${money(order.total || 0)} aguardando confirmação. Mantenha esta janela aberta.`;
+  return `${money(order.total || 0)} aguardando confirmação. Mantenha esta janela aberta; o pedido será enviado automaticamente após a aprovação.`;
 }
 
 function startPollingIfNeeded(data) {

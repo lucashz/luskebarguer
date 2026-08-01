@@ -66,13 +66,20 @@ try {
   storeId = signup.data.admin?.store_id || signup.data.store?.id || null;
   assert(signup.data.needs_activation === true, 'Cadastro deveria exigir ativacao por e-mail.');
   assert(companyId && storeId, 'Cadastro nao retornou empresa/loja.');
+  const inactiveLogin = await request('/api/admin/login', {
+    method: 'POST',
+    allowFailure: true,
+    body: { email, password }
+  });
+  assert(inactiveLogin.status === 403, `Login sem ativacao deveria retornar 403, recebeu ${inactiveLogin.status}.`);
+  assert(/ativ/i.test(inactiveLogin.data.error || ''), 'Login sem ativacao deveria orientar ativacao por e-mail.');
   const activationToken = await replaceSignupActivationToken(signup.data.admin?.id);
   const activationInfo = await request(`/api/portal/activate/${activationToken}`);
   assert(activationInfo.data.activation?.email === email, 'Link de ativacao nao validou o e-mail criado.');
   const activated = await request(`/api/portal/activate/${activationToken}`, { method: 'POST' });
   adminCookie = activated.cookie;
   assert(adminCookie, 'Ativacao nao retornou cookie de admin.');
-  await setSmokeCompanyPlan(companyId, 'professional');
+  await setSmokeCompanyPlan(companyId, 'premium');
 
   await request('/api/admin/logout', { method: 'POST', cookie: adminCookie });
   const login = await request('/api/admin/login', {
@@ -168,11 +175,17 @@ try {
     body: { status: 'accepted' }
   });
   assert(statusUpdated.data.order?.status === 'accepted', 'Status do pedido nao foi atualizado.');
+  const whatsappLog = await waitForOrderWhatsappLog(order.id, 'accepted');
+  assert(whatsappLog?.recipient_phone === '5511777777777', 'WhatsApp de status nao usou o telefone do cliente.');
+  assert(
+    ['sent', 'skipped', 'failed'].includes(whatsappLog.delivery_status),
+    `WhatsApp de status retornou situacao invalida: ${whatsappLog.delivery_status || 'vazio'}.`
+  );
 
   const checkout = await request('/api/admin/billing/checkout', {
     method: 'POST',
     cookie: adminCookie,
-    body: { plan_code: 'premium' }
+    body: { plan_code: 'professional' }
   });
   assert(checkout.data.subscription?.id, 'Checkout/ativacao de plano nao retornou assinatura.');
   const webhook = await request('/api/billing/webhook?provider=manual', {
@@ -180,7 +193,7 @@ try {
     body: {
       eventId: `smoke-billing-${suffix}`,
       status: 'paid',
-      metadata: { companyId, planCode: 'premium' }
+      metadata: { companyId, planCode: 'professional' }
     }
   });
   assert(webhook.data.ok === true, 'Webhook de billing nao retornou ok.');
@@ -325,6 +338,23 @@ async function replaceSignupActivationToken(adminUserId) {
        and status = 'pending'
   `, [adminUserId, tokenHash]);
   return token;
+}
+
+async function waitForOrderWhatsappLog(orderId, status) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const result = await client.query(`
+      select recipient_phone, delivery_status, provider, error_message
+        from public.order_whatsapp_logs
+       where order_id = $1
+         and order_status = $2
+         and is_manual = false
+       order by created_at desc
+       limit 1
+    `, [orderId, status]);
+    if (result.rows[0]) return result.rows[0];
+    await delay(200);
+  }
+  throw new Error(`WhatsApp de status ${status} nao gerou log para o pedido ${orderId}.`);
 }
 
 function firstRow(data) {

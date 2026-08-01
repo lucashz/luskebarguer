@@ -62,6 +62,7 @@
               <input name="password" required type="password" placeholder="Senha">
               <button class="primary-button wide">Entrar</button>
               <p class="form-message" id="adminLoginMessage" role="alert" aria-live="polite"></p>
+              <button class="ghost-button compact" id="adminResendActivationButton" type="button" hidden>Reenviar confirmação</button>
             </form>
             <details class="admin-recover-box">
               <summary>Esqueceu a senha?</summary>
@@ -1034,10 +1035,16 @@
                   </div>
                   <div class="integration-assisted-box">
                     <div>
-                      <strong>Quer ajuda para configurar?</strong>
-                      <p>A equipe TáPronto pode orientar a ativação da Abacate Pay na conta da sua loja e revisar o webhook com você.</p>
+                      <div class="integration-assisted-title">
+                        <strong>Configuração assistida</strong>
+                        <span class="status-pill" id="paymentSetupStatus">Carregando...</span>
+                      </div>
+                      <p id="paymentSetupMessage">Você pode configurar sozinho pelos campos abaixo ou contratar a equipe TáPronto para fazer junto com você.</p>
                     </div>
-                    <button class="primary-button compact" id="requestPaymentSetupButton" type="button">Solicitar configuração</button>
+                    <div class="row-actions">
+                      <button class="primary-button compact" id="checkoutPaymentSetupButton" type="button" hidden>Contratar configuração</button>
+                      <button class="ghost-button compact" id="requestPaymentSetupButton" type="button">Solicitar configuração</button>
+                    </div>
                   </div>
                   <div class="integration-flow-note">
                     <strong>Fluxo do Pix online</strong>
@@ -1089,6 +1096,19 @@
 
             <section class="panel" id="planUsage">
               <p class="empty-state">Carregando uso...</p>
+            </section>
+
+            <section class="panel plan-services-panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Serviços assistidos</p>
+                  <h2>Configurações feitas com a equipe TáPronto</h2>
+                  <p class="muted">Contrate ajuda pontual para acelerar implantação, WhatsApp, Pix online e treinamento.</p>
+                </div>
+              </div>
+              <div class="assisted-services-grid" id="planServices">
+                <p class="empty-state">Carregando serviços...</p>
+              </div>
             </section>
 
             <section class="panel plan-features-panel">

@@ -304,7 +304,7 @@ function renderStore() {
   els.storeLogo.textContent = '';
   els.storeLogo.style.backgroundImage = '';
   els.storeCover.style.backgroundImage = '';
-  els.storeDescription.textContent = store.description || 'Escolha seus itens e envie o pedido pelo WhatsApp da loja.';
+  els.storeDescription.textContent = store.description || 'Escolha seus itens e envie o pedido direto para a loja.';
   els.storeStatus.textContent = !isStorePublished() ? 'Em configuração' : store.is_open === false ? 'Fechado agora' : 'Aberto agora';
   els.storeStatus.classList.toggle('closed', isStoreClosed());
   els.deliveryMeta.textContent = store.accepts_delivery === false ? 'Somente retirada' : `Entrega ${money(store.delivery_fee || 0)}`;
@@ -1373,9 +1373,6 @@ async function submitOrder(event) {
 
     popup?.close?.();
     finishCreatedOrder(result);
-    if (result.whatsapp_url) {
-      window.open(result.whatsapp_url, '_blank', 'noopener');
-    }
   } catch (error) {
     popup?.close?.();
     setStatus(error.message || 'Não foi possível enviar o pedido agora.');
@@ -1453,8 +1450,8 @@ function paymentCheckoutCopy(status) {
     };
   }
   return {
-    title: 'Seu pedido foi reservado.',
-    text: 'Pague no checkout seguro. A loja só recebe o pedido e o WhatsApp só é enviado depois da confirmação.'
+    title: 'Pagamento online aguardando.',
+    text: 'Conclua o Pix na Abacate Pay e mantenha esta página aberta. O pedido só é enviado para a loja depois da confirmação.'
   };
 }
 
@@ -1525,8 +1522,6 @@ async function checkPaymentStatus(options = {}) {
       }
       finishCreatedOrder({ order: data.order });
       setStatus(`Pagamento confirmado. Pedido #${data.order.public_code} enviado para a loja.`);
-      const whatsappUrl = data.payment?.whatsapp_url || '';
-      if (whatsappUrl) window.open(whatsappUrl, '_blank', 'noopener');
       window.setTimeout(() => closePaymentCheckoutDialog(), 1400);
     } else if (['expired', 'failed', 'cancelled'].includes(status)) {
       stopPaymentPolling();
