@@ -42,6 +42,10 @@ try {
   expect('trial', 'menu_categories', true, 3);
   expect('trial', 'orders', true, 30);
   expect('trial', 'admin_users', true, 1);
+  expect('trial', 'tables', false, null);
+  expect('trial', 'basic_reports', false, null);
+  expect('trial', 'advanced_reports', false, null);
+  expect('trial', 'business_insights', false, null);
   expect('trial', 'manual_whatsapp', true, null);
   expect('trial', 'automatic_whatsapp', false, null);
 
@@ -49,6 +53,10 @@ try {
   expect('essential', 'menu_categories', true, 5);
   expect('essential', 'orders', true, 150);
   expect('essential', 'admin_users', true, 1);
+  expect('essential', 'tables', true, 2);
+  expect('essential', 'basic_reports', true, null);
+  expect('essential', 'advanced_reports', false, null);
+  expect('essential', 'business_insights', false, null);
   expect('essential', 'manual_whatsapp', true, null);
   expect('essential', 'automatic_whatsapp', false, null);
   expect('essential', 'promotions', false, null);
@@ -57,6 +65,10 @@ try {
   expect('professional', 'digital_menu', true, 100);
   expect('professional', 'orders', true, null);
   expect('professional', 'admin_users', true, 5);
+  expect('professional', 'tables', true, null);
+  expect('professional', 'basic_reports', true, null);
+  expect('professional', 'advanced_reports', true, null);
+  expect('professional', 'business_insights', false, null);
   expect('professional', 'manual_whatsapp', true, null);
   expect('professional', 'automatic_whatsapp', false, null);
   expect('professional', 'promotions', true, null);
@@ -65,6 +77,10 @@ try {
 
   expect('premium', 'digital_menu', true, null);
   expect('premium', 'admin_users', true, 10);
+  expect('premium', 'tables', true, null);
+  expect('premium', 'basic_reports', true, null);
+  expect('premium', 'advanced_reports', true, null);
+  expect('premium', 'business_insights', true, null);
   expect('premium', 'manual_whatsapp', false, null);
   expect('premium', 'automatic_whatsapp', true, null);
   expect('premium', 'loyalty', true, null);

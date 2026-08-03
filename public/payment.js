@@ -10,12 +10,12 @@ const els = {
   pixFallback: document.querySelector('#paymentPixFallback'),
   providerBox: document.querySelector('#paymentProviderBox'),
   checkoutLink: document.querySelector('#paymentCheckoutLink'),
+  ordersLink: document.querySelector('#paymentOrdersLink'),
   copy: document.querySelector('#copyPixButton'),
   newPix: document.querySelector('#newPixButton')
 };
 
 let pollTimer = null;
-let lastPayment = null;
 const PAYMENT_POLL_INTERVAL_MS = 10000;
 
 els.copy?.addEventListener('click', async () => {
@@ -25,6 +25,7 @@ els.copy?.addEventListener('click', async () => {
 els.newPix?.addEventListener('click', () => regeneratePix());
 
 document.body.classList.toggle('payment-popup-mode', Boolean(window.opener));
+configurePaymentLinks();
 loadPayment();
 loadStoreIdentity().catch(() => {});
 
@@ -39,7 +40,7 @@ async function loadPayment(options = {}) {
     startPollingIfNeeded(data);
     notifyOpenerIfPaid(data);
     if (options.manual && data.order?.financial_status !== 'paid') {
-      setStatus('Pagamento ainda não confirmado. Aguarde alguns segundos e tente novamente.');
+      setStatus('Pagamento ainda não confirmado. Esta tela verifica automaticamente a cada 10 segundos.');
     }
   } catch (error) {
     setStatus(error.message || 'Não foi possível carregar o pagamento.');
@@ -71,7 +72,6 @@ async function regeneratePix() {
 function renderPayment(data) {
   const order = data.order || {};
   const payment = data.payment || {};
-  lastPayment = { order, payment };
   const qrUrl = safeImageUrl(payment.pix_qr_url);
   const checkoutUrl = safeHttpUrl(payment.checkout_url);
   const hasCheckout = Boolean(checkoutUrl);
@@ -90,7 +90,7 @@ function renderPayment(data) {
   els.status.innerHTML = `
     <div class="payment-status-${escapeAttribute(status)}"><span>Status</span><strong>${financialStatusLabel(status)}</strong></div>
     <div><span>Valor</span><strong>${money(order.total || 0)}</strong></div>
-    <div><span>Expira em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'Não informado'}</strong></div>
+    <div><span>Expira Em</span><strong>${payment.expires_at ? new Date(payment.expires_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'Não informado'}</strong></div>
   `;
 
   if (els.providerBox) {
@@ -157,6 +157,17 @@ function notifyOpenerIfPaid(data) {
   }
 }
 
+function configurePaymentLinks() {
+  if (els.ordersLink) els.ordersLink.href = storePageUrl('pedidos');
+}
+
+function storePageUrl(page = '') {
+  const slug = currentStoreSlug();
+  const normalizedPage = String(page || '').replace(/^\/+/, '');
+  if (!slug) return `/${normalizedPage}`;
+  return `/${slug}/${normalizedPage}`;
+}
+
 function setStatus(message) {
   els.subtitle.textContent = message;
 }
@@ -179,19 +190,19 @@ function storeApiUrl(url) {
 
 function currentStoreSlug() {
   const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
-  if (!firstSegment || ['admin', 'painel', 'central', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
+  if (!firstSegment || ['admin', 'painel', 'central', 'ajuda', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
   return firstSegment;
 }
 
 function financialStatusLabel(status) {
   return ({
-    pending: 'Aguardando pagamento',
+    pending: 'Aguardando Pagamento',
     paid: 'Pago',
     failed: 'Falhou',
     expired: 'Expirado',
     cancelled: 'Cancelado',
     refunded: 'Estornado'
-  })[status] || 'Aguardando pagamento';
+  })[status] || 'Aguardando Pagamento';
 }
 
 function money(value) {

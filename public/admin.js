@@ -65,7 +65,9 @@
   selectedSupportTicketId: null,
   supportTickets: [],
   commercialBlock: null,
-  checkoutPlanCode: ''
+  checkoutPlanCode: '',
+  checkoutAddonCode: '',
+  billingCheckoutPollTimer: null
 };
 
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
@@ -157,12 +159,18 @@ const PLAN_FEATURE_CODES = [
   'customers',
   'promotions',
   'basic_reports',
+  'advanced_reports',
+  'business_insights',
   'store_settings',
   'admin_users',
   'manual_whatsapp',
   'automatic_whatsapp',
   'print_kitchen',
-  'custom_domain'
+  'loyalty',
+  'reorder',
+  'cart_suggestions',
+  'custom_domain',
+  'priority_support'
 ];
 const THEME_DEFAULTS = {
   primaryColor: '#d71920',
@@ -415,7 +423,11 @@ const els = {
   whatsappQrBox: document.querySelector('#whatsappQrBox'),
   whatsappQrImage: document.querySelector('#whatsappQrImage'),
   connectWhatsappButton: document.querySelector('#connectWhatsappButton'),
+  whatsappUpgradeGuide: document.querySelector('#whatsappUpgradeGuide'),
+  whatsappAddonOption: document.querySelector('#whatsappAddonOption'),
+  whatsappPremiumOption: document.querySelector('#whatsappPremiumOption'),
   checkoutWhatsappAddonButton: document.querySelector('#checkoutWhatsappAddonButton'),
+  checkoutWhatsappIncludedPlanButton: document.querySelector('#checkoutWhatsappIncludedPlanButton'),
   requestWhatsappSetupButton: document.querySelector('#requestWhatsappSetupButton'),
   refreshWhatsappQrButton: document.querySelector('#refreshWhatsappQrButton'),
   testWhatsappButton: document.querySelector('#testWhatsappButton'),
@@ -564,6 +576,7 @@ els.refreshCategoriesButton.addEventListener('click', () => loadMenuData({ force
 els.refreshProductsButton.addEventListener('click', () => loadMenuData({ force: true }));
 els.connectWhatsappButton?.addEventListener('click', connectWhatsapp);
 els.checkoutWhatsappAddonButton?.addEventListener('click', checkoutWhatsappAddon);
+els.checkoutWhatsappIncludedPlanButton?.addEventListener('click', checkoutWhatsappIncludedPlan);
 els.refreshWhatsappQrButton?.addEventListener('click', refreshWhatsappQrCode);
 els.testWhatsappButton?.addEventListener('click', testWhatsappAuto);
 els.disconnectWhatsappButton?.addEventListener('click', disconnectWhatsapp);
@@ -2762,9 +2775,12 @@ function renderDailyReport(report) {
   const peakHour = hourRows.slice().sort((a, b) => safeReportNumber(b.count) - safeReportNumber(a.count))[0];
   const revenueHour = hourRows.slice().sort((a, b) => safeReportNumber(b.total) - safeReportNumber(a.total))[0];
   const hasOrders = totalOrders > 0 || orders.length > 0;
+  const reportLocks = Array.isArray(report.report_locks) ? report.report_locks : [];
+  const reportAccess = report.report_access || {};
 
   els.reportOrdersTitle.textContent = `Pedidos - ${period.label}`;
   els.reportSummary.innerHTML = `
+    ${reportAccess.label ? reportPlanAccessNotice(reportAccess, reportLocks) : ''}
     ${reportMetricCard('R$', escapeHtml(period.label), money(totalRevenue), 'Faturamento sem cancelados', 'accent')}
     ${reportMetricCard('#', 'Pedidos', totalOrders, `${safeReportNumber(totals.billable_orders)} pedido(s) faturáveis`, 'muted')}
     ${reportMetricCard('T', 'Ticket médio', money(totals.average_ticket || 0), `${safeReportNumber(totals.completed_orders)} concluído(s)`, 'success')}
@@ -2794,6 +2810,23 @@ function renderDailyReport(report) {
         ${orders.map(reportOrderCard).join('') || reportEmptyState('Nenhum pedido listado', 'A lista respeita o período selecionado e os dados da loja atual.')}
       </div>
     </details>
+  `;
+}
+
+function reportPlanAccessNotice(access = {}, locks = []) {
+  const level = String(access.level || '');
+  const lockedText = locks.length
+    ? locks.map((item) => escapeHtml(item.title || item.message || 'Recurso avançado')).join(' · ')
+    : 'Todos os módulos de relatório deste plano estão liberados.';
+  const tone = level === 'basic' ? 'warning' : level === 'insights' ? 'success' : 'muted';
+  return `
+    <article class="report-plan-access report-tone-${tone}">
+      <div>
+        <span class="report-kicker">Plano</span>
+        <strong>${escapeHtml(access.label || 'Relatórios')}</strong>
+      </div>
+      <p>${lockedText}</p>
+    </article>
   `;
 }
 
@@ -5702,6 +5735,8 @@ async function checkoutAssistedService(addonCode, button) {
     });
     if (result.checkout_url) {
       openCheckoutWindow(result.checkout_url);
+      renderAddonCheckoutWaiting(result.checkout_url, result.addon || { code: addonCode });
+      startBillingCheckoutPolling({ type: 'addon', code: addonCode });
       toast('Checkout do serviço aberto em uma nova aba.');
     } else if (result.activated) {
       toast('Serviço assistido liberado.');
@@ -5715,6 +5750,56 @@ async function checkoutAssistedService(addonCode, button) {
       button.textContent = oldText;
     }
   }
+}
+
+function renderAddonCheckoutWaiting(checkoutUrl, addon = {}) {
+  state.checkoutAddonCode = addon.code || '';
+  const modal = ensurePlanCheckoutModal();
+  modal.innerHTML = `
+    <div class="plan-checkout-modal-card plan-checkout-waiting" role="dialog" aria-modal="true" aria-labelledby="addonCheckoutWaitingTitle">
+      <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
+      <div class="plan-checkout-head">
+        <p class="eyebrow">Serviço assistido</p>
+        <h2 id="addonCheckoutWaitingTitle">${escapeHtml(addon.name || 'Finalize o pagamento')}</h2>
+        <p>Quando o pagamento for confirmado, o serviço é liberado e a equipe TáPronto recebe a solicitação para atendimento.</p>
+      </div>
+      <div class="plan-checkout-status">
+        <span aria-hidden="true"></span>
+        <div>
+          <strong>Aguardando confirmação</strong>
+          <p>${escapeHtml(addon.price_label || 'Pagamento em processamento')}</p>
+        </div>
+      </div>
+      <div class="plan-checkout-note">
+        <strong>Verificação automática ativa</strong>
+        <p>Conclua o pagamento na Abacate Pay. Esta tela verifica o status a cada 10 segundos.</p>
+      </div>
+      <div class="row-actions plan-checkout-footer">
+        <button class="ghost-button compact" type="button" data-close-plan-checkout>Fechar</button>
+        <button class="ghost-button compact" type="button" data-reopen-checkout>Abrir checkout novamente</button>
+        <button class="primary-button compact" type="button" data-check-addon-status>Já paguei, verificar</button>
+      </div>
+    </div>
+  `;
+  modal.hidden = false;
+  document.body.classList.add('plan-checkout-open');
+  modal.querySelectorAll('[data-close-plan-checkout]').forEach((closeButton) => closeButton.addEventListener('click', closePlanCheckoutModal));
+  modal.querySelector('[data-reopen-checkout]')?.addEventListener('click', () => openCheckoutWindow(checkoutUrl));
+  modal.querySelector('[data-check-addon-status]')?.addEventListener('click', async (event) => {
+    const target = event.currentTarget;
+    const oldText = target.textContent;
+    target.disabled = true;
+    target.textContent = 'Verificando...';
+    try {
+      await verifyBillingCheckoutStatus({ type: 'addon', code: addon.code || state.checkoutAddonCode });
+      if (!modal.hidden) toast('Pagamento ainda em processamento. Aguarde a confirmação do provedor.');
+    } catch (error) {
+      toast(error.message || 'Não foi possível verificar agora.');
+    } finally {
+      target.disabled = false;
+      target.textContent = oldText;
+    }
+  });
 }
 
 async function requestAssistedServiceSupport(addonCode, button) {
@@ -5826,10 +5911,12 @@ function openPlanCheckoutModal(planCode = '') {
 }
 
 function closePlanCheckoutModal() {
+  stopBillingCheckoutPolling();
   const modal = document.querySelector('#planCheckoutModal');
   if (modal) modal.hidden = true;
   document.body.classList.remove('plan-checkout-open');
   state.checkoutPlanCode = '';
+  state.checkoutAddonCode = '';
 }
 
 function ensurePlanCheckoutModal() {
@@ -5873,6 +5960,7 @@ async function createBillingCheckout(forcedPlanCode = '', options = {}) {
     if (result.checkout_url) {
       openCheckoutWindow(result.checkout_url);
       renderPlanCheckoutWaiting(result.checkout_url, planCode);
+      startBillingCheckoutPolling({ type: 'plan', code: planCode });
       toast('Checkout aberto em uma nova aba.');
       return;
     } else if (result.activated) {
@@ -5922,7 +6010,7 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
       </div>
       <div class="plan-checkout-note">
         <strong>Não feche esta tela se quiser acompanhar por aqui</strong>
-        <p>Você pode concluir o pagamento na outra aba e voltar para verificar se a assinatura já foi atualizada.</p>
+        <p>Você pode concluir o pagamento na outra aba. Esta tela verifica automaticamente a cada 10 segundos.</p>
       </div>
       <div class="row-actions plan-checkout-footer">
         <button class="ghost-button compact" type="button" data-close-plan-checkout>Fechar</button>
@@ -5942,8 +6030,7 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
     button.textContent = 'Verificando...';
     try {
       await loadPlanData({ force: true });
-      const status = state.plan?.subscription?.status || '';
-      if (['active', 'trial'].includes(status) && !isTrialExpired(state.plan?.subscription)) {
+      if (checkoutPlanIsActive(planCode)) {
         toast('Plano atualizado com sucesso.');
         closePlanCheckoutModal();
       } else {
@@ -5957,6 +6044,52 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
     }
   });
   modal.querySelector('[data-check-payment-status]')?.focus();
+}
+
+function startBillingCheckoutPolling(context = {}) {
+  stopBillingCheckoutPolling();
+  const type = context.type || 'plan';
+  const code = context.code || '';
+  state.billingCheckoutPollTimer = window.setInterval(() => verifyBillingCheckoutStatus({ type, code }), 10000);
+  window.setTimeout(() => verifyBillingCheckoutStatus({ type, code }), 1600);
+}
+
+function stopBillingCheckoutPolling() {
+  if (state.billingCheckoutPollTimer) {
+    window.clearInterval(state.billingCheckoutPollTimer);
+    state.billingCheckoutPollTimer = null;
+  }
+}
+
+async function verifyBillingCheckoutStatus(context = {}) {
+  const type = context.type || (state.checkoutAddonCode ? 'addon' : 'plan');
+  try {
+    await loadPlanData({ force: true, background: true });
+    if (type === 'addon') {
+      const addonCode = context.code || state.checkoutAddonCode;
+      const addonEntry = (state.plan?.addons || []).find((entry) => entry.addon?.code === addonCode);
+      if (addonEntry?.active || addonEntry?.included || addonEntry?.active_addon?.status === 'active') {
+        toast('Adicional ativado com sucesso.');
+        closePlanCheckoutModal();
+      }
+      return;
+    }
+    if (checkoutPlanIsActive(context.code || state.checkoutPlanCode)) {
+      toast('Plano atualizado com sucesso.');
+      closePlanCheckoutModal();
+    }
+  } catch (_) {
+    // A verificação automática deve ser silenciosa enquanto o provedor processa.
+  }
+}
+
+function checkoutPlanIsActive(planCode = '') {
+  const currentCode = state.plan?.plan?.code || '';
+  const status = state.plan?.subscription?.status || '';
+  return Boolean(planCode)
+    && currentCode === planCode
+    && ['active', 'trial'].includes(status)
+    && !isTrialExpired(state.plan?.subscription);
 }
 
 function planStatusClass(status) {
@@ -6139,7 +6272,7 @@ function comparePlanCard(plan, currentCode) {
 function billingPlanHighlights(plan) {
   const code = String(plan?.code || '').toLowerCase();
   if (code.includes('trial')) return ['Até 10 produtos', 'Até 3 categorias', 'Até 30 pedidos', '1 usuário'];
-  if (code.includes('essential')) return ['Até 25 produtos', 'Até 5 categorias', 'Até 150 pedidos/mês', 'WhatsApp manual'];
+  if (code.includes('essential')) return ['Até 25 produtos', 'Até 5 categorias', 'Até 150 pedidos/mês', 'Até 2 mesas', 'WhatsApp manual'];
   if (code.includes('professional')) return ['Até 100 produtos', 'Pedidos ilimitados', 'Até 5 usuários', 'Mesas, cupons, KDS e relatórios'];
   if (code.includes('premium')) return ['Produtos ilimitados', 'Automação WhatsApp', 'Fidelidade e sugestões', 'Domínio próprio e suporte prioritário'];
   return (Array.isArray(plan.features) ? plan.features : []).slice(0, 5).map((entry) => {
@@ -7668,6 +7801,7 @@ function renderWhatsappIntegration(data = {}) {
   const addon = data.addon || {};
   const canBuyAddon = !featureEnabled && addon.available === true && addon.active !== true;
   const canConnect = featureEnabled && platformConfigured;
+  const showUpgradeGuide = !featureEnabled && !data.last_error;
   state.whatsappIntegration = data;
   els.whatsappAutoStatus.textContent = label;
   els.whatsappAutoStatus.className = `status-pill whatsapp-status-${status}`;
@@ -7675,9 +7809,9 @@ function renderWhatsappIntegration(data = {}) {
     if (data.last_error) {
       els.whatsappAutoMessage.textContent = data.last_error;
     } else if (canBuyAddon) {
-      els.whatsappAutoMessage.textContent = addon.message || 'Contrate o WhatsApp automático para liberar a conexão por QR Code nesta loja.';
+      els.whatsappAutoMessage.textContent = 'Para liberar a conexão por QR Code, escolha uma das opções abaixo.';
     } else if (!featureEnabled) {
-      els.whatsappAutoMessage.textContent = `${data.feature_message || 'WhatsApp automático não está disponível no plano atual.'} Se quiser ativar, solicite ajuda da equipe TáPronto.`;
+      els.whatsappAutoMessage.textContent = data.feature_message || 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.';
     } else if (!platformConfigured) {
       els.whatsappAutoMessage.textContent = 'A Central TáPronto ainda precisa configurar a Evolution Go antes de conectar o WhatsApp da loja.';
     } else if (status === 'connected') {
@@ -7692,9 +7826,17 @@ function renderWhatsappIntegration(data = {}) {
       els.whatsappAutoMessage.textContent = 'Clique em Conectar WhatsApp e escaneie o QR Code com o celular da loja.';
     }
   }
+  renderWhatsappUpgradeGuide({ showUpgradeGuide, canBuyAddon, addon });
   const qr = data.qr_code_base64 || '';
-  if (els.whatsappQrBox) els.whatsappQrBox.hidden = !qr;
-  if (els.whatsappQrImage && qr) els.whatsappQrImage.src = qr;
+  const showQr = Boolean(qr) && status === 'connecting';
+  if (els.whatsappQrBox) els.whatsappQrBox.hidden = !showQr;
+  if (els.whatsappQrImage) {
+    if (showQr) {
+      els.whatsappQrImage.src = qr;
+    } else {
+      els.whatsappQrImage.removeAttribute('src');
+    }
+  }
   if (els.connectWhatsappButton) {
     els.connectWhatsappButton.hidden = !canConnect || ['connected', 'loading', 'connecting'].includes(status);
     els.connectWhatsappButton.textContent = status === 'error' ? 'Tentar novamente' : 'Conectar WhatsApp';
@@ -7703,17 +7845,9 @@ function renderWhatsappIntegration(data = {}) {
       ? (canBuyAddon ? 'Contrate o adicional para liberar a conexão.' : 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.')
       : (!platformConfigured ? 'A Central TáPronto precisa configurar a Evolution Go antes.' : '');
   }
-  if (els.checkoutWhatsappAddonButton) {
-    els.checkoutWhatsappAddonButton.hidden = !canBuyAddon;
-    els.checkoutWhatsappAddonButton.disabled = status === 'loading';
-    const price = Number(addon.price_cents || 0) / 100;
-    els.checkoutWhatsappAddonButton.textContent = price
-      ? `Contratar WhatsApp Automático - ${money(price)}/mês`
-      : 'Contratar WhatsApp Automático';
-  }
   if (els.requestWhatsappSetupButton) {
-    els.requestWhatsappSetupButton.hidden = canConnect || canBuyAddon;
-    els.requestWhatsappSetupButton.textContent = featureEnabled ? 'Solicitar ajuda da TáPronto' : 'Solicitar upgrade';
+    els.requestWhatsappSetupButton.hidden = canConnect || showUpgradeGuide;
+    els.requestWhatsappSetupButton.textContent = 'Solicitar ajuda da TáPronto';
   }
   if (els.refreshWhatsappQrButton) {
     els.refreshWhatsappQrButton.hidden = !canConnect || !['connecting', 'error'].includes(status);
@@ -7731,6 +7865,33 @@ function renderWhatsappIntegration(data = {}) {
     els.disconnectWhatsappButton.disabled = status === 'loading';
   }
   renderIntegrationStatus();
+}
+
+function renderWhatsappUpgradeGuide({ showUpgradeGuide = false, canBuyAddon = false, addon = {} } = {}) {
+  if (!els.whatsappUpgradeGuide) return;
+  els.whatsappUpgradeGuide.hidden = !showUpgradeGuide;
+  if (els.whatsappAddonOption) els.whatsappAddonOption.hidden = !canBuyAddon;
+  if (els.checkoutWhatsappAddonButton) {
+    els.checkoutWhatsappAddonButton.disabled = false;
+    const price = Number(addon.price_cents || 0) / 100;
+    els.checkoutWhatsappAddonButton.textContent = price
+      ? `Contratar adicional - ${money(price)}/mês`
+      : 'Contratar adicional';
+  }
+  if (els.checkoutWhatsappIncludedPlanButton) {
+    const plan = whatsappIncludedPlan();
+    const price = Number(plan?.monthly_price || 0);
+    els.checkoutWhatsappIncludedPlanButton.textContent = plan?.name
+      ? `Conhecer ${plan.name}${price ? ` - ${money(price)}/mês` : ''}`
+      : 'Ver plano completo';
+  }
+}
+
+function whatsappIncludedPlan() {
+  const plans = Array.isArray(state.plan?.available_plans) ? state.plan.available_plans : [];
+  return plans.find((entry) => String(entry.code || '').toLowerCase().includes('premium'))
+    || plans.find((entry) => String(entry.name || '').toLowerCase().includes('premium'))
+    || null;
 }
 
 function whatsappAutoStatusLabel(status = '') {
@@ -7772,13 +7933,39 @@ async function checkoutWhatsappAddon() {
       toast('Cobrança criada, mas o checkout não retornou URL. Atualize e tente novamente.');
       return;
     }
-    const popup = window.open(checkoutUrl, 'tapronto_whatsapp_addon_checkout', 'width=520,height=760,noopener,noreferrer');
-    if (!popup) {
-      window.location.href = checkoutUrl;
-      return;
-    }
+    openCheckoutWindow(checkoutUrl);
+    renderAddonCheckoutWaiting(checkoutUrl, result.addon || { code: 'whatsapp_automatic', name: 'WhatsApp automático' });
+    startBillingCheckoutPolling({ type: 'addon', code: 'whatsapp_automatic' });
     toast('Conclua o pagamento do adicional. O WhatsApp será liberado após a confirmação.');
   });
+}
+
+async function checkoutWhatsappIncludedPlan() {
+  const button = els.checkoutWhatsappIncludedPlanButton;
+  const previousText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Carregando plano...';
+  }
+  try {
+    if (!state.plan?.available_plans?.length) {
+      await loadPlanData({ force: true, background: true });
+    }
+    const plan = whatsappIncludedPlan();
+    if (!plan?.code) {
+      toast('Não encontrei o plano com WhatsApp automático incluso. Abra a aba Plano para comparar as opções.');
+      activateAdminTab('plan');
+      return;
+    }
+    openPlanCheckoutModal(plan.code);
+  } catch (error) {
+    toast(error.message || 'Não foi possível abrir o plano completo.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText || 'Ver plano completo';
+    }
+  }
 }
 
 async function loadPaymentSetupAssistance() {

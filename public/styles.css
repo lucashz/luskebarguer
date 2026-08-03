@@ -9343,6 +9343,47 @@ body.admin-tour-active {
   padding: 16px;
 }
 
+.report-plan-access {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: auto;
+  border-left: 4px solid #94a3b8 !important;
+}
+
+.report-plan-access.report-tone-warning {
+  border-left-color: #f59e0b !important;
+  background: #fffbeb;
+}
+
+.report-plan-access.report-tone-success {
+  border-left-color: #16a34a !important;
+  background: #f0fdf4;
+}
+
+.report-plan-access strong {
+  margin: 2px 0 0;
+  font-size: 1rem;
+}
+
+.report-plan-access p {
+  margin: 0;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .report-plan-access {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-plan-access p {
+    text-align: left;
+  }
+}
+
 .report-summary span,
 .report-summary p {
   color: var(--muted);
@@ -10763,6 +10804,79 @@ body.admin-tour-active {
 .integration-assisted-box .row-actions {
   justify-content: flex-end;
   align-items: center;
+}
+
+.whatsapp-upgrade-guide {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #dc2626;
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px;
+}
+
+.whatsapp-upgrade-guide[hidden] {
+  display: none;
+}
+
+.whatsapp-upgrade-guide > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.whatsapp-upgrade-guide > div:first-child strong {
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.whatsapp-upgrade-guide > div:first-child p:last-child {
+  margin: 0;
+  color: #475569;
+}
+
+.whatsapp-upgrade-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.whatsapp-upgrade-options article {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.whatsapp-upgrade-options article[hidden] {
+  display: none;
+}
+
+.whatsapp-upgrade-options article span {
+  color: #dc2626;
+  font-size: .72rem;
+  font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.whatsapp-upgrade-options article strong {
+  color: #0f172a;
+}
+
+.whatsapp-upgrade-options article p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.whatsapp-upgrade-options article button {
+  justify-self: start;
+  margin-top: 4px;
 }
 
 .integration-flow-note {
@@ -17182,6 +17296,96 @@ body.admin-tour-active {
   background: var(--platform-primary);
 }
 
+.platform-access-card {
+  min-height: 100%;
+}
+
+.platform-access-summary,
+.platform-access-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.platform-access-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.platform-access-summary article,
+.platform-access-columns section,
+.platform-access-ranking article {
+  border: 1px solid var(--platform-border);
+  border-radius: 10px;
+  background: var(--platform-surface-soft);
+}
+
+.platform-access-summary article {
+  padding: 14px;
+}
+
+.platform-access-summary span,
+.platform-access-summary small,
+.platform-access-columns h4,
+.platform-access-ranking h4,
+.platform-access-ranking small {
+  color: var(--platform-muted);
+}
+
+.platform-access-summary strong {
+  display: block;
+  margin: 6px 0;
+  font-size: 1.5rem;
+  color: var(--platform-text);
+}
+
+.platform-access-columns section,
+.platform-access-ranking {
+  margin-top: 12px;
+}
+
+.platform-access-columns section {
+  padding: 12px;
+}
+
+.platform-access-columns h4,
+.platform-access-ranking h4 {
+  margin: 0 0 10px;
+  font-size: .82rem;
+}
+
+.platform-access-columns p {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--platform-border);
+}
+
+.platform-access-columns p:first-of-type {
+  border-top: 0;
+}
+
+.platform-access-ranking article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.platform-access-ranking article i {
+  grid-column: 1 / -1;
+  display: block;
+  width: var(--value);
+  height: 4px;
+  border-radius: 999px;
+  background: var(--platform-primary);
+}
+
 .platform-page .platform-commercial-alert,
 .platform-page .platform-alert-row,
 .platform-page .platform-log-row,
@@ -17720,6 +17924,8 @@ body.admin-tour-active {
   .platform-page .platform-billing-highlights,
   .platform-page .platform-billing-mini-grid,
   .platform-page .platform-billing-payment-grid,
+  .platform-access-summary,
+  .platform-access-columns,
   .platform-page .platform-daily-summary,
   .platform-page .platform-support-case-strip,
   .platform-page .support-filter-card,

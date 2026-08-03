@@ -4,40 +4,40 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Pagamento Online</title>
-    <link rel="stylesheet" href="/styles.css?v=20260730-payment-copy">
+    <link rel="stylesheet" href="/styles.css?v=20260802-payment-polish">
   </head>
   <body class="client-page payment-page">
     <main class="payment-shell">
       <section class="payment-card">
         <p class="eyebrow">Pagamento Online</p>
-        <h1 id="paymentTitle">Finalizando pagamento</h1>
+        <h1 id="paymentTitle">Finalizando Pagamento</h1>
         <p class="muted" id="paymentSubtitle">Carregando dados do pagamento...</p>
 
         <div class="payment-status-box" id="paymentStatusBox"></div>
 
         <section class="payment-provider-box" id="paymentProviderBox" hidden>
-          <strong>Pague pelo checkout seguro da Abacate Pay</strong>
+          <strong>Pague Pelo Checkout Seguro Da Abacate Pay</strong>
           <p>Seu pedido será enviado para a loja somente depois da confirmação do pagamento. Não feche esta janela até concluir.</p>
           <a class="primary-button wide" id="paymentCheckoutLink" href="#" target="_blank" rel="noopener">Abrir Abacate Pay</a>
         </section>
 
         <details class="payment-pix-fallback" id="paymentPixFallback">
-          <summary>Usar Pix copia e cola como alternativa</summary>
+          <summary>Usar Pix Copia E Cola Como Alternativa</summary>
           <img class="payment-qr" id="paymentQr" alt="QR Code Pix" hidden>
           <label class="payment-copy-field">
-            Código Pix copia e cola
+            Código Pix Copia E Cola
             <textarea id="paymentPixCode" readonly></textarea>
           </label>
-          <button class="ghost-button compact" id="copyPixButton" type="button">Copiar código Pix</button>
+          <button class="ghost-button compact" id="copyPixButton" type="button">Copiar Código Pix</button>
         </details>
 
         <div class="row-actions payment-actions">
-          <button class="ghost-button compact" id="newPixButton" type="button" hidden>Gerar novo Pix</button>
+          <button class="ghost-button compact" id="newPixButton" type="button" hidden>Gerar Novo Pix</button>
         </div>
 
-        <a class="text-button" href="/pedidos">Ver Meus Pedidos</a>
+        <a class="text-button" id="paymentOrdersLink" href="/pedidos">Ver Meus Pedidos</a>
       </section>
     </main>
-    <script src="/payment.js?v=20260725-payment-auto-status" type="module"></script>
+    <script src="/payment.js?v=20260802-payment-polish" type="module"></script>
   </body>
 </html>

@@ -139,6 +139,7 @@ model Company {
   addonBillingEvents AddonBillingEvent[]
   auditLogs          AuditLog[]
   sessions           AppSession[]
+  accessEvents       AccessEvent[]
 
   @@map("companies")
 }
@@ -181,6 +182,7 @@ model Store {
   usageEvents   UsageEvent[]
   onboarding    OnboardingProgress[]
   auditLogs     AuditLog[]
+  accessEvents  AccessEvent[]
 
   @@index([companyId, isActive, name])
   @@map("stores")
@@ -996,6 +998,28 @@ model AddonBillingEvent {
   @@index([companyId, createdAt])
   @@index([storeId, createdAt])
   @@map("addon_billing_events")
+}
+
+model AccessEvent {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId    String?  @map("company_id") @db.Uuid
+  storeId      String?  @map("store_id") @db.Uuid
+  pageType     String   @map("page_type")
+  path         String
+  referrerHost String?  @map("referrer_host")
+  deviceType   String?  @map("device_type")
+  visitorKey   String?  @map("visitor_key")
+  metadata     Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store   Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([storeId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([pageType, createdAt])
+  @@map("access_events")
 }
 
 model CompanyFeatureOverride {

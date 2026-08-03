@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relatorio Comparativo de Planos - Tapronto</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 14mm;
+    }
+
+    :root {
+      --ink: #061833;
+      --muted: #5d6b82;
+      --soft: #f5f7fb;
+      --line: #dfe5ef;
+      --red: #e51d2a;
+      --green: #12a150;
+      --orange: #f59e0b;
+      --blue: #2563eb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 620px;
+      font-size: 30px;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      margin-bottom: 10px;
+      font-size: 18px;
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      font-size: 13px;
+    }
+
+    .page {
+      break-after: page;
+      min-height: 267mm;
+    }
+
+    .page:last-child {
+      break-after: auto;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 22px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 36px;
+      font-weight: 800;
+      font-size: 16px;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 10px;
+      background: var(--red);
+      color: #fff;
+      font-weight: 900;
+    }
+
+    .eyebrow {
+      margin-bottom: 8px;
+      color: var(--red);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 560px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      align-content: end;
+    }
+
+    .meta-card,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 10px 30px rgba(6, 24, 51, 0.06);
+    }
+
+    .meta-card {
+      padding: 14px;
+    }
+
+    .meta-card strong {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    .meta-card span {
+      color: var(--muted);
+    }
+
+    .section {
+      margin-top: 22px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+
+    .section-title p {
+      max-width: 520px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .card {
+      padding: 14px;
+    }
+
+    .metric {
+      display: flex;
+      flex-direction: column;
+      min-height: 105px;
+      border-left: 4px solid var(--red);
+    }
+
+    .metric.success {
+      border-left-color: var(--green);
+    }
+
+    .metric.warning {
+      border-left-color: var(--orange);
+    }
+
+    .metric.blue {
+      border-left-color: var(--blue);
+    }
+
+    .metric span,
+    .small {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .metric strong {
+      margin: 8px 0 5px;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      font-size: 9px;
+    }
+
+    th,
+    td {
+      padding: 8px 9px;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+
+    th {
+      background: var(--soft);
+      color: #26364f;
+      font-size: 8px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #fff1f2;
+      color: #b91c1c;
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .tag.green {
+      background: #eafaf0;
+      color: #087a3a;
+    }
+
+    .tag.orange {
+      background: #fff7e6;
+      color: #9a5a00;
+    }
+
+    .note {
+      padding: 14px;
+      border-radius: 14px;
+      background: #fff7e6;
+      color: #50370a;
+    }
+
+    .recommendation {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .recommendation .card {
+      border-left: 4px solid var(--red);
+    }
+
+    .sources {
+      color: var(--muted);
+      font-size: 9px;
+    }
+
+    .sources a {
+      color: var(--ink);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="page">
+      <div class="hero">
+        <div>
+          <div class="brand"><span class="brand-mark">TP</span>Tapronto</div>
+          <p class="eyebrow">Comparativo de Mercado</p>
+          <h1>Planos, precos e posicionamento para vender cardapio digital com baixo custo e dignidade.</h1>
+          <p class="lead">
+            Este relatorio compara players de cardapio digital, delivery e gestao de restaurante para orientar os planos do Tapronto:
+            um produto acessivel para quem esta comecando, sem perder recursos essenciais.
+          </p>
+        </div>
+        <div class="meta">
+          <div class="meta-card"><span>Faixa barata do mercado</span><strong>R$ 0 a R$ 60</strong></div>
+          <div class="meta-card"><span>Faixa intermediaria</span><strong>R$ 70 a R$ 150</strong></div>
+          <div class="meta-card"><span>Faixa premium</span><strong>R$ 150 a R$ 400+</strong></div>
+          <div class="meta-card"><span>Meta Tapronto</span><strong>Baixo custo</strong></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Resumo Executivo</p>
+            <h2>Onde o Tapronto deve vencer</h2>
+          </div>
+          <p>O mercado tem alternativas gratuitas, basicas e plataformas grandes. O espaco do Tapronto e ser simples, barato, bonito e direto.</p>
+        </div>
+        <div class="grid-4">
+          <article class="card metric success">
+            <span>Entrada digna</span>
+            <strong>R$ 49,90</strong>
+            <p>Essencial abaixo de varios players pagos e sem cobrar comissao por pedido.</p>
+          </article>
+          <article class="card metric warning">
+            <span>Custo real</span>
+            <strong>R$ 29,90</strong>
+            <p>Custo estimado da instancia de WhatsApp automatico. Nao deve entrar no basico.</p>
+          </article>
+          <article class="card metric blue">
+            <span>Plano principal</span>
+            <strong>Profissional</strong>
+            <p>Melhor pacote para restaurante que ja vende todo dia.</p>
+          </article>
+          <article class="card metric">
+            <span>Premium</span>
+            <strong>R$ 149,90</strong>
+            <p>Competitivo quando inclui WhatsApp automatico e suporte prioritario.</p>
+          </article>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Tapronto</p>
+            <h2>Planos atuais e leitura de valor</h2>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Plano</th>
+              <th>Valor</th>
+              <th>Limites</th>
+              <th>Inclui</th>
+              <th>Nao inclui</th>
+              <th>Veredito</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Teste gratis</strong></td>
+              <td>R$ 0 / 14 dias</td>
+              <td>10 produtos, 3 categorias, 30 pedidos, 1 usuario</td>
+              <td>Cardapio, pedidos, WhatsApp manual, onboarding</td>
+              <td>WhatsApp automatico, dominio, KDS, fidelidade</td>
+              <td><span class="tag green">Correto</span> testa sem gerar custo caro.</td>
+            </tr>
+            <tr>
+              <td><strong>Essencial</strong></td>
+              <td>R$ 49,90/mes</td>
+              <td>25 produtos, 5 categorias, 150 pedidos, 1 usuario</td>
+              <td>Cardapio digital, pedidos, entrega basica, clientes, WhatsApp manual</td>
+              <td>WhatsApp automatico, equipe, KDS, fidelidade</td>
+              <td><span class="tag green">Bom valor</span> barato e suficiente para comecar.</td>
+            </tr>
+            <tr>
+              <td><strong>Profissional</strong></td>
+              <td>R$ 89,90/mes</td>
+              <td>100 produtos, pedidos ilimitados, 5 usuarios</td>
+              <td>Mesas, QR Code, relatorios, cupons, taxa por bairro, WhatsApp manual</td>
+              <td>WhatsApp automatico sem adicional</td>
+              <td><span class="tag orange">Plano principal</span> melhor custo-beneficio.</td>
+            </tr>
+            <tr>
+              <td><strong>Premium</strong></td>
+              <td>R$ 149,90/mes</td>
+              <td>Ilimitado, ate 10 usuarios</td>
+              <td>WhatsApp automatico, fidelidade, sugestoes, dominio, suporte prioritario</td>
+              <td>Servicos assistidos completos podem ser vendidos a parte</td>
+              <td><span class="tag green">Competitivo</span> abaixo de varios players robustos.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="page">
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Mercado</p>
+            <h2>Comparacao resumida de concorrentes</h2>
+          </div>
+          <p>Os valores abaixo foram levantados em paginas publicas. Promocoes e planos podem mudar, entao devem ser revisados antes de uso comercial.</p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Plano/faixa</th>
+              <th>Preco</th>
+              <th>Recursos destacados</th>
+              <th>Leitura para Tapronto</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>OlaClick</strong></td>
+              <td>Advanced / Premium / Elite / Infinity</td>
+              <td>R$ 73,30 a R$ 1.092/mês; anual com desconto</td>
+              <td>Pedidos, dominio, PDV, impressao, pagamento online, CRM, WhatsApp chatbot, fidelidade, inventario, campanhas.</td>
+              <td>Forte em recursos. Tapronto deve competir em simplicidade e preco.</td>
+            </tr>
+            <tr>
+              <td><strong>Menu Digital</strong></td>
+              <td>Mensal, Anual, Light, Prata, Ouro</td>
+              <td>12x R$ 89 a 12x R$ 392 em ofertas exibidas</td>
+              <td>Cardapio pronto pela equipe, layout, banco de imagens, traducao, PDF, suporte, displays, site.</td>
+              <td>Mostra que setup assistido tem valor e pode ser vendido separado.</td>
+            </tr>
+            <tr>
+              <td><strong>Abrahão Goomer</strong></td>
+              <td>Gratis, Basico, Automatizar, Integrar</td>
+              <td>R$ 0 a R$ 224,93/mês no anual</td>
+              <td>Gratis com 30 pedidos e excedente, pedidos ilimitados, cupons, chatbot, fidelidade, KDS, integracoes.</td>
+              <td>Concorrente direto no baixo custo. Tapronto precisa manter preco fixo claro.</td>
+            </tr>
+            <tr>
+              <td><strong>Anota AI</strong></td>
+              <td>Start, Advanced, Premium</td>
+              <td>R$ 249,99 a R$ 389,99 segundo Saipos</td>
+              <td>Cardapio, atendimento automatizado, delivery, pagamentos online, gestao e integracoes.</td>
+              <td>Muito mais caro. Tapronto pode ser alternativa para pequenos.</td>
+            </tr>
+            <tr>
+              <td><strong>Cardapio.ai</strong></td>
+              <td>PDV Basico</td>
+              <td>R$ 49,90/mês</td>
+              <td>Pedidos/produtos ilimitados, impressao, relatorios, CRM, cupons/cashback, Pix estatico, pagamento online opcional.</td>
+              <td>Preco agressivo. Tapronto precisa vencer em UX, suporte e clareza.</td>
+            </tr>
+            <tr>
+              <td><strong>Cardapio Web</strong></td>
+              <td>Personalizado / a partir de R$ 139,90 em blog</td>
+              <td>Sob consulta no site principal</td>
+              <td>Chatbot, mesas, pagamento online, disparo WhatsApp, fidelidade, CRM, relatorios, PDV, estoque, KDS, fiscal.</td>
+              <td>Concorrente robusto. Nao e alvo direto do plano Essencial.</td>
+            </tr>
+            <tr>
+              <td><strong>Rei do Delivery</strong></td>
+              <td>Gratis / Premium</td>
+              <td>R$ 0 a R$ 49,90 citado no blog</td>
+              <td>QR Code, WhatsApp, sem comissao no Premium, Pix direto na chave do lojista.</td>
+              <td>Concorrente direto da proposta barata. Tapronto deve entregar painel mais profissional.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Custo por feature</p>
+            <h2>Comparacao economica aproximada</h2>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Plano</th>
+              <th>Preco</th>
+              <th>Features consideradas</th>
+              <th>Custo implicito por feature</th>
+              <th>Observacao</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Tapronto Essencial</td><td>R$ 49,90</td><td>8</td><td>R$ 6,24</td><td>Bom valor para inicio com cardapio e pedidos.</td></tr>
+            <tr><td>Tapronto Profissional</td><td>R$ 89,90</td><td>12</td><td>R$ 7,49</td><td>Plano com melhor equilibrio.</td></tr>
+            <tr><td>Tapronto Premium</td><td>R$ 149,90</td><td>13</td><td>R$ 11,53</td><td>Inclui custo real de WhatsApp automatico.</td></tr>
+            <tr><td>OlaClick Advanced</td><td>R$ 73,30</td><td>12</td><td>R$ 6,11</td><td>Mais features, preco maior.</td></tr>
+            <tr><td>OlaClick Premium</td><td>R$ 188,00</td><td>11</td><td>R$ 17,09</td><td>Automacao mais cara.</td></tr>
+            <tr><td>Abrahão Basico</td><td>R$ 59,94 anualizado</td><td>5</td><td>R$ 11,99</td><td>QR pode ser adicional.</td></tr>
+            <tr><td>Anota AI Start</td><td>R$ 249,99</td><td>3</td><td>R$ 83,33</td><td>Produto mais consultivo/robusto.</td></tr>
+            <tr><td>Cardapio.ai Basico</td><td>R$ 49,90</td><td>8</td><td>R$ 6,24</td><td>Concorrente mais agressivo em preco.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="page">
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Matriz de recursos</p>
+            <h2>O que deve ficar em cada plano</h2>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Teste</th>
+              <th>Essencial</th>
+              <th>Profissional</th>
+              <th>Premium</th>
+              <th>Motivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Produtos</td><td>10</td><td>25</td><td>100</td><td>Ilimitado</td><td>Evita plano basico completo demais.</td></tr>
+            <tr><td>Categorias</td><td>3</td><td>5</td><td>Ilimitado</td><td>Ilimitado</td><td>Atende negocios pequenos sem baguncar upgrade.</td></tr>
+            <tr><td>Pedidos</td><td>30</td><td>150</td><td>Ilimitado</td><td>Ilimitado</td><td>150 pedidos/mês e bom para inicio.</td></tr>
+            <tr><td>WhatsApp manual</td><td>Sim</td><td>Sim</td><td>Sim</td><td>Nao</td><td>Automatico substitui manual no Premium.</td></tr>
+            <tr><td>WhatsApp automatico</td><td>Nao</td><td>Nao</td><td>Adicional</td><td>Incluso</td><td>Existe custo mensal de instancia.</td></tr>
+            <tr><td>Pagamento online</td><td>Nao</td><td>Configuravel</td><td>Sim</td><td>Sim</td><td>Pix online exige orientacao e suporte.</td></tr>
+            <tr><td>Mesas/QR Code</td><td>Nao</td><td>Basico/opcional</td><td>Sim</td><td>Sim</td><td>Recurso de operacao mais madura.</td></tr>
+            <tr><td>Relatorios</td><td>Nao</td><td>Basico</td><td>Completo</td><td>Completo</td><td>Ajuda a diferenciar planos.</td></tr>
+            <tr><td>Cupons</td><td>Nao</td><td>Simples</td><td>Sim</td><td>Sim</td><td>Alto valor percebido e baixo custo tecnico.</td></tr>
+            <tr><td>Fidelidade</td><td>Nao</td><td>Nao</td><td>Opcional/futuro</td><td>Sim</td><td>Recurso de marketing premium.</td></tr>
+            <tr><td>KDS/impressao</td><td>Nao</td><td>Nao</td><td>Sim</td><td>Sim</td><td>Pode gerar suporte; manter fora do barato.</td></tr>
+            <tr><td>Dominio personalizado</td><td>Nao</td><td>Nao/adicional</td><td>Opcional</td><td>Incluso</td><td>DNS gera suporte, entao nao deve ser basico.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Adicionais</p>
+            <h2>Como aumentar ticket medio sem encarecer a entrada</h2>
+          </div>
+        </div>
+        <div class="grid-3">
+          <article class="card">
+            <h3>WhatsApp automatico</h3>
+            <p class="small">R$ 49,90/mês. Custo estimado R$ 29,90. Margem bruta aproximada: R$ 20,00.</p>
+          </article>
+          <article class="card">
+            <h3>Pix online assistido</h3>
+            <p class="small">R$ 79,90 uma vez. Ajuda o leigo a configurar Abacate Pay e webhook.</p>
+          </article>
+          <article class="card">
+            <h3>Implantacao completa</h3>
+            <p class="small">R$ 399,90 uma vez. Loja, cardapio, WhatsApp, Pix e treinamento.</p>
+          </article>
+        </div>
+      </div>
+
+      <div class="section recommendation">
+        <article class="card">
+          <p class="eyebrow">Recomendacao</p>
+          <h2>Posicionamento</h2>
+          <p>O Tapronto deve ser vendido como o cardapio online simples e acessivel para pequenos negocios comecarem do jeito certo, sem depender de conversa perdida no WhatsApp.</p>
+        </article>
+        <article class="card">
+          <p class="eyebrow">Mensagem comercial</p>
+          <h2>Baixo custo, sem cara de improviso</h2>
+          <p>O Essencial deve prometer organizacao e presenca online. O Premium deve prometer automacao, suporte e tranquilidade.</p>
+        </article>
+      </div>
+
+      <div class="section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Fontes</p>
+            <h2>Referencias consultadas</h2>
+          </div>
+        </div>
+        <p class="sources">
+          OlaClick: <a href="https://olaclick.com/precos/">https://olaclick.com/precos/</a><br>
+          Menu Digital: <a href="https://www.menudigital.app.br/">https://www.menudigital.app.br/</a><br>
+          Abrahão Goomer: <a href="https://www.abrahao.com.br/blog/cardapio/quanto-custa-cardapio-digital">https://www.abrahao.com.br/blog/cardapio/quanto-custa-cardapio-digital</a><br>
+          Anota AI oficial: <a href="https://anota.ai/">https://anota.ai/</a><br>
+          Anota AI via Saipos: <a href="https://saipos.com/cardapio-digital/anota-ai">https://saipos.com/cardapio-digital/anota-ai</a><br>
+          Cardapio.ai: <a href="https://cardapio.ai/">https://cardapio.ai/</a><br>
+          Cardapio Web: <a href="https://cardapioweb.com/">https://cardapioweb.com/</a><br>
+          Rei do Delivery: <a href="https://reidodelivery.com.br/blog/quanto-custa-cardapio-digital">https://reidodelivery.com.br/blog/quanto-custa-cardapio-digital</a>
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

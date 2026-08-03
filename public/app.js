@@ -19,7 +19,8 @@
   coupon: null,
   diningTable: null,
   customerTab: null,
-  customerTabs: []
+  customerTabs: [],
+  accessTracked: false
 };
 
 const BOOTSTRAP_CACHE_KEY = 'cardapio_bootstrap_cache_v1';
@@ -252,6 +253,7 @@ async function loadBootstrap() {
     saveCachedBootstrap(data);
     render();
     setStatus(isStoreClosed() ? closedStoreMessage() : `${countItems(state.categories)} produtos disponiveis`);
+    trackAccessEvent('cardapio');
     loadLoggedCustomer().catch(() => {});
   } catch (error) {
     if (isStoreNotFoundError(error)) {
@@ -2173,6 +2175,56 @@ function storeApiUrl(url) {
   const parsed = new URL(url, window.location.origin);
   if (!parsed.searchParams.has('store')) parsed.searchParams.set('store', slug);
   return `${parsed.pathname}${parsed.search}`;
+}
+
+function trackAccessEvent(pageType = 'cardapio') {
+  if (state.accessTracked) return;
+  state.accessTracked = true;
+  const payload = {
+    page_type: pageType,
+    path: window.location.pathname,
+    title: document.title,
+    store_slug: currentStoreSlug(),
+    referrer: document.referrer,
+    device_type: accessDeviceType(),
+    visitor_key: accessVisitorKey(),
+    source: 'public_menu'
+  };
+  const body = JSON.stringify(payload);
+  const url = '/api/analytics/access';
+  try {
+    if (navigator.sendBeacon) {
+      const sent = navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+      if (sent) return;
+    }
+  } catch {}
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true
+  }).catch(() => {});
+}
+
+function accessDeviceType() {
+  const width = window.innerWidth || 1024;
+  if (width <= 767) return 'mobile';
+  if (width <= 1024) return 'tablet';
+  return 'desktop';
+}
+
+function accessVisitorKey() {
+  const key = 'tapronto_access_visitor';
+  try {
+    let value = localStorage.getItem(key);
+    if (!value) {
+      value = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+      localStorage.setItem(key, value);
+    }
+    return value;
+  } catch {
+    return '';
+  }
 }
 
 function storePageUrl(page, query = '') {

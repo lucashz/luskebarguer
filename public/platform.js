@@ -127,6 +127,7 @@ const els = {
   platformDailyChart: document.querySelector('#platformDailyChart'),
   platformDailyDetails: document.querySelector('#platformDailyDetails'),
   platformStoreRanking: document.querySelector('#platformStoreRanking'),
+  platformAccessMetrics: document.querySelector('#platformAccessMetrics'),
   platformBillingMetrics: document.querySelector('#platformBillingMetrics'),
   platformCommercialAlerts: document.querySelector('#platformCommercialAlerts'),
   platformOperationalOverviewAlerts: document.querySelector('#platformOperationalOverviewAlerts'),
@@ -818,6 +819,7 @@ function renderCommercialDashboard() {
   renderKpis();
   renderDailyChart();
   renderStoreRanking();
+  renderAccessMetrics();
   renderBillingMetrics();
   renderCommercialAlerts();
   renderOperationalOverviewAlerts();
@@ -1044,6 +1046,82 @@ function renderStoreRanking() {
       </article>
     `;
   }).join('') : '<p class="empty-state">Nenhuma loja teve pedidos no período selecionado.</p>';
+}
+
+function renderAccessMetrics() {
+  if (!els.platformAccessMetrics) return;
+  if (state.commercialLoading && !state.commercialLoaded) {
+    els.platformAccessMetrics.innerHTML = '<p class="empty-state">Carregando acessos públicos...</p>';
+    return;
+  }
+  if (state.commercialError && !state.commercialLoaded) {
+    els.platformAccessMetrics.innerHTML = `<p class="empty-state">${escapeHtml(state.commercialError)}</p>`;
+    return;
+  }
+  const access = state.analytics?.access || {};
+  const byDevice = access.by_device || [];
+  const byPage = access.by_page || [];
+  const topStores = access.top_stores || [];
+  const maxStoreViews = Math.max(1, ...topStores.map((row) => Number(row.views || 0)));
+  const deviceLabel = {
+    desktop: 'Desktop',
+    mobile: 'Celular',
+    tablet: 'Tablet'
+  };
+  const pageLabel = {
+    home: 'Home',
+    ajuda: 'Ajuda',
+    cardapio: 'Cardápios',
+    checkout: 'Checkout',
+    conta: 'Conta',
+    pedido: 'Pedido'
+  };
+  els.platformAccessMetrics.innerHTML = Number(access.total_views || 0) ? `
+    <div class="platform-access-summary">
+      <article>
+        <span>Visualizações</span>
+        <strong>${Number(access.total_views || 0)}</strong>
+        <small>Total de páginas públicas abertas</small>
+      </article>
+      <article>
+        <span>Visitantes</span>
+        <strong>${Number(access.unique_visitors || 0)}</strong>
+        <small>Estimativa por navegador/dispositivo</small>
+      </article>
+      <article>
+        <span>Média</span>
+        <strong>${Number(access.average_views_per_visitor || 0).toLocaleString('pt-BR')}</strong>
+        <small>Visualizações por visitante</small>
+      </article>
+    </div>
+    <div class="platform-access-columns">
+      <section>
+        <h4>Por página</h4>
+        ${(byPage.length ? byPage : []).slice(0, 5).map((row) => `
+          <p><span>${escapeHtml(pageLabel[row.page_type] || row.page_type || 'Página')}</span><strong>${Number(row.count || 0)}</strong></p>
+        `).join('') || '<p class="empty-state">Sem páginas registradas.</p>'}
+      </section>
+      <section>
+        <h4>Por dispositivo</h4>
+        ${(byDevice.length ? byDevice : []).slice(0, 5).map((row) => `
+          <p><span>${escapeHtml(deviceLabel[row.device_type] || row.device_type || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
+        `).join('') || '<p class="empty-state">Sem dispositivos registrados.</p>'}
+      </section>
+    </div>
+    <div class="platform-access-ranking">
+      <h4>Cardápios mais acessados</h4>
+      ${topStores.length ? topStores.map((row) => `
+        <article>
+          <div>
+            <strong>${escapeHtml(row.store_name || 'Loja')}</strong>
+            <small>/${escapeHtml(row.slug || '')} · ${Number(row.visitors || 0)} visitante(s)</small>
+          </div>
+          <span>${Number(row.views || 0)} acesso(s)</span>
+          <i style="--value:${Math.max(8, (Number(row.views || 0) / maxStoreViews) * 100)}%"></i>
+        </article>
+      `).join('') : '<p class="empty-state">Nenhum cardápio público acessado no período.</p>'}
+    </div>
+  ` : '<p class="empty-state">Ainda não há acessos registrados no período. As visitas começam a aparecer após alguém abrir a Home, Ajuda ou um cardápio público.</p>';
 }
 
 function renderBillingMetrics() {

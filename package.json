@@ -25,10 +25,11 @@
     "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/ajuda.js",
     "test:local": "node scripts/local-db-smoke.mjs",
     "test:plans": "node scripts/plan-matrix-smoke.mjs",
+    "test:trial": "node scripts/trial-expired-smoke.mjs",
     "test:security": "node scripts/sql-injection-tests.mjs",
     "test:flows": "node scripts/core-flow-smoke.mjs",
     "test:platform-health": "node scripts/platform-health-smoke.mjs",
-    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:security && npm run test:flows && npm run test:platform-health"
+    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:flows && npm run test:platform-health"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

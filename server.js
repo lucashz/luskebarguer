@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
@@ -151,6 +151,12 @@ async function handleApi(req, res, url) {
 
   if (method === 'GET' && url.pathname === '/api/portal/plans') {
     json(res, 200, await listPortalPlans());
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/analytics/access') {
+    await recordAccessEvent(req, await readJson(req));
+    json(res, 202, { ok: true });
     return;
   }
 
@@ -1646,7 +1652,8 @@ async function handleApi(req, res, url) {
     if (!admin) return;
     const op = await adminOperationalOptions(admin);
     const date = cleanText(url.searchParams.get('date') || '');
-    json(res, 200, { report: await dailyOrderReport(date, admin.store_id, op) });
+    const report = await dailyOrderReport(date, admin.store_id, op);
+    json(res, 200, { report: await applyReportPlanAccess(report, admin.company_id) });
     return;
   }
 
@@ -1654,15 +1661,14 @@ async function handleApi(req, res, url) {
     const admin = await requireAdminPermission(req, res, 'reports');
     if (!admin) return;
     const op = await adminOperationalOptions(admin);
-    json(res, 200, {
-      report: await rangeOrderReport({
+    const report = await rangeOrderReport({
         days: url.searchParams.get('days'),
         start: url.searchParams.get('start'),
         end: url.searchParams.get('end'),
         storeId: admin.store_id,
         ...op
-      })
-    });
+      });
+    json(res, 200, { report: await applyReportPlanAccess(report, admin.company_id) });
     return;
   }
 
@@ -3446,7 +3452,7 @@ async function platformCommercialSummary() {
 
 async function platformCommercialAnalytics(params = new URLSearchParams()) {
   const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
-  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products] = await Promise.all([
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents] = await Promise.all([
     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
@@ -3468,6 +3474,11 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
     dbRequest('GET', 'menu_items', {
       select: 'id,store_id,is_active',
       limit: '10000'
+    }).catch(() => []),
+    dbRequest('GET', 'access_events', {
+      select: 'id,store_id,page_type,path,referrer_host,device_type,visitor_key,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '10000'
     }).catch(() => [])
   ]);
   const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
@@ -3485,7 +3496,8 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
     revenue,
     conversion,
     new_clients_daily: platformNewClientsDaily(companies, period),
-    mrr_by_plan: revenue.mrr_by_plan
+    mrr_by_plan: revenue.mrr_by_plan,
+    access: platformAccessSnapshot(accessEvents, period, context.storeById)
   };
 }
 
@@ -3967,6 +3979,126 @@ function platformStoreRanking(orders, storeById) {
     grouped.set(order.store_id, current);
   }
   return [...grouped.values()].sort((a, b) => b.orders - a.orders || b.revenue - a.revenue);
+}
+
+async function recordAccessEvent(req, data = {}) {
+  const pageType = accessPageType(data.page_type || data.pageType);
+  const pathValue = cleanPublicPath(data.path || data.pathname || '');
+  const referrerHost = referrerHostFromValue(data.referrer || data.referrer_host || req.headers.referer || '');
+  const visitorKey = accessVisitorKey(req, data.visitor_key || data.visitorKey || '');
+  const store = await resolveAccessStore(req, data, pathValue).catch(() => null);
+  await dbRequest('POST', 'access_events', {}, {
+    company_id: store?.company_id || null,
+    store_id: store?.id || null,
+    page_type: pageType,
+    path: pathValue,
+    referrer_host: referrerHost,
+    device_type: accessDeviceType(data.device_type || data.deviceType || req.headers['user-agent'] || ''),
+    visitor_key: visitorKey,
+    metadata: {
+      title: cleanText(data.title || '').slice(0, 120),
+      source: cleanText(data.source || 'web').slice(0, 40)
+    }
+  }, ['Prefer: return=minimal']);
+}
+
+async function resolveAccessStore(req, data = {}, pathValue = '') {
+  const hostStore = await getStoreByHost(req).catch(() => null);
+  if (hostStore) return hostStore;
+  const slug = cleanSlug(data.store_slug || data.storeSlug || firstPublicPathSegment(pathValue));
+  return slug ? await getStoreBySlug(slug).catch(() => null) : null;
+}
+
+function accessPageType(value) {
+  const type = cleanSlug(value || 'page');
+  if (['home', 'cardapio', 'ajuda', 'checkout', 'pedido', 'conta'].includes(type)) return type;
+  return 'page';
+}
+
+function cleanPublicPath(value) {
+  const text = String(value || '/').split('#')[0].slice(0, 220);
+  return text.startsWith('/') ? text : `/${text}`;
+}
+
+function referrerHostFromValue(value) {
+  try {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return new URL(text, 'https://taprontomenu.com.br').hostname.replace(/^www\./i, '').slice(0, 120);
+  } catch {
+    return '';
+  }
+}
+
+function accessVisitorKey(req, explicitKey = '') {
+  const explicit = cleanText(explicitKey || '').slice(0, 80);
+  if (explicit) return explicit;
+  const raw = `${clientKey(req)}|${String(req.headers['user-agent'] || '').slice(0, 180)}`;
+  return createHash('sha256').update(raw).digest('hex').slice(0, 32);
+}
+
+function accessDeviceType(value) {
+  const text = String(value || '').toLowerCase();
+  if (['desktop', 'mobile', 'tablet'].includes(text)) return text;
+  if (/ipad|tablet/.test(text)) return 'tablet';
+  if (/android|iphone|mobile|windows phone/.test(text)) return 'mobile';
+  return 'desktop';
+}
+
+function platformAccessSnapshot(events = [], period, storeById = new Map()) {
+  const totalViews = events.length;
+  const visitors = new Set(events.map((event) => event.visitor_key).filter(Boolean));
+  const groupedByDate = new Map();
+  for (let cursor = new Date(period.start); cursor <= period.end; cursor.setDate(cursor.getDate() + 1)) {
+    groupedByDate.set(cursor.toISOString().slice(0, 10), { date: cursor.toISOString().slice(0, 10), views: 0, visitors: new Set() });
+  }
+  const byPage = new Map();
+  const byDevice = new Map();
+  const byReferrer = new Map();
+  const byStore = new Map();
+  for (const event of events) {
+    const dateKey = new Date(event.created_at).toISOString().slice(0, 10);
+    const dateRow = groupedByDate.get(dateKey);
+    if (dateRow) {
+      dateRow.views += 1;
+      if (event.visitor_key) dateRow.visitors.add(event.visitor_key);
+    }
+    const page = event.page_type || 'page';
+    byPage.set(page, (byPage.get(page) || 0) + 1);
+    const device = event.device_type || 'desktop';
+    byDevice.set(device, (byDevice.get(device) || 0) + 1);
+    const referrer = event.referrer_host || 'Direto';
+    byReferrer.set(referrer, (byReferrer.get(referrer) || 0) + 1);
+    if (event.store_id) {
+      const store = storeById.get(event.store_id) || {};
+      const current = byStore.get(event.store_id) || {
+        store_id: event.store_id,
+        store_name: store.name || store.slug || 'Loja',
+        slug: store.slug || '',
+        views: 0,
+        visitors: new Set()
+      };
+      current.views += 1;
+      if (event.visitor_key) current.visitors.add(event.visitor_key);
+      byStore.set(event.store_id, current);
+    }
+  }
+  const mapped = (map, keyName = 'key') => [...map.entries()]
+    .map(([key, count]) => ({ [keyName]: key, count }))
+    .sort((a, b) => b.count - a.count);
+  return {
+    total_views: totalViews,
+    unique_visitors: visitors.size,
+    average_views_per_visitor: visitors.size ? Number((totalViews / visitors.size).toFixed(1)) : 0,
+    daily: [...groupedByDate.values()].map((row) => ({ date: row.date, views: row.views, visitors: row.visitors.size })),
+    by_page: mapped(byPage, 'page_type'),
+    by_device: mapped(byDevice, 'device_type'),
+    by_referrer: mapped(byReferrer, 'referrer'),
+    top_stores: [...byStore.values()]
+      .map((row) => ({ ...row, visitors: row.visitors.size }))
+      .sort((a, b) => b.views - a.views)
+      .slice(0, 8)
+  };
 }
 
 function platformGroupOrders(orders, field) {
@@ -6341,11 +6473,7 @@ async function createProviderAddonCheckout({ company, admin, addon, amount, bill
     }
   };
   if (customerId) body.customerId = customerId;
-  const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
-    method: 'POST',
-    token: config.api_key,
-    body
-  });
+  const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'adicional');
   const payload = data.data || data;
   const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
   if (!checkoutUrl) throw httpError(502, 'A Abacate Pay criou a cobrança do adicional, mas não retornou a URL de checkout.');
@@ -6705,11 +6833,7 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
     metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_monthly_charge' }
   };
   if (customerId) body.customerId = customerId;
-  const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
-    method: 'POST',
-    token: config.api_key,
-    body
-  });
+  const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'mensalidade');
   const payload = data.data || data;
   const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
   if (!checkoutUrl) {
@@ -6720,6 +6844,47 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
     transactionId: externalId,
     checkoutUrl
   };
+}
+
+async function createAbacateCheckoutWithPixAutomaticFallback(body, token, contextLabel = 'cobrança') {
+  try {
+    return await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
+      method: 'POST',
+      token,
+      body
+    });
+  } catch (error) {
+    if (!abacatePayPixAutomaticUnavailable(error) || !Array.isArray(body?.methods) || !body.methods.includes('CARD')) {
+      throw error;
+    }
+    const retryBody = {
+      ...body,
+      methods: ['CARD'],
+      metadata: {
+        ...(body.metadata || {}),
+        payment_methods_fallback: 'card_only',
+        fallback_reason: 'pix_automatic_unavailable'
+      }
+    };
+    console.warn(`Abacate Pay recusou Pix Automático na ${contextLabel}; reabrindo checkout somente com cartão.`);
+    return providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
+      method: 'POST',
+      token,
+      body: retryBody
+    });
+  }
+}
+
+function abacatePayPixAutomaticUnavailable(error) {
+  const detail = error?.detail || error?.data || error;
+  const message = [
+    error?.message,
+    detail?.message,
+    detail?.error,
+    detail?.code,
+    detail?.status
+  ].filter(Boolean).join(' ').toLowerCase();
+  return message.includes('pix automatic') || message.includes('pix automático') || message.includes('pix automatico');
 }
 
 async function ensureAbacateSubscriptionProduct({ plan, amount, token }) {
@@ -8984,15 +9149,17 @@ async function connectAdminWhatsappIntegration(req, admin) {
     }
     throw httpError(502, 'Não foi possível gerar o QR Code do WhatsApp. Tente novamente em instantes.');
   }
+  const resolvedStatus = normalizeWhatsappIntegrationStatus(providerData.status || 'connecting');
+  const resolvedQrCode = resolvedStatus === 'connecting' ? (providerData.qr_code_base64 || existing?.qr_code_base64 || null) : null;
   const saved = await upsertStoreWhatsappIntegration({
     current: existing,
     store,
     instance_name: instanceName,
     instance_id: providerData.instance_id || existing?.instance_id || null,
     instance_token: providerData.instance_token || existing?.instance_token || null,
-    status: providerData.status || 'connecting',
-    qr_code_base64: providerData.qr_code_base64 || existing?.qr_code_base64 || null,
-    last_qr_at: providerData.qr_code_base64 ? new Date().toISOString() : existing?.last_qr_at || null,
+    status: resolvedStatus,
+    qr_code_base64: resolvedQrCode,
+    last_qr_at: resolvedQrCode ? new Date().toISOString() : null,
     last_error: null,
     monthly_cost_cents: providerReserve?.instance_cost_cents || existing?.monthly_cost_cents || 2990,
     next_billing_at: providerReserve?.next_billing_at || existing?.next_billing_at || null,
@@ -9024,10 +9191,12 @@ async function refreshAdminWhatsappQrCode(admin) {
     instanceId: integration.instance_id || null,
     instanceToken: integration.instance_token || null
   });
+  const resolvedStatus = normalizeWhatsappIntegrationStatus(data.status || integration.status || 'connecting');
+  const resolvedQrCode = resolvedStatus === 'connecting' ? (data.qr_code_base64 || integration.qr_code_base64 || null) : null;
   const saved = await patchStoreWhatsappIntegration(integration.id, {
-    qr_code_base64: data.qr_code_base64 || integration.qr_code_base64 || null,
-    status: data.status || integration.status || 'connecting',
-    last_qr_at: data.qr_code_base64 ? new Date().toISOString() : integration.last_qr_at,
+    qr_code_base64: resolvedQrCode,
+    status: resolvedStatus,
+    last_qr_at: resolvedQrCode ? new Date().toISOString() : null,
     last_error: null,
     updated_at: new Date().toISOString()
   });
@@ -9312,8 +9481,8 @@ function publicStoreWhatsappIntegration(row = null) {
     instance_name: row.instance_name || '',
     instance_id: row.instance_id || '',
     phone_number: row.phone_number || '',
-    has_qr_code: Boolean(row.qr_code_base64),
-    qr_code_base64: row.qr_code_base64 || '',
+    has_qr_code: normalizeWhatsappIntegrationStatus(row.status || 'disconnected') === 'connecting' && Boolean(row.qr_code_base64),
+    qr_code_base64: normalizeWhatsappIntegrationStatus(row.status || 'disconnected') === 'connecting' ? (row.qr_code_base64 || '') : '',
     last_qr_at: row.last_qr_at || null,
     connected_at: row.connected_at || null,
     disconnected_at: row.disconnected_at || null,
@@ -9365,7 +9534,7 @@ async function evolutionCreateInstance(instanceName, store, config) {
       }
     }, config);
   } catch (error) {
-    if (!String(error.message || '').toLowerCase().includes('instance already exists')) throw error;
+    if (!isEvolutionDuplicateInstanceError(error)) throw error;
     const existing = await evolutionFindInstanceByName(instanceName, config);
     if (!existing?.id || !existing?.token) throw error;
     const connected = await evolutionConnectInstance(instanceName, config, {
@@ -9388,6 +9557,23 @@ async function evolutionCreateInstance(instanceName, store, config) {
     instance_token: resolvedInstanceToken,
     instance_id: instanceId
   };
+}
+
+function isEvolutionDuplicateInstanceError(error = {}) {
+  const text = [
+    error.message,
+    error.detail?.message,
+    error.detail?.detail,
+    error.detail?.error,
+    error.detail?.data?.message,
+    error.detail?.response?.message
+  ].filter(Boolean).join(' ').toLowerCase();
+  return Number(error.status || error.detail?.status || 0) === 409
+    || /instance.+already.+exist/.test(text)
+    || /already.+exist/.test(text)
+    || /duplicate key/.test(text)
+    || /duplicad/.test(text)
+    || /j[aá].+existe/.test(text);
 }
 
 async function evolutionFindInstanceByName(instanceName, config) {
@@ -9638,15 +9824,17 @@ async function receiveEvolutionWebhook(req, payload = {}) {
     : event.includes('CONNECTION') || state
       ? normalizeWhatsappIntegrationStatus(state)
       : integration.status;
+  const resolvedStatus = normalizeWhatsappIntegrationStatus(status);
+  const resolvedQrCode = resolvedStatus === 'connecting' ? (qrData.qr_code_base64 || integration.qr_code_base64 || null) : null;
   await patchStoreWhatsappIntegration(integration.id, {
-    status,
+    status: resolvedStatus,
     instance_id: instanceId || integration.instance_id || null,
     instance_token: instanceToken || integration.instance_token || null,
-    qr_code_base64: qrData.qr_code_base64 || integration.qr_code_base64 || null,
-    last_qr_at: qrData.qr_code_base64 ? new Date().toISOString() : integration.last_qr_at,
-    connected_at: status === 'connected' ? (integration.connected_at || new Date().toISOString()) : integration.connected_at,
-    disconnected_at: status === 'disconnected' ? new Date().toISOString() : integration.disconnected_at,
-    last_error: status === 'error' ? cleanText(payload?.data?.message || payload?.message || 'Erro recebido no webhook.').slice(0, 500) : null,
+    qr_code_base64: resolvedQrCode,
+    last_qr_at: resolvedQrCode ? new Date().toISOString() : null,
+    connected_at: resolvedStatus === 'connected' ? (integration.connected_at || new Date().toISOString()) : integration.connected_at,
+    disconnected_at: resolvedStatus === 'disconnected' ? new Date().toISOString() : integration.disconnected_at,
+    last_error: resolvedStatus === 'error' ? cleanText(payload?.data?.message || payload?.message || 'Erro recebido no webhook.').slice(0, 500) : null,
     updated_at: new Date().toISOString()
   });
   return { ok: true };
@@ -11448,6 +11636,8 @@ function adminPlanFeatureCodes() {
     'digital_menu',
     'menu_categories',
     'basic_reports',
+    'advanced_reports',
+    'business_insights',
     'tables',
     'promotions',
     'customers',
@@ -11466,10 +11656,12 @@ function adminPlanFeatureCodes() {
 
 function featureBlockedMessage(featureCode) {
   return ({
-    tables: 'Mesas e comandas avançadas estão disponíveis a partir do Profissional.',
+    tables: 'Mesas e comandas completas estão disponíveis a partir do Profissional. O Essencial permite até 2 mesas para começar.',
     promotions: 'Cupons e campanhas estão disponíveis a partir do Profissional.',
     customers: 'Clientes não estão disponíveis no plano atual.',
-    basic_reports: 'Relatórios não estão disponíveis no plano atual.',
+    basic_reports: 'Relatórios simples não estão disponíveis no plano atual.',
+    advanced_reports: 'Relatórios completos estão disponíveis a partir do Profissional.',
+    business_insights: 'Insights avançados estão disponíveis no Premium.',
     digital_menu: 'Cardápio não está disponível no plano atual.',
     menu_categories: 'Novas categorias não estão disponíveis no plano atual.',
     orders: 'Pedidos não estão disponíveis no plano atual.',
@@ -11556,6 +11748,18 @@ async function getCompanyFeatureAccess(companyId, featureCode) {
   const subscription = await getCurrentSubscription(resolvedCompanyId);
   if (!subscription || ['cancelled', 'expired', 'suspended'].includes(subscription.status)) {
     return { enabled: false, limit_value: null, source: 'subscription' };
+  }
+  if (subscription.status === 'trial' && subscription.trial_ends_at && new Date(subscription.trial_ends_at).getTime() < Date.now()) {
+    return { enabled: false, limit_value: null, source: 'trial_expired' };
+  }
+  if (['payment_pending', 'past_due', 'blocked'].includes(subscription.status)) {
+    return { enabled: false, limit_value: null, source: 'subscription_status' };
+  }
+  if (subscription.status === 'grace_period') {
+    const due = subscription.payment_due_at || subscription.current_period_ends_at;
+    if (due && new Date(due).getTime() < Date.now()) {
+      return { enabled: false, limit_value: null, source: 'grace_period_expired' };
+    }
   }
   const [planFeature] = await dbRequest('GET', 'plan_features', {
     select: 'id,is_enabled,limit_value',
@@ -13377,6 +13581,7 @@ function rateLimitRule(method, pathname) {
   if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 120 * 1000);
   if (method === 'POST' && pathname === '/api/portal/signup') return limitRule('portal-signup', 5, 120 * 1000);
   if (method === 'POST' && pathname === '/api/admin/uploads') return limitRule('admin-upload', 30, 10 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/analytics/access') return limitRule('access-analytics', 60, 10 * 60 * 1000);
   return null;
 }
 
@@ -14081,9 +14286,9 @@ async function ensureAbacateOrderProduct({ store, order, amount, token }) {
 }
 
 async function createAbacateOrderCustomer({ customer, order, token }) {
-  const email = cleanText(order.customer_snapshot?.email || '');
-  if (!email) return '';
   const customerPayload = abacatePayCustomer({ ...order, customer_snapshot: { ...(order.customer_snapshot || {}), ...customer } });
+  const email = cleanEmail(customerPayload.email || order.customer_snapshot?.email || '');
+  if (!email) return '';
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/customers/create`, {
     method: 'POST',
     token,
@@ -14323,9 +14528,12 @@ async function receivePaymentWebhook(data, options = {}) {
   if (existing[0]) return { ok: true, duplicate: true };
   const transactionId = normalized.transactionId;
   const status = normalized.status;
-  const order = transactionId
+  let order = transactionId
     ? (await db('GET', 'orders', { select: '*', payment_transaction_id: `eq.${transactionId}`, limit: '1' }))[0]
-    : await getOrderByPublicCode(normalized.orderCode, webhookContext);
+    : null;
+  if (!order && normalized.orderCode) {
+    order = await getOrderByPublicCode(normalized.orderCode, webhookContext);
+  }
   if (!order) throw httpError(404, 'Pedido do pagamento não encontrado.');
   if (order.status === 'cancelled' && status === 'paid') throw httpError(422, 'Pedido cancelado não pode receber pagamento.');
   const amount = roundMoney(Number.parseFloat(normalized.amount || order.total) || 0);
@@ -14404,7 +14612,7 @@ async function normalizeProviderWebhook(data) {
       provider,
       eventId: cleanExternalId(data.id || data.eventId || data.event || payload.id || `abacatepay_${Date.now()}`),
       transactionId: cleanExternalId(payload.id || data.paymentId || data.transaction_id || ''),
-      orderCode: cleanPublicCode(payload.metadata?.orderCode || payload.externalId || payload.externalReference || data.order_code || data.code || ''),
+      orderCode: abacatePayOrderCodeFromPayload(payload, data),
       status: abacatePayStatusToFinancial(payload.status || data.status || data.event),
       amount: centsToMoney(payload.amount || payload.value || data.amount || data.value)
     };
@@ -14457,6 +14665,39 @@ async function normalizeProviderWebhook(data) {
     status: sanitizeFinancialStatus(data.status || data.financial_status || 'paid'),
     amount: data.amount
   };
+}
+
+function abacatePayOrderCodeFromPayload(payload = {}, data = {}) {
+  const metadata = {
+    ...(isPlainObject(data.metadata) ? data.metadata : {}),
+    ...(isPlainObject(payload.metadata) ? payload.metadata : {})
+  };
+  const candidates = [
+    metadata.orderCode,
+    metadata.order_code,
+    data.order_code,
+    data.code,
+    payload.orderCode,
+    payload.order_code,
+    payload.code,
+    payload.externalId,
+    payload.external_id,
+    payload.externalReference,
+    payload.external_reference,
+    data.externalId,
+    data.external_id,
+    data.externalReference,
+    data.external_reference
+  ];
+  for (const candidate of candidates) {
+    const value = cleanText(candidate || '');
+    if (!value) continue;
+    const match = value.match(/tapronto-order-([a-z0-9_-]+?)(?:-\d+)?$/i);
+    if (match?.[1]) return cleanPublicCode(match[1]);
+    const code = cleanPublicCode(value);
+    if (code && !code.startsWith('TAPRONTO-ORDER-')) return code;
+  }
+  return '';
 }
 
 function inferWebhookProvider(data) {
@@ -14614,10 +14855,19 @@ async function fetchProviderPaymentStatus(order, integrations) {
     const checkoutUrl = String(details.checkout_url || '');
     const isHostedCheckout = transactionId.startsWith('bill_') || checkoutUrl.includes('app.abacatepay.com/pay/');
     const endpoint = isHostedCheckout ? 'checkouts/get' : 'transparents/check';
-    let data = await providerFetch(`${ABACATEPAY_API_BASE}/${endpoint}?id=${encodeURIComponent(transactionId)}`, { token });
-    let payload = data.data || data;
+    let data = null;
+    let payload = null;
+    try {
+      data = await providerFetch(`${ABACATEPAY_API_BASE}/${endpoint}?id=${encodeURIComponent(transactionId)}`, { token });
+      payload = data.data || data;
+    } catch (error) {
+      if (!isHostedCheckout) throw error;
+      const listed = await findAbacateCheckoutInList(transactionId, token, order.public_code).catch(() => null);
+      if (!listed) throw error;
+      payload = listed;
+    }
     if (isHostedCheckout && abacatePayStatusToFinancial(payload.status) === 'pending') {
-      const listed = await findAbacateCheckoutInList(transactionId, token).catch(() => null);
+      const listed = await findAbacateCheckoutInList(transactionId, token, order.public_code).catch(() => null);
       if (listed && abacatePayStatusToFinancial(listed.status) !== 'pending') payload = listed;
     }
     const providerAmount = Number(payload.paidAmount ?? payload.amount ?? payload.value ?? moneyCents(order.total));
@@ -14641,12 +14891,43 @@ async function fetchProviderPaymentStatus(order, integrations) {
   return { status: order.financial_status, amount: order.total };
 }
 
-async function findAbacateCheckoutInList(transactionId, token) {
-  if (!transactionId || !token) return null;
+async function findAbacateCheckoutInList(transactionId, token, orderCode = '') {
+  if ((!transactionId && !orderCode) || !token) return null;
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/list?limit=100`, { token });
   const payload = data.data || data;
   const items = Array.isArray(payload) ? payload : (Array.isArray(payload.items) ? payload.items : []);
-  return items.find((item) => cleanExternalId(item.id || '') === transactionId) || null;
+  const normalizedTransactionId = cleanExternalId(transactionId || '');
+  const normalizedOrderCode = cleanPublicCode(orderCode || '');
+  return items.find((item) => abacateCheckoutMatchesOrder(item, normalizedTransactionId, normalizedOrderCode)) || null;
+}
+
+function abacateCheckoutMatchesOrder(item = {}, transactionId = '', orderCode = '') {
+  const nested = item.billing || item.checkout || item.payment || {};
+  const metadata = {
+    ...(isPlainObject(item.metadata) ? item.metadata : {}),
+    ...(isPlainObject(nested.metadata) ? nested.metadata : {})
+  };
+  const ids = [
+    item.id,
+    item.checkoutId,
+    item.checkout_id,
+    item.billingId,
+    item.billing_id,
+    item.externalId,
+    item.external_id,
+    nested.id,
+    nested.checkoutId,
+    nested.checkout_id,
+    nested.billingId,
+    nested.billing_id,
+    nested.externalId,
+    nested.external_id,
+    metadata.externalId,
+    metadata.external_id
+  ].map((value) => cleanExternalId(value || '')).filter(Boolean);
+  if (transactionId && ids.includes(transactionId)) return true;
+  if (!orderCode) return false;
+  return abacatePayOrderCodeFromPayload({ ...nested, ...item, metadata }, item) === orderCode;
 }
 
 async function getOrderByPublicCode(code, options = {}) {
@@ -15186,6 +15467,66 @@ async function orderReportBetween(start, end, period, storeId, options = {}) {
     cash_closing: cashClosingTotals(withItems),
     top_products: topProductTotals(withItems.filter((order) => order.status !== 'cancelled')),
     orders: withItems
+  };
+}
+
+async function applyReportPlanAccess(report, companyId) {
+  const access = companyId ? await getCompanyPlanAccess(companyId).catch(() => ({})) : {};
+  const summary = reportAccessSummary(access);
+  const enriched = {
+    ...report,
+    report_access: summary
+  };
+  if (summary.level === 'advanced') {
+    return {
+      ...enriched,
+      report_locks: [
+        {
+          feature: 'business_insights',
+          title: 'Insights avançados',
+          message: featureBlockedMessage('business_insights')
+        }
+      ]
+    };
+  }
+  if (summary.level !== 'basic') return enriched;
+  return {
+    ...enriched,
+    by_origin: [],
+    by_hour: [],
+    top_products: [],
+    orders: [],
+    report_locks: [
+      {
+        feature: 'advanced_reports',
+        title: 'Relatórios completos',
+        message: featureBlockedMessage('advanced_reports')
+      },
+      {
+        feature: 'business_insights',
+        title: 'Insights avançados',
+        message: featureBlockedMessage('business_insights')
+      }
+    ]
+  };
+}
+
+function reportAccessSummary(access = {}) {
+  const hasBasic = access.basic_reports?.enabled === true;
+  const hasAdvanced = access.advanced_reports?.enabled === true;
+  const hasInsights = access.business_insights?.enabled === true;
+  const level = hasInsights ? 'insights' : hasAdvanced ? 'advanced' : hasBasic ? 'basic' : 'none';
+  return {
+    level,
+    label: ({
+      none: 'Sem relatórios',
+      basic: 'Relatório simples',
+      advanced: 'Relatório completo',
+      insights: 'Insights avançados'
+    })[level],
+    basic_reports: hasBasic,
+    advanced_reports: hasAdvanced,
+    business_insights: hasInsights
   };
 }
 

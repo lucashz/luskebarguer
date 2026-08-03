@@ -29,6 +29,7 @@ els.refresh.addEventListener('click', () => loadOnlineOrders({ showLoading: true
 init();
 
 async function init() {
+  configureStoreLinks();
   loadStoreTheme().catch(() => {});
   const cached = loadAccountCache();
   if (cached?.customer) {
@@ -169,9 +170,23 @@ function renderEmpty(message) {
     <article class="orders-empty panel">
       <p class="eyebrow">Histórico</p>
       <h2>${escapeHtml(message)}</h2>
-      <a class="primary-button" href="/">Abrir cardápio</a>
+      <a class="primary-button" href="${escapeAttribute(storeHomeUrl())}">Abrir cardápio</a>
     </article>
   `;
+}
+
+function configureStoreLinks() {
+  const home = storeHomeUrl();
+  const account = storePageUrl('conta');
+  document.querySelectorAll('[data-store-home]').forEach((link) => { link.href = home; });
+  document.querySelectorAll('[data-store-account]').forEach((link) => { link.href = account; });
+}
+
+function storePageUrl(page = '') {
+  const slug = currentStoreSlug();
+  const normalizedPage = String(page || '').replace(/^\/+/, '');
+  if (!slug) return `/${normalizedPage}`;
+  return `/${slug}/${normalizedPage}`;
 }
 
 function renderCacheNotice() {
@@ -273,7 +288,7 @@ function repeatOrder(order) {
   localStorage.setItem('cart', JSON.stringify(cart));
   toast('Pedido colocado na sacola.');
   setTimeout(() => {
-    window.location.href = '/';
+    window.location.href = storeHomeUrl();
   }, 500);
 }
 
@@ -323,6 +338,11 @@ function currentStoreSlug() {
   const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
   if (!firstSegment || ['admin', 'cozinha', 'pagamento', 'conta', 'cliente', 'pedidos'].includes(firstSegment)) return '';
   return firstSegment;
+}
+
+function storeHomeUrl() {
+  const slug = currentStoreSlug();
+  return slug ? `/${slug}` : '/';
 }
 
 function modifierText(modifier) {
