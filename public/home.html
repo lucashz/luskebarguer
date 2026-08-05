@@ -12,7 +12,7 @@
     <meta property="og:image" content="/assets/sistema-cardapio-preview.png">
     <link rel="canonical" href="/">
     <link rel="icon" href="/assets/tapronto-favicon.svg">
-    <link rel="stylesheet" href="/home.css?v=20260718-hero-cards">
+    <link rel="stylesheet" href="/home.css?v=20260804-carousel-gallery">
   </head>
   <body>
     <header class="home-header">
@@ -383,6 +383,25 @@
       </div>
     </footer>
 
-    <script src="/home.js?v=20260717-figma-export" defer></script>
+    <div class="home-image-modal" data-home-image-modal hidden>
+      <div class="home-image-modal-backdrop" data-home-image-modal-close></div>
+      <div class="home-image-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="homeImageModalTitle" aria-describedby="homeImageModalDescription">
+        <button class="home-image-modal-close" type="button" data-home-image-modal-close aria-label="Fechar imagem ampliada">&times;</button>
+        <div class="home-image-modal-media">
+          <img data-home-image-modal-img src="" alt="">
+          <button class="home-image-modal-nav previous" type="button" data-home-image-modal-previous aria-label="Ver foto anterior">&#8249;</button>
+          <button class="home-image-modal-nav next" type="button" data-home-image-modal-next aria-label="Ver próxima foto">&#8250;</button>
+        </div>
+        <div class="home-image-modal-caption">
+          <div>
+            <strong id="homeImageModalTitle" data-home-image-modal-title></strong>
+            <span id="homeImageModalDescription" data-home-image-modal-description></span>
+          </div>
+          <small data-home-image-modal-counter aria-live="polite"></small>
+        </div>
+      </div>
+    </div>
+
+    <script src="/home.js?v=20260804-carousel-gallery" defer></script>
   </body>
 </html>

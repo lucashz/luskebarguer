@@ -7,6 +7,7 @@
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   let activeSlide = 0;
   let slideTimer = null;
+  let modalTrigger = null;
 
   if (menuButton && mobileMenu) {
     const closeMenu = () => {
@@ -64,6 +65,8 @@
     startTimer();
   }
 
+  setupImageModal();
+
   trackHomeAccess();
 
   function trackHomeAccess() {
@@ -77,6 +80,104 @@
       source: 'home'
     };
     postAccessMetric(payload);
+  }
+
+  function setupImageModal() {
+    const modal = document.querySelector('[data-home-image-modal]');
+    const modalImage = modal?.querySelector('[data-home-image-modal-img]');
+    const modalTitle = modal?.querySelector('[data-home-image-modal-title]');
+    const modalDescription = modal?.querySelector('[data-home-image-modal-description]');
+    const modalCounter = modal?.querySelector('[data-home-image-modal-counter]');
+    const previousButton = modal?.querySelector('[data-home-image-modal-previous]');
+    const nextButton = modal?.querySelector('[data-home-image-modal-next]');
+    const closeButton = modal?.querySelector('.home-image-modal-close');
+    if (!modal || !modalImage || !modalTitle || !modalDescription || !modalCounter || !previousButton || !nextButton || !closeButton) return;
+
+    const showModalSlide = (index) => {
+      activeSlide = (index + slides.length) % slides.length;
+      const slide = slides[activeSlide];
+      const image = slide?.querySelector('img');
+      if (!image) return;
+      const title = slide.querySelector('figcaption strong')?.textContent?.trim() || image.alt;
+      const description = slide.querySelector('figcaption span')?.textContent?.trim() || '';
+      modalImage.src = image.currentSrc || image.src;
+      modalImage.alt = image.alt;
+      modalTitle.textContent = title;
+      modalDescription.textContent = description;
+      modalCounter.textContent = `${activeSlide + 1} de ${slides.length}`;
+      slides.forEach((item, itemIndex) => item.classList.toggle('is-active', itemIndex === activeSlide));
+      controls.forEach((button, itemIndex) => button.classList.toggle('is-active', itemIndex === activeSlide));
+    };
+
+    const closeModal = () => {
+      if (modal.hidden) return;
+      modal.hidden = true;
+      document.body.classList.remove('home-modal-open');
+      modalImage.src = '';
+      modalTrigger?.focus();
+      modalTrigger = null;
+      startCarouselTimer();
+    };
+
+    slides.forEach((slide, slideIndex) => {
+      const image = slide.querySelector('img');
+      if (!image) return;
+      image.setAttribute('role', 'button');
+      image.setAttribute('tabindex', '0');
+      image.setAttribute('aria-label', `${image.alt}. Clique para ampliar.`);
+
+      const openModal = () => {
+        modalTrigger = image;
+        showModalSlide(slideIndex);
+        modal.hidden = false;
+        document.body.classList.add('home-modal-open');
+        stopCarouselTimer();
+        closeButton.focus();
+      };
+
+      image.addEventListener('click', openModal);
+      image.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openModal();
+      });
+    });
+
+    modal.querySelectorAll('[data-home-image-modal-close]').forEach((element) => {
+      element.addEventListener('click', closeModal);
+    });
+    previousButton.addEventListener('click', () => showModalSlide(activeSlide - 1));
+    nextButton.addEventListener('click', () => showModalSlide(activeSlide + 1));
+
+    window.addEventListener('keydown', (event) => {
+      if (modal.hidden) return;
+      if (event.key === 'Escape') closeModal();
+      if (event.key === 'ArrowLeft') showModalSlide(activeSlide - 1);
+      if (event.key === 'ArrowRight') showModalSlide(activeSlide + 1);
+      if (event.key === 'Tab') {
+        const focusable = [closeButton, previousButton, nextButton];
+        const currentIndex = focusable.indexOf(document.activeElement);
+        const direction = event.shiftKey ? -1 : 1;
+        const nextIndex = (currentIndex + direction + focusable.length) % focusable.length;
+        event.preventDefault();
+        focusable[nextIndex].focus();
+      }
+    });
+  }
+
+  function stopCarouselTimer() {
+    if (!slideTimer) return;
+    window.clearInterval(slideTimer);
+    slideTimer = null;
+  }
+
+  function startCarouselTimer() {
+    if (reduceMotion || slideTimer || slides.length < 2) return;
+    slideTimer = window.setInterval(() => {
+      activeSlide = (activeSlide + 1) % slides.length;
+      slides.forEach((slide, index) => slide.classList.toggle('is-active', index === activeSlide));
+      controls.forEach((button, index) => button.classList.toggle('is-active', index === activeSlide));
+    }, 5200);
   }
 
   function postAccessMetric(payload) {
