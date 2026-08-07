@@ -8622,11 +8622,9 @@ async function restartPlatformApplication(req, admin, data = {}) {
     service_name: serviceName
   });
   setTimeout(() => {
-    const child = spawn('systemctl', ['restart', serviceName], {
-      detached: true,
-      stdio: 'ignore'
-    });
-    child.unref();
+    // Encerra somente este processo. O systemd, configurado com Restart=always,
+    // inicia uma nova instância sem conceder sudo ou controle de outros serviços.
+    process.kill(process.pid, 'SIGTERM');
   }, 500).unref?.();
   return { ok: true, scheduled: true, service_name: serviceName };
 }
