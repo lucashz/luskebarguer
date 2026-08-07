@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 const [input, output] = process.argv.slice(2);
 const password = process.env.BACKUP_EMAIL_ENCRYPTION_KEY || '';
-if (!input || !output || password.length < 24) throw new Error('Use BACKUP_EMAIL_ENCRYPTION_KEY=... node scripts/decrypt-backup.mjs entrada.enc saida.dump');
+if (!input || !output || password.length < 24) throw new Error('Use BACKUP_EMAIL_ENCRYPTION_KEY=... node scripts/decrypt-backup.mjs entrada.enc saida.dump.gz');
 const data = await readFile(input);
 const header = Buffer.from('TAPRONTO-BACKUP-V1\n', 'ascii');
 if (!data.subarray(0, header.length).equals(header)) throw new Error('Formato de backup inválido.');

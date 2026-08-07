@@ -1,7 +1,9 @@
 import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { createGzip } from 'node:zlib';
 import pg from 'pg';
 
 loadEnv(new URL('../.env', import.meta.url));
@@ -32,6 +34,7 @@ try {
     finalOutput = fallbackOutput;
     await runSqlFallbackBackup(finalOutput);
   }
+  finalOutput = await compressBackup(finalOutput);
   const info = await stat(finalOutput);
   if (process.env.BACKUP_EMAIL_ENCRYPTION_KEY) {
     await sendEncryptedEmailCopy(finalOutput);
@@ -57,6 +60,17 @@ try {
   }).catch(() => {});
   console.error(error.message || error);
   process.exit(1);
+}
+
+async function compressBackup(filePath) {
+  const compressedPath = `${filePath}.gz`;
+  await pipeline(
+    createReadStream(filePath),
+    createGzip({ level: 9 }),
+    createWriteStream(compressedPath, { flags: 'wx', mode: 0o600 })
+  );
+  await unlink(filePath);
+  return compressedPath;
 }
 
 function sendEncryptedEmailCopy(filePath) {
@@ -204,7 +218,7 @@ async function cleanupOldBackups() {
   const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
   const entries = await readdir(backupsDir).catch(() => []);
   for (const entry of entries) {
-    if (!/^postgres-.+\.(dump|sql)$/.test(entry)) continue;
+    if (!/^postgres-.+\.(dump|sql)(\.gz)?$/.test(entry)) continue;
     const fullPath = path.join(backupsDir, entry);
     const info = await stat(fullPath).catch(() => null);
     if (info && info.mtimeMs < cutoff) {
