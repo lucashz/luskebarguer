@@ -33,6 +33,9 @@ try {
     await runSqlFallbackBackup(finalOutput);
   }
   const info = await stat(finalOutput);
+  if (process.env.BACKUP_EMAIL_ENCRYPTION_KEY) {
+    await sendEncryptedEmailCopy(finalOutput);
+  }
   await cleanupOldBackups();
   await writeBackupStatus({
     status: 'success',
@@ -54,6 +57,17 @@ try {
   }).catch(() => {});
   console.error(error.message || error);
   process.exit(1);
+}
+
+function sendEncryptedEmailCopy(filePath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      path.resolve('scripts/send-backup-email.mjs'),
+      filePath
+    ], { stdio: 'inherit', shell: false, env: process.env });
+    child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`Envio externo do backup falhou (código ${code}).`)));
+    child.once('error', reject);
+  });
 }
 
 function runPgDump(outputFile) {
