@@ -3,10 +3,12 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
+import { promisify } from 'node:util';
+import { gunzip } from 'node:zlib';
 import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
@@ -65,6 +67,7 @@ const rateLimitBuckets = new Map();
 const requestMetrics = [];
 const MAX_REQUEST_METRICS = 5000;
 const allowedUploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const gunzipAsync = promisify(gunzip);
 
 const orderStatuses = new Set([
   'new',
@@ -8174,7 +8177,7 @@ async function platformBackupStatus() {
   const manifest = await readJsonFile(statusPath).catch(() => null);
   const entries = await readdir(BACKUP_DIR).catch(() => []);
   const dumps = await Promise.all(entries
-    .filter((entry) => /^postgres-.+\.(dump|sql)$/.test(entry))
+    .filter((entry) => isRestorableBackupFile(entry))
     .map(async (entry) => {
       const info = await stat(path.join(BACKUP_DIR, entry)).catch(() => null);
       return info ? {
@@ -8436,7 +8439,7 @@ async function runPlatformBackup(req, admin, data = {}) {
 async function restorePlatformBackup(req, admin, data = {}) {
   await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
   const file = cleanBackupFileName(data.file || data.backup_file || '');
-  if (!/^postgres-.+\.(dump|sql)$/.test(file)) {
+  if (!isRestorableBackupFile(file)) {
     await auditPlatformService(req, admin, 'platform.service.backup.restore.failed', 'critical', {
       status: 'failed',
       message: 'Arquivo de backup inválido para restauração.',
@@ -8453,13 +8456,15 @@ async function restorePlatformBackup(req, admin, data = {}) {
     throw httpError(404, 'Backup não encontrado.');
   }
   const startedAt = Date.now();
+  let prepared = null;
   try {
     const preRestore = await runNodeScript('scripts/backup-postgres.mjs', [], { timeoutMs: 120000 })
       .then(() => platformBackupStatus())
       .catch((error) => ({ error: error.message || String(error), latest: null }));
-    const commandResult = file.endsWith('.sql')
-      ? await runCommand('psql', ['--set', 'ON_ERROR_STOP=1', '--file', backupPath, pgToolConnectionString(DATABASE_URL)], { timeoutMs: 180000 })
-      : await runCommand('pg_restore', ['--clean', '--if-exists', '--no-owner', '--no-privileges', '--dbname', pgToolConnectionString(DATABASE_URL), backupPath], { timeoutMs: 180000 });
+    prepared = await prepareBackupForRestore(backupPath, file);
+    const commandResult = prepared.format === 'sql'
+      ? await runCommand('psql', ['--set', 'ON_ERROR_STOP=1', '--file', prepared.path, pgToolConnectionString(DATABASE_URL)], { timeoutMs: 180000 })
+      : await runCommand('pg_restore', ['--clean', '--if-exists', '--no-owner', '--no-privileges', '--dbname', pgToolConnectionString(DATABASE_URL), prepared.path], { timeoutMs: 180000 });
     await writeBackupStatus({
       status: 'success',
       finished_at: new Date().toISOString(),
@@ -8467,7 +8472,7 @@ async function restorePlatformBackup(req, admin, data = {}) {
       restored_from: file,
       restore_finished_at: new Date().toISOString(),
       retention_days: envInt('BACKUP_RETENTION_DAYS', 7),
-      mode: file.endsWith('.sql') ? 'psql-restore' : 'pg_restore'
+      mode: prepared.format === 'sql' ? 'psql-restore' : 'pg_restore'
     }).catch(() => {});
     await auditPlatformService(req, admin, 'platform.service.backup.restore', 'critical', {
       status: 'success',
@@ -8495,7 +8500,43 @@ async function restorePlatformBackup(req, admin, data = {}) {
       message: safeCommandOutput(error.message || String(error))
     });
     throw httpError(500, 'Não foi possível restaurar o backup. Verifique o arquivo e os logs operacionais.');
+  } finally {
+    if (prepared?.temporary && prepared.path) await unlink(prepared.path).catch(() => {});
   }
+}
+
+async function prepareBackupForRestore(backupPath, fileName) {
+  const lower = fileName.toLowerCase();
+  const encrypted = lower.endsWith('.tapronto.enc');
+  const compressed = encrypted ? lower.endsWith('.gz.tapronto.enc') : lower.endsWith('.gz');
+  const format = /\.sql(?:\.gz)?(?:\.tapronto\.enc)?$/.test(lower) ? 'sql' : 'dump';
+  if (!encrypted && !compressed) return { path: backupPath, format, temporary: false };
+
+  const info = await stat(backupPath);
+  if (info.size > 100 * 1024 * 1024) throw new Error('Backup excede o limite operacional de 100 MB.');
+  let contents = await readFile(backupPath);
+  if (encrypted) contents = decryptEmailBackup(contents);
+  if (compressed) contents = await gunzipAsync(contents);
+
+  const tempDir = path.resolve(__dirname, process.env.TMP_DIR || '.tmp');
+  await mkdir(tempDir, { recursive: true });
+  const tempPath = path.join(tempDir, `restore-${randomUUID()}.${format}`);
+  await writeFile(tempPath, contents, { flag: 'wx', mode: 0o600 });
+  return { path: tempPath, format, temporary: true };
+}
+
+function decryptEmailBackup(data) {
+  const password = String(process.env.BACKUP_EMAIL_ENCRYPTION_KEY || '');
+  if (password.length < 24) throw new Error('Chave de descriptografia dos backups não configurada.');
+  const header = Buffer.from('TAPRONTO-BACKUP-V1\n', 'ascii');
+  if (!data.subarray(0, header.length).equals(header)) throw new Error('Formato criptografado do backup é inválido.');
+  let offset = header.length;
+  const salt = data.subarray(offset, offset += 16);
+  const iv = data.subarray(offset, offset += 12);
+  const tag = data.subarray(offset, offset += 16);
+  const decipher = createDecipheriv('aes-256-gcm', scryptSync(password, salt, 32), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(data.subarray(offset)), decipher.final()]);
 }
 
 async function runPlatformTrialCleanup(req, admin, data = {}) {
@@ -11864,7 +11905,11 @@ function sanitizeBackupStatus(value) {
 
 function cleanBackupFileName(value) {
   const file = path.basename(cleanText(value || ''));
-  return /^postgres-.+\.(dump|sql)$/.test(file) ? file : '';
+  return isRestorableBackupFile(file) ? file : '';
+}
+
+function isRestorableBackupFile(value) {
+  return /^postgres-[a-zA-Z0-9._-]+\.(dump|sql)(\.gz)?(\.tapronto\.enc)?$/.test(String(value || ''));
 }
 
 async function listStoreDomains(storeId) {
