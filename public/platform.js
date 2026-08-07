@@ -42,6 +42,7 @@
   commercialLoading: false,
   commercialLoaded: false,
   commercialError: '',
+  dailyExpanded: false,
   activeView: 'overview'
 };
 
@@ -941,7 +942,8 @@ function renderDailyChart() {
       </article>
     `).join('');
   }
-  els.platformDailyChart.innerHTML = rows.map((row) => {
+  const visibleRows = state.dailyExpanded ? rows : rows.slice(0, 3);
+  els.platformDailyChart.innerHTML = visibleRows.map((row) => {
     const orders = Number(row.orders || 0);
     const revenueValue = Number(row.revenue_cents ?? row.revenue ?? 0);
     const orderWidth = Math.max(orders ? 6 : 2, Math.round((orders / maxOrders) * 100));
@@ -973,7 +975,17 @@ function renderDailyChart() {
         </div>
       </article>
     `;
-  }).join('');
+  }).join('') + (rows.length > 3 ? `
+    <div class="platform-daily-more">
+      <button class="ghost-button compact" type="button" data-daily-toggle>
+        ${state.dailyExpanded ? 'Mostrar apenas os 3 últimos dias' : `Exibir mais ${rows.length - 3} dia(s)`}
+      </button>
+    </div>
+  ` : '');
+  els.platformDailyChart.querySelector('[data-daily-toggle]')?.addEventListener('click', () => {
+    state.dailyExpanded = !state.dailyExpanded;
+    renderDailyChart();
+  });
   if (els.platformDailyDetails) {
     els.platformDailyDetails.innerHTML = `
       <div class="platform-daily-legend">

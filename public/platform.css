@@ -740,6 +740,16 @@ body.platform-redesign [hidden] {
   padding: 12px;
 }
 
+.platform-redesign .platform-daily-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.platform-redesign .platform-daily-more button {
+  min-width: 190px;
+}
+
 .platform-redesign .platform-daily-date,
 .platform-redesign .platform-daily-metrics {
   min-width: 0;
