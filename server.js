@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
@@ -38,6 +38,7 @@ const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
 const COOKIE_SECURE = parseBoolean(process.env.COOKIE_SECURE, false);
 const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH || 8), 8, 72);
 const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
+const ADMIN_2FA_REQUIRED = parseBoolean(process.env.ADMIN_2FA_REQUIRED, true);
 const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false);
 const PLATFORM_BILLING_PROVIDER = cleanText(process.env.PLATFORM_BILLING_PROVIDER || 'abacatepay').toLowerCase();
 const PLATFORM_BILLING_API_KEY = process.env.PLATFORM_BILLING_API_KEY || process.env.ABACATEPAY_API_KEY || '';
@@ -360,6 +361,14 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/admin/login') {
     const result = await loginAdmin(await readJson(req));
+    if (result.requiresTwoFactor) {
+      await audit('admin.login.2fa_requested', {
+        req, actor_admin_id: result.adminId, entity_type: 'admin_user', entity_id: result.adminId,
+        after_data: { email: result.email }
+      });
+      json(res, 202, { requires_2fa: true, challenge: result.challenge, expires_in: 600, email_hint: maskEmailOrToken(result.email) });
+      return;
+    }
     await audit('admin.login.success', {
       req,
       actor_admin_id: result.body?.admin?.id || null,
@@ -367,6 +376,16 @@ async function handleApi(req, res, url) {
       store_id: result.body?.admin?.store_id || null,
       entity_type: 'admin_user',
       entity_id: result.body?.admin?.id || null,
+      after_data: { email: result.body?.admin?.email || null }
+    });
+    json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/login/2fa') {
+    const result = await verifyAdminTwoFactorLogin(await readJson(req));
+    await audit('admin.login.2fa_success', {
+      req, actor_admin_id: result.body?.admin?.id || null, entity_type: 'admin_user', entity_id: result.body?.admin?.id || null,
       after_data: { email: result.body?.admin?.email || null }
     });
     json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
@@ -2116,10 +2135,63 @@ async function loginAdmin(data) {
     throw httpError(401, 'Senha incorreta.');
   }
 
-  await dbRequest('PATCH', 'admin_users', { id: `eq.${admin.id}` }, {
-    last_login_at: new Date().toISOString()
-  }, ['Prefer: return=representation']);
+  if (ADMIN_2FA_REQUIRED && normalizeAdminRole(admin.role) === 'superadmin') {
+    const challenge = await createAdminTwoFactorChallenge(admin);
+    return { requiresTwoFactor: true, adminId: admin.id, email: admin.email, ...challenge };
+  }
 
+  await markAdminLogin(admin.id);
+
+  return createAdminSession(admin);
+}
+
+async function markAdminLogin(adminId) {
+  await dbRequest('PATCH', 'admin_users', { id: `eq.${cleanUuid(adminId)}` }, {
+    last_login_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']);
+}
+
+async function createAdminTwoFactorChallenge(admin) {
+  const token = randomBytes(32).toString('base64url');
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const code = String(randomInt(0, 1000000)).padStart(6, '0');
+  const codeHash = createHash('sha256').update(`${tokenHash}:${code}`).digest('hex');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await dbRequest('DELETE', 'admin_2fa_challenges', { admin_user_id: `eq.${admin.id}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+  await dbRequest('POST', 'admin_2fa_challenges', {}, {
+    admin_user_id: admin.id, token_hash: tokenHash, code_hash: codeHash, expires_at: expiresAt
+  }, ['Prefer: return=minimal']);
+  try {
+    await sendPlatformEmail({
+      to: admin.email,
+      templateKey: 'admin_2fa_code',
+      subject: 'Código de segurança da Central TáPronto',
+      body: `Seu código para entrar na Central é: ${code}\n\nEle expira em 10 minutos e pode ser usado apenas uma vez.\n\nSe você não tentou entrar, troque sua senha imediatamente.`
+    });
+  } catch (error) {
+    await dbRequest('DELETE', 'admin_2fa_challenges', { token_hash: `eq.${tokenHash}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+    throw httpError(502, 'Não foi possível enviar o código de segurança.');
+  }
+  return { challenge: token };
+}
+
+async function verifyAdminTwoFactorLogin(data = {}) {
+  const token = String(data.challenge || '');
+  const code = String(data.code || '').replace(/\D/g, '');
+  if (!token || !/^\d{6}$/.test(code)) throw httpError(422, 'Informe o código de 6 dígitos.');
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const [challenge] = await dbRequest('GET', 'admin_2fa_challenges', { select: '*', token_hash: `eq.${tokenHash}`, limit: '1' });
+  if (!challenge || challenge.consumed_at || new Date(challenge.expires_at).getTime() <= Date.now()) throw httpError(401, 'Código expirado. Entre novamente.');
+  if (Number(challenge.attempts || 0) >= 5) throw httpError(429, 'Limite de tentativas atingido. Entre novamente.');
+  const actual = createHash('sha256').update(`${tokenHash}:${code}`).digest('hex');
+  if (!safeSecretEquals(actual, challenge.code_hash)) {
+    await dbRequest('PATCH', 'admin_2fa_challenges', { id: `eq.${challenge.id}` }, { attempts: Number(challenge.attempts || 0) + 1 }, ['Prefer: return=minimal']);
+    throw httpError(401, 'Código de segurança incorreto.');
+  }
+  const [admin] = await dbRequest('GET', 'admin_users', { select: '*', id: `eq.${challenge.admin_user_id}`, is_active: 'eq.true', limit: '1' });
+  if (!admin || normalizeAdminRole(admin.role) !== 'superadmin') throw httpError(403, 'Conta Admin Master indisponível.');
+  await dbRequest('PATCH', 'admin_2fa_challenges', { id: `eq.${challenge.id}` }, { consumed_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await markAdminLogin(admin.id);
   return createAdminSession(admin);
 }
 
@@ -14450,6 +14522,7 @@ function trustedRequestOrigins(req) {
 
 function rateLimitRule(method, pathname) {
   if (method === 'POST' && pathname === '/api/admin/login') return limitRule('admin-login', 8, 120 * 1000);
+  if (method === 'POST' && pathname === '/api/admin/login/2fa') return limitRule('admin-login-2fa', 8, 10 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/customer/login') return limitRule('customer-login', 10, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/customer/reset-password') return limitRule('customer-reset', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/portal/recover-password') return limitRule('admin-recover', 5, 30 * 60 * 1000);

@@ -588,6 +588,7 @@ async function startServer() {
       HOST: '127.0.0.1',
       PORT: String(port),
       COOKIE_SECURE: 'false',
+      ADMIN_2FA_REQUIRED: 'false',
       PLATFORM_BILLING_PROVIDER: 'mock',
       PLATFORM_BILLING_API_KEY: 'test-platform-key',
       PLATFORM_BILLING_WEBHOOK_SECRET: 'test-platform-secret',

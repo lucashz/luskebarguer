@@ -43,7 +43,8 @@
   commercialLoaded: false,
   commercialError: '',
   dailyExpanded: false,
-  activeView: 'overview'
+  activeView: 'overview',
+  twoFactorChallenge: ''
 };
 
 const PUBLIC_SITE_BASE_URL = resolveExternalBaseUrl('https://taprontomenu.com.br');
@@ -111,6 +112,11 @@ const els = {
   platformLoginForm: document.querySelector('#platformLoginForm'),
   platformLoginMessage: document.querySelector('#platformLoginMessage'),
   platformLoginButton: document.querySelector('#platformLoginButton'),
+  platformTwoFactorForm: document.querySelector('#platformTwoFactorForm'),
+  platformTwoFactorHint: document.querySelector('#platformTwoFactorHint'),
+  platformTwoFactorMessage: document.querySelector('#platformTwoFactorMessage'),
+  platformTwoFactorButton: document.querySelector('#platformTwoFactorButton'),
+  platformTwoFactorBack: document.querySelector('#platformTwoFactorBack'),
   platformRecoverForm: document.querySelector('#platformRecoverForm'),
   platformRecoverMessage: document.querySelector('#platformRecoverMessage'),
   platformRecoverButton: document.querySelector('#platformRecoverButton'),
@@ -215,6 +221,8 @@ const els = {
 };
 
 els.platformLoginForm?.addEventListener('submit', submitPlatformLogin);
+els.platformTwoFactorForm?.addEventListener('submit', submitPlatformTwoFactor);
+els.platformTwoFactorBack?.addEventListener('click', resetPlatformTwoFactor);
 els.platformRecoverForm?.addEventListener('submit', submitPlatformRecover);
 els.platformLogoutButton?.addEventListener('click', logout);
 els.refreshPlatformButton?.addEventListener('click', () => loadPlatform({ force: true }));
@@ -327,6 +335,9 @@ function showPlatformLogin(message = '') {
   document.body.classList.remove('platform-blocked-session');
   hidePlatformGateways();
   if (els.platformLoginPanel) els.platformLoginPanel.hidden = false;
+  if (els.platformLoginForm) els.platformLoginForm.hidden = false;
+  if (els.platformTwoFactorForm) els.platformTwoFactorForm.hidden = true;
+  state.twoFactorChallenge = '';
   if (els.platformUser) els.platformUser.textContent = 'Central TáPronto';
   if (els.platformPageTitle) els.platformPageTitle.textContent = 'Entrar na Central';
   if (els.platformPageSubtitle) els.platformPageSubtitle.textContent = 'Acesse com uma conta superadmin.';
@@ -360,6 +371,14 @@ async function submitPlatformLogin(event) {
         password: data.password
       })
     });
+    if (result.requires_2fa) {
+      state.twoFactorChallenge = result.challenge || '';
+      if (els.platformLoginForm) els.platformLoginForm.hidden = true;
+      if (els.platformTwoFactorForm) els.platformTwoFactorForm.hidden = false;
+      if (els.platformTwoFactorHint) els.platformTwoFactorHint.textContent = `Enviamos um código de 6 dígitos para ${result.email_hint || 'o e-mail do Admin Master'}.`;
+      els.platformTwoFactorForm?.elements.code?.focus();
+      return;
+    }
     form.reset();
     await enterPlatformWithAdmin(result.admin);
   } catch (error) {
@@ -371,6 +390,35 @@ async function submitPlatformLogin(event) {
       els.platformLoginButton.textContent = 'Entrar na Central';
     }
   }
+}
+
+async function submitPlatformTwoFactor(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const code = String(new FormData(form).get('code') || '').replace(/\D/g, '');
+  if (els.platformTwoFactorMessage) els.platformTwoFactorMessage.textContent = '';
+  if (els.platformTwoFactorButton) { els.platformTwoFactorButton.disabled = true; els.platformTwoFactorButton.textContent = 'Verificando...'; }
+  try {
+    const result = await request('/api/admin/login/2fa', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge: state.twoFactorChallenge, code })
+    });
+    form.reset();
+    state.twoFactorChallenge = '';
+    await enterPlatformWithAdmin(result.admin);
+  } catch (error) {
+    if (els.platformTwoFactorMessage) els.platformTwoFactorMessage.textContent = error.message || 'Não foi possível validar o código.';
+  } finally {
+    if (els.platformTwoFactorButton) { els.platformTwoFactorButton.disabled = false; els.platformTwoFactorButton.textContent = 'Confirmar e entrar'; }
+  }
+}
+
+function resetPlatformTwoFactor() {
+  state.twoFactorChallenge = '';
+  els.platformTwoFactorForm?.reset();
+  if (els.platformTwoFactorForm) els.platformTwoFactorForm.hidden = true;
+  if (els.platformLoginForm) els.platformLoginForm.hidden = false;
+  els.platformLoginForm?.elements.email?.focus();
 }
 
 async function submitPlatformRecover(event) {
