@@ -17647,7 +17647,7 @@ async function sendFile(req, res, filePath) {
     entry = {
       content,
       gzip: compressibleStaticExtensions.has(ext) && content.length >= 1024 ? gzipSync(content, { level: 6 }) : null,
-      etag: `"${createHash('sha256').update(content).digest('base64url').slice(0, 24)}"`,
+      etag: `W/"${createHash('sha256').update(content).digest('base64url').slice(0, 24)}"`,
       mtimeMs: fileStat.mtimeMs,
       size: fileStat.size
     };
