@@ -506,6 +506,8 @@ model Order {
   reconciliationStatus ReconciliationStatus @default(pending) @map("reconciliation_status")
   reconciledAt         DateTime?            @map("reconciled_at") @db.Timestamptz(6)
   promotionCode        String?              @map("promotion_code")
+  paymentAccessTokenHash String?             @map("payment_access_token_hash")
+  paymentAccessExpiresAt DateTime?           @map("payment_access_expires_at") @db.Timestamptz(6)
   whatsappMessage      String?              @map("whatsapp_message")
   archivedAt           DateTime?            @map("archived_at") @db.Timestamptz(6)
   createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -527,6 +529,21 @@ model Order {
   @@index([storeId, customerId, createdAt])
   @@unique([publicCode])
   @@map("orders")
+}
+
+model PromotionRedemption {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  promotionId String   @map("promotion_id") @db.Uuid
+  orderId     String   @unique @map("order_id") @db.Uuid
+  customerId  String?  @map("customer_id") @db.Uuid
+  storeId     String?  @map("store_id") @db.Uuid
+  status      String   @default("reserved")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([promotionId, status, createdAt])
+  @@index([promotionId, customerId, status])
+  @@map("promotion_redemptions")
 }
 
 model DiningTable {

@@ -1369,7 +1369,7 @@ async function submitOrder(event) {
     }
 
     if (result.payment?.pix || result.payment?.card) {
-      openPaymentCheckoutDialog(result, storePageUrl('pagamento', `pedido=${encodeURIComponent(result.order.public_code)}`), popup);
+      openPaymentCheckoutDialog(result, storePageUrl('pagamento', `pedido=${encodeURIComponent(result.order.public_code)}&token=${encodeURIComponent(result.order.payment_access_token || '')}`), popup);
       return;
     }
 
@@ -1398,6 +1398,7 @@ function openPaymentCheckoutDialog(result, checkoutUrl, popup = null) {
   const payment = result.payment?.pix || result.payment?.card || result.payment || {};
   state.paymentCheckout = {
     code: order.public_code,
+    token: order.payment_access_token || '',
     total: Number(order.total || 0),
     checkoutUrl,
     expiresAt: payment.expires_at || order.payment_expires_at || '',
@@ -1510,7 +1511,7 @@ async function checkPaymentStatus(options = {}) {
   if (!checkout?.code) return;
   if (options.manual) setStatus('Verificando pagamento...');
   try {
-    const data = await request(`/api/payments/order?code=${encodeURIComponent(checkout.code)}`);
+    const data = await request(`/api/payments/order?code=${encodeURIComponent(checkout.code)}&token=${encodeURIComponent(checkout.token || '')}`);
     const status = data.payment?.status || data.order?.financial_status || 'pending';
     checkout.status = status;
     checkout.expiresAt = data.payment?.expires_at || data.order?.payment_expires_at || checkout.expiresAt;

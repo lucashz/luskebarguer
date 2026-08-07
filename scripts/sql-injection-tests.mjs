@@ -1,4 +1,8 @@
 import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+
+loadEnv(new URL('../.env', import.meta.url));
 
 const shouldManageServer = !process.env.BASE_URL;
 const port = Number(process.env.SECURITY_SMOKE_PORT || 3707 + Math.floor(Math.random() * 400));
@@ -85,11 +89,45 @@ try {
     }
   }
 
+  failures += await testPrivatePaymentAccess();
+
   if (failures) process.exitCode = 1;
 } finally {
   if (serverProcess) {
     serverProcess.kill();
     await new Promise((resolve) => serverProcess.once('exit', resolve));
+  }
+}
+
+async function testPrivatePaymentAccess() {
+  if (!process.env.DATABASE_URL) return 0;
+  const pg = await import('pg');
+  const client = new pg.default.Client({ connectionString: process.env.DATABASE_URL });
+  const token = randomBytes(32).toString('base64url');
+  const code = `SEC${randomBytes(4).toString('hex')}`.toUpperCase();
+  let orderId = '';
+  try {
+    await client.connect();
+    const created = await client.query(`
+      insert into orders (store_id, public_code, payment_method, customer_snapshot, subtotal, total, financial_status, payment_access_token_hash, payment_access_expires_at)
+      select id, $1, 'Pix Online', '{}'::jsonb, 1, 1, 'pending', $2, now() + interval '1 hour'
+      from stores where slug = 'luske-burguer' limit 1
+      returning id
+    `, [code, createHash('sha256').update(token).digest('hex')]);
+    orderId = created.rows[0]?.id || '';
+    if (!orderId) throw new Error('Loja de teste não encontrada.');
+    const missing = await fetch(`${BASE_URL}/api/payments/order?code=${code}`);
+    const wrong = await fetch(`${BASE_URL}/api/payments/order?code=${code}&token=incorreto`);
+    const correct = await fetch(`${BASE_URL}/api/payments/order?code=${code}&token=${encodeURIComponent(token)}`);
+    const ok = missing.status === 403 && wrong.status === 403 && correct.status === 200;
+    console.log(`${ok ? 'OK' : 'FAIL'} acesso privado ao pagamento: sem=${missing.status} errado=${wrong.status} correto=${correct.status}`);
+    return ok ? 0 : 1;
+  } catch (error) {
+    console.error(`FAIL acesso privado ao pagamento: ${error.message}`);
+    return 1;
+  } finally {
+    if (orderId) await client.query('delete from orders where id = $1', [orderId]).catch(() => {});
+    await client.end().catch(() => {});
   }
 }
 
@@ -192,4 +230,14 @@ function delay(ms) {
 
 function shouldUseSsl(databaseUrl) {
   return /sslmode=require/i.test(databaseUrl || '') || /supabase|neon|render|railway/i.test(databaseUrl || '');
+}
+
+function loadEnv(url) {
+  if (!existsSync(url)) return;
+  for (const line of readFileSync(url, 'utf8').split(/\r?\n/)) {
+    const text = line.trim();
+    if (!text || text.startsWith('#') || !text.includes('=')) continue;
+    const [key, ...rest] = text.split('=');
+    process.env[key.trim()] ||= rest.join('=').trim().replace(/^["']|["']$/g, '');
+  }
 }

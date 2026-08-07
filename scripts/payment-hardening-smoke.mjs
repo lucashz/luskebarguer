@@ -29,6 +29,17 @@ try {
   `);
   if (orderCodeIndex.rowCount !== 1) throw new Error('Código público do pedido não possui unicidade obrigatória.');
 
+  const orderSecurity = await client.query(`
+    select
+      to_regclass('public.promotion_redemptions') is not null as has_redemptions,
+      exists(select 1 from information_schema.columns where table_name='orders' and column_name='payment_access_token_hash') as has_token_hash,
+      exists(select 1 from information_schema.columns where table_name='orders' and column_name='payment_access_expires_at') as has_token_expiry
+  `);
+  const security = orderSecurity.rows[0] || {};
+  if (!security.has_redemptions || !security.has_token_hash || !security.has_token_expiry) {
+    throw new Error('Estrutura transacional de cupons/Pix privado incompleta.');
+  }
+
   const unsafeSessions = await client.query(`
     select count(*)::int as count from app_sessions where token !~ '^[0-9a-f]{64}$'
   `);

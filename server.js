@@ -13,7 +13,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import pg from 'pg';
-import { localPostgrestRequest } from './src/lib/local-postgrest-adapter.js';
+import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -236,7 +236,7 @@ async function handleApi(req, res, url) {
 
   if (method === 'GET' && url.pathname === '/api/payments/order') {
     const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
-    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order'), { db: context.db, tenant: context.tenant }));
+    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order'), { db: context.db, tenant: context.tenant, accessToken: url.searchParams.get('token') || '' }));
     return;
   }
 
@@ -1581,12 +1581,16 @@ async function handleApi(req, res, url) {
       throw httpError(422, 'Status de pedido inválido.');
     }
     const patch = { status: body.status };
-    if (body.status === 'cancelled') patch.financial_status = 'cancelled';
+    if (body.status === 'cancelled') {
+      patch.financial_status = 'cancelled';
+      patch.payment_access_expires_at = new Date().toISOString();
+    }
     const updated = await op.db('PATCH', 'orders', {
       id: `eq.${orderStatusMatch[1]}`,
       ...(admin.store_id ? { store_id: `eq.${admin.store_id}` } : {})
     }, patch, ['Prefer: return=representation']);
     if (!updated[0]) throw httpError(404, 'Pedido não encontrado nesta loja.');
+    if (body.status === 'cancelled') await updatePromotionRedemptionStatus(updated[0], 'released', op.db);
     clearAdminOrdersCache(admin.store_id);
     let whatsappLog = null;
     try {
@@ -13793,6 +13797,9 @@ async function getMenu(admin, storeId, options = {}) {
 }
 
 async function createOrder(req, data, options = {}) {
+  if (!options.inTransaction && (!options.db || options.db === dbRequest)) {
+    return withLocalTransaction((db) => createOrder(req, data, { ...options, db, inTransaction: true }));
+  }
   const db = options.db || dbRequest;
   const storeId = cleanUuid(options.storeId) || (await getDefaultStore())?.id || null;
   const commercial = await companyCommercialStatusByStore(storeId);
@@ -13892,7 +13899,7 @@ async function createOrder(req, data, options = {}) {
   if (!customerRow && customer.phone) {
     customerRow = await upsertCustomer(customer, storeId, options);
   }
-  const coupon = couponCode ? await findActivePromotion(couponCode, {
+  let coupon = couponCode ? await findActivePromotion(couponCode, {
     db,
     storeId,
     subtotal,
@@ -13900,6 +13907,12 @@ async function createOrder(req, data, options = {}) {
     customer: customerRow,
     items: orderItems
   }) : null;
+  if (coupon && typeof db.lockPromotion === 'function') {
+    await db.lockPromotion(coupon.id);
+    coupon = await findActivePromotion(couponCode, {
+      db, storeId, subtotal, deliveryFee, customer: customerRow, items: orderItems
+    });
+  }
   const discount = coupon ? couponDiscountAmount(coupon, subtotal, deliveryFee) : 0;
   const total = roundMoney(Math.max(0, subtotal + deliveryFee - discount));
   validatePaymentDetails(paymentDetails, paymentMethod, total);
@@ -13909,6 +13922,7 @@ async function createOrder(req, data, options = {}) {
     await upsertAddress(customerRow.id, address, storeId, options);
   }
 
+  const paymentAccessToken = isOnlinePaymentMethod(paymentMethod) ? randomBytes(32).toString('base64url') : '';
   const orderPayload = {
     store_id: storeId,
     public_code: createPublicCode(),
@@ -13931,6 +13945,8 @@ async function createOrder(req, data, options = {}) {
     financial_status: isOnlinePixPayment(paymentMethod) ? 'pending' : 'pending',
     payment_provider: onlinePaymentProviderFor(paymentMethod, integrationSettings),
     promotion_code: coupon?.code || null
+    ,payment_access_token_hash: paymentAccessToken ? createHash('sha256').update(paymentAccessToken).digest('hex') : null
+    ,payment_access_expires_at: paymentAccessToken ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null
   };
 
   const [order] = await db('POST', 'orders', {}, orderPayload, ['Prefer: return=representation']);
@@ -13946,10 +13962,10 @@ async function createOrder(req, data, options = {}) {
   let payment = null;
   let finalOrder = updatedOrder;
   if (isOnlinePixPayment(paymentMethod)) {
-    payment = await createPixPayment(updatedOrder, options);
+    payment = await createPixPayment(updatedOrder, { ...options, paymentAccessToken });
     finalOrder = payment.order;
   } else if (isOnlineCardPayment(paymentMethod)) {
-    payment = await createCardPayment(updatedOrder, options);
+    payment = await createCardPayment(updatedOrder, { ...options, paymentAccessToken });
     finalOrder = payment.order;
   }
   const hasOnlinePayment = isOnlinePaymentMethod(paymentMethod);
@@ -13958,6 +13974,13 @@ async function createOrder(req, data, options = {}) {
   if (coupon) {
     await db('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
       used_count: Number(coupon.used_count || 0) + 1
+    }, ['Prefer: return=minimal']);
+    await db('POST', 'promotion_redemptions', {}, {
+      promotion_id: coupon.id,
+      order_id: order.id,
+      customer_id: customerRow?.id || null,
+      store_id: storeId,
+      status: hasOnlinePayment ? 'reserved' : 'consumed'
     }, ['Prefer: return=minimal']);
     clearAdminPromotionsCache();
   }
@@ -13968,7 +13991,7 @@ async function createOrder(req, data, options = {}) {
   if (customerRow?.id) clearAdminCustomersCache();
 
   return {
-    order: { ...finalOrder, items: itemsWithOrder },
+    order: { ...stripPaymentAccessSecrets(finalOrder), items: itemsWithOrder, ...(paymentAccessToken ? { payment_access_token: paymentAccessToken } : {}) },
     payment,
     whatsapp_url: null,
     whatsapp_message: whatsappMessage
@@ -14526,7 +14549,7 @@ async function listCustomerOrders(customerId, storeId, options = {}) {
     limit: '30'
   });
 
-  return attachOrderItems(orders, options);
+  return (await attachOrderItems(orders, options)).map(stripPaymentAccessSecrets);
 }
 
 async function listOrders(storeId, options = {}) {
@@ -14547,7 +14570,8 @@ async function listOrders(storeId, options = {}) {
 
   const withItems = await attachOrderItems(orders, options);
   const data = (await attachOrderIntegrationLogs(withItems, options))
-    .filter((order) => !isOnlineOrderAwaitingRelease(order));
+    .filter((order) => !isOnlineOrderAwaitingRelease(order))
+    .map(stripPaymentAccessSecrets);
   adminOrdersCache.set(cacheKey, {
     data,
     expiresAt: Date.now() + ADMIN_ORDERS_CACHE_MS
@@ -14967,7 +14991,7 @@ async function createPixPayment(order, options = {}) {
   }
   let providerPayment;
   try {
-    providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations, idempotencyKey: attempt.idempotency_key });
+    providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations, idempotencyKey: attempt.idempotency_key, paymentAccessToken: options.paymentAccessToken });
   } catch (error) {
     await updatePaymentAttempt(attempt.id, {
       status: 'failed',
@@ -15056,7 +15080,7 @@ async function createCardPayment(order, options = {}) {
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
   if (!integrations.card.enabled) throw httpError(422, 'Cartão online não está ativo nesta loja.');
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
-  const providerPayment = await createProviderPayment({ store, order, type: 'card', integrations });
+  const providerPayment = await createProviderPayment({ store, order, type: 'card', integrations, paymentAccessToken: options.paymentAccessToken });
   const transactionId = providerPayment.transactionId || `card_${order.public_code}_${Date.now()}`;
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'pending',
@@ -15127,13 +15151,13 @@ async function getCentralStoreRef(storeId) {
   return store || null;
 }
 
-async function createProviderPayment({ store, order, type, integrations, idempotencyKey }) {
+async function createProviderPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken }) {
   const provider = type === 'card' ? integrations.card.provider : integrations.pix.provider;
   if (provider !== 'abacatepay') throw httpError(422, 'Gateway de pagamento não suportado. Configure a Abacate Pay.');
-  return createAbacatePayPayment({ store, order, type, integrations, idempotencyKey });
+  return createAbacatePayPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken });
 }
 
-async function createAbacatePayPayment({ store, order, type, integrations, idempotencyKey }) {
+async function createAbacatePayPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken }) {
   const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
   if (!token) throw httpError(422, 'Configure a chave da Abacate Pay.');
   if (isMaskedSecretValue(token)) {
@@ -15143,17 +15167,19 @@ async function createAbacatePayPayment({ store, order, type, integrations, idemp
   const amount = moneyCents(order.total);
 
   if (type === 'pix') {
-    return createAbacateOrderCheckout({ store, order, token, amount, methods: ['PIX'], customer, idempotencyKey });
+    return createAbacateOrderCheckout({ store, order, token, amount, methods: ['PIX'], customer, idempotencyKey, paymentAccessToken });
   }
 
-  return createAbacateOrderCheckout({ store, order, token, amount, methods: ['CARD'], customer });
+  return createAbacateOrderCheckout({ store, order, token, amount, methods: ['CARD'], customer, paymentAccessToken });
 }
 
-async function createAbacateOrderCheckout({ store, order, token, amount, methods, customer, idempotencyKey }) {
+async function createAbacateOrderCheckout({ store, order, token, amount, methods, customer, idempotencyKey, paymentAccessToken }) {
   const productId = await ensureAbacateOrderProduct({ store, order, amount, token });
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   const storeSlug = cleanSlug(store.slug || '');
-  const paymentPath = `${storeSlug ? `/${storeSlug}` : ''}/pagamento?pedido=${encodeURIComponent(order.public_code)}`;
+  const paymentQuery = new URLSearchParams({ pedido: order.public_code });
+  if (paymentAccessToken) paymentQuery.set('token', paymentAccessToken);
+  const paymentPath = `${storeSlug ? `/${storeSlug}` : ''}/pagamento?${paymentQuery.toString()}`;
   const fallbackUrl = origin ? `${origin}${paymentPath}` : '';
   const externalSuffix = idempotencyKey
     ? createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 20)
@@ -15356,6 +15382,7 @@ async function publicPaymentStatus(code, options = {}) {
   const db = options.db || dbRequest;
   let order = await getOrderByPublicCode(code, options);
   if (!order) throw httpError(404, 'Pedido não encontrado.');
+  assertPaymentAccessToken(order, options.accessToken);
   const reconciliationKey = `order:${order.id}`;
   const lastProviderCheck = paymentReconciliationCache.get(reconciliationKey) || 0;
   if (
@@ -15427,9 +15454,10 @@ async function reconcileOrderPaymentWithProvider(order, options = {}) {
     financial_status: expected,
     paid_amount: expected === 'paid' ? amount : order.paid_amount,
     paid_at: expected === 'paid' ? (order.paid_at || new Date().toISOString()) : order.paid_at,
-    ...(expected === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new' } : {})
+    ...(expected === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new', payment_access_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString() } : {})
   };
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  if (expected === 'paid') await updatePromotionRedemptionStatus(updated || order, 'consumed', db);
   await registerPaymentTransactionIndex(updated || { ...order, ...patch }, order.payment_provider, order.payment_transaction_id, options).catch(() => null);
   clearAdminOrdersCache(order.store_id);
   if (expected === 'paid' && updated?.id) {
@@ -15451,14 +15479,31 @@ function sanitizeProviderStatusPayload(payload) {
 async function regeneratePixPayment(data, options = {}) {
   const order = await getOrderByPublicCode(data.code || data.order, options);
   if (!order) throw httpError(404, 'Pedido não encontrado.');
+  assertPaymentAccessToken(order, data.token || options.accessToken);
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
   if (order.financial_status === 'paid') throw httpError(422, 'Pedido já pago.');
   const recentAttempts = await (options.db || dbRequest)('GET', 'payment_attempts', {
     select: 'id', order_id: `eq.${order.id}`, created_at: `gte.${new Date(Date.now() - 15 * 60000).toISOString()}`, limit: '6'
   });
   if (recentAttempts.length >= 5) throw httpError(429, 'Limite de regenerações atingido. Aguarde alguns minutos.');
-  const payment = await createPixPayment(order, options);
+  const payment = await createPixPayment(order, { ...options, paymentAccessToken: String(data.token || options.accessToken || '') });
   return { order: publicPaymentOrder(payment.order), payment: payment.pix };
+}
+
+function assertPaymentAccessToken(order, token) {
+  const expected = String(order.payment_access_token_hash || '');
+  const supplied = String(token || '');
+  if (!expected || !supplied) throw httpError(403, 'Acesso ao pagamento não autorizado.');
+  const actual = createHash('sha256').update(supplied).digest('hex');
+  if (!safeSecretEquals(actual, expected)) throw httpError(403, 'Acesso ao pagamento não autorizado.');
+  if (order.payment_access_expires_at && new Date(order.payment_access_expires_at).getTime() <= Date.now()) {
+    throw httpError(410, 'O acesso a este pagamento expirou.');
+  }
+}
+
+function stripPaymentAccessSecrets(order = {}) {
+  const { payment_access_token_hash, payment_access_expires_at, ...safeOrder } = order;
+  return safeOrder;
 }
 
 async function receivePaymentWebhook(data, options = {}) {
@@ -15537,9 +15582,12 @@ async function receivePaymentWebhook(data, options = {}) {
     payment_transaction_id: transactionId || order.payment_transaction_id,
     paid_amount: status === 'paid' ? amount : order.paid_amount,
     paid_at: status === 'paid' ? new Date().toISOString() : order.paid_at,
-    ...(status === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new' } : {})
+    ...(status === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new', payment_access_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString() } : {}),
+    ...(status === 'cancelled' ? { payment_access_expires_at: new Date().toISOString() } : {})
   };
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  if (status === 'paid') await updatePromotionRedemptionStatus(updated || order, 'consumed', db);
+  if (status === 'cancelled') await updatePromotionRedemptionStatus(updated || order, 'released', db);
   if (transactionId) {
     await db('PATCH', 'payment_attempts', {
       provider: 'eq.abacatepay', transaction_id: `eq.${transactionId}`
@@ -15551,6 +15599,24 @@ async function receivePaymentWebhook(data, options = {}) {
   }
   clearAdminOrdersCache(order.store_id);
   return { ok: true, order: publicPaymentOrder(updated) };
+}
+
+async function updatePromotionRedemptionStatus(order, status, db = dbRequest) {
+  if (!order?.id || !order.promotion_code) return null;
+  const [redemption] = await db('GET', 'promotion_redemptions', {
+    select: '*', order_id: `eq.${cleanUuid(order.id)}`, limit: '1'
+  }).catch(() => []);
+  if (!redemption || redemption.status === status) return redemption || null;
+  const [updated] = await db('PATCH', 'promotion_redemptions', { id: `eq.${redemption.id}` }, {
+    status, updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  if (status === 'released' && redemption.status !== 'released') {
+    const [promotion] = await db('GET', 'promotions', { select: 'id,used_count', id: `eq.${redemption.promotion_id}`, limit: '1' });
+    if (promotion) await db('PATCH', 'promotions', { id: `eq.${promotion.id}` }, {
+      used_count: Math.max(0, Number(promotion.used_count || 0) - 1)
+    }, ['Prefer: return=minimal']);
+  }
+  return updated || null;
 }
 
 async function resolvePaymentWebhookContext(normalized) {

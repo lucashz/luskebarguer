@@ -1,5 +1,6 @@
 const params = new URLSearchParams(window.location.search);
 const code = params.get('pedido') || params.get('order') || params.get('code') || '';
+const paymentToken = params.get('token') || '';
 
 const els = {
   title: document.querySelector('#paymentTitle'),
@@ -36,7 +37,7 @@ async function loadPayment(options = {}) {
     return;
   }
   try {
-    const data = await request(`/api/payments/order?code=${encodeURIComponent(code)}`);
+    const data = await request(`/api/payments/order?code=${encodeURIComponent(code)}&token=${encodeURIComponent(paymentToken)}`);
     renderPayment(data);
     startPollingIfNeeded(data);
     notifyOpenerIfPaid(data);
@@ -61,7 +62,7 @@ async function regeneratePix() {
     const data = await request('/api/payments/regenerate-pix', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code })
+      body: JSON.stringify({ code, token: paymentToken })
     });
     renderPayment(data);
     setStatus('Novo pagamento gerado. Abra o checkout seguro para continuar.');

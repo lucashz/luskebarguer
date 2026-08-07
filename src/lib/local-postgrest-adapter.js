@@ -35,6 +35,27 @@ export async function localPostgrestRequest(method, table, query = {}, payload, 
   }
 }
 
+export async function withLocalTransaction(callback) {
+  const client = await getLocalPool().connect();
+  try {
+    await client.query('begin');
+    const db = (method, table, query = {}, payload, extraHeaders = []) =>
+      executeLocalRequest(client, method, table, query, payload, extraHeaders);
+    db.lockPromotion = async (promotionId) => {
+      const result = await client.query('select * from promotions where id = $1 for update', [promotionId]);
+      return result.rows[0] || null;
+    };
+    const result = await callback(db);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    await client.query('rollback').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function executeLocalRequest(client, method, table, query, payload, extraHeaders) {
   const tableName = identifier(table);
   const prefer = extraHeaders.find((header) => String(header).toLowerCase().startsWith('prefer:')) || '';
