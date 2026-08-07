@@ -20,7 +20,17 @@ export function getLocalPool() {
   return pool;
 }
 
+export async function closeLocalPool() {
+  if (!pool) return;
+  const current = pool;
+  pool = null;
+  await current.end();
+}
+
 export async function localPostgrestRequest(method, table, query = {}, payload, extraHeaders = []) {
+  if (method === 'GET') {
+    return executeLocalRequest(getLocalPool(), method, table, query, payload, extraHeaders);
+  }
   const client = await getLocalPool().connect();
   try {
     await client.query('begin');
@@ -63,9 +73,11 @@ async function executeLocalRequest(client, method, table, query, payload, extraH
   const where = buildWhere(query);
 
   if (method === 'GET') {
+    const select = buildSelect(query.select);
     const order = buildOrder(query.order);
     const limit = query.limit ? ` limit ${positiveInt(query.limit)}` : '';
-    const sql = `select * from "${tableName}"${where.sql}${order}${limit}`;
+    const offset = query.offset ? ` offset ${nonNegativeInt(query.offset)}` : '';
+    const sql = `select ${select} from "${tableName}"${where.sql}${order}${limit}${offset}`;
     const result = await client.query(sql, where.values);
     return result.rows;
   }
@@ -207,6 +219,13 @@ function buildOrder(order) {
   return clauses.length ? ` order by ${clauses.join(', ')}` : '';
 }
 
+function buildSelect(select) {
+  if (!select || String(select).trim() === '*') return '*';
+  const columns = String(select).split(',').map((value) => identifier(value.trim()));
+  if (!columns.length) return '*';
+  return columns.map((column) => `"${column}"`).join(', ');
+}
+
 function shiftWhere(where, shift) {
   if (!where.sql || !shift) return where;
   return {
@@ -241,6 +260,11 @@ function parseArrayOperand(value) {
 function positiveInt(value) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 10_000) : 100;
+}
+
+function nonNegativeInt(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.min(parsed, 10_000_000) : 0;
 }
 
 function identifier(value) {

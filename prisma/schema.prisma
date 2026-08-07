@@ -527,6 +527,7 @@ model Order {
 
   @@index([storeId, status, archivedAt, createdAt])
   @@index([storeId, customerId, createdAt])
+  @@index([createdAt])
   @@unique([publicCode])
   @@map("orders")
 }
@@ -1297,6 +1298,7 @@ model SubscriptionEvent {
   creator      AdminUser?           @relation(fields: [createdBy], references: [id], onDelete: SetNull)
 
   @@index([companyId, createdAt])
+  @@index([createdAt])
   @@map("subscription_events")
 }
 
@@ -1324,5 +1326,6 @@ model AuditLog {
   @@index([storeId, createdAt])
   @@index([actorAdminId, createdAt])
   @@index([action, createdAt])
+  @@index([createdAt])
   @@map("audit_logs")
 }

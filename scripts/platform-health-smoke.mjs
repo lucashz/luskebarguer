@@ -51,6 +51,14 @@ try {
 
   const page = await fetch(`${baseUrl}/plataform`, { headers: { Cookie: superLogin.cookie } });
   assert(page.ok, '/plataform nao carregou o HTML da plataforma.');
+  assert(page.headers.get('cache-control') === 'no-cache', 'HTML nao usa revalidacao segura de cache.');
+  assert(!page.headers.has('clear-site-data'), 'HTML ainda apaga o cache inteiro do navegador.');
+  const staticAsset = await fetch(`${baseUrl}/platform.js`, { headers: { 'Accept-Encoding': 'gzip' } });
+  const staticEtag = staticAsset.headers.get('etag');
+  assert(staticAsset.headers.get('content-encoding') === 'gzip', 'JavaScript estatico nao foi comprimido com gzip.');
+  assert(staticEtag, 'JavaScript estatico nao retornou ETag.');
+  const revalidatedAsset = await fetch(`${baseUrl}/platform.js`, { headers: { 'If-None-Match': staticEtag } });
+  assert(revalidatedAsset.status === 304, 'Revalidacao ETag do arquivo estatico falhou.');
 
   const health = await request('/api/platform/health?period=24h', { cookie: superLogin.cookie });
   assert(Array.isArray(health.data.statuses) && health.data.statuses.length >= 10, 'Status operacional incompleto.');
@@ -58,6 +66,8 @@ try {
   assert(health.data.statuses.some((item) => item.key === 'ssl'), 'Status SSL/dominio nao foi retornado.');
   assert(health.data.metrics?.api && health.data.metrics?.database && health.data.metrics?.checkout && health.data.metrics?.order_mutations && health.data.metrics?.system, 'Metricas operacionais incompletas.');
   assert(typeof health.data.metrics.api.requests_per_minute === 'number', 'Metricas nao retornaram requisicoes por minuto.');
+  assert(Array.isArray(health.data.metrics.api.slow_routes), 'Metricas nao retornaram latencia agrupada por rota.');
+  assert(health.data.metrics.api_all?.requests >= health.data.metrics.api.requests, 'Metricas completas da API estao inconsistentes.');
   assert(health.data.metrics.system.memory && health.data.metrics.system.disk, 'Metricas de memoria/disco nao retornaram.');
   assert(Array.isArray(health.data.config?.items) && health.data.config.items.length >= 8, 'Checklist operacional incompleto.');
   assert(health.data.backup?.status, 'Monitoramento de backup nao retornou status.');

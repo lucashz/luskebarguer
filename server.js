@@ -7,6 +7,7 @@ import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, 
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
+import { gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { gunzip } from 'node:zlib';
 import net from 'node:net';
@@ -91,10 +92,20 @@ const mimeTypes = new Map([
   ['.svg', 'image/svg+xml'],
   ['.ico', 'image/x-icon']
 ]);
+const staticFileCache = new Map();
+const compressibleStaticExtensions = new Set(['.html', '.css', '.js', '.json', '.svg']);
+const inflightDbReads = new Map();
 
 const server = createServer(async (req, res) => {
   const startedAt = performance.now();
   let pathname = '/';
+  const originalWriteHead = res.writeHead.bind(res);
+  res.writeHead = (...args) => {
+    if (!res.headersSent && !res.hasHeader('Server-Timing')) {
+      res.setHeader('Server-Timing', `app;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`);
+    }
+    return originalWriteHead(...args);
+  };
   res.on('finish', () => {
     recordRequestMetric({
       method: req.method || 'GET',
@@ -112,7 +123,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    await serveStatic(res, url.pathname, req.headers.host, url.search);
+    await serveStatic(req, res, url.pathname, req.headers.host, url.search);
   } catch (error) {
     logServerError(error, req);
     const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
@@ -2867,58 +2878,74 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
   const offset = (page - 1) * perPage;
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const [companies, stores, domains, admins, subscriptions, features, overrides, orders, products, settings] = await Promise.all([
+  const [companies, features] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
       order: 'created_at.desc',
       limit: String(perPage),
       offset: String(offset)
     }),
-    dbRequest('GET', 'stores', {
-      select: '*',
-      order: 'name.asc',
-      limit: '500'
-    }),
-    dbRequest('GET', 'store_domains', {
-      select: 'id,store_id,domain,status,verified_at',
-      order: 'created_at.desc',
-      limit: '1000'
-    }).catch(() => []),
-    dbRequest('GET', 'admin_users', {
-      select: 'id,company_id,name,email,role,is_active,last_login_at,created_at',
-      order: 'created_at.asc',
-      limit: '1000'
-    }).catch(() => []),
-    dbRequest('GET', 'company_subscriptions', {
-      select: '*',
-      order: 'created_at.desc',
-      limit: '500'
-    }),
     dbRequest('GET', 'platform_features', {
       select: '*',
       order: 'sort_order.asc',
       limit: '300'
+    })
+  ]);
+  const companyIds = companies.map((company) => company.id);
+  const companyFilter = `in.(${companyIds.join(',')})`;
+  const [stores, admins, subscriptions, overrides] = companyIds.length ? await Promise.all([
+    dbRequest('GET', 'stores', {
+      select: '*',
+      company_id: companyFilter,
+      order: 'name.asc',
+      limit: '3000'
+    }),
+    dbRequest('GET', 'admin_users', {
+      select: 'id,company_id,name,email,role,is_active,last_login_at,created_at',
+      company_id: companyFilter,
+      order: 'created_at.asc',
+      limit: '3000'
+    }).catch(() => []),
+    dbRequest('GET', 'company_subscriptions', {
+      select: '*',
+      company_id: companyFilter,
+      order: 'created_at.desc',
+      limit: '3000'
     }),
     dbRequest('GET', 'company_feature_overrides', {
       select: '*',
+      company_id: companyFilter,
       order: 'created_at.desc',
-      limit: '1000'
-    }),
+      limit: '5000'
+    })
+  ]) : [[], [], [], []];
+  const storeIds = stores.map((store) => store.id);
+  const storeFilter = `in.(${storeIds.join(',')})`;
+  const [domains, orders, products, settings] = storeIds.length ? await Promise.all([
+    dbRequest('GET', 'store_domains', {
+      select: 'id,store_id,domain,status,verified_at',
+      store_id: storeFilter,
+      order: 'created_at.desc',
+      limit: '5000'
+    }).catch(() => []),
     dbRequest('GET', 'orders', {
       select: 'id,store_id,total,status,created_at',
+      store_id: storeFilter,
       created_at: `gte.${monthStart.toISOString()}`,
       order: 'created_at.desc',
       limit: '10000'
     }).catch(() => []),
     dbRequest('GET', 'menu_items', {
       select: 'id,store_id,is_active',
+      store_id: storeFilter,
       limit: '10000'
     }).catch(() => []),
     dbRequest('GET', 'store_settings', {
       select: 'store_id,whatsapp_number,onboarding_completed,is_open',
+      store_id: storeFilter,
       limit: '2000'
     }).catch(() => [])
-  ]);
+  ]) : [[], [], [], []];
   const featureById = new Map(features.map((feature) => [feature.id, feature]));
   const domainsByStore = new Map();
   for (const domain of domains) {
@@ -8968,6 +8995,7 @@ function recordRequestMetric(entry) {
   if (!entry?.pathname) return;
   requestMetrics.push({
     ...entry,
+    route: normalizeMetricRoute(entry.pathname),
     created_at: Date.now()
   });
   if (requestMetrics.length > MAX_REQUEST_METRICS) requestMetrics.splice(0, requestMetrics.length - MAX_REQUEST_METRICS);
@@ -8975,7 +9003,9 @@ function recordRequestMetric(entry) {
 
 function platformMetricsSnapshot(period) {
   const rows = requestMetrics.filter((entry) => entry.created_at >= period.since);
-  const apiRows = rows.filter((entry) => entry.pathname.startsWith('/api/'));
+  const allApiRows = rows.filter((entry) => entry.pathname.startsWith('/api/'));
+  const operationalRows = allApiRows.filter((entry) => isOperationalMetricRoute(entry.pathname));
+  const apiRows = allApiRows.filter((entry) => !isOperationalMetricRoute(entry.pathname));
   const checkoutRows = rows.filter((entry) => entry.pathname === '/api/orders');
   const orderMutationRows = rows.filter((entry) => /^\/api\/admin\/orders/.test(entry.pathname) && ['POST', 'PUT', 'PATCH'].includes(entry.method));
   const stats = (entries) => latencyStats(entries.map((entry) => entry.duration_ms));
@@ -8985,12 +9015,40 @@ function platformMetricsSnapshot(period) {
       ...stats(apiRows),
       requests: apiRows.length,
       errors_5xx: apiRows.filter((entry) => entry.status >= 500).length,
-      requests_per_minute: requestsPerMinute(apiRows, period)
+      requests_per_minute: requestsPerMinute(apiRows, period),
+      slow_routes: slowMetricRoutes(apiRows)
     },
+    api_all: { ...stats(allApiRows), requests: allApiRows.length, errors_5xx: allApiRows.filter((entry) => entry.status >= 500).length },
+    operational_api: { ...stats(operationalRows), requests: operationalRows.length, errors_5xx: operationalRows.filter((entry) => entry.status >= 500).length, slow_routes: slowMetricRoutes(operationalRows) },
     database: { average_ms: null, p95_ms: null, p99_ms: null, source: 'verificação atual no card de banco' },
     checkout: { ...stats(checkoutRows), requests: checkoutRows.length },
     order_mutations: { ...stats(orderMutationRows), requests: orderMutationRows.length }
   };
+}
+
+function normalizeMetricRoute(pathname = '') {
+  return String(pathname || '/')
+    .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, ':id')
+    .replace(/\/\d+(?=\/|$)/g, '/:id')
+    .replace(/\/[A-Z0-9_-]{16,}(?=\/|$)/gi, '/:token');
+}
+
+function isOperationalMetricRoute(pathname = '') {
+  return /^\/api\/platform\/(health|metrics|alerts\/operational|logs|services(?:\/|$)|backups(?:\/|$))/.test(pathname);
+}
+
+function slowMetricRoutes(rows = []) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = `${row.method || 'GET'} ${row.route || normalizeMetricRoute(row.pathname)}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row.duration_ms);
+  }
+  return [...grouped.entries()].map(([route, values]) => ({
+    route,
+    requests: values.length,
+    ...latencyStats(values)
+  })).sort((a, b) => (b.p95_ms || 0) - (a.p95_ms || 0)).slice(0, 10);
 }
 
 async function platformTechnicalMetrics(period, databaseStatus = null, backup = null) {
@@ -10849,12 +10907,20 @@ function smtpSend(settings, message, to) {
       secureSocket.once('error', rej);
     });
     const read = (expected) => new Promise((res, rej) => {
+      const cleanup = () => {
+        socket.off('data', onData);
+        socket.off('error', onError);
+      };
+      const onError = (error) => {
+        cleanup();
+        rej(error);
+      };
       const onData = (chunk) => {
         buffer += chunk.toString('utf8');
         const lines = buffer.split(/\r?\n/).filter(Boolean);
         const last = lines[lines.length - 1] || '';
         if (/^\d{3} /.test(last)) {
-          socket.off('data', onData);
+          cleanup();
           const code = Number(last.slice(0, 3));
           if (!expected.includes(code)) rej(new Error(`SMTP respondeu ${code}.`));
           else {
@@ -10864,7 +10930,7 @@ function smtpSend(settings, message, to) {
         }
       };
       socket.on('data', onData);
-      socket.once('error', rej);
+      socket.once('error', onError);
     });
     const write = (line) => socket.write(`${line}\r\n`);
     socket.once('error', (error) => {
@@ -17376,9 +17442,19 @@ function uploadFolder(usage) {
 }
 
 async function dbRequest(method, table, query = {}, payload, extraHeaders = []) {
-  return localDbRequest({
-    scope: 'local-postgres'
-  }, method, table, query, payload, extraHeaders);
+  if (method !== 'GET') {
+    return localDbRequest({ scope: 'local-postgres' }, method, table, query, payload, extraHeaders);
+  }
+  const key = `${table}:${JSON.stringify(query)}`;
+  const existing = inflightDbReads.get(key);
+  if (existing) return existing;
+  const pending = localDbRequest({ scope: 'local-postgres' }, method, table, query, payload, extraHeaders);
+  inflightDbReads.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    if (inflightDbReads.get(key) === pending) inflightDbReads.delete(key);
+  }
 }
 
 async function localDbRequest(config, method, table, query = {}, payload, extraHeaders = []) {
@@ -17397,9 +17473,9 @@ async function localDbRequest(config, method, table, query = {}, payload, extraH
     throw httpError(error.status || 500, `Banco local: ${error.message}`, error.detail || error);
   }
 }
-async function serveStatic(res, requestPath, hostHeader = '', requestSearch = '') {
+async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch = '') {
   if (requestPath.startsWith('/uploads/')) {
-    await serveUpload(res, requestPath);
+    await serveUpload(req, res, requestPath);
     return;
   }
 
@@ -17427,11 +17503,11 @@ async function serveStatic(res, requestPath, hostHeader = '', requestSearch = ''
   const filePath = path.normalize(path.join(publicDir, routedPath));
 
   if (!filePath.startsWith(publicDir) || !existsSync(filePath)) {
-    await sendFile(res, path.join(publicDir, 'app.html'));
+    await sendFile(req, res, path.join(publicDir, 'app.html'));
     return;
   }
 
-  await sendFile(res, filePath);
+  await sendFile(req, res, filePath);
 }
 
 function canonicalHostRedirectUrl(requestPath, hostHeader = '', requestSearch = '') {
@@ -17502,14 +17578,14 @@ function isHelpHostname(hostname = '') {
   return helpHosts.includes(hostname) || hostname.startsWith('ajuda.');
 }
 
-async function serveUpload(res, requestPath) {
+async function serveUpload(req, res, requestPath) {
   const relative = decodeURIComponent(requestPath.replace(/^\/uploads\//, ''));
   const filePath = path.normalize(path.join(UPLOAD_DIR, relative));
   if (!filePath.startsWith(UPLOAD_DIR) || !existsSync(filePath)) {
     json(res, 404, { error: 'Arquivo não encontrado.' });
     return;
   }
-  await sendFile(res, filePath);
+  await sendFile(req, res, filePath);
 }
 
 function routePath(requestPath, hostHeader = '') {
@@ -17561,19 +17637,47 @@ function csvEnv(name) {
     .filter(Boolean);
 }
 
-async function sendFile(res, filePath) {
+async function sendFile(req, res, filePath) {
   const ext = path.extname(filePath);
-  const content = await readFile(filePath);
-  const cacheHeaders = {
-    'Cache-Control': 'no-store',
-    ...(ext === '.html' ? { 'Clear-Site-Data': '"cache"' } : {})
-  };
-  res.writeHead(200, {
+  const fileStat = await stat(filePath);
+  const cacheableInMemory = filePath.startsWith(publicDir) && fileStat.size <= 2 * 1024 * 1024;
+  let entry = cacheableInMemory ? staticFileCache.get(filePath) : null;
+  if (!entry || entry.mtimeMs !== fileStat.mtimeMs || entry.size !== fileStat.size) {
+    const content = await readFile(filePath);
+    entry = {
+      content,
+      gzip: compressibleStaticExtensions.has(ext) && content.length >= 1024 ? gzipSync(content, { level: 6 }) : null,
+      etag: `"${createHash('sha256').update(content).digest('base64url').slice(0, 24)}"`,
+      mtimeMs: fileStat.mtimeMs,
+      size: fileStat.size
+    };
+    if (cacheableInMemory) staticFileCache.set(filePath, entry);
+  }
+  const cacheControl = ext === '.html'
+    ? 'no-cache'
+    : ['.js', '.css'].includes(ext)
+      ? 'public, max-age=300, stale-while-revalidate=60'
+      : 'public, max-age=86400, stale-while-revalidate=3600';
+  const baseHeaders = {
     ...securityHeaders({ allowSameOriginFrame: ext === '.html' }),
-    ...cacheHeaders,
+    'Cache-Control': cacheControl,
+    ETag: entry.etag,
+    Vary: 'Accept-Encoding',
     'Content-Type': mimeTypes.get(ext) || 'application/octet-stream'
+  };
+  if (req.headers['if-none-match'] === entry.etag) {
+    res.writeHead(304, baseHeaders);
+    res.end();
+    return;
+  }
+  const acceptsGzip = /(?:^|,)\s*gzip\s*(?:,|$)/i.test(String(req.headers['accept-encoding'] || ''));
+  const body = acceptsGzip && entry.gzip ? entry.gzip : entry.content;
+  res.writeHead(200, {
+    ...baseHeaders,
+    ...(body === entry.gzip ? { 'Content-Encoding': 'gzip' } : {}),
+    'Content-Length': body.length
   });
-  res.end(content);
+  res.end(body);
 }
 
 async function readJson(req) {

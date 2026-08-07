@@ -459,9 +459,11 @@ async function loadPlatform(options = {}) {
   if (!state.baseLoaded) render();
   try {
     if (options.resetPage !== false) state.companyPage = 1;
+    const viewPromise = ensurePlatformViewData(state.activeView, { force: options.force === true });
     const [companies, plans] = await Promise.all([
       request(companiesUrl()),
-      request('/api/platform/plans')
+      request('/api/platform/plans'),
+      viewPromise
     ]);
     state.companies = companies.companies || [];
     state.companyPagination = companies.pagination || null;
@@ -469,7 +471,6 @@ async function loadPlatform(options = {}) {
     state.plans = plans.plans || [];
     state.baseLoaded = true;
     render();
-    await ensurePlatformViewData(state.activeView, { force: options.force === true });
   } catch (error) {
     state.baseLoaded = false;
     state.commercialError = error.message || 'Não foi possível carregar a plataforma.';
@@ -515,7 +516,6 @@ async function ensurePlatformViewData(view, options = {}) {
   const force = options.force === true;
   if (['overview', 'commercial'].includes(view) && (force || !state.commercialLoaded)) {
     await loadCommercialAnalytics({ silent: true, renderBefore: true, renderAfter: true });
-    if (view === 'overview' && (force || !state.healthLoaded)) await loadHealth({ silent: true });
   } else if (view === 'health' && (force || !state.healthLoaded)) {
     await loadHealth({ silent: true });
   } else if (view === 'billing' && (force || !state.billingLoaded)) {
@@ -2009,7 +2009,8 @@ function platformResourceStatus() {
 function renderPlatformMetrics(metrics) {
   if (!els.platformMetrics) return;
   const rows = [
-    ['API', metrics.api, `${Number(metrics.api?.requests_per_minute || 0)} req/min · ${Number(metrics.api?.errors_5xx || 0)} erro(s) 5xx`],
+    ['API principal', metrics.api, `${Number(metrics.api?.requests_per_minute || 0)} req/min · ${Number(metrics.api?.errors_5xx || 0)} erro(s) 5xx`],
+    ['Diagnósticos', metrics.operational_api, `${Number(metrics.operational_api?.requests || 0)} verificação(ões)`],
     ['Banco', metrics.database, metrics.database?.status ? statusLabelHealth(metrics.database.status) : 'Verificação atual'],
     ['Checkout', metrics.checkout, `${Number(metrics.checkout?.requests || 0)} requisição(ões)`],
     ['Pedidos', metrics.order_mutations, `${Number(metrics.order_mutations?.requests || 0)} mutação(ões)`]
@@ -2018,6 +2019,7 @@ function renderPlatformMetrics(metrics) {
   const disk = system.disk || {};
   const memory = system.memory || {};
   const cpu = system.cpu || {};
+  const slowRoutes = Array.isArray(metrics.api?.slow_routes) ? metrics.api.slow_routes.slice(0, 5) : [];
   els.platformMetrics.innerHTML = `
     ${rows.map(([label, data = {}, detail = '']) => `
     <div class="platform-metric-row">
@@ -2029,6 +2031,13 @@ function renderPlatformMetrics(metrics) {
       ${detail ? `<small>${escapeHtml(detail)}</small>` : ''}
     </div>
     `).join('')}
+    ${slowRoutes.length ? `
+      <div class="platform-metric-row platform-system-metric">
+        <strong>Rotas mais lentas</strong>
+        ${slowRoutes.map((route) => `<span>${escapeHtml(route.route)} · P95 ${metricMs(route.p95_ms)}</span>`).join('')}
+        <small>Somente API principal; diagnósticos e backups ficam separados.</small>
+      </div>
+    ` : ''}
     <div class="platform-metric-row platform-system-metric">
       <strong>Memória</strong>
       <span>Processo: ${formatBytes(memory.rss_bytes || 0)}</span>
