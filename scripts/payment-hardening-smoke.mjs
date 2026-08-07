@@ -23,6 +23,22 @@ try {
   `);
   if (indexes.rowCount !== 3) throw new Error('Índices de idempotência de pagamentos incompletos.');
 
+  const orderCodeIndex = await client.query(`
+    select 1 from pg_indexes
+    where schemaname = 'public' and indexname = 'orders_public_code_key'
+  `);
+  if (orderCodeIndex.rowCount !== 1) throw new Error('Código público do pedido não possui unicidade obrigatória.');
+
+  const unsafeSessions = await client.query(`
+    select count(*)::int as count from app_sessions where token !~ '^[0-9a-f]{64}$'
+  `);
+  if (unsafeSessions.rows[0].count) throw new Error('Existem tokens de sessão armazenados sem hash.');
+
+  const serverSource = readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  if (/searchParams\.get\(['"]webhookSecret['"]\)/.test(serverSource)) {
+    throw new Error('Segredo de webhook ainda pode ser recebido pela URL.');
+  }
+
   const invalid = await client.query(`
     select count(*)::int as count from payment_attempts where amount_cents < 0 or currency <> 'BRL'
   `);

@@ -30,7 +30,7 @@ const REFERRAL_REWARD_CENTS = 1000;
 const REFERRAL_MONTHLY_LIMIT_CENTS = 3000;
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
-const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 180), 1, 365);
+const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 30), 1, 90);
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
 const COOKIE_SECURE = parseBoolean(process.env.COOKIE_SECURE, false);
@@ -150,6 +150,7 @@ async function handleApi(req, res, url) {
   }
 
   enforceRateLimit(req, method, url.pathname);
+  enforceAuthenticatedRequestOrigin(req, method);
 
   if (method === 'GET' && url.pathname === '/api/portal/plans') {
     json(res, 200, await listPortalPlans());
@@ -538,7 +539,7 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/billing/webhook') {
     const payload = await readJson(req);
     const provider = url.searchParams.get('provider') || '';
-    const webhookSecret = req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || '';
+    const webhookSecret = req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || '';
     try {
       json(res, 200, await receiveBillingWebhook(payload, { provider, webhookSecret }));
     } catch (error) {
@@ -12213,7 +12214,7 @@ async function requireAdmin(req, res) {
   if (session.data?.session_version !== 2 || !session.data?.store_id) {
     session.data = await enrichAdminSessionData(session.data);
     if (token) {
-      await dbRequest('PATCH', 'app_sessions', { token: `eq.${token}`, type: 'eq.admin' }, {
+      await dbRequest('PATCH', 'app_sessions', { token: `eq.${sessionTokenHash(token)}`, type: 'eq.admin' }, {
         company_id: session.data.company_id ? cleanUuid(session.data.company_id) : null,
         store_id: session.data.store_id ? cleanUuid(session.data.store_id) : null,
         data: session.data
@@ -14134,9 +14135,10 @@ async function getCustomerStoreId(customerId, options = {}) {
 
 async function createPersistentSession(type, ownerId, data) {
   const token = randomBytes(32).toString('hex');
+  const tokenHash = sessionTokenHash(token);
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000).toISOString();
   await dbRequest('POST', 'app_sessions', {}, {
-    token,
+    token: tokenHash,
     type,
     owner_id: ownerId,
     company_id: data.company_id ? cleanUuid(data.company_id) : null,
@@ -14145,7 +14147,7 @@ async function createPersistentSession(type, ownerId, data) {
     expires_at: expiresAt
   }, ['Prefer: return=minimal']);
   sessionCache.set(`${type}:${token}`, {
-    session: { token, type, owner_id: ownerId, data, expires_at: expiresAt },
+    session: { token: tokenHash, type, owner_id: ownerId, data, expires_at: expiresAt },
     expiresAt: Date.now() + SESSION_CACHE_MS
   });
   return token;
@@ -14153,6 +14155,7 @@ async function createPersistentSession(type, ownerId, data) {
 
 async function readPersistentSession(token, expectedType) {
   if (!token) return null;
+  const tokenHash = sessionTokenHash(token);
   const cacheKey = `${expectedType}:${token}`;
   const cached = sessionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
@@ -14160,7 +14163,7 @@ async function readPersistentSession(token, expectedType) {
   }
   const rows = await dbRequest('GET', 'app_sessions', {
     select: '*',
-    token: `eq.${token}`,
+    token: `eq.${tokenHash}`,
     type: `eq.${expectedType}`,
     limit: '1'
   });
@@ -14173,7 +14176,7 @@ async function readPersistentSession(token, expectedType) {
   }
 
   if (new Date(session.expires_at).getTime() - Date.now() < SESSION_RENEW_MS) {
-    await dbRequest('PATCH', 'app_sessions', { token: `eq.${token}` }, {
+    await dbRequest('PATCH', 'app_sessions', { token: `eq.${tokenHash}` }, {
       expires_at: new Date(Date.now() + SESSION_MAX_AGE * 1000).toISOString()
     }, ['Prefer: return=minimal']);
   }
@@ -14188,7 +14191,11 @@ async function readPersistentSession(token, expectedType) {
 async function deleteSession(token) {
   if (!token) return;
   clearSessionCacheToken(token);
-  await dbRequest('DELETE', 'app_sessions', { token: `eq.${token}` }, undefined, ['Prefer: return=minimal']);
+  await dbRequest('DELETE', 'app_sessions', { token: `eq.${sessionTokenHash(token)}` }, undefined, ['Prefer: return=minimal']);
+}
+
+function sessionTokenHash(token) {
+  return createHash('sha256').update(String(token || '')).digest('hex');
 }
 
 async function startPlatformSupportImpersonation(req, admin, data = {}) {
@@ -14338,6 +14345,41 @@ function enforceRateLimit(req, method, pathname) {
       if (entry.resetAt <= now) rateLimitBuckets.delete(entryKey);
     }
   }
+}
+
+function enforceAuthenticatedRequestOrigin(req, method) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return;
+  const cookies = parseCookies(req);
+  if (!cookies[ADMIN_COOKIE] && !cookies[CUSTOMER_COOKIE]) return;
+
+  const fetchSite = cleanText(req.headers['sec-fetch-site'] || '').toLowerCase();
+  if (fetchSite === 'cross-site') throw httpError(403, 'Origem da requisição não autorizada.');
+
+  const source = cleanText(req.headers.origin || req.headers.referer || '');
+  if (!source) return; // Clientes não-browser continuam suportados; cookies HttpOnly não ficam expostos a eles.
+  let sourceOrigin = '';
+  try {
+    sourceOrigin = new URL(source).origin.toLowerCase();
+  } catch {
+    throw httpError(403, 'Origem da requisição inválida.');
+  }
+  const trusted = trustedRequestOrigins(req);
+  if (!trusted.has(sourceOrigin)) throw httpError(403, 'Origem da requisição não autorizada.');
+}
+
+function trustedRequestOrigins(req) {
+  const origins = new Set();
+  const add = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return;
+    try { origins.add(new URL(text).origin.toLowerCase()); } catch {}
+  };
+  add(requestOrigin(req));
+  add(process.env.APP_URL);
+  add(process.env.PUBLIC_APP_URL);
+  add(process.env.PANEL_BASE_URL);
+  add(process.env.PLATFORM_BASE_URL);
+  return origins;
 }
 
 function rateLimitRule(method, pathname) {
@@ -17975,7 +18017,7 @@ function publicCustomer(customer) {
 }
 
 function json(res, status, data, headers = {}) {
-  res.writeHead(status, { ...securityHeaders(), 'Content-Type': 'application/json; charset=utf-8', ...headers });
+  res.writeHead(status, { ...securityHeaders(), 'Cache-Control': 'no-store', 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(data));
 }
 
@@ -17983,8 +18025,10 @@ function securityHeaders(options = {}) {
   const frameAncestors = options.allowSameOriginFrame ? "frame-ancestors 'self'" : "frame-ancestors 'none'";
   return {
     'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': options.allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    ...(process.env.NODE_ENV === 'production' ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {}),
     'Content-Security-Policy': [
       "default-src 'self'",
       "script-src 'self'",

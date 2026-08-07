@@ -525,6 +525,7 @@ model Order {
 
   @@index([storeId, status, archivedAt, createdAt])
   @@index([storeId, customerId, createdAt])
+  @@unique([publicCode])
   @@map("orders")
 }
 
