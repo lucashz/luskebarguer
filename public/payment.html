@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Pagamento Online</title>
-    <link rel="stylesheet" href="/styles.css?v=20260802-payment-polish">
+    <link rel="stylesheet" href="/styles.css?v=20260805-payment-hardening">
   </head>
   <body class="client-page payment-page">
     <main class="payment-shell">
@@ -16,9 +16,9 @@
         <div class="payment-status-box" id="paymentStatusBox"></div>
 
         <section class="payment-provider-box" id="paymentProviderBox" hidden>
-          <strong>Pague Pelo Checkout Seguro Da Abacate Pay</strong>
-          <p>Seu pedido será enviado para a loja somente depois da confirmação do pagamento. Não feche esta janela até concluir.</p>
-          <a class="primary-button wide" id="paymentCheckoutLink" href="#" target="_blank" rel="noopener">Abrir Abacate Pay</a>
+          <strong>Conclua o pagamento no checkout seguro</strong>
+          <p>Seu pedido será enviado para a loja somente depois da confirmação. Ao finalizar, você voltará para acompanhar o pedido.</p>
+          <a class="primary-button wide" id="paymentCheckoutLink" href="#">Pagar pedido</a>
         </section>
 
         <details class="payment-pix-fallback" id="paymentPixFallback">
@@ -38,6 +38,6 @@
         <a class="text-button" id="paymentOrdersLink" href="/pedidos">Ver Meus Pedidos</a>
       </section>
     </main>
-    <script src="/payment.js?v=20260802-payment-polish" type="module"></script>
+    <script src="/payment.js?v=20260805-payment-hardening" type="module"></script>
   </body>
 </html>

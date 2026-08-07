@@ -64,9 +64,14 @@
   openSupportTicketIds: new Set(),
   selectedSupportTicketId: null,
   supportTickets: [],
+  referrals: null,
+  referralsLoading: false,
+  referralsError: '',
+  integrationSetupOverview: null,
   commercialBlock: null,
   checkoutPlanCode: '',
   checkoutAddonCode: '',
+  planBillingCycle: localStorage.getItem('adminPlanBillingCycle') || 'monthly',
   billingCheckoutPollTimer: null
 };
 
@@ -323,6 +328,7 @@ const els = {
   operationMetricOrders: document.querySelector('#operationMetricOrders'),
   operationMetricOpen: document.querySelector('#operationMetricOpen'),
   operationMetricStatus: document.querySelector('#operationMetricStatus'),
+  adminReadinessList: document.querySelector('#adminReadinessList'),
   dashboardRevenue: document.querySelector('#dashboardRevenue'),
   dashboardRevenueHint: document.querySelector('#dashboardRevenueHint'),
   dashboardProducts: document.querySelector('#dashboardProducts'),
@@ -418,6 +424,11 @@ const els = {
   printSettingsForm: document.querySelector('#printSettingsForm'),
   testIntegrationsButton: document.querySelector('#testIntegrationsButton'),
   integrationStatusText: document.querySelector('#integrationStatusText'),
+  integrationSetupBanner: document.querySelector('#integrationSetupBanner'),
+  integrationSetupBannerTitle: document.querySelector('#integrationSetupBannerTitle'),
+  integrationSetupBannerMessage: document.querySelector('#integrationSetupBannerMessage'),
+  integrationSetupBannerOffers: document.querySelector('#integrationSetupBannerOffers'),
+  requestIntegrationSetupButton: document.querySelector('#requestIntegrationSetupButton'),
   whatsappAutoStatus: document.querySelector('#whatsappAutoStatus'),
   whatsappAutoMessage: document.querySelector('#whatsappAutoMessage'),
   whatsappQrBox: document.querySelector('#whatsappQrBox'),
@@ -475,6 +486,12 @@ const els = {
   planFeatures: document.querySelector('#planFeatures'),
   planCompare: document.querySelector('#planCompare'),
   planHistory: document.querySelector('#planHistory'),
+  referralLinkText: document.querySelector('#referralLinkText'),
+  referralStats: document.querySelector('#referralStats'),
+  referralRules: document.querySelector('#referralRules'),
+  referralList: document.querySelector('#referralList'),
+  copyReferralLinkButton: document.querySelector('#copyReferralLinkButton'),
+  refreshReferralsButton: document.querySelector('#refreshReferralsButton'),
   adminSupportTicketForm: document.querySelector('#adminSupportTicketForm'),
   supportCreateBox: document.querySelector('#supportCreateBox'),
   openSupportTicketFormButton: document.querySelector('#openSupportTicketFormButton'),
@@ -523,6 +540,8 @@ els.adminHeaderLogoutButton?.addEventListener('click', logout);
 els.endSupportModeButton?.addEventListener('click', endSupportMode);
 els.storeSwitcher?.addEventListener('change', switchStore);
 els.refreshPlanButton?.addEventListener('click', () => loadPlanData({ force: true }));
+els.refreshReferralsButton?.addEventListener('click', () => loadReferralData({ force: true }));
+els.copyReferralLinkButton?.addEventListener('click', copyReferralLink);
 els.onboardingBackButton?.addEventListener('click', previousOnboardingStep);
 els.onboardingNextButton?.addEventListener('click', nextOnboardingStep);
 els.onboardingSkipButton?.addEventListener('click', skipOnboardingForNow);
@@ -656,6 +675,7 @@ els.storeForm.addEventListener('click', (event) => {
   }
 });
 els.testIntegrationsButton?.addEventListener('click', testIntegrations);
+els.requestIntegrationSetupButton?.addEventListener('click', openIntegrationSetupCheckout);
 els.requestWhatsappSetupButton?.addEventListener('click', () => openSupportTicketWithContext('whatsapp'));
 els.accountForm.addEventListener('submit', submitAccount);
 els.passwordForm.addEventListener('submit', submitPassword);
@@ -1156,15 +1176,16 @@ async function loadAdminTabData(tab, options = {}) {
     if (tab === 'store' || tab === 'integrations') {
       await loadStoreData(options);
       if (tab === 'integrations') {
-        await Promise.all([
-          loadWhatsappIntegration(),
-          loadPaymentSetupAssistance()
-        ]);
+        await Promise.all([loadIntegrationSetupOverview(), loadWhatsappIntegration()]);
       }
       return;
     }
     if (tab === 'plan') {
       await loadPlanData(options);
+      return;
+    }
+    if (tab === 'referrals') {
+      await loadReferralData(options);
       return;
     }
     if (tab === 'support') {
@@ -1199,6 +1220,7 @@ function isAdminTabFresh(tab) {
     store: 45000,
     integrations: 45000,
     plan: 45000,
+    referrals: 45000,
     support: 30000,
     account: 45000,
     reports: 30000
@@ -1319,6 +1341,40 @@ async function loadPlanData(options = {}) {
   renderPlanFeatureHints();
 }
 
+async function loadReferralData(options = {}) {
+  if (!options.force && state.loadedAdminTabs.has('referrals')) return;
+  const startedAt = performance.now();
+  state.referralsLoading = true;
+  state.referralsError = '';
+  renderReferrals();
+  try {
+    const data = await request('/api/admin/referrals');
+    state.referrals = data;
+    state.loadedAdminTabs.add('referrals');
+    logSlowClientLoad('referrals', startedAt);
+  } catch (error) {
+    state.referralsError = error.message || 'Não foi possível carregar suas indicações.';
+    state.loadedAdminTabs.delete('referrals');
+  } finally {
+    state.referralsLoading = false;
+    renderReferrals();
+  }
+}
+
+async function copyReferralLink() {
+  const url = state.referrals?.code?.url || els.referralLinkText?.textContent || '';
+  if (!url || url === 'Carregando...') {
+    toast('Link de indicação ainda não carregado.');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link de indicação copiado.');
+  } catch {
+    window.prompt('Copie seu link de indicação:', url);
+  }
+}
+
 function render() {
   els.adminUser.textContent = state.admin ? `${state.admin.name} - ${state.admin.email}` : 'Painel';
   renderSupportModeBanner();
@@ -1335,6 +1391,7 @@ function render() {
   renderMenu();
   renderCategoryOptions();
   renderPlanFeatureHints();
+  renderReferrals();
   renderPermissionedNavigation();
   renderAdminUsers();
   fillStoreForm();
@@ -1830,6 +1887,7 @@ function renderOperation() {
     if (els.dashboardTables) els.dashboardTables.textContent = '-';
     if (els.dashboardPlan) els.dashboardPlan.textContent = '-';
     if (els.dashboardAlertText) els.dashboardAlertText.textContent = 'Carregando dados da loja.';
+    renderAdminReadinessChecklist();
     els.startOperationButton.disabled = true;
     els.stopOperationButton.disabled = true;
     return;
@@ -1871,6 +1929,7 @@ function renderOperation() {
     els.dashboardPlanHint.textContent = status;
   }
   if (els.dashboardAlertText) els.dashboardAlertText.textContent = dashboardAlertMessage({ isOpen, openOrders, activeProducts, activeTables, plan });
+  renderAdminReadinessChecklist();
 }
 
 function dashboardAlertMessage({ isOpen, openOrders, activeProducts, activeTables, plan }) {
@@ -1881,6 +1940,107 @@ function dashboardAlertMessage({ isOpen, openOrders, activeProducts, activeTable
   if (!activeTables) return 'Cadastre mesas para usar QR Code e comandas no salão.';
   if (!plan?.name) return 'Plano ainda carregando. Confira limites e recursos em Meu plano.';
   return 'Tudo pronto para operar. Acompanhe novos pedidos e mantenha o cardápio atualizado.';
+}
+
+function renderAdminReadinessChecklist() {
+  if (!els.adminReadinessList) return;
+  if (!state.store) {
+    els.adminReadinessList.innerHTML = '<p class="empty-state">Carregando checklist...</p>';
+    return;
+  }
+  const activeProducts = state.categories.reduce((sum, category) => (
+    sum + (category.items || []).filter((item) => item.is_available !== false).length
+  ), 0);
+  const whatsapp = state.whatsappIntegration || {};
+  const pixEnabled = state.store?.integration_pix_enabled === true
+    || state.store?.integration_settings?.pix?.enabled === true
+    || state.store?.payment_settings?.pix_online_enabled === true
+    || state.store?.payment_settings?.abacatepay?.enabled === true;
+  const paymentMethods = Array.isArray(state.store?.payment_methods) ? state.store.payment_methods : [];
+  const hasAnyPayment = paymentMethods.length > 0 || pixEnabled;
+  const items = [
+    {
+      key: 'store',
+      title: 'Loja',
+      text: state.store.name && state.store.slug && state.store.whatsapp_number
+        ? 'Nome, link público e WhatsApp dos pedidos estão preenchidos.'
+        : 'Revise nome, link público e WhatsApp dos pedidos.',
+      done: Boolean(state.store.name && state.store.slug && state.store.whatsapp_number),
+      tab: 'store',
+      action: 'Revisar loja'
+    },
+    {
+      key: 'menu',
+      title: 'Cardápio',
+      text: activeProducts > 0
+        ? `${activeProducts} produto(s) ativo(s) para vender.`
+        : 'Cadastre ou ative pelo menos um produto.',
+      done: activeProducts > 0,
+      tab: 'menu',
+      action: activeProducts > 0 ? 'Editar cardápio' : 'Cadastrar produto'
+    },
+    {
+      key: 'whatsapp',
+      title: 'WhatsApp',
+      text: adminWhatsappChecklistText(whatsapp),
+      done: whatsapp.connected === true || Boolean(state.store.whatsapp_number),
+      tab: 'integrations',
+      action: whatsapp.connected ? 'Ver conexão' : 'Configurar WhatsApp'
+    },
+    {
+      key: 'payment',
+      title: 'Pagamento',
+      text: pixEnabled
+        ? 'Pix online ativado para receber confirmação automática.'
+        : hasAnyPayment ? 'Formas de pagamento básicas cadastradas. Pix online pode ser ativado depois.' : 'Cadastre pelo menos uma forma de pagamento.',
+      done: hasAnyPayment,
+      tab: pixEnabled ? 'integrations' : 'store',
+      action: pixEnabled ? 'Ver Pix online' : 'Revisar pagamentos'
+    },
+    {
+      key: 'publish',
+      title: 'Publicar',
+      text: state.store.onboarding_completed
+        ? state.store.is_open === false ? 'Loja configurada, mas operação está offline.' : 'Loja publicada e pronta para receber pedidos.'
+        : 'Conclua a configuração inicial para publicar com segurança.',
+      done: Boolean(state.store.onboarding_completed && state.store.is_open !== false),
+      tab: state.store.onboarding_completed ? 'operation' : 'store',
+      action: state.store.onboarding_completed ? 'Ver operação' : 'Continuar configuração',
+      onboarding: !state.store.onboarding_completed
+    }
+  ];
+  els.adminReadinessList.innerHTML = items.map((item) => `
+    <article class="admin-readiness-item ${item.done ? 'is-done' : ''}">
+      <span class="admin-readiness-status" aria-hidden="true">${item.done ? 'OK' : '!'}</span>
+      <div>
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.text)}</p>
+      </div>
+      <button class="${item.done ? 'ghost-button' : 'primary-button'} compact" type="button" data-readiness-action="${escapeAttribute(item.key)}">${escapeHtml(item.action)}</button>
+    </article>
+  `).join('');
+  els.adminReadinessList.querySelectorAll('[data-readiness-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = items.find((entry) => entry.key === button.dataset.readinessAction);
+      if (!item) return;
+      if (item.onboarding) {
+        reopenOnboarding();
+        return;
+      }
+      activateAdminTab(item.tab);
+    });
+  });
+}
+
+function adminWhatsappChecklistText(whatsapp = {}) {
+  if (whatsapp.connected) {
+    const phone = whatsapp.connected_phone || whatsapp.phone || '';
+    return phone ? `Conectado ao número ${phone}.` : 'WhatsApp automático conectado.';
+  }
+  if (state.store?.whatsapp_number) {
+    return 'WhatsApp dos pedidos preenchido. O automático pode ser conectado quando estiver liberado no plano.';
+  }
+  return 'Informe o WhatsApp da loja para receber pedidos e avisos.';
 }
 
 function renderOnboarding() {
@@ -3405,6 +3565,12 @@ function orderCard(order) {
       <span class="financial-status-badge financial-status-${escapeAttribute(order.financial_status || 'pending')}">${financialStatusLabel(order.financial_status)}</span>
       ${customer.phone ? `<span>${escapeHtml(customer.phone)}</span>` : ''}
     </div>
+    ${order.reconciliation_status === 'divergent' ? `
+      <div class="order-payment-review-alert">
+        <strong>Pagamento precisa de revisão</strong>
+        <span>Confira o valor e a transação na Abacate Pay antes de liberar ou reembolsar o pedido.</span>
+      </div>
+    ` : ''}
     <details class="order-details" ${state.openOrderDetailIds.has(String(order.id)) ? 'open' : ''}>
       <summary>Ver detalhes</summary>
       <div class="order-details-body">
@@ -3416,6 +3582,7 @@ function orderCard(order) {
           ${order.tab_snapshot?.name ? `<div><dt>Comanda</dt><dd>${escapeHtml(order.tab_snapshot.name)}</dd></div>` : ''}
           <div><dt>Pagamento</dt><dd>${payment}</dd></div>
           <div><dt>Status financeiro</dt><dd>${financialStatusLabel(order.financial_status)}</dd></div>
+          ${order.reconciliation_status === 'divergent' ? '<div><dt>Conciliação</dt><dd>Revisão necessária</dd></div>' : ''}
           ${order.payment_transaction_id ? `<div><dt>Transação</dt><dd>${escapeHtml(order.payment_transaction_id)}</dd></div>` : ''}
           ${order.paid_amount ? `<div><dt>Valor pago</dt><dd>${money(order.paid_amount)}</dd></div>` : ''}
           ${order.paid_at ? `<div><dt>Pago em</dt><dd>${new Date(order.paid_at).toLocaleString('pt-BR')}</dd></div>` : ''}
@@ -4920,6 +5087,12 @@ function openSupportTicketWithContext(context = '') {
       priority: 'high',
       subject: 'Preciso de ajuda com Abacate Pay',
       message: 'Olá, preciso de ajuda para configurar Pix online e confirmação automática de pagamento.'
+    },
+    checklist: {
+      category: 'Primeira configuração',
+      priority: 'medium',
+      subject: 'Preciso de ajuda para deixar minha loja pronta',
+      message: 'Olá, estou seguindo o checklist da loja e preciso de ajuda para concluir a configuração.'
     }
   };
   const preset = presets[context] || presets.integrations;
@@ -5510,6 +5683,108 @@ function normalizeSearch(value) {
     .trim();
 }
 
+function renderReferrals() {
+  if (!els.referralLinkText || !els.referralStats || !els.referralList) return;
+  const data = state.referrals;
+  if (state.referralsLoading) {
+    els.referralLinkText.textContent = 'Carregando seu link...';
+    els.referralStats.innerHTML = `
+      ${referralStatSkeleton()}
+      ${referralStatSkeleton()}
+      ${referralStatSkeleton()}
+      ${referralStatSkeleton()}
+    `;
+    els.referralList.innerHTML = '<p class="empty-state referral-empty">Buscando suas indicações recentes...</p>';
+    return;
+  }
+  if (state.referralsError) {
+    els.referralLinkText.textContent = 'Não foi possível carregar.';
+    els.referralStats.innerHTML = `
+      <div class="referral-error-state">
+        <strong>Não conseguimos carregar o programa de indicação.</strong>
+        <span>${escapeHtml(state.referralsError)}</span>
+        <button class="ghost-button compact" type="button" data-referral-retry>Tentar novamente</button>
+      </div>
+    `;
+    els.referralStats.querySelector('[data-referral-retry]')?.addEventListener('click', () => loadReferralData({ force: true }));
+    els.referralList.innerHTML = '<p class="empty-state referral-empty">Assim que carregar, o histórico aparece aqui.</p>';
+    return;
+  }
+  if (!data) {
+    els.referralLinkText.textContent = 'Carregando...';
+    els.referralStats.innerHTML = '<p class="empty-state referral-empty">Carregando indicações...</p>';
+    els.referralList.innerHTML = '<p class="empty-state referral-empty">Seu histórico aparecerá aqui.</p>';
+    return;
+  }
+  const stats = data.stats || {};
+  const program = data.program || {};
+  const code = data.code || {};
+  els.referralLinkText.textContent = code.url || 'Link indisponível';
+  if (els.referralRules) {
+    els.referralRules.innerHTML = (program.rules || [])
+      .map((rule) => `<li>${escapeHtml(rule)}</li>`)
+      .join('');
+  }
+  els.referralStats.innerHTML = `
+    ${referralStatCard('Indicações', stats.total || 0, 'Total de cadastros pelo seu link')}
+    ${referralStatCard('Viraram cliente', stats.paid || 0, 'Pagaram o primeiro plano')}
+    ${referralStatCard('Crédito disponível', moneyCentsLabel(stats.rewards_available_cents || 0), 'Para abater cobranças futuras')}
+    ${referralStatCard('Limite mensal', `${moneyCentsLabel(program.monthly_used_cents || 0)} / ${moneyCentsLabel(program.monthly_limit_cents || 0)}`, 'Teto de recompensa no mês')}
+  `;
+  const referrals = Array.isArray(data.referrals) ? data.referrals : [];
+  els.referralList.innerHTML = referrals.length ? referrals.map((item) => `
+    <article class="referral-row">
+      <div>
+        <strong>${escapeHtml(item.referred_store_name || item.referred_company_name || item.referred_email || 'Indicação')}</strong>
+        <span>${escapeHtml(referralStatusLabel(item.status))} · ${escapeHtml(dateLabel(item.signed_up_at) || 'sem data')}</span>
+      </div>
+      <small>${item.first_paid_at ? `Pagamento em ${escapeHtml(dateLabel(item.first_paid_at))}` : 'Aguardando primeiro pagamento'}</small>
+    </article>
+  `).join('') : `
+    <div class="referral-empty-state">
+      <strong>Nenhuma indicação ainda</strong>
+      <span>Copie seu link e envie para outros restaurantes, lanchonetes ou bares que precisam organizar pedidos.</span>
+      <button class="ghost-button compact" type="button" data-referral-copy-empty>Copiar link</button>
+    </div>
+  `;
+  els.referralList.querySelector('[data-referral-copy-empty]')?.addEventListener('click', copyReferralLink);
+}
+
+function referralStatCard(label, value, hint) {
+  return `
+    <article class="referral-stat-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value))}</strong>
+      <small>${escapeHtml(hint)}</small>
+    </article>
+  `;
+}
+
+function referralStatSkeleton() {
+  return `
+    <article class="referral-stat-card is-loading">
+      <span>Carregando</span>
+      <strong>...</strong>
+      <small>Atualizando dados</small>
+    </article>
+  `;
+}
+
+function referralStatusLabel(status) {
+  return ({
+    signed_up: 'Conta criada',
+    trial: 'Em teste',
+    pending: 'Pendente',
+    paid: 'Cliente pago',
+    paid_limit_reached: 'Pago, limite mensal atingido',
+    rejected: 'Rejeitada'
+  })[status] || status || 'Pendente';
+}
+
+function moneyCentsLabel(cents) {
+  return money((Number(cents || 0) || 0) / 100);
+}
+
 function renderPlan() {
   if (!els.planSummary || !els.planUsage || !els.planFeatures) return;
   const data = state.plan;
@@ -5527,12 +5802,12 @@ function renderPlan() {
   const features = data.features || [];
   const billingHistory = Array.isArray(data.billing_history) ? data.billing_history : [];
   const selectedPlanCode = plan.code || availablePlans[0]?.code || '';
+  const billingCycle = normalizePlanBillingCycle(state.planBillingCycle);
   const rawStatus = subscription.status || company.status || 'indefinido';
   const status = isTrialExpired(subscription) ? 'trial_expired' : rawStatus;
   const statusLabel = commercialStatusLabel(status);
   const nextRenewal = subscription.next_renewal_at || subscription.current_period_ends_at || subscription.trial_ends_at || '';
   const pendingCheckoutUrl = pendingSubscription.metadata?.checkout_url || '';
-  const daysRemaining = subscriptionDaysRemaining(nextRenewal);
   const billingStatus = pendingSubscription.id
     ? commercialStatusLabel(pendingSubscription.status)
     : status === 'active' || status === 'trial'
@@ -5548,30 +5823,25 @@ function renderPlan() {
     <div class="plan-summary-card ${pendingSubscription.id ? 'has-pending' : ''}">
       <div class="plan-summary-main">
         <div>
-          <p class="eyebrow">Resumo da assinatura</p>
           <div class="plan-main-title">
             <h2>${escapeHtml(plan.name || 'Sem plano definido')}</h2>
             <span class="plan-status ${planStatusClass(status)}">${escapeHtml(statusLabel)}</span>
           </div>
-          <p class="muted">${escapeHtml(plan.description || 'Configure o plano pelo painel da plataforma.')}</p>
         </div>
-        <strong class="plan-price">${formatPlanPrice(plan.monthly_price)}</strong>
+        <strong class="plan-price">${formatPlanPriceForCycle(plan, subscription.metadata?.billing_cycle || billingCycle)}</strong>
       </div>
       <div class="plan-summary-meta">
         <article>
           <span>Cobrança</span>
           <strong>${escapeHtml(billingStatus)}</strong>
-          <small>${pendingSubscription.id ? 'Aguardando regularização' : 'Sem pendência aberta'}</small>
         </article>
         <article>
           <span>Renovação</span>
           <strong>${dateLabel(nextRenewal) || '-'}</strong>
-          <small>${daysRemaining === null ? renewalMessage(subscription) : `${daysRemaining} dia(s) restante(s)`}</small>
         </article>
         <article>
           <span>Valor</span>
-          <strong>${money(pendingSubscription.metadata?.amount_cents ? Number(pendingSubscription.metadata.amount_cents) / 100 : plan.monthly_price || 0)}</strong>
-          <small>${pendingSubscription.payment_due_at ? `Vence em ${dateLabel(pendingSubscription.payment_due_at)}` : 'Mensalidade atual'}</small>
+          <strong>${money(pendingSubscription.metadata?.amount_cents ? Number(pendingSubscription.metadata.amount_cents) / 100 : planAmountForCycle(plan, subscription.metadata?.billing_cycle || billingCycle))}</strong>
         </article>
       </div>
       ${pendingSubscription.id ? `
@@ -5583,16 +5853,30 @@ function renderPlan() {
           ${pendingCheckoutUrl ? `<a class="primary-button compact" href="${escapeAttribute(pendingCheckoutUrl)}" target="_blank" rel="noopener">Regularizar pagamento</a>` : `<button class="primary-button compact" id="billingPendingButton" type="button">Regularizar pagamento</button>`}
         </div>
       ` : ''}
-      <div class="plan-actions">
-        <label>Alterar para
-          <select id="billingPlanSelect">
-            ${availablePlans.map((entry) => `<option value="${escapeAttribute(entry.code)}"${entry.code === selectedPlanCode ? ' selected' : ''}>${escapeHtml(entry.name)} - ${money(entry.monthly_price || 0)}/mês</option>`).join('')}
-          </select>
-        </label>
-        <button class="primary-button compact" id="billingCheckoutButton" type="button"${availablePlans.length ? '' : ' disabled'}>${plan.code ? 'Alterar plano' : 'Ativar plano'}</button>
-      </div>
+      <details class="plan-change-details">
+        <summary><span class="plan-change-cta-icon" aria-hidden="true">↑</span><span class="plan-change-cta-copy"><strong>${plan.code ? 'Alterar meu plano' : 'Ativar meu plano'}</strong><small>Compare opções e libere mais recursos</small></span><span class="plan-change-cta-toggle" aria-hidden="true">+</span></summary>
+        <div class="plan-actions">
+          <div class="plan-cycle-toggle" role="group" aria-label="Ciclo de cobrança">
+            <button class="${billingCycle === 'monthly' ? 'active' : ''}" type="button" data-plan-cycle="monthly">Mensal</button>
+            <button class="${billingCycle === 'annual' ? 'active' : ''}" type="button" data-plan-cycle="annual">Anual</button>
+          </div>
+          <label>Escolha o plano
+            <select id="billingPlanSelect">
+              ${availablePlans.map((entry) => `<option value="${escapeAttribute(entry.code)}"${entry.code === selectedPlanCode ? ' selected' : ''}>${escapeHtml(entry.name)} - ${escapeHtml(planOptionPriceLabel(entry, billingCycle))}</option>`).join('')}
+            </select>
+          </label>
+          <button class="primary-button compact" id="billingCheckoutButton" type="button"${availablePlans.length ? '' : ' disabled'}>Continuar</button>
+        </div>
+      </details>
     </div>
   `;
+  document.querySelectorAll('[data-plan-cycle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.planBillingCycle = normalizePlanBillingCycle(button.dataset.planCycle);
+      localStorage.setItem('adminPlanBillingCycle', state.planBillingCycle);
+      renderPlan();
+    });
+  });
   document.querySelector('#billingCheckoutButton')?.addEventListener('click', () => openPlanCheckoutModal());
   document.querySelector('#billingPendingButton')?.addEventListener('click', () => openPlanCheckoutModal());
 
@@ -5605,13 +5889,6 @@ function renderPlan() {
   }
 
   els.planUsage.innerHTML = `
-    <div class="plan-panel-head">
-      <div>
-        <p class="eyebrow">Uso</p>
-        <h2>Uso e limites</h2>
-      </div>
-      <p class="muted">Barras aparecem apenas quando existe limite no plano.</p>
-    </div>
     <div class="plan-usage-list">
       ${usageBar('Produtos cadastrados', usage.products, featureLimit(features, 'digital_menu'))}
       ${usageBar('Categorias', usage.categories, featureLimit(features, 'menu_categories'))}
@@ -5622,7 +5899,7 @@ function renderPlan() {
       ${usageBar('WhatsApp/mensagens', usage.whatsapp_messages, featureLimit(features, 'automatic_whatsapp') || featureLimit(features, 'manual_whatsapp'))}
     </div>
   `;
-  renderPlanServices(data.addons || [], data.addons_error || '');
+  renderPlanAddons(data.addons || [], data.addons_error || '');
   els.planFeatures.innerHTML = planFeatureGroups(features);
   els.planFeatures.querySelector('[data-plan-show-features]')?.addEventListener('click', (event) => {
     els.planFeatures.querySelectorAll('[data-plan-extra-feature]').forEach((node) => { node.hidden = false; });
@@ -5630,7 +5907,7 @@ function renderPlan() {
   });
 
   if (els.planCompare) {
-    els.planCompare.innerHTML = availablePlans.length ? availablePlans.map((entry) => comparePlanCard(entry, plan.code)).join('') : '<p class="empty-state">Nenhum plano disponível.</p>';
+    els.planCompare.innerHTML = availablePlans.length ? availablePlans.map((entry) => comparePlanCard(entry, plan.code, billingCycle)).join('') : '<p class="empty-state">Nenhum plano disponível.</p>';
     els.planCompare.querySelectorAll('[data-plan-code]').forEach((button) => {
       button.addEventListener('click', () => openPlanCheckoutModal(button.dataset.planCode));
     });
@@ -5642,7 +5919,7 @@ function renderPlan() {
       <div class="plan-history-table">
         <div class="plan-history-header">
           <span>Data</span>
-          <span>Plano</span>
+          <span>Tipo</span>
           <span>Status</span>
           <span>Valor</span>
           <span>Ação</span>
@@ -5654,18 +5931,44 @@ function renderPlan() {
   }
 }
 
-function renderPlanServices(addons = [], error = '') {
+function renderPlanAddons(addons = [], error = '') {
   if (!els.planServices) return;
   if (error) {
     els.planServices.innerHTML = `<p class="empty-state">${escapeHtml(error)}</p>`;
     return;
   }
-  const services = addons.filter((entry) => entry?.addon?.service_type === 'assisted_setup');
-  if (!services.length) {
-    els.planServices.innerHTML = '<p class="empty-state">Nenhum serviço assistido disponível para este plano.</p>';
+  if (!addons.length) {
+    els.planServices.innerHTML = '<p class="empty-state">Nenhum adicional disponível para este plano.</p>';
     return;
   }
-  els.planServices.innerHTML = services.map((entry) => assistedServiceCard(entry)).join('');
+  const recurring = addons.filter((entry) => entry?.addon?.billing_type !== 'one_time');
+  const services = addons.filter((entry) => entry?.addon?.service_type === 'assisted_setup');
+  els.planServices.innerHTML = `
+    ${recurring.length ? `
+      <div class="plan-addon-group">
+        <div class="plan-addon-group-head">
+          <strong>Adicionais Mensais</strong>
+          <span>Recursos que podem ser ativados junto com o plano.</span>
+        </div>
+        <div class="assisted-services-grid">${recurring.map((entry) => planAddonCard(entry)).join('')}</div>
+      </div>
+    ` : ''}
+    ${services.length ? `
+      <div class="plan-addon-group">
+        <div class="plan-addon-group-head">
+          <strong>Serviços Assistidos</strong>
+          <span>Pagamentos únicos para a equipe TáPronto configurar com você.</span>
+        </div>
+        <div class="assisted-services-grid">${services.map((entry) => assistedServiceCard(entry)).join('')}</div>
+      </div>
+    ` : ''}
+  `;
+  els.planServices.querySelectorAll('[data-addon-checkout]').forEach((button) => {
+    button.addEventListener('click', () => checkoutAssistedService(button.dataset.addonCheckout, button));
+  });
+  els.planServices.querySelectorAll('[data-reopen-addon-checkout]').forEach((button) => {
+    button.addEventListener('click', () => openCheckoutWindow(button.dataset.reopenAddonCheckout));
+  });
   els.planServices.querySelectorAll('[data-service-addon-checkout]').forEach((button) => {
     button.addEventListener('click', () => checkoutAssistedService(button.dataset.serviceAddonCheckout, button));
   });
@@ -5675,6 +5978,39 @@ function renderPlanServices(addons = [], error = '') {
   els.planServices.querySelectorAll('[data-service-ticket-id]').forEach((button) => {
     button.addEventListener('click', () => openSupportTicketFromService(button.dataset.serviceTicketId));
   });
+}
+
+function planAddonCard(entry = {}) {
+  const addon = entry.addon || {};
+  const active = Boolean(entry.active || entry.included);
+  const pending = entry.active_addon?.status === 'payment_pending';
+  const statusText = entry.included ? 'Incluso no plano' : active ? 'Ativo' : pending ? 'Pagamento pendente' : entry.available ? 'Disponível' : 'Requer upgrade';
+  const statusClass = entry.included || active ? 'ok' : pending ? 'warn' : entry.available ? 'info' : 'muted';
+  const action = entry.included
+    ? '<button class="ghost-button compact" type="button" disabled>Incluso</button>'
+    : active
+      ? '<button class="ghost-button compact" type="button" disabled>Já ativo</button>'
+      : pending && entry.active_addon?.checkout_url
+        ? `<button class="primary-button compact" type="button" data-reopen-addon-checkout="${escapeAttribute(entry.active_addon.checkout_url)}">Ir para pagamento</button>`
+        : entry.available
+          ? `<button class="primary-button compact" type="button" data-addon-checkout="${escapeAttribute(addon.code)}">Contratar</button>`
+          : `<button class="ghost-button compact" type="button" disabled>${escapeHtml(entry.message || 'Requer upgrade')}</button>`;
+  return `
+    <article class="assisted-service-card plan-addon-card ${active ? 'is-active' : ''}">
+      <div class="assisted-service-head">
+        <span class="assisted-service-icon whatsapp" aria-hidden="true">${addon.code === 'whatsapp_automatic' ? 'WA' : '+'}</span>
+        <span class="status-pill ${statusClass}">${escapeHtml(statusText)}</span>
+      </div>
+      <h3>${escapeHtml(addon.name || 'Adicional')}</h3>
+      <p>${escapeHtml(addon.description || entry.message || 'Adicione este recurso ao seu plano.')}</p>
+      <div class="assisted-service-meta">
+        <strong>${escapeHtml(addon.price_label || money((addon.price_cents || 0) / 100))}</strong>
+        <span>${entry.included ? 'Sem custo extra neste plano' : addon.billing_type === 'one_time' ? 'Pagamento único' : 'Cobrança mensal'}</span>
+      </div>
+      ${entry.message ? `<small class="plan-addon-message">${escapeHtml(entry.message)}</small>` : ''}
+      <div class="row-actions">${action}</div>
+    </article>
+  `;
 }
 
 function assistedServiceCard(entry = {}) {
@@ -5864,6 +6200,63 @@ function selectedCheckoutPlan(planCode = '') {
   return plans.find((entry) => entry.code === code) || null;
 }
 
+function normalizePlanBillingCycle(value = '') {
+  return ['annual', 'yearly', 'anual'].includes(String(value || '').toLowerCase()) ? 'annual' : 'monthly';
+}
+
+function billingCycleLabel(value = '') {
+  return normalizePlanBillingCycle(value) === 'annual' ? 'Cobrança anual' : 'Cobrança mensal';
+}
+
+function planAmountForCycle(plan = {}, cycle = 'monthly') {
+  const normalized = normalizePlanBillingCycle(cycle);
+  const annual = Number(plan.annual_price || 0);
+  const monthly = Number(plan.monthly_price || 0);
+  if (normalized === 'annual') return annual > 0 ? annual : monthly * 12;
+  return monthly;
+}
+
+function planAnnualSavings(plan = {}) {
+  const monthly = Number(plan.monthly_price || 0);
+  const annual = Number(plan.annual_price || 0);
+  if (!monthly || !annual) return { cents: 0, percent: 0, equivalent: annual ? annual / 12 : monthly };
+  const fullYear = monthly * 12;
+  const saving = Math.max(0, fullYear - annual);
+  return {
+    cents: Math.round(saving * 100),
+    percent: fullYear > 0 ? Math.round((saving / fullYear) * 100) : 0,
+    equivalent: annual / 12
+  };
+}
+
+function formatPlanPriceForCycle(plan = {}, cycle = 'monthly') {
+  const normalized = normalizePlanBillingCycle(cycle);
+  if (normalized === 'annual') {
+    const amount = planAmountForCycle(plan, 'annual');
+    if (amount <= 0) return 'R$ 0 / teste';
+    return `${money(amount)} / ano`;
+  }
+  return formatPlanPrice(plan.monthly_price);
+}
+
+function planOptionPriceLabel(plan = {}, cycle = 'monthly') {
+  if (normalizePlanBillingCycle(cycle) === 'annual') {
+    const savings = planAnnualSavings(plan);
+    const amount = planAmountForCycle(plan, 'annual');
+    const suffix = savings.cents > 0 ? ` · economize ${money(savings.cents / 100)}` : '';
+    return `${money(amount)}/ano${suffix}`;
+  }
+  return `${money(plan.monthly_price || 0)}/mês`;
+}
+
+function annualEconomyText(plan = {}) {
+  const savings = planAnnualSavings(plan);
+  if (savings.cents > 0) {
+    return `Equivale a ${money(savings.equivalent)}/mês e economiza ${money(savings.cents / 100)} por ano.`;
+  }
+  return `Equivale a ${money(planAmountForCycle(plan, 'annual') / 12)}/mês no pagamento anual.`;
+}
+
 function openPlanCheckoutModal(planCode = '') {
   const plan = selectedCheckoutPlan(planCode);
   if (!plan) {
@@ -5875,6 +6268,7 @@ function openPlanCheckoutModal(planCode = '') {
     return;
   }
   state.checkoutPlanCode = plan.code;
+  const billingCycle = normalizePlanBillingCycle(state.planBillingCycle);
   const currentPlan = state.plan?.plan || {};
   const currentStatus = isTrialExpired(state.plan?.subscription) ? 'trial_expired' : state.plan?.subscription?.status;
   const modal = ensurePlanCheckoutModal();
@@ -5882,18 +6276,25 @@ function openPlanCheckoutModal(planCode = '') {
     <div class="plan-checkout-modal-card" role="dialog" aria-modal="true" aria-labelledby="planCheckoutTitle">
       <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
       <div class="plan-checkout-head">
-        <p class="eyebrow">${commercialStatusBlocksOperation(currentStatus) ? 'Liberar painel' : 'Pagamento mensal'}</p>
-        <h2 id="planCheckoutTitle">${escapeHtml(plan.name || 'Plano mensal')}</h2>
+        <p class="eyebrow">${commercialStatusBlocksOperation(currentStatus) ? 'Liberar painel' : billingCycleLabel(billingCycle)}</p>
+        <h2 id="planCheckoutTitle">${escapeHtml(plan.name || 'Plano')}</h2>
         <p>${escapeHtml(plan.description || 'Finalize o pagamento para ativar os recursos deste plano.')}</p>
       </div>
       <div class="plan-checkout-summary">
         <article><span>Plano atual</span><strong>${escapeHtml(currentPlan.name || 'Sem plano')}</strong></article>
         <article><span>Novo plano</span><strong>${escapeHtml(plan.name || 'Plano')}</strong></article>
-        <article><span>Mensalidade</span><strong>${formatPlanPrice(plan.monthly_price || 0)}</strong></article>
+        <article><span>Cobrança</span><strong>${escapeHtml(billingCycleLabel(billingCycle))}</strong></article>
+        <article><span>Valor</span><strong>${formatPlanPriceForCycle(plan, billingCycle)}</strong></article>
       </div>
+      ${billingCycle === 'annual' ? `
+        <div class="plan-checkout-economy">
+          <strong>${escapeHtml(annualEconomyText(plan))}</strong>
+          <span>O plano anual libera o mesmo pacote por 12 meses e reduz o custo médio mensal.</span>
+        </div>
+      ` : ''}
       <div class="plan-checkout-note">
         <strong>Como funciona</strong>
-        <p>Ao continuar, vamos abrir o checkout seguro com Pix e cartão. O plano é liberado por 30 dias assim que o pagamento for confirmado.</p>
+        <p>Ao continuar, vamos abrir o checkout seguro. O plano é liberado automaticamente assim que o pagamento for confirmado pelo provedor.</p>
       </div>
       <div class="row-actions plan-checkout-footer">
         <button class="ghost-button compact" type="button" data-close-plan-checkout>Cancelar</button>
@@ -5905,7 +6306,7 @@ function openPlanCheckoutModal(planCode = '') {
   document.body.classList.add('plan-checkout-open');
   modal.querySelectorAll('[data-close-plan-checkout]').forEach((button) => button.addEventListener('click', closePlanCheckoutModal));
   modal.querySelector('[data-confirm-plan-checkout]')?.addEventListener('click', (event) => {
-    createBillingCheckout(state.checkoutPlanCode, { triggerButton: event.currentTarget });
+    createBillingCheckout(state.checkoutPlanCode, { triggerButton: event.currentTarget, billingCycle });
   });
   modal.querySelector('[data-confirm-plan-checkout]')?.focus();
 }
@@ -5935,6 +6336,7 @@ function ensurePlanCheckoutModal() {
 
 async function createBillingCheckout(forcedPlanCode = '', options = {}) {
   const planCode = forcedPlanCode || document.querySelector('#billingPlanSelect')?.value || state.plan?.plan?.code;
+  const billingCycle = normalizePlanBillingCycle(options.billingCycle || state.planBillingCycle);
   if (!planCode) {
     toast('Plano não encontrado para cobrança.');
     return;
@@ -5955,7 +6357,7 @@ async function createBillingCheckout(forcedPlanCode = '', options = {}) {
     const result = await request('/api/admin/billing/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan_code: planCode })
+      body: JSON.stringify({ plan_code: planCode, billing_cycle: billingCycle })
     });
     if (result.checkout_url) {
       openCheckoutWindow(result.checkout_url);
@@ -5993,6 +6395,7 @@ function openCheckoutWindow(url) {
 function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
   const modal = ensurePlanCheckoutModal();
   const plan = selectedCheckoutPlan(planCode) || {};
+  const billingCycle = normalizePlanBillingCycle(state.planBillingCycle);
   modal.innerHTML = `
     <div class="plan-checkout-modal-card plan-checkout-waiting" role="dialog" aria-modal="true" aria-labelledby="planCheckoutWaitingTitle">
       <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
@@ -6005,7 +6408,7 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
         <span aria-hidden="true"></span>
         <div>
           <strong>Aguardando confirmação</strong>
-          <p>${escapeHtml(plan.name || 'Plano mensal')} ${plan.monthly_price ? `· ${formatPlanPrice(plan.monthly_price)}` : ''}</p>
+          <p>${escapeHtml(plan.name || 'Plano')} ${plan.code ? `· ${formatPlanPriceForCycle(plan, billingCycle)}` : ''}</p>
         </div>
       </div>
       <div class="plan-checkout-note">
@@ -6245,11 +6648,13 @@ function planFeatureGroups(features = []) {
   `;
 }
 
-function comparePlanCard(plan, currentCode) {
+function comparePlanCard(plan, currentCode, billingCycle = 'monthly') {
   const isCurrent = plan.code === currentCode;
   const featured = /professional|profissional/i.test(`${plan.code || ''} ${plan.name || ''}`);
   const features = billingPlanHighlights(plan);
   const daily = billingPlanDailyPrice(plan);
+  const cycle = normalizePlanBillingCycle(billingCycle);
+  const savings = planAnnualSavings(plan);
   return `
     <article class="plan-compare-card ${isCurrent ? 'current' : ''} ${featured ? 'featured' : ''}">
       <div>
@@ -6257,8 +6662,10 @@ function comparePlanCard(plan, currentCode) {
         <h3>${escapeHtml(plan.name || 'Plano')}</h3>
         <p>${escapeHtml(plan.description || '')}</p>
       </div>
-      <strong>${money(plan.monthly_price || 0)} / mês</strong>
-      ${daily ? `<small class="muted">${escapeHtml(daily)}</small>` : ''}
+      <strong>${escapeHtml(formatPlanPriceForCycle(plan, cycle))}</strong>
+      ${cycle === 'annual'
+        ? `<small class="muted">${escapeHtml(savings.cents > 0 ? annualEconomyText(plan) : 'Pagamento anual sem desconto configurado.')}</small>`
+        : daily ? `<small class="muted">${escapeHtml(daily)}</small>` : ''}
       <ul>
         ${features.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
       </ul>
@@ -6291,13 +6698,15 @@ function billingPlanDailyPrice(plan) {
 
 function billingHistoryRow(event) {
   const payload = event.metadata || {};
-  const planCode = payload.plan_code || payload.planCode || payload.plan_name || '-';
+  const planCode = payload.plan_name || payload.plan_code || payload.planCode || payload.addon_code || payload.description || event.description || '-';
+  const type = event.billing_type === 'addon' ? 'Adicional/serviço' : 'Plano';
   const receipt = payload.checkout_url || payload.receipt_url || payload.url || '';
-  const amount = payload.amount_cents ? money(Number(payload.amount_cents) / 100) : '-';
+  const amountCents = payload.amount_cents ?? event.amount_cents;
+  const amount = amountCents ? money(Number(amountCents) / 100) : '-';
   return `
     <article class="plan-history-row">
       <span>${dateTimeLabel(event.created_at)}</span>
-      <strong>${escapeHtml(planCode)}</strong>
+      <strong>${escapeHtml(type)}<small>${escapeHtml(planCode)}</small></strong>
       <span>${escapeHtml(billingEventLabel(event.event_type || event.type || 'Evento'))}</span>
       <span>${escapeHtml(amount)}</span>
       ${receipt ? `<a href="${escapeAttribute(receipt)}" target="_blank" rel="noopener">Abrir</a>` : '<span>-</span>'}
@@ -7631,6 +8040,7 @@ async function submitIntegrations(event) {
     saveAdminCache();
     fillIntegrationSettings(state.store.integration_settings || payload.integration_settings);
     renderIntegrationStatus(state.store.integration_settings || payload.integration_settings);
+    renderAdminReadinessChecklist();
     toast('Integrações salvas.');
   });
 }
@@ -7712,6 +8122,8 @@ function fillIntegrationSettings(settings = {}) {
   setValue(form.elements.integration_whatsapp_accessToken, whatsapp.accessToken || '');
   setValue(form.elements.integration_whatsapp_apiUrl, whatsapp.apiUrl || '');
   if (form.elements.integration_pix_enabled) form.elements.integration_pix_enabled.checked = Boolean(pix.enabled);
+  const pixAdvancedConfig = document.getElementById('pixAdvancedConfig');
+  if (pixAdvancedConfig) pixAdvancedConfig.open = Boolean(pix.enabled || pix.apiKey || pix.webhookSecret);
   setValue(form.elements.integration_pix_provider, 'abacatepay');
   setValue(form.elements.integration_pix_apiKey, pix.apiKey || '');
   setValue(form.elements.integration_pix_webhookSecret, pix.webhookSecret || '');
@@ -7731,9 +8143,21 @@ function renderIntegrationStatus(settings = state.store?.integration_settings ||
   if (!els.integrationStatusText) return;
   const whatsapp = settings.whatsapp || {};
   const pix = settings.pix || {};
+  const pixStatus = document.getElementById('pixIntegrationStatus');
   const whatsappConnected = state.whatsappIntegration?.status === 'connected';
-  const whatsappLabel = whatsappConnected ? 'automático conectado' : (whatsapp.enabled ? 'ativo' : 'desativado');
-  els.integrationStatusText.textContent = `WhatsApp: ${whatsappLabel} - Abacate Pay/Pix: ${pix.enabled ? 'ativo' : 'desativado'}.`;
+  const whatsappLabel = whatsappConnected
+    ? 'WhatsApp automático conectado e pronto para avisos.'
+    : whatsapp.enabled ? 'WhatsApp configurado, mas ainda sem conexão automática.' : 'WhatsApp automático ainda não ativado.';
+  const pixLabel = pix.enabled
+    ? 'Pix online ativado. Faça um pedido teste para validar a confirmação automática.'
+    : 'Pix online desativado. A loja pode continuar usando formas de pagamento manuais.';
+  if (pixStatus) {
+    pixStatus.textContent = pix.enabled ? 'Ativado' : (pix.apiKey ? 'Configuração pendente' : 'Não configurado');
+    pixStatus.classList.toggle('is-connected', Boolean(pix.enabled));
+    pixStatus.classList.toggle('is-pending', !pix.enabled && Boolean(pix.apiKey));
+  }
+  els.integrationStatusText.classList.toggle('is-ready', whatsappConnected || pix.enabled);
+  els.integrationStatusText.textContent = `${whatsappLabel} ${pixLabel}`;
 }
 
 async function testIntegrations() {
@@ -7801,17 +8225,17 @@ function renderWhatsappIntegration(data = {}) {
   const addon = data.addon || {};
   const canBuyAddon = !featureEnabled && addon.available === true && addon.active !== true;
   const canConnect = featureEnabled && platformConfigured;
-  const showUpgradeGuide = !featureEnabled && !data.last_error;
+  const showUpgradeGuide = !featureEnabled;
   state.whatsappIntegration = data;
   els.whatsappAutoStatus.textContent = label;
   els.whatsappAutoStatus.className = `status-pill whatsapp-status-${status}`;
   if (els.whatsappAutoMessage) {
-    if (data.last_error) {
-      els.whatsappAutoMessage.textContent = data.last_error;
-    } else if (canBuyAddon) {
-      els.whatsappAutoMessage.textContent = 'Para liberar a conexão por QR Code, escolha uma das opções abaixo.';
+    if (canBuyAddon) {
+      els.whatsappAutoMessage.textContent = 'Contrate o adicional para liberar a conexão por QR Code.';
     } else if (!featureEnabled) {
       els.whatsappAutoMessage.textContent = data.feature_message || 'WhatsApp automático está disponível no Profissional como adicional ou incluso no Premium.';
+    } else if (data.last_error) {
+      els.whatsappAutoMessage.textContent = data.last_error;
     } else if (!platformConfigured) {
       els.whatsappAutoMessage.textContent = 'A Central TáPronto ainda precisa configurar a Evolution Go antes de conectar o WhatsApp da loja.';
     } else if (status === 'connected') {
@@ -7865,6 +8289,7 @@ function renderWhatsappIntegration(data = {}) {
     els.disconnectWhatsappButton.disabled = status === 'loading';
   }
   renderIntegrationStatus();
+  renderAdminReadinessChecklist();
 }
 
 function renderWhatsappUpgradeGuide({ showUpgradeGuide = false, canBuyAddon = false, addon = {} } = {}) {
@@ -7903,6 +8328,141 @@ function whatsappAutoStatusLabel(status = '') {
     error: 'Erro',
     loading: 'Carregando...'
   })[status] || 'Desconhecido';
+}
+
+async function loadIntegrationSetupOverview() {
+  try {
+    const overview = await request('/api/admin/integrations/setup-overview');
+    state.integrationSetupOverview = overview;
+    renderIntegrationSetupOverview(overview);
+  } catch (error) {
+    state.integrationSetupOverview = null;
+    if (els.integrationSetupBanner) els.integrationSetupBanner.hidden = true;
+    if (els.integrationStatusText) els.integrationStatusText.textContent = error.message || 'Não foi possível carregar as integrações.';
+  }
+}
+
+function renderIntegrationSetupOverview(overview = {}) {
+  const integrations = Array.isArray(overview.integrations) ? overview.integrations : [];
+  const payment = integrations.find((entry) => entry.code === 'payment_setup_assisted') || {};
+  renderIntegrationSetupCard(document.getElementById('pixIntegrationStatus'), els.paymentSetupMessage, payment);
+  if (els.integrationSetupBanner) els.integrationSetupBanner.hidden = overview.show_banner !== true;
+  const count = Number(overview.pending_count || 0);
+  const availablePending = (Array.isArray(overview.pending) ? overview.pending : []).filter((entry) => entry.available);
+  const totalCents = availablePending.reduce((sum, entry) => sum + Number(entry.price_cents || 0), 0);
+  if (els.integrationSetupBannerTitle) {
+    els.integrationSetupBannerTitle.textContent = count === 1 ? '1 configuração pendente' : `${count} configurações pendentes`;
+  }
+  if (els.integrationSetupBannerMessage) {
+    els.integrationSetupBannerMessage.textContent = count > 1
+      ? 'Você pode contratar todas de uma vez em um único pedido.'
+      : 'A equipe TáPronto pode concluir essa configuração para você.';
+  }
+  if (els.integrationSetupBannerOffers) {
+    els.integrationSetupBannerOffers.innerHTML = availablePending.map((entry) => `
+      <span><strong>${escapeHtml(entry.name)}</strong> ${escapeHtml(entry.price_label || money(Number(entry.price_cents || 0) / 100))}</span>
+    `).join('');
+  }
+  if (els.requestIntegrationSetupButton) {
+    els.requestIntegrationSetupButton.disabled = !availablePending.length;
+    els.requestIntegrationSetupButton.textContent = availablePending.length
+      ? `Solicitar configuração · ${totalCents ? money(totalCents / 100) : 'Incluso'}`
+      : 'Configuração indisponível no plano';
+  }
+  if (els.integrationStatusText) {
+    els.integrationStatusText.textContent = overview.has_in_progress
+      ? 'Já existe uma configuração em andamento.'
+      : count ? `${count} configuração(ões) pendente(s).` : 'Todas as integrações estão configuradas.';
+  }
+}
+
+function renderIntegrationSetupCard(statusElement, messageElement, integration = {}) {
+  if (!statusElement) return;
+  const status = integration.status || 'pending';
+  statusElement.textContent = integration.status_label || 'Pendente';
+  statusElement.className = `status-pill integration-setup-status ${status}`;
+  if (messageElement) {
+    messageElement.textContent = status === 'configured'
+      ? 'Integração configurada e pronta para uso.'
+      : status === 'in_progress'
+        ? 'A equipe TáPronto já está cuidando desta configuração.'
+        : 'Esta integração ainda precisa ser configurada.';
+  }
+}
+
+function openIntegrationSetupCheckout() {
+  const overview = state.integrationSetupOverview || {};
+  const pending = (Array.isArray(overview.pending) ? overview.pending : []).filter((entry) => entry.available);
+  if (!pending.length) {
+    toast('Não há configurações disponíveis para contratação.');
+    return;
+  }
+  const modal = ensurePlanCheckoutModal();
+  const total = pending.reduce((sum, entry) => sum + Number(entry.price_cents || 0), 0);
+  modal.innerHTML = `
+    <div class="plan-checkout-modal-card integration-setup-checkout" role="dialog" aria-modal="true" aria-labelledby="integrationSetupCheckoutTitle">
+      <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
+      <div class="plan-checkout-head">
+        <p class="eyebrow">Configuração assistida</p>
+        <h2 id="integrationSetupCheckoutTitle">Solicitar configuração</h2>
+        <p>Selecione as integrações que a equipe TáPronto deve configurar.</p>
+      </div>
+      <div class="integration-setup-checkout-list">
+        ${pending.map((entry) => `
+          <label>
+            <input type="checkbox" value="${escapeAttribute(entry.code)}" data-integration-setup-item checked>
+            <span><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.price_label || money(Number(entry.price_cents || 0) / 100))}</small></span>
+          </label>
+        `).join('')}
+      </div>
+      <div class="integration-setup-checkout-total">
+        <span>Total</span><strong data-integration-setup-total>${money(total / 100)}</strong>
+      </div>
+      <div class="row-actions plan-checkout-footer">
+        <button class="ghost-button compact" type="button" data-close-plan-checkout>Cancelar</button>
+        <button class="primary-button compact" type="button" data-confirm-integration-setup>Ir para pagamento</button>
+      </div>
+    </div>`;
+  modal.hidden = false;
+  document.body.classList.add('plan-checkout-open');
+  modal.querySelectorAll('[data-close-plan-checkout]').forEach((button) => button.addEventListener('click', closePlanCheckoutModal));
+  const updateTotal = () => {
+    const selected = [...modal.querySelectorAll('[data-integration-setup-item]:checked')].map((input) => pending.find((entry) => entry.code === input.value)).filter(Boolean);
+    modal.querySelector('[data-integration-setup-total]').textContent = money(selected.reduce((sum, entry) => sum + Number(entry.price_cents || 0), 0) / 100);
+    modal.querySelector('[data-confirm-integration-setup]').disabled = !selected.length;
+  };
+  modal.querySelectorAll('[data-integration-setup-item]').forEach((input) => input.addEventListener('change', updateTotal));
+  modal.querySelector('[data-confirm-integration-setup]')?.addEventListener('click', checkoutIntegrationSetups);
+  modal.querySelector('[data-confirm-integration-setup]')?.focus();
+}
+
+async function checkoutIntegrationSetups(event) {
+  const modal = ensurePlanCheckoutModal();
+  const codes = [...modal.querySelectorAll('[data-integration-setup-item]:checked')].map((input) => input.value);
+  if (!codes.length) return;
+  const button = event.currentTarget;
+  const previousText = button.textContent;
+  try {
+    button.disabled = true;
+    button.textContent = 'Criando pedido...';
+    const result = await request('/api/admin/integrations/setup-checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addon_codes: codes })
+    });
+    if (result.activated) {
+      closePlanCheckoutModal();
+      toast('Solicitação criada. A equipe TáPronto entrará em contato.');
+      await loadIntegrationSetupOverview();
+      return;
+    }
+    if (!result.checkout_url) throw new Error('O checkout não retornou uma URL de pagamento.');
+    openCheckoutWindow(result.checkout_url);
+    closePlanCheckoutModal();
+    toast('Conclua o pagamento. Um único chamado será criado para cada configuração selecionada.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível criar o pedido de configuração.');
+    button.disabled = false;
+    button.textContent = previousText;
+  }
 }
 
 async function connectWhatsapp() {
@@ -8411,6 +8971,7 @@ function activateAdminTab(tab) {
     store: 'Configurações da Loja',
     integrations: 'Integrações',
     plan: 'Plano',
+    referrals: 'Indicações',
     support: 'Suporte',
     account: 'Conta e usuários'
   };
@@ -8445,19 +9006,19 @@ function renderPermissionedNavigation() {
 }
 
 function firstAllowedAdminTab() {
-  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'plan', 'support', 'account']
+  return ['operation', 'orders', 'tables', 'menu', 'reports', 'promotions', 'customers', 'store', 'integrations', 'plan', 'referrals', 'support', 'account']
     .find((tab) => canAccessTab(tab)) || 'account';
 }
 
 function canAccessTab(tab) {
-  if (commercialStatusBlocksOperation(state.commercialBlock?.status) && !['plan', 'support', 'account'].includes(tab)) return false;
-  if (tab === 'account' || tab === 'support') return true;
+  if (commercialStatusBlocksOperation(state.commercialBlock?.status) && !['plan', 'referrals', 'support', 'account'].includes(tab)) return false;
+  if (tab === 'account' || tab === 'support' || tab === 'referrals') return true;
   if (!hasRoleAccessToTab(tab)) return false;
   return isTabAvailableInPlan(tab);
 }
 
 function hasRoleAccessToTab(tab) {
-  if (tab === 'account' || tab === 'support') return true;
+  if (tab === 'account' || tab === 'support' || tab === 'referrals') return true;
   const permission = ({
     operation: 'operation',
     orders: 'orders',
@@ -8469,6 +9030,7 @@ function hasRoleAccessToTab(tab) {
     store: 'store',
     integrations: 'store',
     plan: 'plan',
+    referrals: null,
     support: null
   })[tab];
   return !permission || hasPermission(permission);
@@ -8486,7 +9048,7 @@ function isTabAvailableInPlan(tab) {
     store: 'store_settings',
     integrations: 'store_settings'
   })[tab];
-  if (!feature || tab === 'plan' || tab === 'account' || tab === 'support') return true;
+  if (!feature || tab === 'plan' || tab === 'referrals' || tab === 'account' || tab === 'support') return true;
   const access = state.admin?.plan_access?.[feature];
   return access ? access.enabled !== false : true;
 }
@@ -9240,6 +9802,15 @@ function humanRequestMessage(url, response, data = {}, detail = '') {
   }
   if (normalized.includes('undefined') || normalized.includes('cannot read properties')) {
     return 'Encontramos um dado incompleto nesta ação. Atualize a página e tente novamente.';
+  }
+  if (normalized.includes('evolution') || normalized.includes('qr code') || normalized.includes('instance')) {
+    return 'Não foi possível conectar o WhatsApp agora. Tente atualizar o QR Code ou peça ajuda ao suporte.';
+  }
+  if (normalized.includes('abacate') || normalized.includes('pix automático') || normalized.includes('pix automatico')) {
+    return 'Não foi possível validar o Pix online. Confira a chave da Abacate Pay ou solicite ajuda da equipe TáPronto.';
+  }
+  if (normalized.includes('api key') || normalized.includes('secret') || normalized.includes('token')) {
+    return 'A configuração precisa de uma chave válida. Revise os campos salvos ou peça ajuda ao suporte.';
   }
   return raw || friendlyRequestError(url, response, data);
 }

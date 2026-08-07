@@ -122,24 +122,28 @@ model Company {
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  stores             Store[]
-  adminUsers         AdminUser[]
-  adminAccess        AdminUserStoreAccess[]
-  adminInvitations   AdminInvitation[]
-  subscriptions      CompanySubscription[]
-  featureOverrides   CompanyFeatureOverride[]
-  usageCounters      CompanyUsageCounter[]
-  usageEvents        UsageEvent[]
+  stores               Store[]
+  adminUsers           AdminUser[]
+  adminAccess          AdminUserStoreAccess[]
+  adminInvitations     AdminInvitation[]
+  subscriptions        CompanySubscription[]
+  featureOverrides     CompanyFeatureOverride[]
+  usageCounters        CompanyUsageCounter[]
+  usageEvents          UsageEvent[]
   whatsappIntegrations StoreWhatsappIntegration[]
-  whatsappMessageLogs WhatsappMessageLog[]
-  onboarding         OnboardingProgress[]
-  subscriptionEvents SubscriptionEvent[]
-  paymentTransactions SubscriptionPaymentTransaction[]
-  subscriptionAddons StoreSubscriptionAddon[]
-  addonBillingEvents AddonBillingEvent[]
-  auditLogs          AuditLog[]
-  sessions           AppSession[]
-  accessEvents       AccessEvent[]
+  whatsappMessageLogs  WhatsappMessageLog[]
+  onboarding           OnboardingProgress[]
+  subscriptionEvents   SubscriptionEvent[]
+  paymentTransactions  SubscriptionPaymentTransaction[]
+  subscriptionAddons   StoreSubscriptionAddon[]
+  addonBillingEvents   AddonBillingEvent[]
+  auditLogs            AuditLog[]
+  sessions             AppSession[]
+  accessEvents         AccessEvent[]
+  referralCodes        ReferralCode[]
+  referralsMade        Referral[]                       @relation("ReferralReferrerCompany")
+  referralsReceived    Referral[]                       @relation("ReferralReferredCompany")
+  referralRewards      ReferralReward[]
 
   @@map("companies")
 }
@@ -155,34 +159,40 @@ model Store {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  company       Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  domains       StoreDomain[]
-  settings      StoreSetting[]
-  access        AdminUserStoreAccess[]
-  invitations   AdminInvitation[]
-  customers     Customer[]
-  addresses     CustomerAddress[]
-  categories    MenuCategory[]
-  products      MenuItem[]
-  optionGroups  MenuModifierGroup[]
-  options       MenuModifier[]
-  orders        Order[]
-  orderItems    OrderItem[]
-  printLogs     OrderPrintLog[]
-  whatsappLogs  OrderWhatsappLog[]
+  company              Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  domains              StoreDomain[]
+  settings             StoreSetting[]
+  access               AdminUserStoreAccess[]
+  invitations          AdminInvitation[]
+  customers            Customer[]
+  addresses            CustomerAddress[]
+  categories           MenuCategory[]
+  products             MenuItem[]
+  optionGroups         MenuModifierGroup[]
+  options              MenuModifier[]
+  orders               Order[]
+  orderItems           OrderItem[]
+  printLogs            OrderPrintLog[]
+  whatsappLogs         OrderWhatsappLog[]
   whatsappIntegrations StoreWhatsappIntegration[]
-  whatsappMessageLogs WhatsappMessageLog[]
-  paymentEvents OrderPaymentEvent[]
-  subscriptionAddons StoreSubscriptionAddon[]
-  addonBillingEvents AddonBillingEvent[]
-  tables        DiningTable[]
-  tabs          CustomerTab[]
-  promotions    Promotion[]
-  sessions      AppSession[]
-  usageEvents   UsageEvent[]
-  onboarding    OnboardingProgress[]
-  auditLogs     AuditLog[]
-  accessEvents  AccessEvent[]
+  whatsappMessageLogs  WhatsappMessageLog[]
+  paymentEvents        OrderPaymentEvent[]
+  paymentAttempts      PaymentAttempt[]
+  paymentRefunds       PaymentRefund[]
+  subscriptionAddons   StoreSubscriptionAddon[]
+  addonBillingEvents   AddonBillingEvent[]
+  tables               DiningTable[]
+  tabs                 CustomerTab[]
+  promotions           Promotion[]
+  sessions             AppSession[]
+  usageEvents          UsageEvent[]
+  onboarding           OnboardingProgress[]
+  auditLogs            AuditLog[]
+  accessEvents         AccessEvent[]
+  referralCodes        ReferralCode[]
+  referralsMade        Referral[]                 @relation("ReferralReferrerStore")
+  referralsReceived    Referral[]                 @relation("ReferralReferredStore")
+  referralRewards      ReferralReward[]
 
   @@index([companyId, isActive, name])
   @@map("stores")
@@ -250,10 +260,10 @@ model AdminUser {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  company             Company?                 @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company             Company?                  @relation(fields: [companyId], references: [id], onDelete: SetNull)
   access              AdminUserStoreAccess[]
-  invitationsSent     AdminInvitation[]        @relation("InvitationSender")
-  invitationsAccepted AdminInvitation[]        @relation("InvitationAccepter")
+  invitationsSent     AdminInvitation[]         @relation("InvitationSender")
+  invitationsAccepted AdminInvitation[]         @relation("InvitationAccepter")
   featureOverrides    CompanyFeatureOverride[]
   subscriptionEvents  SubscriptionEvent[]
   auditLogs           AuditLog[]
@@ -501,15 +511,17 @@ model Order {
   createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  store         Store?              @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  customer      Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  diningTable   DiningTable?        @relation(fields: [diningTableId], references: [id], onDelete: SetNull)
-  customerTab   CustomerTab?        @relation(fields: [customerTabId], references: [id], onDelete: SetNull)
-  items         OrderItem[]
-  printLogs     OrderPrintLog[]
-  whatsappLogs  OrderWhatsappLog[]
+  store               Store?               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer            Customer?            @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  diningTable         DiningTable?         @relation(fields: [diningTableId], references: [id], onDelete: SetNull)
+  customerTab         CustomerTab?         @relation(fields: [customerTabId], references: [id], onDelete: SetNull)
+  items               OrderItem[]
+  printLogs           OrderPrintLog[]
+  whatsappLogs        OrderWhatsappLog[]
   whatsappMessageLogs WhatsappMessageLog[]
-  paymentEvents OrderPaymentEvent[]
+  paymentEvents       OrderPaymentEvent[]
+  paymentAttempts     PaymentAttempt[]
+  paymentRefunds      PaymentRefund[]
 
   @@index([storeId, status, archivedAt, createdAt])
   @@index([storeId, customerId, createdAt])
@@ -633,17 +645,17 @@ model PlatformWhatsappSetting {
 }
 
 model PlatformWhatsappProviderAccount {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider          String    @default("evolution_go")
-  status            String    @default("inactive")
-  balanceCents      Int       @default(0) @map("balance_cents")
-  instanceCostCents Int       @default(2990) @map("instance_cost_cents")
-  lowBalanceCents   Int       @default(2990) @map("low_balance_cents")
-  billingCycleDays  Int       @default(30) @map("billing_cycle_days")
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider          String   @default("evolution_go")
+  status            String   @default("inactive")
+  balanceCents      Int      @default(0) @map("balance_cents")
+  instanceCostCents Int      @default(2990) @map("instance_cost_cents")
+  lowBalanceCents   Int      @default(2990) @map("low_balance_cents")
+  billingCycleDays  Int      @default(30) @map("billing_cycle_days")
   notes             String?
-  metadata          Json      @default("{}")
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  metadata          Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([provider, status])
   @@map("platform_whatsapp_provider_accounts")
@@ -681,17 +693,17 @@ model StoreWhatsappIntegration {
 }
 
 model WhatsappInstanceEvent {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  companyId    String?  @map("company_id") @db.Uuid
-  storeId      String?  @map("store_id") @db.Uuid
-  integrationId String? @map("integration_id") @db.Uuid
-  provider     String   @default("evolution_go")
-  eventType    String   @map("event_type")
-  status       String   @default("info")
-  costCents    Int      @default(0) @map("cost_cents")
-  message      String?
-  metadata     Json     @default("{}")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId     String?  @map("company_id") @db.Uuid
+  storeId       String?  @map("store_id") @db.Uuid
+  integrationId String?  @map("integration_id") @db.Uuid
+  provider      String   @default("evolution_go")
+  eventType     String   @map("event_type")
+  status        String   @default("info")
+  costCents     Int      @default(0) @map("cost_cents")
+  message       String?
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([storeId, createdAt])
   @@index([provider, eventType, createdAt])
@@ -739,6 +751,57 @@ model OrderPaymentEvent {
   @@unique([provider, providerEventId])
   @@index([storeId, orderId, createdAt])
   @@map("order_payment_events")
+}
+
+model PaymentAttempt {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId        String?   @map("store_id") @db.Uuid
+  orderId        String    @map("order_id") @db.Uuid
+  provider       String    @default("abacatepay")
+  idempotencyKey String    @unique @map("idempotency_key")
+  transactionId  String?   @map("transaction_id")
+  status         String    @default("created")
+  amountCents    Int       @map("amount_cents")
+  currency       String    @default("BRL")
+  checkoutUrl    String?   @map("checkout_url")
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  failureCode    String?   @map("failure_code")
+  failureMessage String?   @map("failure_message")
+  metadata       Json      @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, transactionId])
+  @@index([orderId, createdAt])
+  @@index([storeId, status, createdAt])
+  @@map("payment_attempts")
+}
+
+model PaymentRefund {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String?   @map("store_id") @db.Uuid
+  orderId          String    @map("order_id") @db.Uuid
+  provider         String    @default("abacatepay")
+  providerRefundId String?   @map("provider_refund_id")
+  idempotencyKey   String    @unique @map("idempotency_key")
+  status           String    @default("requested")
+  amountCents      Int       @map("amount_cents")
+  reason           String?
+  failureMessage   String?   @map("failure_message")
+  metadata         Json      @default("{}")
+  requestedAt      DateTime  @default(now()) @map("requested_at") @db.Timestamptz(6)
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, requestedAt])
+  @@index([storeId, status, requestedAt])
+  @@map("payment_refunds")
 }
 
 model Promotion {
@@ -840,8 +903,8 @@ model SubscriptionPlan {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  features      PlanFeature[]
-  subscriptions CompanySubscription[]
+  features            PlanFeature[]
+  subscriptions       CompanySubscription[]
   paymentTransactions SubscriptionPaymentTransaction[]
 
   @@map("subscription_plans")
@@ -905,11 +968,11 @@ model CompanySubscription {
   createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  company Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  plan    SubscriptionPlan?   @relation(fields: [planId], references: [id], onDelete: SetNull)
-  events  SubscriptionEvent[]
+  company             Company                          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan                SubscriptionPlan?                @relation(fields: [planId], references: [id], onDelete: SetNull)
+  events              SubscriptionEvent[]
   paymentTransactions SubscriptionPaymentTransaction[]
-  addons  StoreSubscriptionAddon[]
+  addons              StoreSubscriptionAddon[]
 
   @@index([companyId, status, createdAt])
   @@map("company_subscriptions")
@@ -936,7 +999,7 @@ model SubscriptionPaymentTransaction {
 
   company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   subscription CompanySubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  plan         SubscriptionPlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  plan         SubscriptionPlan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
 
   @@index([companyId, createdAt])
   @@index([subscriptionId, createdAt])
@@ -1020,6 +1083,74 @@ model AccessEvent {
   @@index([companyId, createdAt])
   @@index([pageType, createdAt])
   @@map("access_events")
+}
+
+model ReferralCode {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String?  @map("company_id") @db.Uuid
+  storeId   String?  @map("store_id") @db.Uuid
+  code      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company   Company?   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store     Store?     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  referrals Referral[]
+
+  @@index([storeId, isActive])
+  @@map("referral_codes")
+}
+
+model Referral {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  referralCodeId    String?   @map("referral_code_id") @db.Uuid
+  code              String
+  referrerCompanyId String?   @map("referrer_company_id") @db.Uuid
+  referrerStoreId   String?   @map("referrer_store_id") @db.Uuid
+  referredCompanyId String?   @map("referred_company_id") @db.Uuid
+  referredStoreId   String?   @map("referred_store_id") @db.Uuid
+  referredEmail     String?   @map("referred_email")
+  status            String    @default("signed_up")
+  signedUpAt        DateTime  @default(now()) @map("signed_up_at") @db.Timestamptz(6)
+  firstPaidAt       DateTime? @map("first_paid_at") @db.Timestamptz(6)
+  rejectedAt        DateTime? @map("rejected_at") @db.Timestamptz(6)
+  rejectionReason   String?   @map("rejection_reason")
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  referralCode    ReferralCode?    @relation(fields: [referralCodeId], references: [id], onDelete: SetNull)
+  referrerCompany Company?         @relation("ReferralReferrerCompany", fields: [referrerCompanyId], references: [id], onDelete: Cascade)
+  referrerStore   Store?           @relation("ReferralReferrerStore", fields: [referrerStoreId], references: [id], onDelete: SetNull)
+  referredCompany Company?         @relation("ReferralReferredCompany", fields: [referredCompanyId], references: [id], onDelete: SetNull)
+  referredStore   Store?           @relation("ReferralReferredStore", fields: [referredStoreId], references: [id], onDelete: SetNull)
+  rewards         ReferralReward[]
+
+  @@index([referrerCompanyId, createdAt])
+  @@index([status, createdAt])
+  @@map("referrals")
+}
+
+model ReferralReward {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  referralId            String?  @map("referral_id") @db.Uuid
+  referrerCompanyId     String?  @map("referrer_company_id") @db.Uuid
+  referrerStoreId       String?  @map("referrer_store_id") @db.Uuid
+  amountCents           Int      @default(0) @map("amount_cents")
+  status                String   @default("available")
+  reason                String?
+  appliedBillingEventId String?  @map("applied_billing_event_id") @db.Uuid
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  referral        Referral? @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  referrerCompany Company?  @relation(fields: [referrerCompanyId], references: [id], onDelete: Cascade)
+  referrerStore   Store?    @relation(fields: [referrerStoreId], references: [id], onDelete: SetNull)
+
+  @@index([referrerCompanyId, status, createdAt])
+  @@map("referral_rewards")
 }
 
 model CompanyFeatureOverride {

@@ -158,3 +158,14 @@ Para validar visualmente no navegador:
 5. Abra o cardápio público da loja, faça um pedido e confirme que ele aparece no admin sem usar F5.
 6. Crie/edite categoria, produto e mesa e confirme que as listas atualizam automaticamente.
 7. Teste a exclusão de conta apenas com uma conta temporária.
+# Operação de pagamentos
+
+O gateway de pedidos e do billing é a Abacate Pay. Antes de ativar pagamentos em produção:
+
+- defina `PAYMENT_SECRETS_KEY` com uma chave aleatória forte e mantenha o mesmo valor em todos os deploys;
+- configure API key e segredo do webhook pelo painel;
+- cadastre o webhook em `/api/payments/webhook?provider=abacatepay` e envie o segredo em `x-webhook-secret` ou `x-abacatepay-secret`;
+- aplique as migrations antes de subir a nova versão;
+- monitore tentativas com `review_required`, que indicam valor divergente ou pagamento recebido após cancelamento.
+
+API keys e segredos novos são armazenados com AES-256-GCM. Valores legados são convertidos quando as integrações forem salvas novamente. Nunca altere `PAYMENT_SECRETS_KEY` sem antes planejar a rotação das credenciais.

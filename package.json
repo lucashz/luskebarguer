@@ -29,7 +29,8 @@
     "test:security": "node scripts/sql-injection-tests.mjs",
     "test:flows": "node scripts/core-flow-smoke.mjs",
     "test:platform-health": "node scripts/platform-health-smoke.mjs",
-    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:flows && npm run test:platform-health"
+    "test:payments": "node scripts/payment-hardening-smoke.mjs",
+    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:payments && npm run test:flows && npm run test:platform-health"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

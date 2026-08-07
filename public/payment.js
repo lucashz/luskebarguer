@@ -16,7 +16,8 @@ const els = {
 };
 
 let pollTimer = null;
-const PAYMENT_POLL_INTERVAL_MS = 10000;
+let pollAttempt = 0;
+const PAYMENT_POLL_DELAYS_MS = [2500, 4000, 6500, 10000, 15000];
 
 els.copy?.addEventListener('click', async () => {
   await navigator.clipboard?.writeText(els.pixCode.value || '');
@@ -40,7 +41,7 @@ async function loadPayment(options = {}) {
     startPollingIfNeeded(data);
     notifyOpenerIfPaid(data);
     if (options.manual && data.order?.financial_status !== 'paid') {
-      setStatus('Pagamento ainda não confirmado. Esta tela verifica automaticamente a cada 10 segundos.');
+      setStatus('Pagamento ainda não confirmado. A confirmação é atualizada automaticamente.');
     }
   } catch (error) {
     setStatus(error.message || 'Não foi possível carregar o pagamento.');
@@ -128,16 +129,21 @@ function startPollingIfNeeded(data) {
     stopPolling();
     return;
   }
-  if (!pollTimer) {
-    pollTimer = window.setInterval(() => loadPayment(), PAYMENT_POLL_INTERVAL_MS);
-  }
+  if (pollTimer) return;
+  const delay = PAYMENT_POLL_DELAYS_MS[Math.min(pollAttempt, PAYMENT_POLL_DELAYS_MS.length - 1)];
+  pollTimer = window.setTimeout(async () => {
+    pollTimer = null;
+    pollAttempt += 1;
+    await loadPayment();
+  }, delay);
 }
 
 function stopPolling() {
   if (pollTimer) {
-    window.clearInterval(pollTimer);
+    window.clearTimeout(pollTimer);
     pollTimer = null;
   }
+  pollAttempt = 0;
 }
 
 function notifyOpenerIfPaid(data) {

@@ -223,6 +223,7 @@ async function submitSignup(event) {
   const form = new FormData(signupForm);
   const payload = {
     plan_code: 'trial',
+    referral_code: new URLSearchParams(location.search).get('ref') || '',
     accept_terms: form.get('accept_terms') === 'on',
     marketing_opt_in: form.get('marketing_opt_in') === 'on',
     owner: {

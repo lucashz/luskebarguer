@@ -87,6 +87,19 @@ try {
   expect('premium', 'cart_suggestions', true, null);
   expect('premium', 'custom_domain', true, null);
 
+  const { rows: [whatsappAddon] } = await client.query(`
+    SELECT available_plan_codes, included_plan_codes, monthly_price_cents
+    FROM plan_addons
+    WHERE code = 'whatsapp_automatic' AND is_active = true
+  `);
+  assert(whatsappAddon, 'Adicional WhatsApp automatico nao encontrado.');
+  assert(Number(whatsappAddon.monthly_price_cents) === 4990, 'Adicional WhatsApp deve custar R$ 49,90.');
+  for (const plan of ['trial', 'essential', 'professional']) {
+    assert(whatsappAddon.available_plan_codes.includes(plan), `Adicional WhatsApp deve estar disponivel no plano ${plan}.`);
+  }
+  assert(!whatsappAddon.available_plan_codes.includes('premium'), 'Premium nao deve oferecer adicional WhatsApp separado.');
+  assert(whatsappAddon.included_plan_codes.includes('premium'), 'Premium deve incluir WhatsApp automatico.');
+
   console.log('Matriz de planos validada com sucesso.');
 } finally {
   await client.end().catch(() => {});

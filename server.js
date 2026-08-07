@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
@@ -26,6 +26,8 @@ const BACKUP_DIR = path.resolve(__dirname, process.env.BACKUP_DIR || 'backups');
 const STORE_WHATSAPP_NUMBER = onlyDigits(process.env.STORE_WHATSAPP_NUMBER || '');
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
 const COMPANY_LEGAL_ID = 'TáPronto - CNPJ 68.264.239/0001-02';
+const REFERRAL_REWARD_CENTS = 1000;
+const REFERRAL_MONTHLY_LIMIT_CENTS = 3000;
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 180), 1, 365);
@@ -244,7 +246,7 @@ async function handleApi(req, res, url) {
     const payload = await readJson(req);
     json(res, 200, await receivePaymentWebhook(payload, {
       provider: url.searchParams.get('provider') || '',
-      webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || url.searchParams.get('webhookSecret') || ''
+      webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || ''
     }));
     return;
   }
@@ -472,7 +474,21 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && url.pathname === '/api/admin/plan') {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
-    json(res, 200, await getCompanyPlanOverview(admin.company_id, admin.store_id));
+    json(res, 200, await getCompanyPlanOverview(admin.company_id, admin.store_id, admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/referrals') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await getAdminReferralProgram(req, admin));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/referrals/code') {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+    json(res, 200, await createOrRefreshAdminReferralCode(req, admin));
     return;
   }
 
@@ -494,6 +510,20 @@ async function handleApi(req, res, url) {
     const admin = await requireAdminAnyPermission(req, res, ['plan', 'integrations']);
     if (!admin) return;
     json(res, 200, await listAdminBillingAddons(admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/admin/integrations/setup-overview') {
+    const admin = await requireAdminPermission(req, res, 'integrations');
+    if (!admin) return;
+    json(res, 200, await getIntegrationSetupOverview(admin));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/integrations/setup-checkout') {
+    const admin = await requireAdminPermission(req, res, 'integrations');
+    if (!admin) return;
+    json(res, 200, await createIntegrationSetupCheckout(req, admin, await readJson(req)));
     return;
   }
 
@@ -2146,8 +2176,6 @@ async function requestAdminPasswordRecovery(req, data = {}) {
 }
 
 async function sendAdminPasswordRecoveryEmail(req, admin, token, expiresAt) {
-  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === 'password_recovery');
-  if (!template?.is_active) throw new Error('Template de recuperação desativado.');
   const resetUrl = absoluteAppUrl(req, `/redefinir-senha?token=${token}`);
   const variables = {
     customer_name: admin.name || admin.email,
@@ -2160,11 +2188,11 @@ async function sendAdminPasswordRecoveryEmail(req, admin, token, expiresAt) {
     payment_url: absolutePanelUrl('/?tab=plan'),
     platform_url: absolutePlatformUrl('/')
   };
-  await sendPlatformEmail({
+  await sendPlatformTemplateEmail({
     to: admin.email,
     templateKey: 'password_recovery',
-    subject: renderEmailTemplate(template.subject, variables),
-    body: renderEmailTemplate(template.body, variables)
+    variables,
+    requireActive: true
   });
 }
 
@@ -2632,6 +2660,8 @@ async function deleteCurrentCompanyAccount(req, session, data = {}) {
 async function deleteStoreOperationalData(db, storeId) {
   const resolvedStoreId = cleanUuid(storeId, 'loja');
   const tables = [
+    'payment_refunds',
+    'payment_attempts',
     'order_payment_events',
     'order_whatsapp_logs',
     'order_print_logs',
@@ -4537,11 +4567,13 @@ async function listPlatformFeaturesSafe() {
   }).catch(() => []));
 }
 
-async function listPortalPlans() {
+async function listPortalPlans(options = {}) {
+  const includeInternal = options.includeInternal === true;
   const data = await listPlatformPlans();
   return {
     plans: data.plans
       .filter((plan) => plan.is_active !== false)
+      .filter((plan) => includeInternal || !isInternalTestPlan(plan))
       .map((plan) => ({
         code: plan.code,
         name: plan.name,
@@ -4559,6 +4591,15 @@ async function listPortalPlans() {
           }))
       }))
   };
+}
+
+function isInternalTestPlan(plan = {}) {
+  const settings = isPlainObject(plan.settings) ? plan.settings : {};
+  return settings.internal_test === true || settings.hide_public === true || cleanSlug(plan.code || '') === 'payment_test';
+}
+
+function canSeeInternalTestPlans(admin = {}) {
+  return Boolean(admin?.id || admin?.email);
 }
 
 async function checkPortalSlug(value) {
@@ -4583,7 +4624,7 @@ async function checkPortalSlug(value) {
 }
 
 async function createPortalSignup(req, data = {}) {
-  const parsed = sanitizePortalSignup(data);
+  const parsed = sanitizePortalSignup(data, req);
   const slugStatus = await checkPortalSlug(parsed.store.slug);
   if (!slugStatus.available) throw httpError(409, slugStatus.reason || 'Endereço público indisponível.');
 
@@ -4638,6 +4679,14 @@ async function createPortalSignup(req, data = {}) {
     await createPortalStoreSettings(store.id, parsed);
     await createStarterMenu(store.id, parsed.businessType);
     await createOnboardingProgress(company.id, store.id, parsed);
+    await recordReferralSignup(req, parsed.referralCode, {
+      company,
+      store,
+      admin,
+      ownerEmail: parsed.owner.email
+    }).catch((error) => {
+      console.warn('Não foi possível registrar indicação:', error.message || error);
+    });
 
     await audit('portal.signup.create', {
       req,
@@ -4793,8 +4842,6 @@ async function resendAdminActivationEmail(req, data = {}) {
 }
 
 async function sendAdminActivationEmail(req, { admin, company, store, token, expiresAt }) {
-  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === 'account_activation');
-  if (!template?.is_active) throw new Error('Template de ativação desativado.');
   const activationUrl = absoluteAppUrl(req, `/ativar-conta?token=${token}`);
   const variables = {
     customer_name: admin.name || admin.email,
@@ -4807,11 +4854,11 @@ async function sendAdminActivationEmail(req, { admin, company, store, token, exp
     payment_url: absolutePublicUrl('/planos'),
     platform_url: absolutePlatformUrl('/')
   };
-  await sendPlatformEmail({
+  await sendPlatformTemplateEmail({
     to: admin.email,
     templateKey: 'account_activation',
-    subject: renderEmailTemplate(template.subject, variables),
-    body: renderEmailTemplate(template.body, variables)
+    variables,
+    requireActive: true
   });
 }
 
@@ -4887,9 +4934,10 @@ async function findAdminActivationByToken(token) {
   return activation;
 }
 
-function sanitizePortalSignup(data = {}) {
+function sanitizePortalSignup(data = {}, req = null) {
   const owner = data.owner || {};
   const business = data.business || {};
+  const signupUrl = req?.url ? new URL(req.url, `http://${req.headers?.host || HOST}`) : null;
   const planCode = 'trial';
   const ownerName = cleanText(owner.name || data.name || '');
   const ownerEmail = cleanEmail(owner.email || data.email || '');
@@ -4910,6 +4958,7 @@ function sanitizePortalSignup(data = {}) {
 
   return {
     planCode,
+    referralCode: cleanReferralCode(data.referral_code || data.referralCode || data.ref || signupUrl?.searchParams.get('ref') || ''),
     businessType: cleanSlug(business.type || 'outro') || 'outro',
     marketingOptIn: Boolean(data.marketing_opt_in || data.marketingOptIn),
     owner: {
@@ -4935,6 +4984,326 @@ function sanitizePortalSignup(data = {}) {
       document: cleanText(business.document || '')
     }
   };
+}
+
+function cleanReferralCode(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 32);
+}
+
+function referralPublicUrl(req, code) {
+  const query = code ? `?ref=${encodeURIComponent(code)}` : '';
+  return `${absolutePublicUrl('/cadastro')}${query}`;
+}
+
+async function getAdminReferralProgram(req, admin) {
+  const companyId = cleanUuid(admin.company_id, 'empresa');
+  const storeId = cleanOptionalUuid(admin.store_id || admin.active_store?.id || '', 'loja');
+  const code = await ensureReferralCode(admin);
+  const referrals = await dbRequest('GET', 'referrals', {
+    select: '*',
+    referrer_company_id: `eq.${companyId}`,
+    order: 'created_at.desc',
+    limit: '50'
+  }).catch(() => []);
+  const rewards = await dbRequest('GET', 'referral_rewards', {
+    select: '*',
+    referrer_company_id: `eq.${companyId}`,
+    order: 'created_at.desc',
+    limit: '50'
+  }).catch(() => []);
+  const availableCents = rewards
+    .filter((reward) => reward.status === 'available')
+    .reduce((sum, reward) => sum + Number(reward.amount_cents || 0), 0);
+  const monthStart = startOfCurrentMonthIso();
+  const monthRewardCents = rewards
+    .filter((reward) => new Date(reward.created_at || 0).toISOString() >= monthStart && ['available', 'applied'].includes(reward.status))
+    .reduce((sum, reward) => sum + Number(reward.amount_cents || 0), 0);
+  return {
+    program: {
+      reward_cents: REFERRAL_REWARD_CENTS,
+      monthly_limit_cents: REFERRAL_MONTHLY_LIMIT_CENTS,
+      monthly_used_cents: monthRewardCents,
+      available_cents: availableCents,
+      rules: [
+        'Convide outro estabelecimento pelo seu link.',
+        'A recompensa é liberada quando a indicação paga o primeiro plano.',
+        'O limite mensal evita abusos e mantém o programa sustentável.'
+      ]
+    },
+    code: {
+      id: code.id,
+      code: code.code,
+      url: referralPublicUrl(req, code.code),
+      store_id: code.store_id || storeId || null
+    },
+    stats: {
+      total: referrals.length,
+      signed_up: referrals.filter((item) => item.status === 'signed_up').length,
+      paid: referrals.filter((item) => item.status === 'paid').length,
+      rewards_available_cents: availableCents
+    },
+    referrals: referrals.map(publicReferral),
+    rewards: rewards.map(publicReferralReward)
+  };
+}
+
+async function createOrRefreshAdminReferralCode(req, admin) {
+  const current = await ensureReferralCode(admin, { forceNew: true });
+  await audit('admin.referral_code.refresh', {
+    req,
+    actor_admin_id: admin.id,
+    company_id: admin.company_id,
+    store_id: admin.store_id || null,
+    entity_type: 'referral_code',
+    entity_id: current.id,
+    severity: 'info',
+    after_data: { code: current.code }
+  });
+  return { code: { id: current.id, code: current.code, url: referralPublicUrl(req, current.code) } };
+}
+
+async function ensureReferralCode(admin, options = {}) {
+  const companyId = cleanUuid(admin.company_id, 'empresa');
+  const storeId = cleanOptionalUuid(admin.store_id || admin.active_store?.id || '', 'loja');
+  if (!options.forceNew) {
+    const [existing] = await dbRequest('GET', 'referral_codes', {
+      select: '*',
+      company_id: `eq.${companyId}`,
+      is_active: 'eq.true',
+      order: 'created_at.desc',
+      limit: '1'
+    }).catch(() => []);
+    if (existing) return existing;
+  }
+  if (options.forceNew) {
+    await dbRequest('PATCH', 'referral_codes', {
+      company_id: `eq.${companyId}`,
+      is_active: 'eq.true'
+    }, {
+      is_active: false,
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const suffix = randomBytes(3).toString('hex');
+    const base = cleanReferralCode(admin.active_store?.slug || admin.active_store?.name || admin.name || 'tapronto') || 'tapronto';
+    const code = cleanReferralCode(`${base}${suffix}`);
+    try {
+      const [created] = await dbRequest('POST', 'referral_codes', {}, {
+        company_id: companyId,
+        store_id: storeId || null,
+        code,
+        is_active: true
+      }, ['Prefer: return=representation']);
+      return created;
+    } catch (error) {
+      if (!String(error.message || '').includes('duplicate')) throw error;
+    }
+  }
+  throw httpError(500, 'Não foi possível gerar um código de indicação agora.');
+}
+
+async function recordReferralSignup(req, referralCode, context = {}) {
+  const code = cleanReferralCode(referralCode);
+  if (!code) return null;
+  const [refCode] = await dbRequest('GET', 'referral_codes', {
+    select: '*',
+    code: `eq.${code}`,
+    is_active: 'eq.true',
+    limit: '1'
+  }).catch(() => []);
+  if (!refCode?.company_id || refCode.company_id === context.company?.id) return null;
+  const referredEmail = cleanEmail(context.ownerEmail || context.admin?.email || '');
+  const [referrerCompany] = await dbRequest('GET', 'companies', {
+    select: 'id,billing_email,name',
+    id: `eq.${refCode.company_id}`,
+    limit: '1'
+  }).catch(() => []);
+  if (cleanEmail(referrerCompany?.billing_email || '') && cleanEmail(referrerCompany.billing_email) === referredEmail) return null;
+  const [existing] = await dbRequest('GET', 'referrals', {
+    select: 'id',
+    referred_company_id: `eq.${context.company.id}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existing) return existing;
+  const [row] = await dbRequest('POST', 'referrals', {}, {
+    referral_code_id: refCode.id,
+    code,
+    referrer_company_id: refCode.company_id,
+    referrer_store_id: refCode.store_id || null,
+    referred_company_id: context.company.id,
+    referred_store_id: context.store.id,
+    referred_email: referredEmail || null,
+    status: 'signed_up',
+    metadata: {
+      referred_company_name: context.company.name || '',
+      referred_store_name: context.store.name || '',
+      referred_admin_name: context.admin?.name || ''
+    }
+  }, ['Prefer: return=representation']);
+  await audit('referral.signup', {
+    req,
+    actor_admin_id: context.admin?.id || null,
+    company_id: context.company.id,
+    store_id: context.store.id,
+    entity_type: 'referral',
+    entity_id: row?.id || null,
+    severity: 'info',
+    after_data: { referral_code: code, referrer_company_id: refCode.company_id }
+  });
+  await sendReferralReceivedEmail(row).catch(() => {});
+  return row;
+}
+
+async function processReferralPayment(req, { companyId, transactionId, amountCents }) {
+  const paidCompanyId = cleanOptionalUuid(companyId || '', 'empresa');
+  if (!paidCompanyId) return null;
+  const [referral] = await dbRequest('GET', 'referrals', {
+    select: '*',
+    referred_company_id: `eq.${paidCompanyId}`,
+    status: 'in.(signed_up,trial,pending)',
+    limit: '1'
+  }).catch(() => []);
+  if (!referral?.id || !referral.referrer_company_id) return null;
+  const [existingReward] = await dbRequest('GET', 'referral_rewards', {
+    select: 'id',
+    referral_id: `eq.${referral.id}`,
+    limit: '1'
+  }).catch(() => []);
+  if (existingReward) return null;
+  const monthStart = startOfCurrentMonthIso();
+  const monthRewards = await dbRequest('GET', 'referral_rewards', {
+    select: 'amount_cents,status,created_at',
+    referrer_company_id: `eq.${referral.referrer_company_id}`,
+    created_at: `gte.${monthStart}`,
+    status: 'in.(available,applied)',
+    limit: '200'
+  }).catch(() => []);
+  const used = monthRewards.reduce((sum, reward) => sum + Number(reward.amount_cents || 0), 0);
+  const amount = Math.max(0, Math.min(REFERRAL_REWARD_CENTS, REFERRAL_MONTHLY_LIMIT_CENTS - used));
+  if (amount <= 0) {
+    await dbRequest('PATCH', 'referrals', { id: `eq.${referral.id}` }, {
+      status: 'paid_limit_reached',
+      first_paid_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']).catch(() => {});
+    return null;
+  }
+  const [reward] = await dbRequest('POST', 'referral_rewards', {}, {
+    referral_id: referral.id,
+    referrer_company_id: referral.referrer_company_id,
+    referrer_store_id: referral.referrer_store_id || null,
+    amount_cents: amount,
+    status: 'available',
+    reason: 'Primeira assinatura paga por indicação.',
+    metadata: {
+      payment_transaction_id: transactionId || null,
+      paid_company_id: paidCompanyId,
+      paid_amount_cents: amountCents || 0
+    }
+  }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'referrals', { id: `eq.${referral.id}` }, {
+    status: 'paid',
+    first_paid_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=minimal']).catch(() => {});
+  await audit('referral.reward.available', {
+    req,
+    company_id: referral.referrer_company_id,
+    store_id: referral.referrer_store_id || null,
+    entity_type: 'referral_reward',
+    entity_id: reward?.id || null,
+    severity: 'info',
+    after_data: { amount_cents: amount, referral_id: referral.id }
+  });
+  await sendReferralRewardEmail(referral, reward).catch(() => {});
+  return reward;
+}
+
+function startOfCurrentMonthIso() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+
+function publicReferral(row = {}) {
+  const meta = row.metadata || {};
+  return {
+    id: row.id,
+    code: row.code,
+    status: row.status || 'signed_up',
+    referred_email: maskEmailOrToken(row.referred_email || ''),
+    referred_company_name: meta.referred_company_name || '',
+    referred_store_name: meta.referred_store_name || '',
+    signed_up_at: row.signed_up_at || row.created_at || null,
+    first_paid_at: row.first_paid_at || null
+  };
+}
+
+function publicReferralReward(row = {}) {
+  return {
+    id: row.id,
+    referral_id: row.referral_id || null,
+    amount_cents: Number(row.amount_cents || 0),
+    status: row.status || 'available',
+    reason: row.reason || '',
+    created_at: row.created_at || null
+  };
+}
+
+async function sendReferralReceivedEmail(referral = {}) {
+  const [admin] = await dbRequest('GET', 'admin_users', {
+    select: 'email,name',
+    company_id: `eq.${referral.referrer_company_id}`,
+    role: 'in.(owner,admin,superadmin)',
+    order: 'created_at.asc',
+    limit: '1'
+  }).catch(() => []);
+  if (!admin?.email) return;
+  const variables = {
+    customer_name: admin.name || admin.email,
+    company_name: referral.metadata?.referred_company_name || 'uma nova loja',
+    store_name: referral.metadata?.referred_store_name || '',
+    referral_code: referral.code || '',
+    referral_reward: formatMoney(REFERRAL_REWARD_CENTS / 100),
+    referral_url: absolutePanelUrl('/'),
+    dashboard_url: absolutePanelUrl('/')
+  };
+  await sendPlatformTemplateEmail({
+    to: admin.email,
+    templateKey: 'referral_received',
+    variables
+  });
+}
+
+async function sendReferralRewardEmail(referral = {}, reward = {}) {
+  const [admin] = await dbRequest('GET', 'admin_users', {
+    select: 'email,name',
+    company_id: `eq.${referral.referrer_company_id}`,
+    role: 'in.(owner,admin,superadmin)',
+    order: 'created_at.asc',
+    limit: '1'
+  }).catch(() => []);
+  if (!admin?.email) return;
+  const variables = {
+    customer_name: admin.name || admin.email,
+    company_name: referral.metadata?.referred_company_name || 'sua indicação',
+    store_name: referral.metadata?.referred_store_name || '',
+    referral_code: referral.code || '',
+    referral_reward: formatMoney(Number(reward.amount_cents || 0) / 100),
+    referral_url: absolutePanelUrl('/'),
+    dashboard_url: absolutePanelUrl('/')
+  };
+  await sendPlatformTemplateEmail({
+    to: admin.email,
+    templateKey: 'referral_reward_unlocked',
+    variables
+  });
 }
 
 async function createPortalStoreSettings(storeId, parsed) {
@@ -5928,7 +6297,7 @@ function pickCurrentCompanySubscription(subscriptions = []) {
     || null;
 }
 
-async function getCompanyPlanOverview(companyId, storeId) {
+async function getCompanyPlanOverview(companyId, storeId, admin = null) {
   const resolvedCompanyId = cleanUuid(companyId);
   if (!resolvedCompanyId) {
     return { company: null, subscription: null, pending_subscription: null, plan: null, features: [], available_plans: [], usage: await companyUsageSnapshot(companyId, storeId) };
@@ -5936,7 +6305,7 @@ async function getCompanyPlanOverview(companyId, storeId) {
   const [company, subscriptions, availablePlans, billingHistory, storeAddons] = await Promise.all([
     getCompanyById(resolvedCompanyId).catch(() => null),
     listCompanySubscriptions(resolvedCompanyId),
-    listPortalPlans().then((data) => data.plans || []).catch(() => []),
+    listPortalPlans({ includeInternal: canSeeInternalTestPlans(admin) }).then((data) => data.plans || []).catch(() => []),
     listBillingHistory(resolvedCompanyId),
     listStoreSubscriptionAddons(storeId)
   ]);
@@ -5976,12 +6345,34 @@ async function getCompanyPlanOverview(companyId, storeId) {
 async function listBillingHistory(companyId) {
   const resolvedCompanyId = cleanUuid(companyId);
   if (!resolvedCompanyId) return [];
-  return dbRequest('GET', 'subscription_events', {
-    select: '*',
-    company_id: `eq.${resolvedCompanyId}`,
-    order: 'created_at.desc',
-    limit: '20'
-  }).catch(() => []);
+  const [subscriptionEvents, addonEvents] = await Promise.all([
+    dbRequest('GET', 'subscription_events', {
+      select: '*',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'created_at.desc',
+      limit: '20'
+    }).catch(() => []),
+    dbRequest('GET', 'addon_billing_events', {
+      select: '*',
+      company_id: `eq.${resolvedCompanyId}`,
+      order: 'created_at.desc',
+      limit: '20'
+    }).catch(() => [])
+  ]);
+  return [
+    ...subscriptionEvents.map((entry) => ({ ...entry, billing_type: 'plan' })),
+    ...addonEvents.map((entry) => ({
+      ...entry,
+      billing_type: 'addon',
+      event_type: entry.event_type,
+      metadata: {
+        ...(entry.metadata || {}),
+        amount_cents: entry.amount_cents,
+        provider: entry.provider,
+        description: entry.description
+      }
+    }))
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 20);
 }
 
 async function assertTrialCanBeActivated(companyId, plan) {
@@ -6026,7 +6417,8 @@ async function planLimitWarnings(companyId, storeId, plan) {
 
 async function createBillingCheckout(req, admin, data = {}) {
   const companyId = cleanUuid(admin.company_id, 'empresa');
-  const planCode = cleanSlug(data.plan_code || data.planCode || '');
+  const planCode = cleanPlanCode(data.plan_code || data.planCode || '');
+  const billingCycle = normalizeBillingCycle(data.billing_cycle || data.billingCycle || 'monthly');
   if (!planCode) throw httpError(422, 'Informe o plano desejado.');
   const [plan] = await dbRequest('GET', 'subscription_plans', {
     select: '*',
@@ -6035,6 +6427,9 @@ async function createBillingCheckout(req, admin, data = {}) {
     limit: '1'
   });
   if (!plan) throw httpError(404, 'Plano não encontrado.');
+  if (isInternalTestPlan(plan) && !canSeeInternalTestPlans(admin)) {
+    throw httpError(404, 'Plano não encontrado.');
+  }
   const [company] = await dbRequest('GET', 'companies', {
     select: '*',
     id: `eq.${companyId}`,
@@ -6048,9 +6443,9 @@ async function createBillingCheckout(req, admin, data = {}) {
     : null;
   const changeType = billingPlanChangeType(currentPlan, plan);
   const downgradeWarnings = await planLimitWarnings(companyId, admin.store_id, plan);
-  const amount = moneyCents(plan.monthly_price || 0);
+  const amount = planBillingAmountCents(plan, billingCycle);
   const billingConfig = await privatePlatformBillingSettings();
-  const reusableCheckout = await findReusablePendingBillingCheckout(companyId, plan.id);
+  const reusableCheckout = await findReusablePendingBillingCheckout(companyId, plan.id, billingCycle);
   if (reusableCheckout?.checkout_url) {
     return {
       subscription: reusableCheckout.subscription,
@@ -6059,6 +6454,7 @@ async function createBillingCheckout(req, admin, data = {}) {
       checkout_url: reusableCheckout.checkout_url,
       provider: reusableCheckout.subscription?.billing_provider || billingConfig.provider,
       reused: true,
+      billing_cycle: reusableCheckout.subscription?.metadata?.billing_cycle || billingCycle,
       change_type: reusableCheckout.subscription?.metadata?.change_type || changeType,
       downgrade_warnings: reusableCheckout.subscription?.metadata?.downgrade_warnings || downgradeWarnings
     };
@@ -6072,6 +6468,8 @@ async function createBillingCheckout(req, admin, data = {}) {
       provider: 'manual',
       currentPlan,
       changeType,
+      billingCycle,
+      amountCents: amount,
       downgradeWarnings
     });
     return {
@@ -6079,11 +6477,12 @@ async function createBillingCheckout(req, admin, data = {}) {
       checkout_url: null,
       provider: 'manual',
       activated: true,
+      billing_cycle: billingCycle,
       change_type: changeType,
       downgrade_warnings: downgradeWarnings
     };
   }
-  const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount, billingConfig });
+  const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount, billingCycle, billingConfig });
   if (!checkout.checkoutUrl) {
     throw httpError(502, 'O provedor de pagamento não retornou a URL do checkout. Confira a configuração da Abacate Pay.');
   }
@@ -6099,6 +6498,7 @@ async function createBillingCheckout(req, admin, data = {}) {
       checkout_url: checkout.checkoutUrl || null,
       external_id: checkout.transactionId || null,
       plan_code: plan.code,
+      billing_cycle: billingCycle,
       amount_cents: amount,
       change_type: changeType,
       downgrade_warnings: downgradeWarnings
@@ -6118,6 +6518,7 @@ async function createBillingCheckout(req, admin, data = {}) {
       source: 'admin_billing_checkout',
       plan_code: plan.code,
       plan_name: plan.name,
+      billing_cycle: billingCycle,
       checkout_external_id: checkout.transactionId || null,
       change_type: changeType,
       downgrade_warnings: downgradeWarnings
@@ -6133,6 +6534,7 @@ async function createBillingCheckout(req, admin, data = {}) {
       provider_event_id: checkout.subscriptionId || checkout.transactionId || `checkout_${Date.now()}`,
       payment_transaction_id: transaction?.id || null,
       plan_code: plan.code,
+      billing_cycle: billingCycle,
       checkout_url: checkout.checkoutUrl || null,
       amount_cents: amount,
       change_type: changeType,
@@ -6147,7 +6549,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     store_id: admin.store_id,
     entity_type: 'company_subscription',
     entity_id: subscription.id,
-    after_data: { plan_code: plan.code, provider: billingConfig.provider }
+    after_data: { plan_code: plan.code, billing_cycle: billingCycle, provider: billingConfig.provider }
   });
   return {
     subscription,
@@ -6155,6 +6557,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     payment_transaction: transaction,
     checkout_url: checkout.checkoutUrl || null,
     provider: billingConfig.provider,
+    billing_cycle: billingCycle,
     change_type: changeType,
     downgrade_warnings: downgradeWarnings
   };
@@ -6163,7 +6566,7 @@ async function createBillingCheckout(req, admin, data = {}) {
 async function createAddonCheckout(req, admin, data = {}) {
   const companyId = cleanUuid(admin.company_id, 'empresa');
   const storeId = cleanUuid(admin.store_id, 'loja');
-  const addonCode = cleanSlug(data.addon_code || data.addonCode || 'whatsapp_automatic');
+  const addonCode = cleanAddonCode(data.addon_code || data.addonCode || 'whatsapp_automatic');
   const addon = await getPlanAddonByCode(addonCode);
   if (!addon) throw httpError(404, 'Adicional não encontrado.');
   const access = await getStoreAddonAccess(admin, addonCode);
@@ -6276,6 +6679,143 @@ async function createAddonCheckout(req, admin, data = {}) {
   };
 }
 
+const INTEGRATION_SETUP_ADDON_CODES = ['payment_setup_assisted'];
+
+async function getIntegrationSetupOverview(admin) {
+  const [payment, storeAddons] = await Promise.all([
+    getAdminPaymentSetupAssistance(admin).catch(() => ({})),
+    listStoreSubscriptionAddons(admin.store_id).catch(() => [])
+  ]);
+  const integrations = [];
+  for (const code of INTEGRATION_SETUP_ADDON_CODES) {
+    const addon = await getPlanAddonByCode(code);
+    if (!addon) continue;
+    const configured = payment.configured === true;
+    const rows = storeAddons.filter((row) => row.addon?.code === code);
+    const current = rows.find((row) => ['active', 'payment_pending'].includes(row.status)) || null;
+    const serviceStatus = cleanSlug(current?.metadata?.service_status || '');
+    const paymentPending = current?.status === 'payment_pending';
+    const inProgress = paymentPending || Boolean(current?.metadata?.support_ticket_id) || ['awaiting_support', 'in_progress'].includes(serviceStatus);
+    const access = await getStoreAddonAccess(admin, code).catch(() => ({ available: false, included: false }));
+    const status = configured ? 'configured' : inProgress ? 'in_progress' : 'pending';
+    integrations.push({
+      code,
+      name: 'Pix com Abacate Pay',
+      status,
+      status_label: status === 'configured' ? 'Configurada' : status === 'in_progress' ? 'Em configuração' : 'Pendente',
+      checkout_pending: paymentPending,
+      checkout_url: paymentPending ? cleanText(current.checkout_url || '') : '',
+      available: Boolean(access.available || access.included),
+      included: Boolean(access.included),
+      price_cents: access.included ? 0 : Number(addon.monthly_price_cents || 0),
+      price_label: access.included ? 'Incluso no plano' : addonPriceLabel(addon)
+    });
+  }
+  const pending = integrations.filter((entry) => entry.status === 'pending');
+  const hasInProgress = integrations.some((entry) => entry.status === 'in_progress');
+  return {
+    integrations,
+    pending,
+    pending_count: pending.length,
+    has_in_progress: hasInProgress,
+    show_banner: pending.length > 0 && !hasInProgress
+  };
+}
+
+async function createIntegrationSetupCheckout(req, admin, data = {}) {
+  const requestedCodes = [...new Set((Array.isArray(data.addon_codes) ? data.addon_codes : [])
+    .map((code) => cleanAddonCode(code))
+    .filter((code) => INTEGRATION_SETUP_ADDON_CODES.includes(code)))];
+  if (!requestedCodes.length) throw httpError(422, 'Selecione ao menos uma configuração.');
+  const overview = await getIntegrationSetupOverview(admin);
+  if (overview.has_in_progress) throw httpError(409, 'Já existe uma configuração em andamento para esta loja.');
+  const allowed = new Set(overview.pending.filter((entry) => entry.available).map((entry) => entry.code));
+  const codes = requestedCodes.filter((code) => allowed.has(code));
+  if (!codes.length) throw httpError(409, 'As configurações selecionadas já foram contratadas ou não estão disponíveis para seu plano.');
+  const companyId = cleanUuid(admin.company_id, 'empresa');
+  const storeId = cleanUuid(admin.store_id, 'loja');
+  const [company] = await dbRequest('GET', 'companies', { select: '*', id: `eq.${companyId}`, limit: '1' });
+  if (!company) throw httpError(404, 'Empresa não encontrada.');
+  const selections = (await Promise.all(codes.map(async (code) => ({ addon: await getPlanAddonByCode(code), access: await getStoreAddonAccess(admin, code) })))).filter((entry) => entry.addon);
+  const includedSelections = selections.filter((entry) => entry.access.included);
+  const addons = selections.filter((entry) => !entry.access.included).map((entry) => entry.addon);
+  const amount = addons.reduce((total, addon) => total + Number(addon.monthly_price_cents || 0), 0);
+  const billingConfig = await privatePlatformBillingSettings();
+  if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
+    throw httpError(503, 'Checkout indisponível: configure Abacate Pay na Central antes de vender configurações.');
+  }
+  const currentSubscription = pickCurrentCompanySubscription(await listCompanySubscriptions(companyId, 100));
+  const activatedIncluded = [];
+  for (const { addon } of includedSelections) {
+    activatedIncluded.push(await activateStoreAddon(req, admin, {
+      companyId, storeId, subscriptionId: currentSubscription?.id || null, addon,
+      provider: 'included', source: 'included_setup_bundle'
+    }));
+  }
+  if (!addons.length) {
+    return { activated: true, addons: includedSelections.map((entry) => publicPlanAddon(entry.addon)), active_addons: activatedIncluded.map(publicStoreAddon), checkout_url: null };
+  }
+  if (billingConfig.provider === 'mock' || amount <= 0) {
+    const activated = [...activatedIncluded];
+    for (const addon of addons) {
+      activated.push(await activateStoreAddon(req, admin, {
+        companyId, storeId, subscriptionId: currentSubscription?.id || null, addon,
+        provider: 'manual', source: amount <= 0 ? 'free_setup_bundle' : 'mock_setup_bundle'
+      }));
+    }
+    return { activated: true, addons: selections.map((entry) => publicPlanAddon(entry.addon)), active_addons: activated.map(publicStoreAddon), checkout_url: null };
+  }
+  const checkout = await createProviderIntegrationSetupCheckout({ company, admin, addons, amount, billingConfig });
+  const rows = [];
+  for (const addon of addons) {
+    const [row] = await dbRequest('POST', 'store_subscription_addons', {}, {
+      company_id: companyId, store_id: storeId, subscription_id: currentSubscription?.id || null,
+      addon_id: addon.id, status: 'payment_pending', provider: billingConfig.provider,
+      external_transaction_id: checkout.subscriptionId || checkout.transactionId || null,
+      checkout_url: checkout.checkoutUrl,
+      metadata: { source: 'integration_setup_bundle', addon_code: addon.code, amount_cents: Number(addon.monthly_price_cents || 0), billing_type: 'one_time', service_type: 'assisted_setup', service_status: 'payment_pending' }
+    }, ['Prefer: return=representation']);
+    rows.push({ row, addon });
+  }
+  const transaction = await createSubscriptionPaymentTransaction({
+    companyId, subscriptionId: currentSubscription?.id || null, planId: null,
+    provider: billingConfig.provider, externalTransactionId: checkout.subscriptionId || checkout.transactionId || null,
+    status: 'pending', amountCents: amount, checkoutUrl: checkout.checkoutUrl,
+    expiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
+    metadata: {
+      source: 'integration_setup_bundle', kind: 'addon_bundle', store_id: storeId,
+      addon_items: rows.map(({ row, addon }) => ({ addon_code: addon.code, addon_id: addon.id, store_subscription_addon_id: row.id, amount_cents: Number(addon.monthly_price_cents || 0) }))
+    }
+  });
+  await audit('billing.integration_setup_bundle.checkout.create', {
+    req, actor_admin_id: admin.id, company_id: companyId, store_id: storeId,
+    entity_type: 'subscription_payment_transaction', entity_id: transaction?.id || null,
+    after_data: { addon_codes: codes, amount_cents: amount, provider: billingConfig.provider }
+  });
+  return { addons: addons.map(publicPlanAddon), checkout_url: checkout.checkoutUrl, provider: billingConfig.provider, payment_transaction: transaction };
+}
+
+async function createProviderIntegrationSetupCheckout({ company, admin, addons, amount, billingConfig }) {
+  const config = billingConfig || await privatePlatformBillingSettings();
+  const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const items = [];
+  for (const addon of addons) {
+    items.push({ id: await ensureAbacateAddonProduct({ addon, amount: Number(addon.monthly_price_cents || 0), token: config.api_key }), quantity: 1 });
+  }
+  const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
+  const externalId = cleanExternalId(`tapronto-setup-${company.id}-${Date.now()}`);
+  const body = {
+    items, methods: ['PIX', 'CARD'], returnUrl: `${origin}/?billing=addon-cancelled`, completionUrl: `${origin}/?billing=addon-success`, externalId,
+    metadata: { companyId: company.id, storeId: admin.store_id, addonCodes: addons.map((addon) => addon.code).join(','), kind: 'platform_addon_bundle_charge' }
+  };
+  if (customerId) body.customerId = customerId;
+  const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'configurações');
+  const payload = data.data || data;
+  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
+  if (!checkoutUrl) throw httpError(502, 'A Abacate Pay criou a cobrança, mas não retornou a URL de checkout.');
+  return { subscriptionId: String(payload.id || payload.checkoutId || payload.billingId || ''), transactionId: externalId, checkoutUrl, amount };
+}
+
 async function listAdminBillingAddons(admin) {
   const storeId = cleanUuid(admin.store_id || '');
   const rows = await dbRequest('GET', 'plan_addons', {
@@ -6339,7 +6879,7 @@ function publicStoreAddon(row = {}) {
 }
 
 async function getPlanAddonByCode(code) {
-  const addonCode = cleanSlug(code || '');
+  const addonCode = cleanAddonCode(code || '');
   if (!addonCode) return null;
   const [addon] = await dbRequest('GET', 'plan_addons', {
     select: '*',
@@ -6370,7 +6910,7 @@ async function listStoreSubscriptionAddons(storeId) {
 
 async function getActiveStoreAddon(storeId, addonCode) {
   const resolvedStoreId = cleanUuid(storeId);
-  const code = cleanSlug(addonCode || '');
+  const code = cleanAddonCode(addonCode || '');
   if (!resolvedStoreId || !code) return null;
   const rows = (await listStoreSubscriptionAddons(resolvedStoreId)).filter((entry) => entry.status === 'active');
   return rows.find((entry) => entry.addon?.code === code) || null;
@@ -6410,7 +6950,7 @@ async function getStoreAddonAccess(admin, addonCode) {
 
 function addonBillingType(addon = {}) {
   const settings = isPlainObject(addon.settings) ? addon.settings : {};
-  return cleanSlug(settings.billing_type || settings.billingType || 'monthly') || 'monthly';
+  return cleanAddonCode(settings.billing_type || settings.billingType || 'monthly') || 'monthly';
 }
 
 function isOneTimeAddon(addon = {}) {
@@ -6425,7 +6965,7 @@ function addonPriceLabel(addon = {}) {
 
 function isAssistedServiceAddon(addon = {}) {
   const settings = isPlainObject(addon.settings) ? addon.settings : {};
-  return cleanSlug(settings.service_type || settings.serviceType || '') === 'assisted_setup';
+  return cleanAddonCode(settings.service_type || settings.serviceType || '') === 'assisted_setup';
 }
 
 function assistedServiceTicketInfo(addon = {}) {
@@ -6704,10 +7244,11 @@ async function recordAddonBillingEvent(data = {}) {
   return row || null;
 }
 
-async function findReusablePendingBillingCheckout(companyId, planId) {
+async function findReusablePendingBillingCheckout(companyId, planId, billingCycle = 'monthly') {
   const resolvedCompanyId = cleanUuid(companyId);
   const resolvedPlanId = cleanUuid(planId);
   if (!resolvedCompanyId || !resolvedPlanId) return null;
+  const cycle = normalizeBillingCycle(billingCycle);
   const [subscription] = await dbRequest('GET', 'company_subscriptions', {
     select: '*',
     company_id: `eq.${resolvedCompanyId}`,
@@ -6717,6 +7258,7 @@ async function findReusablePendingBillingCheckout(companyId, planId) {
     limit: '1'
   }).catch(() => []);
   if (!subscription) return null;
+  if (normalizeBillingCycle(subscription.metadata?.billing_cycle || 'monthly') !== cycle) return null;
   const dueAt = subscription.payment_due_at ? new Date(subscription.payment_due_at).getTime() : 0;
   const checkoutUrl = cleanText(subscription.metadata?.checkout_url || '');
   if (!checkoutUrl || (dueAt && dueAt < Date.now())) return null;
@@ -6735,9 +7277,11 @@ async function findReusablePendingBillingCheckout(companyId, planId) {
 async function activateCompanyPlan(req, admin, company, plan, options = {}) {
   const companyId = cleanUuid(company.id || admin.company_id, 'empresa');
   const now = new Date();
+  const billingCycle = normalizeBillingCycle(options.billingCycle || options.billing_cycle || 'monthly');
+  const amountCents = Number(options.amountCents ?? options.amount_cents ?? planBillingAmountCents(plan, billingCycle)) || 0;
   const monthlyPrice = moneyCents(plan.monthly_price || 0);
-  const isTrialPlan = plan.code === 'trial' || monthlyPrice <= 0;
-  const periodDays = isTrialPlan ? Number(plan.settings?.trial_days || 14) || 14 : 30;
+  const isTrialPlan = plan.code === 'trial' || amountCents <= 0;
+  const periodDays = isTrialPlan ? Number(plan.settings?.trial_days || 14) || 14 : billingCyclePeriodDays(billingCycle);
   const periodEnd = new Date(now.getTime() + periodDays * 86400000);
   const status = isTrialPlan ? 'trial' : 'active';
   const previousSubscriptions = await listCompanySubscriptions(companyId, 100);
@@ -6771,7 +7315,8 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
     metadata: {
       source: options.source || 'manual_activation',
       activated_by: admin.id,
-      amount_cents: monthlyPrice,
+      amount_cents: amountCents,
+      billing_cycle: billingCycle,
       change_type: changeType,
       downgrade_warnings: downgradeWarnings
     }
@@ -6790,8 +7335,9 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
       provider: options.provider || 'manual',
       plan_code: plan.code,
       plan_name: plan.name,
+      billing_cycle: billingCycle,
       previous_subscription_id: current?.id || null,
-      amount_cents: monthlyPrice,
+      amount_cents: amountCents,
       change_type: changeType,
       downgrade_warnings: downgradeWarnings
     },
@@ -6805,32 +7351,33 @@ async function activateCompanyPlan(req, admin, company, plan, options = {}) {
     store_id: admin.store_id,
     entity_type: 'company_subscription',
     entity_id: subscription.id,
-    after_data: { plan_code: plan.code, status, provider: options.provider || 'manual' }
+    after_data: { plan_code: plan.code, billing_cycle: billingCycle, status, provider: options.provider || 'manual' }
   });
 
   return { subscription, plan, change_type: changeType, downgrade_warnings: downgradeWarnings };
 }
 
-async function createProviderSubscriptionCheckout({ company, plan, admin, amount, billingConfig = null }) {
+async function createProviderSubscriptionCheckout({ company, plan, admin, amount, billingCycle = 'monthly', billingConfig = null }) {
   const config = billingConfig || await privatePlatformBillingSettings();
+  const cycle = normalizeBillingCycle(billingCycle);
   if (config.provider === 'mock') {
     return {
       subscriptionId: `mock_sub_${company.id}_${Date.now()}`,
-      checkoutUrl: absolutePanelUrl(`/?billing=mock&plan=${encodeURIComponent(plan.code)}`)
+      checkoutUrl: absolutePanelUrl(`/?billing=mock&plan=${encodeURIComponent(plan.code)}&cycle=${encodeURIComponent(cycle)}`)
     };
   }
   if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
   const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-  const productId = await ensureAbacateSubscriptionProduct({ plan, amount, token: config.api_key });
+  const productId = await ensureAbacateSubscriptionProduct({ plan, amount, billingCycle: cycle, token: config.api_key });
   const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
-  const externalId = cleanExternalId(`tapronto-sub-${company.id}-${plan.code}-${Date.now()}`);
+  const externalId = cleanExternalId(`tapronto-sub-${company.id}-${plan.code}-${cycle}-${Date.now()}`);
   const body = {
     items: [{ id: productId, quantity: 1 }],
     methods: ['PIX', 'CARD'],
     returnUrl: `${origin}/?billing=cancelled`,
     completionUrl: `${origin}/?billing=success`,
     externalId,
-    metadata: { companyId: company.id, planCode: plan.code, kind: 'platform_monthly_charge' }
+    metadata: { companyId: company.id, planCode: plan.code, billingCycle: cycle, kind: 'platform_subscription_charge' }
   };
   if (customerId) body.customerId = customerId;
   const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'mensalidade');
@@ -6887,8 +7434,9 @@ function abacatePayPixAutomaticUnavailable(error) {
   return message.includes('pix automatic') || message.includes('pix automático') || message.includes('pix automatico');
 }
 
-async function ensureAbacateSubscriptionProduct({ plan, amount, token }) {
-  const externalId = cleanExternalId(`tapronto-plan-${plan.code}-${amount}`);
+async function ensureAbacateSubscriptionProduct({ plan, amount, billingCycle = 'monthly', token }) {
+  const cycle = normalizeBillingCycle(billingCycle);
+  const externalId = cleanExternalId(`tapronto-plan-${plan.code}-${cycle}-${amount}`);
   const existing = await findAbacateProductByExternalId(externalId, token).catch(() => null);
   if (existing?.id) return String(existing.id);
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/products/create`, {
@@ -6896,16 +7444,16 @@ async function ensureAbacateSubscriptionProduct({ plan, amount, token }) {
     token,
     body: {
       externalId,
-      name: `Assinatura ${plan.name}`,
-      description: plan.description || 'Assinatura mensal da plataforma TáPronto',
+      name: `Assinatura ${plan.name} ${cycle === 'annual' ? 'Anual' : 'Mensal'}`,
+      description: plan.description || `Assinatura ${cycle === 'annual' ? 'anual' : 'mensal'} da plataforma TáPronto`,
       price: amount,
       currency: 'BRL',
-      cycle: 'MONTHLY'
+      cycle: cycle === 'annual' ? 'YEARLY' : 'MONTHLY'
     }
   });
   const payload = data.data || data;
   const productId = payload.id || payload.product?.id || '';
-  if (!productId) throw httpError(502, 'A Abacate Pay não retornou o identificador do produto mensal.');
+  if (!productId) throw httpError(502, 'A Abacate Pay não retornou o identificador do produto de assinatura.');
   return String(productId);
 }
 
@@ -7068,6 +7616,26 @@ function billingTransactionStatus(subscriptionStatus) {
   })[subscriptionStatus] || 'pending';
 }
 
+function normalizeBillingCycle(value) {
+  const cycle = cleanSlug(value || 'monthly');
+  return ['annual', 'yearly', 'anual'].includes(cycle) ? 'annual' : 'monthly';
+}
+
+function billingCyclePeriodDays(value) {
+  return normalizeBillingCycle(value) === 'annual' ? 365 : 30;
+}
+
+function planBillingAmountCents(plan = {}, billingCycle = 'monthly') {
+  const cycle = normalizeBillingCycle(billingCycle);
+  const amount = cycle === 'annual'
+    ? moneyCents(plan.annual_price || 0)
+    : moneyCents(plan.monthly_price || 0);
+  if (cycle === 'annual' && amount <= 0) {
+    return moneyCents(plan.monthly_price || 0) * 12;
+  }
+  return amount;
+}
+
 async function receiveBillingWebhook(data, options = {}) {
   const config = await privatePlatformBillingSettings();
   const provider = cleanSlug(options.provider || inferPaymentProvider(data) || config.provider || PLATFORM_BILLING_PROVIDER);
@@ -7085,7 +7653,8 @@ async function receiveBillingWebhook(data, options = {}) {
   const externalIds = billingWebhookExternalIds(payload, data);
   const metadata = payload.metadata || data.metadata || {};
   const companyId = cleanOptionalUuid(metadata.companyId || metadata.company_id || data.companyId || externalIds.map(companyIdFromBillingExternalId).find(Boolean) || '', 'empresa');
-  const planCode = cleanSlug(metadata.planCode || metadata.plan_code || payload.externalId || '');
+  const planCode = cleanPlanCode(metadata.planCode || metadata.plan_code || payload.externalId || '');
+  const billingCycle = normalizeBillingCycle(metadata.billingCycle || metadata.billing_cycle || '');
   const status = billingProviderStatus(payload.status || data.status || data.event);
   const amountCents = billingWebhookAmountCents(payload, data);
 
@@ -7093,6 +7662,11 @@ async function receiveBillingWebhook(data, options = {}) {
   if (duplicateTransaction) return { ok: true, duplicate: true, transaction: duplicateTransaction };
 
   const addonTransaction = await findSubscriptionPaymentTransactionByExternalIds(provider, externalIds);
+  if (addonTransaction?.metadata?.kind === 'addon_bundle') {
+    return processAddonBundleBillingWebhook(reqLikeFromWebhook(), {
+      data, payload, provider, eventId, externalId, status, amountCents, transaction: addonTransaction
+    });
+  }
   if (addonTransaction?.metadata?.kind === 'addon') {
     return processAddonBillingWebhook(reqLikeFromWebhook(), {
       data,
@@ -7153,7 +7727,8 @@ async function receiveBillingWebhook(data, options = {}) {
     if (plan?.id) planId = plan.id;
   }
   const now = new Date();
-  const periodEnd = new Date(now.getTime() + 30 * 86400000).toISOString();
+  const transactionCycle = normalizeBillingCycle(transaction?.metadata?.billing_cycle || subscription.metadata?.billing_cycle || billingCycle || 'monthly');
+  const periodEnd = new Date(now.getTime() + billingCyclePeriodDays(transactionCycle) * 86400000).toISOString();
   const graceEnd = new Date(now.getTime() + BILLING_GRACE_DAYS * 86400000).toISOString();
   const nextPaymentDue = status === 'grace_period' ? graceEnd : status === 'payment_pending' || status === 'past_due' ? subscription.payment_due_at || periodEnd : null;
   const [updated] = await dbRequest('PATCH', 'company_subscriptions', { id: `eq.${subscription.id}` }, {
@@ -7165,7 +7740,7 @@ async function receiveBillingWebhook(data, options = {}) {
     current_period_starts_at: status === 'active' ? now.toISOString() : subscription.current_period_starts_at,
     current_period_ends_at: status === 'active' ? periodEnd : subscription.current_period_ends_at,
     next_renewal_at: status === 'active' ? periodEnd : subscription.next_renewal_at,
-    metadata: { ...(subscription.metadata || {}), last_webhook: { eventId, status, received_at: now.toISOString() } }
+    metadata: { ...(subscription.metadata || {}), billing_cycle: transactionCycle, last_webhook: { eventId, status, received_at: now.toISOString() } }
   }, ['Prefer: return=representation']);
   if (!transaction) {
     transaction = await createSubscriptionPaymentTransaction({
@@ -7178,7 +7753,8 @@ async function receiveBillingWebhook(data, options = {}) {
       amountCents,
       metadata: {
         source: 'webhook_without_checkout_transaction',
-        plan_code: planCode || null
+        plan_code: planCode || null,
+        billing_cycle: transactionCycle
       }
     }).catch(() => null);
   }
@@ -7220,10 +7796,20 @@ async function receiveBillingWebhook(data, options = {}) {
       provider_event_id: eventId,
       payment_transaction_id: transaction?.id || null,
       plan_code: planCode || null,
+      billing_cycle: transactionCycle,
       amount_cents: amountCents || transaction?.amount_cents || 0,
       payload: sanitizeAuditPayload(data)
     }
   }, ['Prefer: return=minimal']);
+  if (status === 'active') {
+    await processReferralPayment(reqLikeFromWebhook(), {
+      companyId: subscription.company_id,
+      transactionId: transaction?.id || null,
+      amountCents: amountCents || transaction?.amount_cents || 0
+    }).catch((error) => {
+      console.warn('Não foi possível processar recompensa de indicação:', error.message || error);
+    });
+  }
   return { ok: true, subscription: updated, transaction };
 }
 
@@ -7235,7 +7821,7 @@ async function processAddonBillingWebhook(req, context = {}) {
   const { data, provider, eventId, externalId, status, amountCents, transaction } = context;
   const metadata = transaction.metadata || {};
   const addonId = cleanUuid(metadata.addon_id || '');
-  const addonCode = cleanSlug(metadata.addon_code || '');
+  const addonCode = cleanAddonCode(metadata.addon_code || '');
   const storeId = cleanUuid(metadata.store_id || '');
   const subscriptionAddonId = cleanUuid(metadata.store_subscription_addon_id || '');
   const [subscriptionAddon] = subscriptionAddonId
@@ -7346,6 +7932,64 @@ async function processAddonBillingWebhook(req, context = {}) {
   }).catch(() => {});
 
   return { ok: true, addon_subscription: updatedAddon, transaction };
+}
+
+async function processAddonBundleBillingWebhook(req, context = {}) {
+  const { data, provider, eventId, externalId, status, amountCents, transaction } = context;
+  const items = Array.isArray(transaction.metadata?.addon_items) ? transaction.metadata.addon_items : [];
+  if (!items.length) throw httpError(422, 'Cobrança agrupada sem configurações identificadas.');
+  if (transaction.amount_cents && amountCents && Number(transaction.amount_cents) !== Number(amountCents)) {
+    await updateSubscriptionPaymentTransaction(transaction.id, { external_event_id: eventId, status: 'amount_mismatch', raw_payload: sanitizeAuditPayload(data), failed_at: new Date().toISOString() }).catch(() => {});
+    throw httpError(422, 'Valor do pagamento não confere com a cobrança das configurações.');
+  }
+  const now = new Date().toISOString();
+  const updatedAddons = [];
+  for (const item of items) {
+    const addon = item.addon_id
+      ? (await dbRequest('GET', 'plan_addons', { select: '*', id: `eq.${cleanUuid(item.addon_id)}`, limit: '1' }).catch(() => []))[0]
+      : await getPlanAddonByCode(item.addon_code);
+    const subscriptionAddonId = cleanUuid(item.store_subscription_addon_id || '');
+    if (!addon || !subscriptionAddonId) continue;
+    const [current] = await dbRequest('GET', 'store_subscription_addons', { select: '*', id: `eq.${subscriptionAddonId}`, limit: '1' }).catch(() => []);
+    if (!current) continue;
+    const nextStatus = status === 'active' ? 'active' : status === 'cancelled' ? 'cancelled' : billingTransactionStatus(status);
+    let [updated] = await dbRequest('PATCH', 'store_subscription_addons', { id: `eq.${current.id}` }, {
+      status: nextStatus,
+      provider,
+      external_transaction_id: externalId || current.external_transaction_id || null,
+      activated_at: status === 'active' ? (current.activated_at || now) : current.activated_at,
+      updated_at: now,
+      metadata: {
+        ...(current.metadata || {}),
+        service_type: 'assisted_setup',
+        service_status: status === 'active' ? 'awaiting_support' : nextStatus,
+        last_webhook: { eventId, status, received_at: now }
+      }
+    }, ['Prefer: return=representation']);
+    if (status === 'active') {
+      updated = await ensureAssistedAddonSupportTicket(req, {
+        id: null, company_id: current.company_id, store_id: current.store_id
+      }, updated, addon).catch(() => updated);
+    }
+    updatedAddons.push(updated);
+    await recordAddonBillingEvent({
+      companyId: current.company_id, storeId: current.store_id, subscriptionAddonId: current.id, addonId: addon.id,
+      eventType: `addon.bundle.billing.${status}`, status, amountCents: Number(item.amount_cents || 0), provider,
+      externalEventId: eventId, externalTransactionId: externalId,
+      description: `Evento de cobrança agrupada recebido para ${addon.name}.`, metadata: { payment_transaction_id: transaction.id }
+    }).catch(() => {});
+  }
+  await updateSubscriptionPaymentTransaction(transaction.id, {
+    external_event_id: eventId,
+    external_transaction_id: externalId || transaction.external_transaction_id || null,
+    status: billingTransactionStatus(status),
+    amount_cents: amountCents || transaction.amount_cents || 0,
+    raw_payload: sanitizeAuditPayload(data),
+    metadata: { ...(transaction.metadata || {}), last_status: status, last_event_id: eventId, received_at: now },
+    paid_at: status === 'active' ? now : transaction.paid_at || null,
+    failed_at: ['past_due', 'cancelled', 'suspended'].includes(status) ? now : transaction.failed_at || null
+  }).catch(() => {});
+  return { ok: true, addon_subscriptions: updatedAddons, transaction };
 }
 
 async function recordBillingWebhookFailure(data, options = {}) {
@@ -8737,10 +9381,20 @@ async function sendPlatformSmtpTest(req, admin, data = {}) {
   const target = cleanEmail(data.email || admin.email || '');
   if (!target) throw httpError(422, 'Informe um e-mail válido para teste.');
   try {
-    await sendPlatformEmail({
+    await sendPlatformTemplateEmail({
       to: target,
-      subject: 'Teste de envio SMTP do TáPronto',
-      body: `Olá ${admin.name || 'Admin Master'}, este é um teste de SMTP do Platform.`
+      templateKey: 'smtp_test',
+      variables: {
+        customer_name: admin.name || 'Admin Master',
+        company_name: 'TáPronto',
+        store_name: '',
+        due_date: '',
+        dashboard_url: absolutePanelUrl('/'),
+        support_url: absolutePlatformUrl('/?tab=communication'),
+        payment_url: absolutePanelUrl('/?tab=plan'),
+        platform_url: absolutePlatformUrl('/?tab=communication')
+      },
+      requireActive: true
     });
     await markSmtpTest('success');
     await audit('platform.smtp.test', {
@@ -9890,6 +10544,22 @@ function platformEmailRecipient(templateKey, fallbackTo) {
   return cleanEmail(fallbackTo || '');
 }
 
+async function sendPlatformTemplateEmail({ to, templateKey, variables = {}, requireActive = false }) {
+  const key = cleanTemplateKey(templateKey || '');
+  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === key);
+  if (!template?.is_active) {
+    if (requireActive) throw new Error(`Template ${key || 'desconhecido'} desativado.`);
+    return false;
+  }
+  await sendPlatformEmail({
+    to,
+    templateKey: key,
+    subject: renderEmailTemplate(template.subject, variables),
+    body: renderEmailTemplate(template.body, variables)
+  });
+  return true;
+}
+
 async function sendPlatformEmail({ to, subject, body, templateKey }) {
   const rows = await dbRequest('GET', 'platform_smtp_settings', { select: '*', order: 'created_at.desc', limit: '1' }).catch(() => []);
   const settings = privateSmtpSettings(rows[0] || {});
@@ -9908,6 +10578,12 @@ function buildSmtpMessage({ to, subject, body, settings }) {
     ? rawBody
     : `${rawBody}\n\n--\n${COMPANY_LEGAL_ID}`;
   const plainBody = bodyWithLegalId.replace(/\n/g, '\r\n');
+  const htmlBody = renderTransactionalEmailHtml({
+    subject,
+    body: rawBody,
+    legalId: COMPANY_LEGAL_ID
+  });
+  const boundary = `tapronto_${randomUUID().replaceAll('-', '')}`;
   const headers = [
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${randomUUID()}@${ehloDomain}>`,
@@ -9916,11 +10592,100 @@ function buildSmtpMessage({ to, subject, body, settings }) {
     `Subject: ${encodeMimeHeader(subject)}`,
     `Reply-To: ${settings.reply_to || settings.from_email}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
     'X-Mailer: TáPronto Platform'
   ];
-  return `${headers.join('\r\n')}\r\n\r\n${Buffer.from(plainBody, 'utf8').toString('base64')}\r\n`;
+  const plainPart = [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(plainBody, 'utf8').toString('base64')
+  ].join('\r\n');
+  const htmlPart = [
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(htmlBody, 'utf8').toString('base64')
+  ].join('\r\n');
+  return `${headers.join('\r\n')}\r\n\r\n${plainPart}\r\n${htmlPart}\r\n--${boundary}--\r\n`;
+}
+
+function renderTransactionalEmailHtml({ subject, body, legalId }) {
+  const title = emailEscapeHtml(subject || 'TáPronto');
+  const content = emailTextToHtml(body || '');
+  const firstUrl = String(body || '').match(/https?:\/\/[^\s)]+/i)?.[0] || '';
+  const cta = firstUrl ? `
+    <tr>
+      <td style="padding:8px 30px 24px;">
+        <a href="${emailEscapeAttribute(firstUrl)}" style="display:inline-block;background:#e11d2a;color:#ffffff;text-decoration:none;font-weight:700;border-radius:12px;padding:13px 18px;">Abrir no TáPronto</a>
+      </td>
+    </tr>` : '';
+  return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${title}</title>
+  </head>
+  <body style="margin:0;background:#f4f6f8;color:#071326;font-family:Arial,Helvetica,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;color:transparent;">${emailEscapeHtml(String(body || '').split('\n').find(Boolean) || subject || 'TáPronto')}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6f8;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border:1px solid #dde5ee;border-radius:20px;overflow:hidden;">
+            <tr>
+              <td style="padding:26px 30px 18px;border-left:5px solid #e11d2a;">
+                <div style="font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#e11d2a;">TáPronto</div>
+                <h1 style="margin:8px 0 0;font-size:26px;line-height:1.18;color:#071326;">${title}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 30px 8px;font-size:16px;line-height:1.65;color:#24344d;">
+                ${content}
+              </td>
+            </tr>
+            ${cta}
+            <tr>
+              <td style="padding:20px 30px;background:#f8fafc;border-top:1px solid #e6edf5;color:#66758f;font-size:12px;line-height:1.5;">
+                <strong style="color:#071326;">TáPronto</strong><br>
+                Cardápio e pedidos para restaurantes.<br>
+                ${emailEscapeHtml(legalId || '')}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function emailTextToHtml(text = '') {
+  return String(text || '')
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p style="margin:0 0 16px;">${linkifyEmailText(paragraph)}</p>`)
+    .join('');
+}
+
+function linkifyEmailText(text = '') {
+  return emailEscapeHtml(text)
+    .replace(/\n/g, '<br>')
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#e11d2a;font-weight:700;">$1</a>');
+}
+
+function emailEscapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function emailEscapeAttribute(value = '') {
+  return emailEscapeHtml(value).replace(/`/g, '&#96;');
 }
 
 function encodeMailAddress(name, email) {
@@ -10050,6 +10815,10 @@ const EMAIL_TEMPLATE_DEFINITIONS = [
   { key: 'plan_changed', name: 'Plano alterado', subject: 'Seu plano foi alterado para {{plan_name}}', body: 'Olá {{company_name}},\n\nO plano da loja {{store_name}} foi alterado para {{plan_name}}.\n\nOs recursos e limites já foram atualizados no painel:\n{{dashboard_url}}\n\nConsulte o histórico de cobrança para acompanhar os detalhes.' },
   { key: 'cancellation_received', name: 'Cancelamento recebido', subject: 'Recebemos sua solicitação de cancelamento', body: 'Olá {{company_name}},\n\nRecebemos a solicitação de cancelamento da loja {{store_name}}.\n\nNossa equipe vai revisar a assinatura e confirmar os próximos passos.\n\nSe o cancelamento foi um engano ou se podemos ajudar com algum ajuste, responda este e-mail ou abra um chamado:\n{{support_url}}' },
   { key: 'satisfaction_survey', name: 'Pesquisa de satisfação', subject: 'Como foi sua experiência com o suporte?', body: 'Olá {{customer_name}},\n\nQueremos saber como foi sua experiência com o atendimento.\n\nSe puder, avalie rapidamente o suporte recebido:\n{{rating_url}}\n\nSua opinião ajuda a melhorar o sistema e o atendimento.' },
+  { key: 'referral_invite', name: 'Convite de indicação', subject: '{{customer_name}} indicou o TáPronto para você', body: 'Olá,\n\n{{customer_name}} usa o TáPronto para organizar cardápio digital e pedidos da loja.\n\nVocê também pode criar sua loja online em poucos minutos pelo link abaixo:\n{{referral_url}}\n\nAo contratar um plano, a indicação pode liberar {{referral_reward}} de crédito para quem indicou.\n\nTáPronto\nCardápio digital, pedidos organizados.' },
+  { key: 'referral_received', name: 'Indicação cadastrada', subject: 'Sua indicação criou uma conta no TáPronto', body: 'Olá {{customer_name}},\n\nUma indicação sua criou uma conta no TáPronto.\n\nIndicação: {{company_name}}\nCódigo usado: {{referral_code}}\n\nA recompensa será liberada quando essa loja pagar o primeiro plano.' },
+  { key: 'referral_reward_unlocked', name: 'Recompensa de indicação liberada', subject: 'Você ganhou {{referral_reward}} em indicação', body: 'Olá {{customer_name}},\n\nBoa notícia: a indicação {{company_name}} pagou o primeiro plano.\n\nLiberamos {{referral_reward}} de crédito para sua conta.\n\nVocê pode acompanhar suas indicações no painel:\n{{dashboard_url}}' },
+  { key: 'smtp_test', name: 'Teste SMTP', subject: 'Teste de envio SMTP do TáPronto', body: 'Olá {{customer_name}},\n\nEste é um teste de entrega do TáPronto.\n\nSe este e-mail chegou corretamente, a configuração SMTP está autenticando e preservando acentos.\n\nAcesse a Central para revisar a comunicação:\n{{platform_url}}' },
   { key: 'backup_failed', name: 'Backup falhou', subject: 'Alerta: falha no backup da plataforma', body: 'Alerta operacional do TáPronto.\n\nA rotina de backup falhou ou está atrasada.\n\nResumo: {{error_summary}}\nPeríodo: {{period}}\n\nAcesse o Platform para verificar Saúde e Serviços:\n{{platform_url}}' },
   { key: 'webhook_failed', name: 'Webhook falhou', subject: 'Alerta: webhook com falha', body: 'Alerta operacional do TáPronto.\n\nUm webhook apresentou falha de processamento.\n\nProvedor: {{provider}}\nEvento: {{event_id}}\nResumo: {{error_summary}}\n\nVerifique logs, assinatura do webhook e eventos financeiros no Platform:\n{{platform_url}}' },
   { key: 'smtp_failed', name: 'SMTP com erro', subject: 'Alerta: envio de e-mail com falha', body: 'Alerta operacional do TáPronto.\n\nO SMTP apresentou falha no envio ou teste de entrega.\n\nResumo: {{error_summary}}\n\nAcesse Comunicação no Platform para revisar host, porta, TLS, usuário e senha de app:\n{{platform_url}}' },
@@ -10087,6 +10856,10 @@ const EMAIL_TEMPLATE_VARIABLES = [
   'limit_name',
   'usage_count',
   'limit_value',
+  'referral_url',
+  'referral_code',
+  'referral_reward',
+  'referral_credit',
   'period',
   'provider',
   'event_id',
@@ -10709,8 +11482,6 @@ async function notifySupportTicket(ticket, templateKey) {
   const [admin] = ticket.admin_user_id ? await dbRequest('GET', 'admin_users', { select: 'name,email', id: `eq.${ticket.admin_user_id}`, limit: '1' }).catch(() => []) : [];
   const to = cleanEmail(admin?.email || company?.billing_email || '');
   if (!to) return;
-  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === templateKey);
-  if (!template?.is_active) return;
   const variables = {
     store_name: '',
     company_name: company?.name || '',
@@ -10721,11 +11492,10 @@ async function notifySupportTicket(ticket, templateKey) {
     payment_url: absolutePanelUrl('/?tab=plan'),
     support_url: absolutePanelUrl('/?tab=support')
   };
-  await sendPlatformEmail({
+  await sendPlatformTemplateEmail({
     to,
     templateKey,
-    subject: renderEmailTemplate(template.subject, variables),
-    body: renderEmailTemplate(template.body, variables)
+    variables
   });
 }
 
@@ -10740,8 +11510,6 @@ async function notifyPlatformSupportActivity(ticket = {}, templateKey, options =
     : ticket.store_id
       ? await dbRequest('GET', 'stores', { select: 'name,slug', id: `eq.${ticket.store_id}`, limit: '1' }).catch(() => [])
       : [];
-  const template = (await listPlatformEmailTemplates()).templates.find((entry) => entry.template_key === templateKey);
-  if (!template?.is_active) return;
   const baseUrl = publicAppBaseUrl(options.req || { headers: {} });
   const variables = {
     company_name: company?.name || 'Cliente sem empresa',
@@ -10753,11 +11521,10 @@ async function notifyPlatformSupportActivity(ticket = {}, templateKey, options =
     support_url: platformBaseUrl(),
     platform_url: platformBaseUrl()
   };
-  await sendPlatformEmail({
+  await sendPlatformTemplateEmail({
     to: PLATFORM_SYSTEM_EMAIL_RECIPIENT,
     templateKey,
-    subject: renderEmailTemplate(template.subject, variables),
-    body: renderEmailTemplate(template.body, variables)
+    variables
   });
 }
 
@@ -10834,6 +11601,7 @@ async function platformConfigChecklist() {
     configItem('https', 'HTTPS ativo em produção', !production || /^https:\/\//i.test(appUrl), production ? 'Obrigatório em produção' : 'Ambiente não produção'),
     configItem('jwt_secret', 'Secrets de sessão não padrão', hasStrongSessionSecret(), hasStrongSessionSecret() ? 'Configurado' : 'Configure SESSION_SECRET/COOKIE_SECRET'),
     configItem('cookie_secret', 'COOKIE_SECRET/SESSION_SECRET configurado', Boolean(process.env.COOKIE_SECRET || process.env.SESSION_SECRET), 'Não exibe segredo'),
+    configItem('payment_secrets_key', 'Criptografia das credenciais de pagamento', Boolean(process.env.PAYMENT_SECRETS_KEY), 'Configure PAYMENT_SECRETS_KEY e não altere depois de salvar credenciais'),
     configItem('cookie_secure', 'COOKIE_SECURE correto para produção', !production || COOKIE_SECURE === true, String(COOKIE_SECURE)),
     configItem('abacate_api', 'Abacate Pay configurado', Boolean(billing?.is_active && billing?.has_api_key), billing?.has_api_key ? `Configurado (${billing.source})` : 'Ausente'),
     configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(billing?.has_webhook_secret), billing?.has_webhook_secret ? `Configurado (${billing.source})` : 'Ausente'),
@@ -12802,7 +13570,7 @@ async function updateIntegrationSettings(data, storeId, options = {}) {
   const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const nextSettings = mergeIntegrationSettings(current.integration_settings || {}, data.integration_settings || data);
   const payload = {
-    integration_settings: nextSettings
+    integration_settings: protectIntegrationSettings(nextSettings)
   };
 
   if (current.id) {
@@ -13124,13 +13892,6 @@ async function createOrder(req, data, options = {}) {
   await recordUsageByStore(storeId, 'orders', 'orders', { entity_type: 'order', entity_id: order.id });
   const itemsWithOrder = orderItems.map((item) => ({ ...item, order_id: order.id, store_id: storeId }));
   await db('POST', 'order_items', {}, itemsWithOrder, ['Prefer: return=representation']);
-  if (coupon) {
-    await db('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
-      used_count: Number(coupon.used_count || 0) + 1
-    }, ['Prefer: return=minimal']);
-    clearAdminPromotionsCache();
-  }
-
   const whatsappMessage = buildWhatsappMessage(store, order, itemsWithOrder, customer, address);
   const [updatedOrder] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     whatsapp_message: whatsappMessage
@@ -13146,6 +13907,14 @@ async function createOrder(req, data, options = {}) {
     finalOrder = payment.order;
   }
   const hasOnlinePayment = isOnlinePaymentMethod(paymentMethod);
+  // O cupom só é consumido depois que uma tentativa online foi criada com sucesso.
+  // Pedidos offline continuam consumindo-o imediatamente.
+  if (coupon) {
+    await db('PATCH', 'promotions', { id: `eq.${coupon.id}` }, {
+      used_count: Number(coupon.used_count || 0) + 1
+    }, ['Prefer: return=minimal']);
+    clearAdminPromotionsCache();
+  }
   if (!hasOnlinePayment) {
     await sendOrderStatusWhatsapp(order.id, 'new', { manual: false, db, tenant: options.tenant }).catch(() => null);
   }
@@ -13578,6 +14347,9 @@ function rateLimitRule(method, pathname) {
   if (method === 'POST' && pathname === '/api/portal/recover-password') return limitRule('admin-recover', 5, 30 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/portal/resend-activation') return limitRule('activation-resend', 3, 15 * 60 * 1000);
   if (method === 'POST' && pathname === '/api/orders') return limitRule('order-create', 20, 10 * 60 * 1000);
+  if (method === 'GET' && pathname === '/api/payments/order') return limitRule('payment-status', 120, 10 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/payments/regenerate-pix') return limitRule('payment-regenerate', 5, 15 * 60 * 1000);
+  if (method === 'POST' && pathname === '/api/payments/webhook') return limitRule('payment-webhook', 300, 60 * 1000);
   if (method === 'POST' && pathname === '/api/admin/setup') return limitRule('admin-setup', 3, 120 * 1000);
   if (method === 'POST' && pathname === '/api/portal/signup') return limitRule('portal-signup', 5, 120 * 1000);
   if (method === 'POST' && pathname === '/api/admin/uploads') return limitRule('admin-upload', 30, 10 * 60 * 1000);
@@ -14097,8 +14869,29 @@ async function createPixPayment(order, options = {}) {
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
   await assertPublicUsageLimitByStore(order.store_id, 'payment_transactions', 'payment_transactions');
   const expiresAt = new Date(Date.now() + integrations.pix.expirationMinutes * 60000).toISOString();
-  const providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations });
-  const transactionId = providerPayment.transactionId || `pix_${order.public_code}_${Date.now()}`;
+  let attempt = await findRetryablePaymentAttempt(order, db);
+  if (attempt) {
+    attempt = await updatePaymentAttempt(attempt.id, {
+      status: 'created', failure_code: null, failure_message: null, expires_at: expiresAt
+    }, db);
+  } else {
+    await supersedePendingPaymentAttempts(order.id, db);
+    attempt = await createPaymentAttempt(order, expiresAt, db);
+  }
+  let providerPayment;
+  try {
+    providerPayment = await createProviderPayment({ store, order, type: 'pix', integrations, idempotencyKey: attempt.idempotency_key });
+  } catch (error) {
+    await updatePaymentAttempt(attempt.id, {
+      status: 'failed',
+      failure_code: cleanText(error.code || error.status || 'provider_error'),
+      failure_message: cleanText(error.message || 'Falha ao criar pagamento.')
+    }, db).catch(() => null);
+    await db('PATCH', 'orders', { id: `eq.${order.id}` }, { financial_status: 'failed' }, ['Prefer: return=minimal']).catch(() => null);
+    throw error;
+  }
+  const transactionId = cleanExternalId(providerPayment.transactionId || '');
+  if (!transactionId) throw httpError(502, 'A Abacate Pay não retornou o identificador do pagamento.');
   const pixCode = providerPayment.pixCode || (providerPayment.checkoutUrl ? '' : buildMockPixCode(store, order, transactionId));
   const pixQrUrl = providerPayment.pixQrUrl || (pixCode
     ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`
@@ -14115,10 +14908,59 @@ async function createPixPayment(order, options = {}) {
       checkout_url: providerPayment.checkoutUrl || null
     }
   }, ['Prefer: return=representation']);
+  await updatePaymentAttempt(attempt.id, {
+    status: 'pending',
+    transaction_id: transactionId,
+    checkout_url: providerPayment.checkoutUrl || null
+  }, db);
   await registerPaymentTransactionIndex(updated, integrations.pix.provider, transactionId, options);
   clearAdminOrdersCache(order.store_id);
   await recordUsageByStore(order.store_id, 'payment_transactions', 'payment_transactions', { entity_type: 'order', entity_id: order.id });
   return { order: updated, pix: publicPaymentPayload(updated) };
+}
+
+async function createPaymentAttempt(order, expiresAt, db = dbRequest) {
+  const idempotencyKey = `order:${order.id}:pix:${randomUUID()}`;
+  const [attempt] = await db('POST', 'payment_attempts', {}, {
+    store_id: order.store_id || null,
+    order_id: order.id,
+    provider: 'abacatepay',
+    idempotency_key: idempotencyKey,
+    status: 'created',
+    amount_cents: moneyCents(order.total),
+    currency: 'BRL',
+    expires_at: expiresAt,
+    metadata: { order_code: order.public_code }
+  }, ['Prefer: return=representation']);
+  return attempt;
+}
+
+async function findRetryablePaymentAttempt(order, db = dbRequest) {
+  const attempts = await db('GET', 'payment_attempts', {
+    select: '*',
+    order_id: `eq.${cleanUuid(order.id)}`,
+    provider: 'eq.abacatepay',
+    status: 'eq.failed',
+    transaction_id: 'is.null',
+    created_at: `gte.${new Date(Date.now() - 5 * 60000).toISOString()}`,
+    order: 'created_at.desc',
+    limit: '1'
+  });
+  const attempt = attempts[0];
+  if (!attempt || !['502', '504', 'provider_error'].includes(String(attempt.failure_code || ''))) return null;
+  return Number(attempt.amount_cents) === moneyCents(order.total) ? attempt : null;
+}
+
+async function updatePaymentAttempt(id, patch, db = dbRequest) {
+  const [attempt] = await db('PATCH', 'payment_attempts', { id: `eq.${cleanUuid(id)}` }, patch, ['Prefer: return=representation']);
+  return attempt || null;
+}
+
+async function supersedePendingPaymentAttempts(orderId, db = dbRequest) {
+  await db('PATCH', 'payment_attempts', {
+    order_id: `eq.${cleanUuid(orderId)}`,
+    status: 'in.(created,pending)'
+  }, { status: 'superseded' }, ['Prefer: return=minimal']);
 }
 
 async function createCardPayment(order, options = {}) {
@@ -14198,20 +15040,13 @@ async function getCentralStoreRef(storeId) {
   return store || null;
 }
 
-async function createProviderPayment({ store, order, type, integrations }) {
+async function createProviderPayment({ store, order, type, integrations, idempotencyKey }) {
   const provider = type === 'card' ? integrations.card.provider : integrations.pix.provider;
-  if (provider === 'abacatepay') return createAbacatePayPayment({ store, order, type, integrations });
-  if (provider === 'mercadopago') return createMercadoPagoPayment({ store, order, type, integrations });
-  if (provider === 'asaas') return createAsaasPayment({ store, order, type, integrations });
-  if (provider === 'efi') return createEfiPixPayment({ store, order, integrations });
-  return {
-    transactionId: `${provider}_${type}_${order.public_code}_${Date.now()}`,
-    pixCode: type === 'pix' ? buildMockPixCode(store, order, `${provider}_${Date.now()}`) : '',
-    checkoutUrl: null
-  };
+  if (provider !== 'abacatepay') throw httpError(422, 'Gateway de pagamento não suportado. Configure a Abacate Pay.');
+  return createAbacatePayPayment({ store, order, type, integrations, idempotencyKey });
 }
 
-async function createAbacatePayPayment({ store, order, type, integrations }) {
+async function createAbacatePayPayment({ store, order, type, integrations, idempotencyKey }) {
   const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
   if (!token) throw httpError(422, 'Configure a chave da Abacate Pay.');
   if (isMaskedSecretValue(token)) {
@@ -14221,19 +15056,22 @@ async function createAbacatePayPayment({ store, order, type, integrations }) {
   const amount = moneyCents(order.total);
 
   if (type === 'pix') {
-    return createAbacateOrderCheckout({ store, order, token, amount, methods: ['PIX'], customer });
+    return createAbacateOrderCheckout({ store, order, token, amount, methods: ['PIX'], customer, idempotencyKey });
   }
 
   return createAbacateOrderCheckout({ store, order, token, amount, methods: ['CARD'], customer });
 }
 
-async function createAbacateOrderCheckout({ store, order, token, amount, methods, customer }) {
+async function createAbacateOrderCheckout({ store, order, token, amount, methods, customer, idempotencyKey }) {
   const productId = await ensureAbacateOrderProduct({ store, order, amount, token });
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   const storeSlug = cleanSlug(store.slug || '');
   const paymentPath = `${storeSlug ? `/${storeSlug}` : ''}/pagamento?pedido=${encodeURIComponent(order.public_code)}`;
   const fallbackUrl = origin ? `${origin}${paymentPath}` : '';
-  const externalId = cleanExternalId(`tapronto-order-${order.public_code}-${Date.now()}`);
+  const externalSuffix = idempotencyKey
+    ? createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 20)
+    : createHash('sha256').update(`${order.id}:${order.public_code}`).digest('hex').slice(0, 20);
+  const externalId = cleanExternalId(`tapronto-order-${order.public_code}-${externalSuffix}`);
   const body = {
     items: [{ id: productId, quantity: 1 }],
     methods,
@@ -14253,7 +15091,8 @@ async function createAbacateOrderCheckout({ store, order, token, amount, methods
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/checkouts/create`, {
     method: 'POST',
     token,
-    body
+    body,
+    idempotencyKey
   });
   const payload = data.data || data;
   const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || '';
@@ -14265,7 +15104,10 @@ async function createAbacateOrderCheckout({ store, order, token, amount, methods
 }
 
 async function ensureAbacateOrderProduct({ store, order, amount, token }) {
-  const externalId = cleanExternalId(`tapronto-order-${order.public_code}-${amount}`);
+  // Reutiliza o produto por loja e valor para não criar um recurso remoto novo
+  // a cada pedido. A identificação do pedido continua no metadata do checkout.
+  const storeKey = cleanExternalId(order.store_id || store.id || store.slug || 'store');
+  const externalId = cleanExternalId(`tapronto-store-${storeKey}-${amount}`);
   const existing = await findAbacateProductByExternalId(externalId, token).catch(() => null);
   if (existing?.id) return String(existing.id);
   const data = await providerFetch(`${ABACATEPAY_API_BASE}/products/create`, {
@@ -14273,8 +15115,8 @@ async function ensureAbacateOrderProduct({ store, order, amount, token }) {
     token,
     body: {
       externalId,
-      name: `Pedido #${order.public_code}`,
-      description: `Pedido realizado em ${store.name || 'Cardápio'}`,
+      name: `Pedido online - ${store.name || 'Cardápio'}`,
+      description: 'Pagamento de pedido realizado pelo TáPronto',
       price: amount,
       currency: 'BRL'
     }
@@ -14369,16 +15211,27 @@ async function createEfiPixPayment({ store, order }) {
   };
 }
 
-async function providerFetch(url, { method = 'GET', token, body } = {}) {
-  const response = await fetch(url, {
+async function providerFetch(url, { method = 'GET', token, body, idempotencyKey, timeoutMs = 7000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), clampInteger(timeoutMs, 1000, 30000));
+  let response;
+  try {
+    response = await fetch(url, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
-      access_token: token,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey, 'X-Idempotency-Key': idempotencyKey } : {})
     },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw httpError(504, 'A Abacate Pay demorou para responder. Tente novamente.');
+    throw httpError(502, 'Não foi possível conectar à Abacate Pay. Tente novamente.');
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await safeResponse(response);
   if (!response.ok) throw httpError(response.status, providerErrorMessage(data), sanitizeProviderErrorDetail(data));
   return data;
@@ -14416,11 +15269,15 @@ async function publicPaymentStatus(code, options = {}) {
   const db = options.db || dbRequest;
   let order = await getOrderByPublicCode(code, options);
   if (!order) throw httpError(404, 'Pedido não encontrado.');
+  const reconciliationKey = `order:${order.id}`;
+  const lastProviderCheck = paymentReconciliationCache.get(reconciliationKey) || 0;
   if (
     order.payment_provider === 'abacatepay'
     && order.payment_transaction_id
     && ['pending', 'failed', 'expired'].includes(sanitizeFinancialStatus(order.financial_status))
+    && Date.now() - lastProviderCheck >= 8000
   ) {
+    paymentReconciliationCache.set(reconciliationKey, Date.now());
     order = await reconcileOrderPaymentWithProvider(order, options).catch((error) => {
       console.warn('Falha ao consultar pagamento na Abacate Pay:', error.message || error);
       return order;
@@ -14449,6 +15306,12 @@ async function reconcileOrderPaymentWithProvider(order, options = {}) {
   if (!expected || expected === current || expected === 'pending') return order;
 
   const amount = roundMoney(Number.parseFloat(providerStatus.amount || order.total) || 0);
+  if (expected === 'paid' && moneyCents(amount) !== moneyCents(order.total)) {
+    await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
+      reconciliation_status: 'divergent', reconciled_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']);
+    return { ...order, reconciliation_status: 'divergent' };
+  }
   const eventId = cleanExternalId(providerStatus.provider_event_id || `reconcile_${order.payment_provider}_${order.payment_transaction_id}_${expected}`);
   if (eventId) {
     const existing = await db('GET', 'order_payment_events', {
@@ -14503,6 +15366,10 @@ async function regeneratePixPayment(data, options = {}) {
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   if (order.status === 'cancelled') throw httpError(422, 'Pedido cancelado não aceita pagamento.');
   if (order.financial_status === 'paid') throw httpError(422, 'Pedido já pago.');
+  const recentAttempts = await (options.db || dbRequest)('GET', 'payment_attempts', {
+    select: 'id', order_id: `eq.${order.id}`, created_at: `gte.${new Date(Date.now() - 15 * 60000).toISOString()}`, limit: '6'
+  });
+  if (recentAttempts.length >= 5) throw httpError(429, 'Limite de regenerações atingido. Aguarde alguns minutos.');
   const payment = await createPixPayment(order, options);
   return { order: publicPaymentOrder(payment.order), payment: payment.pix };
 }
@@ -14531,22 +15398,52 @@ async function receivePaymentWebhook(data, options = {}) {
   let order = transactionId
     ? (await db('GET', 'orders', { select: '*', payment_transaction_id: `eq.${transactionId}`, limit: '1' }))[0]
     : null;
+  if (!order && webhookContext.index?.order_id) {
+    [order] = await db('GET', 'orders', { select: '*', id: `eq.${webhookContext.index.order_id}`, limit: '1' });
+  }
   if (!order && normalized.orderCode) {
     order = await getOrderByPublicCode(normalized.orderCode, webhookContext);
   }
   if (!order) throw httpError(404, 'Pedido do pagamento não encontrado.');
-  if (order.status === 'cancelled' && status === 'paid') throw httpError(422, 'Pedido cancelado não pode receber pagamento.');
-  const amount = roundMoney(Number.parseFloat(normalized.amount || order.total) || 0);
-  await db('POST', 'order_payment_events', {}, {
-    order_id: order.id,
-    store_id: order.store_id || webhookContext.storeId || null,
-    provider,
-    provider_event_id: eventId,
-    transaction_id: transactionId || order.payment_transaction_id,
-    financial_status: status,
-    amount,
-    raw_payload: data
-  }, ['Prefer: return=minimal']);
+  const amount = roundMoney(Number.parseFloat(normalized.amount) || 0);
+  const amountMatches = moneyCents(amount) === moneyCents(order.total);
+  const lateCancelledPayment = order.status === 'cancelled' && status === 'paid';
+  try {
+    await db('POST', 'order_payment_events', {}, {
+      order_id: order.id,
+      store_id: order.store_id || webhookContext.storeId || null,
+      provider,
+      provider_event_id: eventId,
+      transaction_id: transactionId || order.payment_transaction_id,
+      financial_status: status,
+      amount,
+      raw_payload: sanitizeAuditPayload(data)
+    }, ['Prefer: return=minimal']);
+  } catch (error) {
+    if (String(error.code || error.detail?.code || '').includes('23505') || /duplicate|unique/i.test(String(error.message || ''))) {
+      return { ok: true, duplicate: true };
+    }
+    throw error;
+  }
+  if (status === 'paid' && (!amountMatches || lateCancelledPayment)) {
+    await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
+      reconciliation_status: 'divergent',
+      reconciled_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']);
+    if (transactionId) {
+      await db('PATCH', 'payment_attempts', {
+        provider: 'eq.abacatepay', transaction_id: `eq.${transactionId}`
+      }, {
+        status: 'review_required',
+        failure_code: lateCancelledPayment ? 'late_cancelled_payment' : 'amount_mismatch',
+        failure_message: lateCancelledPayment
+          ? 'Pagamento recebido depois do cancelamento do pedido.'
+          : `Valor recebido ${amount.toFixed(2)} difere do esperado ${moneyNumber(order.total).toFixed(2)}.`
+      }, ['Prefer: return=minimal']).catch(() => null);
+    }
+    clearAdminOrdersCache(order.store_id);
+    return { ok: true, review_required: true };
+  }
   const patch = {
     financial_status: status,
     payment_provider: provider,
@@ -14556,6 +15453,11 @@ async function receivePaymentWebhook(data, options = {}) {
     ...(status === 'paid' && isOnlinePaymentMethod(order.payment_method) ? { status: 'new' } : {})
   };
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, patch, ['Prefer: return=representation']);
+  if (transactionId) {
+    await db('PATCH', 'payment_attempts', {
+      provider: 'eq.abacatepay', transaction_id: `eq.${transactionId}`
+    }, { status }, ['Prefer: return=minimal']).catch(() => null);
+  }
   await updatePaymentTransactionIndexStatus(webhookContext.index, status, amount);
   if (status === 'paid' && updated?.id) {
     await sendOrderStatusWhatsapp(updated.id, 'new', { manual: false, db, tenant: webhookContext.tenant }).catch(() => null);
@@ -14594,77 +15496,43 @@ async function resolvePaymentWebhookContext(normalized) {
 }
 
 async function assertPaymentWebhookSecret(provider, incomingSecret, context = {}) {
-  if (provider !== 'abacatepay') return;
+  if (provider !== 'abacatepay') throw httpError(422, 'Gateway de webhook não suportado.');
   const store = await getStoreSettings(context.storeId, context);
   const settings = sanitizeIntegrationSettings(store.integration_settings || {});
   const expected = settings.pix.webhookSecret;
-  if (!expected) return;
-  if (!incomingSecret || incomingSecret !== expected) {
+  if (!expected) throw httpError(503, 'Configure o segredo do webhook da Abacate Pay antes de receber pagamentos.');
+  if (!incomingSecret || !safeSecretEquals(incomingSecret, expected)) {
     throw httpError(401, 'Webhook da Abacate Pay não autorizado.');
   }
 }
 
 async function normalizeProviderWebhook(data) {
-  const provider = cleanProvider(data.provider || inferWebhookProvider(data) || 'mock');
+  const provider = cleanProvider(data.provider || inferWebhookProvider(data) || '');
   if (provider === 'abacatepay') {
     const payload = data.data || data.payment || data.pixQrCode || data.billing || data;
+    const eventIdentity = payload.id
+      ? `${payload.id}_${data.event || payload.status || data.status || 'updated'}`
+      : webhookPayloadHash(data);
     return {
       provider,
-      eventId: cleanExternalId(data.id || data.eventId || data.event || payload.id || `abacatepay_${Date.now()}`),
+      eventId: cleanExternalId(data.id || data.eventId || eventIdentity),
       transactionId: cleanExternalId(payload.id || data.paymentId || data.transaction_id || ''),
       orderCode: abacatePayOrderCodeFromPayload(payload, data),
       status: abacatePayStatusToFinancial(payload.status || data.status || data.event),
       amount: centsToMoney(payload.amount || payload.value || data.amount || data.value)
     };
   }
-  if (provider === 'mercadopago') {
-    const paymentId = cleanExternalId(data.data?.id || data.id || data.resource || data.transaction_id || '');
-    let detail = data.payment || data;
-    const store = await getStoreSettings();
-    const settings = sanitizeIntegrationSettings(store.integration_settings || {});
-    const token = settings.pix.apiKey || settings.card.apiKey;
-    if (paymentId && token && !data.payment) {
-      detail = await providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { token }).catch(() => detail);
-    }
-    return {
-      provider,
-      eventId: cleanExternalId(data.id || data.action || paymentId || `mp_${Date.now()}`),
-      transactionId: cleanExternalId(detail.id || paymentId),
-      orderCode: cleanPublicCode(detail.external_reference || data.external_reference || ''),
-      status: mercadoPagoStatusToFinancial(detail.status || data.status),
-      amount: detail.transaction_amount || data.amount
-    };
-  }
-  if (provider === 'asaas') {
-    const payment = data.payment || data;
-    return {
-      provider,
-      eventId: cleanExternalId(data.id || data.event || payment.id || `asaas_${Date.now()}`),
-      transactionId: cleanExternalId(payment.id || data.paymentId || ''),
-      orderCode: cleanPublicCode(payment.externalReference || data.externalReference || ''),
-      status: asaasStatusToFinancial(payment.status || data.status || data.event),
-      amount: payment.value || data.value || data.amount
-    };
-  }
-  if (provider === 'efi') {
-    const pix = Array.isArray(data.pix) ? data.pix[0] : data.pix || data;
-    return {
-      provider,
-      eventId: cleanExternalId(pix.endToEndId || pix.txid || data.id || `efi_${Date.now()}`),
-      transactionId: cleanExternalId(pix.txid || data.txid || ''),
-      orderCode: cleanPublicCode(data.order_code || data.code || pix.txid || ''),
-      status: 'paid',
-      amount: pix.valor || data.valor || data.amount
-    };
-  }
-  return {
-    provider,
-    eventId: cleanExternalId(data.event_id || data.id || `${provider}_${Date.now()}`),
-    transactionId: cleanExternalId(data.transaction_id || data.payment_transaction_id || ''),
-    orderCode: cleanPublicCode(data.order_code || data.code || ''),
-    status: sanitizeFinancialStatus(data.status || data.financial_status || 'paid'),
-    amount: data.amount
-  };
+  throw httpError(422, 'Webhook de gateway não suportado.');
+}
+
+function webhookPayloadHash(data) {
+  return `payload_${createHash('sha256').update(JSON.stringify(data || {})).digest('hex').slice(0, 40)}`;
+}
+
+function safeSecretEquals(incoming, expected) {
+  const left = Buffer.from(String(incoming || ''));
+  const right = Buffer.from(String(expected || ''));
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
 }
 
 function abacatePayOrderCodeFromPayload(payload = {}, data = {}) {
@@ -14759,14 +15627,41 @@ async function refundOrderPayment(orderId, data = {}, options = {}) {
   if (!order) throw httpError(404, 'Pedido não encontrado.');
   if (order.financial_status !== 'paid') throw httpError(422, 'Apenas pedidos pagos podem ser estornados.');
   const amount = roundMoney(Number.parseFloat(data.amount || order.paid_amount || order.total) || 0);
+  if (amount <= 0 || moneyCents(amount) > moneyCents(order.paid_amount || order.total)) {
+    throw httpError(422, 'Valor de estorno inválido.');
+  }
   const store = await getStoreSettings(order.store_id, options);
   const integrations = sanitizeIntegrationSettings(store.integration_settings || {});
-  await refundProviderPayment(order, amount, integrations);
+  const idempotencyKey = `refund:${order.id}:${moneyCents(amount)}:${randomUUID()}`;
+  const [refund] = await db('POST', 'payment_refunds', {}, {
+    store_id: order.store_id || null,
+    order_id: order.id,
+    provider: 'abacatepay',
+    idempotency_key: idempotencyKey,
+    status: 'requested',
+    amount_cents: moneyCents(amount),
+    reason: cleanText(data.reason || 'Estorno manual')
+  }, ['Prefer: return=representation']);
+  let providerRefund;
+  try {
+    providerRefund = await refundProviderPayment(order, amount, integrations, idempotencyKey);
+  } catch (error) {
+    await db('PATCH', 'payment_refunds', { id: `eq.${refund.id}` }, {
+      status: 'failed', failure_message: cleanText(error.message || 'Falha no estorno.')
+    }, ['Prefer: return=minimal']).catch(() => null);
+    throw error;
+  }
   const [updated] = await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
     financial_status: 'refunded',
     refunded_amount: amount,
     refunded_at: new Date().toISOString()
   }, ['Prefer: return=representation']);
+  await db('PATCH', 'payment_refunds', { id: `eq.${refund.id}` }, {
+    status: 'succeeded',
+    provider_refund_id: cleanExternalId(providerRefund?.data?.id || providerRefund?.id || '') || null,
+    completed_at: new Date().toISOString(),
+    metadata: sanitizeAuditPayload(providerRefund || {})
+  }, ['Prefer: return=minimal']);
   await db('POST', 'order_payment_events', {}, {
     order_id: order.id,
     provider: order.payment_provider || 'manual',
@@ -14780,8 +15675,8 @@ async function refundOrderPayment(orderId, data = {}, options = {}) {
   return updated;
 }
 
-async function refundProviderPayment(order, amount, integrations) {
-  if (!order.payment_provider || order.payment_provider === 'mock') return { ok: true };
+async function refundProviderPayment(order, amount, integrations, idempotencyKey) {
+  if (order.payment_provider !== 'abacatepay') throw httpError(422, 'Este pagamento não pertence à Abacate Pay e não pode ser estornado automaticamente.');
   if (order.payment_provider === 'abacatepay') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;
     if (!token) throw httpError(422, 'Chave da Abacate Pay não configurada.');
@@ -14789,30 +15684,13 @@ async function refundProviderPayment(order, amount, integrations) {
     return providerFetch(`https://api.abacatepay.com/v1/${endpoint}`, {
       method: 'POST',
       token,
-      body: { id: order.payment_transaction_id, amount: moneyCents(amount) }
+      body: { id: order.payment_transaction_id, amount: moneyCents(amount) },
+      idempotencyKey
     }).catch((error) => {
       throw httpError(error.status || 422, 'Estorno automático não disponível para este pagamento na Abacate Pay. Faça o estorno no painel do provedor e depois concilie o pedido.', error.detail);
     });
   }
-  if (order.payment_provider === 'mercadopago') {
-    const token = integrations.pix.apiKey || integrations.card.apiKey;
-    if (!token) throw httpError(422, 'Chave do Mercado Pago não configurada.');
-    return providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(order.payment_transaction_id)}/refunds`, {
-      method: 'POST',
-      token,
-      body: { amount }
-    });
-  }
-  if (order.payment_provider === 'asaas') {
-    const token = integrations.pix.apiKey || integrations.card.apiKey;
-    if (!token) throw httpError(422, 'Chave do Asaas não configurada.');
-    return providerFetch(`https://www.asaas.com/api/v3/payments/${encodeURIComponent(order.payment_transaction_id)}/refund`, {
-      method: 'POST',
-      token,
-      body: { value: amount }
-    });
-  }
-  return { ok: true };
+  throw httpError(422, 'Estorno não suportado para este pagamento.');
 }
 
 async function reconcileOnlinePayments(data = {}, options = {}) {
@@ -14837,8 +15715,7 @@ async function reconcileOnlinePayments(data = {}, options = {}) {
     const isMatch = expected === order.financial_status;
     await db('PATCH', 'orders', { id: `eq.${order.id}` }, {
       reconciliation_status: isMatch ? 'matched' : 'divergent',
-      reconciled_at: new Date().toISOString(),
-      ...(isMatch ? {} : { financial_status: expected })
+      reconciled_at: new Date().toISOString()
     }, ['Prefer: return=minimal']);
     if (isMatch) matched += 1;
     else divergent += 1;
@@ -16056,8 +16933,8 @@ function sanitizeIntegrationSettings(value) {
     pix: {
       enabled: Boolean(pix.enabled),
       provider: pix.enabled === false ? defaults.pix.provider : 'abacatepay',
-      apiKey: cleanText(pix.apiKey || '').slice(0, 500),
-      webhookSecret: cleanText(pix.webhookSecret || '').slice(0, 500),
+      apiKey: cleanText(revealPaymentSecret(pix.apiKey || '')).slice(0, 500),
+      webhookSecret: cleanText(revealPaymentSecret(pix.webhookSecret || '')).slice(0, 500),
       expirationMinutes: clampInteger(pix.expirationMinutes || defaults.pix.expirationMinutes, 5, 120)
     },
     card: {
@@ -16076,6 +16953,52 @@ function sanitizeIntegrationSettings(value) {
       days: clampInteger(reconciliation.days || defaults.reconciliation.days, 1, 30)
     }
   };
+}
+
+function protectIntegrationSettings(settings) {
+  const next = structuredClone(settings || defaultIntegrationSettings());
+  if (next.pix?.enabled && !paymentSecretsKey()) {
+    throw httpError(503, 'Configure PAYMENT_SECRETS_KEY no servidor antes de salvar credenciais de pagamento.');
+  }
+  if (next.pix?.enabled && (!next.pix.apiKey || !next.pix.webhookSecret)) {
+    throw httpError(422, 'Para ativar o Pix online, informe a API key e o segredo do webhook da Abacate Pay.');
+  }
+  if (next.pix) {
+    next.pix.apiKey = protectPaymentSecret(next.pix.apiKey || '');
+    next.pix.webhookSecret = protectPaymentSecret(next.pix.webhookSecret || '');
+  }
+  return next;
+}
+
+function paymentSecretsKey() {
+  const secret = String(process.env.PAYMENT_SECRETS_KEY || '').trim();
+  return secret ? createHash('sha256').update(secret).digest() : null;
+}
+
+function protectPaymentSecret(value) {
+  const plain = String(value || '');
+  if (!plain || plain.startsWith('enc:v1:')) return plain;
+  const key = paymentSecretsKey();
+  if (!key) return plain;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return `enc:v1:${iv.toString('base64url')}:${cipher.getAuthTag().toString('base64url')}:${encrypted.toString('base64url')}`;
+}
+
+function revealPaymentSecret(value) {
+  const stored = String(value || '');
+  if (!stored.startsWith('enc:v1:')) return stored;
+  const key = paymentSecretsKey();
+  if (!key) throw httpError(503, 'PAYMENT_SECRETS_KEY ausente ou inválida para ler as credenciais de pagamento.');
+  try {
+    const [, , ivValue, tagValue, encryptedValue] = stored.split(':');
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivValue, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(encryptedValue, 'base64url')), decipher.final()]).toString('utf8');
+  } catch {
+    throw httpError(503, 'Não foi possível descriptografar as credenciais de pagamento. Verifique PAYMENT_SECRETS_KEY.');
+  }
 }
 
 function mergeIntegrationSettings(currentValue, nextValue) {
@@ -17135,7 +18058,7 @@ function sanitizeErrorDetailForLog(detail) {
 }
 
 function createPublicCode() {
-  return Math.random().toString(36).slice(2, 6).toUpperCase() + Date.now().toString(36).slice(-4).toUpperCase();
+  return randomBytes(6).toString('base64url').replace(/[^A-Z0-9]/gi, '').slice(0, 10).toUpperCase();
 }
 
 function cleanText(value) {
@@ -17180,6 +18103,16 @@ function cleanProvider(value) {
   return ['abacatepay', 'mercadopago', 'asaas', 'efi', 'mock'].includes(provider) ? provider : 'mock';
 }
 
+function cleanPlanCode(value) {
+  return String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 80);
+}
+
 function cleanExternalId(value) {
   return cleanText(value).replace(/[^a-zA-Z0-9._:-]/g, '').slice(0, 180);
 }
@@ -17194,6 +18127,14 @@ function cleanSlug(value) {
     .replace(/\b([a-z0-9])[\s._-]+(?=[a-z0-9]\b)/g, '$1')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
+    .slice(0, 80);
+}
+
+function cleanAddonCode(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '')
     .slice(0, 80);
 }
 

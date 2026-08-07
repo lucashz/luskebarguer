@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Painel - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
-    <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
+    <link rel="stylesheet" href="/styles.css?v=20260805-self-config-plan-cta">
   </head>
   <body class="admin-page">
     <main class="admin-layout auth-only" id="adminLayout">
@@ -24,6 +24,7 @@
           <button data-admin-tab="store" type="button">Configurações da Loja</button>
           <button data-admin-tab="integrations" type="button">Integrações</button>
           <button data-admin-tab="plan" type="button">Plano</button>
+          <button data-admin-tab="referrals" type="button">Indicações</button>
           <button data-admin-tab="support" type="button">Suporte</button>
           <button data-admin-tab="account" type="button">Conta e Usuários</button>
         </nav>
@@ -324,6 +325,20 @@
               <article><span>Status</span><strong id="operationMetricStatus">-</strong></article>
             </section>
 
+            <section class="panel admin-readiness-panel" id="adminReadinessPanel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Guia rápido</p>
+                  <h2>Checklist da loja</h2>
+                  <p class="muted">Veja o que falta para deixar sua loja pronta para vender sem depender de tentativa e erro.</p>
+                </div>
+                <button class="ghost-button compact" type="button" data-open-support-context="checklist">Preciso de ajuda</button>
+              </div>
+              <div class="admin-readiness-list" id="adminReadinessList">
+                <p class="empty-state">Carregando checklist...</p>
+              </div>
+            </section>
+
             <section class="dashboard-grid" id="operationDashboard">
               <article class="dashboard-card">
                 <span>Faturamento hoje</span>
@@ -521,7 +536,10 @@
                       <h2>Adicionais por produto</h2>
                       <p>Escolha um produto e configure perguntas, respostas e valores extras.</p>
                     </div>
-                    <button class="ghost-button compact" id="refreshModifiersButton" type="button">Atualizar</button>
+                    <div class="row-actions">
+                      <button class="ghost-button compact" type="button" data-open-support-context="menu">Preciso de ajuda</button>
+                      <button class="ghost-button compact" id="refreshModifiersButton" type="button">Atualizar</button>
+                    </div>
                   </div>
 
                   <label class="modifier-product-picker">
@@ -982,126 +1000,129 @@
             <form id="integrationsForm" class="panel store-editor">
               <div class="store-editor-head">
                 <div>
-                  <p class="eyebrow">Credenciais e automações</p>
                   <h2>Integrações</h2>
-                  <p>Configure WhatsApp automático e Pix online com Abacate Pay. As credenciais ficam protegidas no servidor.</p>
+                  <p>Acompanhe as conexões e configurações da sua loja.</p>
                 </div>
                 <div class="row-actions">
-                  <button class="ghost-button compact" type="button" data-open-support-context="integrations">Preciso de ajuda</button>
-                  <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar integrações</button>
-                  <button class="primary-button compact" type="submit">Salvar integrações</button>
+                  <button class="ghost-button compact" type="button" data-open-support-context="integrations">Ajuda</button>
+                  <button class="ghost-button compact" id="testIntegrationsButton" type="button">Testar</button>
+                  <button class="primary-button compact" type="submit">Salvar</button>
                 </div>
               </div>
 
+              <section class="integration-setup-banner" id="integrationSetupBanner" hidden>
+                <div>
+                  <span class="integration-setup-banner-icon" aria-hidden="true">!</span>
+                  <div>
+                    <strong id="integrationSetupBannerTitle">Configurações pendentes</strong>
+                    <p id="integrationSetupBannerMessage"></p>
+                    <div class="integration-setup-banner-offers" id="integrationSetupBannerOffers"></div>
+                  </div>
+                </div>
+                <button class="primary-button compact" id="requestIntegrationSetupButton" type="button">Solicitar configuração</button>
+              </section>
+
+              <p class="sr-only" id="integrationStatusText" aria-live="polite"></p>
               <div class="integration-settings-grid">
-                <section class="integration-card">
-                  <div class="whatsapp-connect-head">
-                    <div>
-                      <p class="eyebrow">WhatsApp automático</p>
-                      <strong>Conectar WhatsApp da loja</strong>
-                      <p>Escaneie um QR Code com o celular da loja. Cada loja conecta o próprio número, sem precisar entender a parte técnica.</p>
+                <section class="integration-card integration-card-whatsapp">
+                  <div class="integration-card-head">
+                    <span class="integration-brand-icon whatsapp" aria-hidden="true">WA</span>
+                    <div class="integration-card-title">
+                      <strong>WhatsApp automático</strong>
+                      <p>Receba avisos de novos pedidos no WhatsApp.</p>
                     </div>
-                    <span class="status-pill" id="whatsappAutoStatus">Não conectado</span>
+                    <span class="status-pill" id="whatsappAutoStatus">Carregando...</span>
                   </div>
-                  <div class="whatsapp-qr-box" id="whatsappQrBox" hidden>
-                    <img id="whatsappQrImage" alt="QR Code para conectar o WhatsApp da loja">
-                    <div>
-                      <strong>Como conectar</strong>
-                      <ol>
-                        <li>Abra o WhatsApp no celular da loja.</li>
-                        <li>Toque em Configurações ou nos três pontinhos.</li>
-                        <li>Entre em Aparelhos conectados e toque em Conectar aparelho.</li>
-                        <li>Aponte para este QR Code.</li>
-                      </ol>
+                  <div class="integration-card-body">
+                    <p class="integration-state-message" id="whatsappAutoMessage">Verificando a situação da integração.</p>
+                    <div class="whatsapp-upgrade-guide integration-addon-offer" id="whatsappUpgradeGuide" hidden>
+                      <div>
+                        <strong>WhatsApp automático não está no seu plano</strong>
+                        <p>Contrate o adicional e conecte o número da loja pelo QR Code.</p>
+                      </div>
+                      <div class="whatsapp-upgrade-options">
+                        <article id="whatsappAddonOption" hidden>
+                          <span>Adicional mensal</span>
+                          <strong>WhatsApp automático</strong>
+                          <p>Ative sem trocar o plano atual.</p>
+                          <button class="primary-button compact" id="checkoutWhatsappAddonButton" type="button">Contratar adicional</button>
+                        </article>
+                        <article id="whatsappPremiumOption">
+                          <span>Plano completo</span>
+                          <strong>Disponível no Premium</strong>
+                          <p>Tenha o recurso incluso junto com os demais benefícios.</p>
+                          <button class="ghost-button compact" id="checkoutWhatsappIncludedPlanButton" type="button">Ver plano completo</button>
+                        </article>
+                      </div>
                     </div>
-                  </div>
-                  <p class="muted" id="whatsappAutoMessage">Clique em conectar para iniciar.</p>
-                  <div class="whatsapp-upgrade-guide" id="whatsappUpgradeGuide" hidden>
-                    <div>
-                      <p class="eyebrow">Liberar WhatsApp automático</p>
-                      <strong>Escolha como quer ativar esse recurso</strong>
-                      <p>Você pode contratar apenas o adicional quando seu plano permitir, ou mudar para o plano que já inclui tudo.</p>
-                    </div>
-                    <div class="whatsapp-upgrade-options">
-                      <article id="whatsappAddonOption" hidden>
-                        <span>Opção econômica</span>
-                        <strong>Adicionar WhatsApp automático</strong>
-                        <p>Ideal para manter seu plano atual e liberar a conexão por QR Code.</p>
-                        <button class="primary-button compact" id="checkoutWhatsappAddonButton" type="button">Contratar adicional</button>
-                      </article>
-                      <article id="whatsappPremiumOption">
-                        <span>Plano completo</span>
-                        <strong>Ir para o Premium</strong>
-                        <p>Inclui WhatsApp automático, recursos avançados e suporte prioritário.</p>
-                        <button class="ghost-button compact" id="checkoutWhatsappIncludedPlanButton" type="button">Ver plano completo</button>
-                      </article>
-                    </div>
-                  </div>
-                  <div class="row-actions">
-                    <button class="primary-button compact" id="connectWhatsappButton" type="button">Conectar WhatsApp</button>
-                    <button class="ghost-button compact" id="requestWhatsappSetupButton" type="button" hidden>Solicitar ajuda da TáPronto</button>
-                    <button class="ghost-button compact" id="refreshWhatsappQrButton" type="button">Atualizar QR Code</button>
-                    <button class="ghost-button compact" id="testWhatsappButton" type="button">Enviar teste para minha loja</button>
-                    <button class="ghost-button compact" type="button" data-integration-help="whatsapp-auto">Como funciona?</button>
-                    <button class="danger-button compact" id="disconnectWhatsappButton" type="button">Desconectar</button>
+                    <details class="integration-self-config">
+                      <summary>Configurar por conta própria <span aria-hidden="true">+</span></summary>
+                      <div class="integration-self-config-content">
+                        <p class="muted">Conecte o número da loja escaneando o QR Code.</p>
+                        <div class="whatsapp-qr-box" id="whatsappQrBox" hidden>
+                          <img id="whatsappQrImage" alt="QR Code para conectar o WhatsApp da loja">
+                          <div><strong>Abra o WhatsApp</strong><p>Vá em Aparelhos conectados, toque em Conectar aparelho e escaneie o código.</p></div>
+                        </div>
+                        <div class="row-actions">
+                          <button class="primary-button compact" id="connectWhatsappButton" type="button">Conectar WhatsApp</button>
+                          <button class="ghost-button compact" id="refreshWhatsappQrButton" type="button">Atualizar QR</button>
+                          <button class="ghost-button compact" id="testWhatsappButton" type="button">Enviar teste</button>
+                          <button class="danger-button compact" id="disconnectWhatsappButton" type="button">Desconectar</button>
+                        </div>
+                      </div>
+                    </details>
                   </div>
                 </section>
 
-                <section class="integration-card">
-                  <div>
-                    <p class="eyebrow">Pagamento online</p>
-                    <strong>Abacate Pay</strong>
-                    <p>Gera Pix copia e cola, QR Code e recebe confirmação automática pelo webhook.</p>
+                <section class="integration-card integration-card-pix">
+                  <div class="integration-card-head">
+                    <span class="integration-brand-icon pix" aria-hidden="true">PIX</span>
+                    <div class="integration-card-title">
+                      <strong>Pix com Abacate Pay</strong>
+                      <p>Receba pagamentos online antes de aceitar o pedido.</p>
+                    </div>
+                    <span class="status-pill integration-local-status" id="pixIntegrationStatus">Carregando...</span>
                   </div>
-                  <div class="integration-assisted-box">
-                    <div>
-                      <div class="integration-assisted-title">
-                        <strong>Configuração assistida</strong>
-                        <span class="status-pill" id="paymentSetupStatus">Carregando...</span>
+                  <div class="integration-card-body">
+                    <p class="integration-state-message" id="paymentSetupMessage">Verificando a situação da integração.</p>
+                    <details class="integration-self-config" id="pixAdvancedConfig">
+                      <summary>Configurar por conta própria <span aria-hidden="true">+</span></summary>
+                      <div class="integration-self-config-content">
+                        <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
+                        <input name="integration_pix_provider" type="hidden" value="abacatepay">
+                        <label>API key da Abacate Pay
+                          <input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Cole a API key">
+                        </label>
+                        <label>Segredo do webhook
+                          <input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Obrigatório para confirmar pagamentos">
+                        </label>
+                        <label>Expiração do Pix (min)
+                          <input name="integration_pix_expirationMinutes" type="number" min="5" max="120" value="15">
+                        </label>
+                        <div class="integration-webhook-url">
+                          <span>URL para cadastrar no webhook</span>
+                          <code id="abacateWebhookUrl">/api/payments/webhook?provider=abacatepay</code>
+                        </div>
+                        <div class="integration-help-actions">
+                          <button class="ghost-button compact" type="button" data-integration-help="abacate-key">Onde pego a API key?</button>
+                          <button class="ghost-button compact" type="button" data-integration-help="abacate-webhook">Como configurar o webhook?</button>
+                        </div>
                       </div>
-                      <p id="paymentSetupMessage">Você pode configurar sozinho pelos campos abaixo ou contratar a equipe TáPronto para fazer junto com você.</p>
-                    </div>
-                    <div class="row-actions">
-                      <button class="primary-button compact" id="checkoutPaymentSetupButton" type="button" hidden>Contratar configuração</button>
-                      <button class="ghost-button compact" id="requestPaymentSetupButton" type="button">Solicitar configuração</button>
-                    </div>
-                  </div>
-                  <div class="integration-flow-note">
-                    <strong>Fluxo do Pix online</strong>
-                    <span>Cliente paga no checkout seguro, o pedido é liberado após confirmação e a loja recebe o aviso automaticamente.</span>
-                  </div>
-                  <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
-                  <input name="integration_pix_provider" type="hidden" value="abacatepay">
-                  <label>API key da Abacate Pay
-                    <input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Cole a API key">
-                  </label>
-                  <label>Segredo do webhook
-                    <input name="integration_pix_webhookSecret" type="password" autocomplete="new-password" placeholder="Opcional, mas recomendado">
-                  </label>
-                  <label>Expiração do Pix (min)<input name="integration_pix_expirationMinutes" type="number" min="5" max="120" value="15"></label>
-                  <div class="integration-help-actions">
-                    <button class="ghost-button compact" type="button" data-integration-help="abacate-key">Onde pego a API key?</button>
-                    <button class="ghost-button compact" type="button" data-integration-help="abacate-webhook">Como configuro o webhook?</button>
-                  </div>
-                  <div class="integration-webhook-url">
-                    <span>URL para cadastrar no webhook</span>
-                    <code id="abacateWebhookUrl">/api/payments/webhook?provider=abacatepay</code>
+                    </details>
                   </div>
                 </section>
               </div>
-              <p class="muted integration-status-text" id="integrationStatusText">Configure e salve para ativar as integrações.</p>
             </form>
           </section>
 
           <section class="admin-section" data-admin-section="plan">
             <div class="section-actions">
               <div>
-                <p class="eyebrow">Assinatura</p>
                 <h2>Meu plano</h2>
-                <p class="muted">Acompanhe recursos liberados, status comercial e uso da loja atual.</p>
+                <p class="muted">Assinatura, uso e cobrança da sua loja.</p>
               </div>
               <div class="row-actions">
-                <button class="ghost-button compact" type="button" data-open-support-context="plan">Preciso de ajuda</button>
+                <button class="ghost-button compact" type="button" data-open-support-context="plan">Ajuda</button>
                 <button class="ghost-button compact" id="refreshPlanButton" type="button">Atualizar</button>
               </div>
             </div>
@@ -1114,61 +1135,105 @@
             <section id="planBilling" hidden></section>
             <section id="planRenewal" hidden></section>
 
-            <section class="panel" id="planUsage">
-              <p class="empty-state">Carregando uso...</p>
-            </section>
+            <details class="panel plan-clean-details" open>
+              <summary>
+                <span><strong>Uso e limites</strong><small>Acompanhe o consumo do plano</small></span>
+                <span aria-hidden="true">+</span>
+              </summary>
+              <div class="plan-clean-content" id="planUsage"><p class="empty-state">Carregando uso...</p></div>
+            </details>
 
-            <section class="panel plan-services-panel">
-              <div class="section-actions">
-                <div>
-                  <p class="eyebrow">Serviços assistidos</p>
-                  <h2>Configurações feitas com a equipe TáPronto</h2>
-                  <p class="muted">Contrate ajuda pontual para acelerar implantação, WhatsApp, Pix online e treinamento.</p>
-                </div>
-              </div>
-              <div class="assisted-services-grid" id="planServices">
+            <details class="panel plan-clean-details plan-services-panel">
+              <summary>
+                <span><strong>Adicionais e serviços</strong><small>Recursos opcionais para sua loja</small></span>
+                <span aria-hidden="true">+</span>
+              </summary>
+              <div class="plan-clean-content" id="planServices">
                 <p class="empty-state">Carregando serviços...</p>
               </div>
-            </section>
+            </details>
 
-            <section class="panel plan-features-panel">
-              <div class="section-actions">
-                <div>
-                  <p class="eyebrow">Recursos</p>
-                  <h2>O que está incluso</h2>
-                  <p class="muted">Principais recursos liberados para a operação da loja.</p>
-                </div>
-              </div>
-              <div class="feature-list compact" id="planFeatures">
+            <details class="panel plan-clean-details plan-features-panel">
+              <summary>
+                <span><strong>Recursos incluídos</strong><small>Veja o que está disponível no seu plano</small></span>
+                <span aria-hidden="true">+</span>
+              </summary>
+              <div class="plan-clean-content feature-list compact" id="planFeatures">
                 <p class="empty-state">Nenhum recurso carregado.</p>
               </div>
-            </section>
+            </details>
 
-            <details class="panel plan-compare-details">
+            <details class="panel plan-clean-details plan-compare-details">
               <summary>
-                <span>
-                  <span class="eyebrow">Comparar</span>
-                  <strong>Comparar planos</strong>
-                </span>
-                <span>Ver opções</span>
+                <span><strong>Comparar planos</strong><small>Conheça outras opções</small></span>
+                <span aria-hidden="true">+</span>
               </summary>
-              <div class="plan-compare-grid" id="planCompare">
+              <div class="plan-clean-content plan-compare-grid" id="planCompare">
                 <p class="empty-state">Carregando planos...</p>
               </div>
             </details>
 
-            <section class="panel">
-              <div class="section-actions">
-                <div>
-                  <p class="eyebrow">Histórico</p>
-                  <h2>Histórico de cobrança</h2>
-                </div>
-              </div>
-              <div class="plan-history" id="planHistory">
+            <details class="panel plan-clean-details">
+              <summary>
+                <span><strong>Histórico de cobrança</strong><small>Pagamentos e alterações recentes</small></span>
+                <span aria-hidden="true">+</span>
+              </summary>
+              <div class="plan-clean-content plan-history" id="planHistory">
                 <p class="empty-state">Nenhum evento carregado.</p>
               </div>
-            </section>
+            </details>
 
+          </section>
+
+          <section class="admin-section" data-admin-section="referrals">
+            <section class="panel referral-panel">
+              <div class="section-actions">
+                <div>
+                  <p class="eyebrow">Crescimento</p>
+                  <h2>Indique o TáPronto</h2>
+                  <p class="muted">Compartilhe seu link com outros estabelecimentos e acompanhe suas recompensas.</p>
+                </div>
+                <div class="row-actions">
+                  <button class="ghost-button compact" id="refreshReferralsButton" type="button">Atualizar</button>
+                  <button class="primary-button compact" id="copyReferralLinkButton" type="button">Copiar link</button>
+                </div>
+              </div>
+
+              <div class="referral-hero">
+                <div>
+                  <span class="referral-badge">Programa de indicação</span>
+                  <h3>Ganhe crédito quando sua indicação contratar.</h3>
+                  <p>O link leva direto para o cadastro. A recompensa é liberada quando a loja indicada pagar o primeiro plano.</p>
+                </div>
+                <div class="referral-link-card">
+                  <small>Seu link</small>
+                  <code id="referralLinkText">Carregando...</code>
+                </div>
+              </div>
+
+              <div class="referral-stats-grid" id="referralStats">
+                <p class="empty-state">Carregando indicações...</p>
+              </div>
+
+              <div class="referral-rules">
+                <strong>Como funciona</strong>
+                <ul id="referralRules">
+                  <li>Convide outro restaurante pelo seu link.</li>
+                  <li>Acompanhe o cadastro e o pagamento no painel.</li>
+                  <li>Use os créditos liberados para abater cobranças futuras.</li>
+                </ul>
+              </div>
+
+              <div class="section-actions compact">
+                <div>
+                  <p class="eyebrow">Histórico</p>
+                  <h3>Indicações recentes</h3>
+                </div>
+              </div>
+              <div class="referral-list" id="referralList">
+                <p class="empty-state">Nenhuma indicação carregada.</p>
+              </div>
+            </section>
           </section>
 
           <section class="admin-section" data-admin-section="support">
@@ -1534,7 +1599,7 @@
       </section>
     </main>
 
-    <script src="/admin.js?v=20260727-evolution-whatsapp" type="module"></script>
+    <script src="/admin.js?v=20260805-setup-prices-visible" type="module"></script>
   </body>
 </html>
 
