@@ -18082,6 +18082,10 @@ function sendSeoLandingPage(req, res, page) {
     sendSeoGuidesHubPage(req, res, page);
     return;
   }
+  if (page.slug.startsWith('guias/')) {
+    sendSeoGuideArticlePage(req, res, page);
+    return;
+  }
   const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
   const canonical = `${origin}/${page.slug}`;
   const structured = {
@@ -18125,6 +18129,59 @@ function sendSeoLandingPage(req, res, page) {
   </main>
   <footer class="home-container seo-section"><strong>TáPronto</strong><p>Cardápio digital e pedidos organizados para restaurantes.</p><nav><a href="/">Início</a> · <a href="/planos">Planos</a> · <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos</a></nav></footer>
   <script src="/seo-landing.js" type="module"></script>
+</body></html>`;
+  seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
+}
+
+function sendSeoGuideArticlePage(req, res, page) {
+  const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
+  const canonical = `${origin}/${page.slug}`;
+  const article = page.article || { sections: [], category: 'Guia prático', readTime: '5 min', author: 'Equipe TáPronto', updatedAt: '11 de agosto de 2026', takeaway: '' };
+  const sections = Array.isArray(article.sections) ? article.sections : [];
+  const related = seoLandingPages.filter((entry) => entry.slug.startsWith('guias/') && entry.slug !== page.slug).slice(0, 3);
+  const structured = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      { '@type': 'Article', headline: page.heading, description: page.description, url: canonical, inLanguage: 'pt-BR', dateModified: '2026-08-11', author: { '@type': 'Organization', name: 'TáPronto', url: origin }, publisher: { '@type': 'Organization', name: 'TáPronto', url: origin } },
+      { '@type': 'BreadcrumbList', itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Início', item: `${origin}/` },
+        { '@type': 'ListItem', position: 2, name: 'Guias', item: `${origin}/guias` },
+        { '@type': 'ListItem', position: 3, name: page.heading, item: canonical }
+      ] },
+      { '@type': 'FAQPage', mainEntity: page.faq.map(([question, answer]) => ({ '@type': 'Question', name: question, acceptedAnswer: { '@type': 'Answer', text: answer } })) }
+    ]
+  };
+  const renderSection = (section, index) => {
+    const id = cleanSlug(section.title) || `passo-${index + 1}`;
+    const paragraphs = (section.paragraphs || []).map((text) => `<p>${emailEscapeHtml(text)}</p>`).join('');
+    const bullets = section.bullets?.length ? `<ul class="article-list">${section.bullets.map((text) => `<li><span aria-hidden="true">✓</span>${emailEscapeHtml(text)}</li>`).join('')}</ul>` : '';
+    const checklist = section.checklist?.length ? `<div class="article-checklist"><strong>Confira antes de continuar</strong>${section.checklist.map((text) => `<span><i aria-hidden="true"></i>${emailEscapeHtml(text)}</span>`).join('')}</div>` : '';
+    const example = section.example ? `<div class="article-example"><strong>Exemplo prático</strong><div><span class="example-bad">Evite</span><p>${emailEscapeHtml(section.example.bad)}</p></div><div><span class="example-good">Prefira</span><p>${emailEscapeHtml(section.example.good)}</p></div></div>` : '';
+    const middleCta = index === 2 ? `<aside class="article-inline-cta"><div><small>Quer montar enquanto aprende?</small><strong>Cadastre os três produtos mais vendidos e teste pelo celular.</strong></div><a href="/cadastro">Começar grátis →</a></aside>` : '';
+    return `<section class="article-section" id="${emailEscapeAttribute(id)}"><span class="article-step">${String(index + 1).padStart(2, '0')}</span><h2>${emailEscapeHtml(section.title)}</h2>${paragraphs}${bullets}${example}${checklist}</section>${middleCta}`;
+  };
+  const html = `<!doctype html>
+<html lang="pt-BR"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${emailEscapeHtml(page.title)}</title>
+  <meta name="description" content="${emailEscapeAttribute(page.description)}"><link rel="canonical" href="${emailEscapeAttribute(canonical)}">
+  <meta property="og:type" content="article"><meta property="og:title" content="${emailEscapeAttribute(page.title)}"><meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}"><meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css"><script type="application/ld+json">${safeJsonForHtml(structured)}</script>
+  <style>
+    .article-page{color:#172033;background:#fff}.article-page *{box-sizing:border-box}.article-nav{border-bottom:1px solid #edf0f3;background:#fff}.article-breadcrumb{display:flex;gap:8px;align-items:center;padding-top:30px;color:#858c9b;font-size:.86rem}.article-breadcrumb a{color:#667085;text-decoration:none}.article-hero{max-width:900px;padding:52px 0 38px}.article-category{display:inline-flex;padding:7px 11px;border-radius:999px;background:#fff1f1;color:#d31820;font-size:.74rem;font-weight:850;letter-spacing:.07em;text-transform:uppercase}.article-hero h1{font-size:clamp(2.5rem,6vw,5rem);line-height:1.02;letter-spacing:-.045em;margin:17px 0 20px}.article-lead{font-size:1.18rem;line-height:1.72;color:#596277;max-width:760px}.article-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:#858c9b;font-size:.86rem;margin-top:24px}.article-visual{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:30px;border-radius:26px;background:linear-gradient(140deg,#ed1c24,#a8070d);color:#fff;box-shadow:0 24px 60px #9c08152b}.article-visual-card{padding:22px;border-radius:18px;background:#fff;color:#172033;box-shadow:0 12px 30px #59000622}.article-visual-card>span{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#fff0f1;color:#d31820;font-weight:900}.article-visual-card strong{display:block;margin:14px 0 6px}.article-visual-card small{color:#667085;line-height:1.45}.article-layout{display:grid;grid-template-columns:240px minmax(0,720px);gap:70px;align-items:start;padding:68px 0}.article-toc{position:sticky;top:24px;padding:20px;border:1px solid #e7e9ee;border-radius:17px}.article-toc strong{display:block;margin-bottom:13px}.article-toc a{display:block;padding:8px 0;color:#667085;text-decoration:none;font-size:.86rem;line-height:1.35;border-bottom:1px solid #f0f1f3}.article-toc a:last-child{border:0}.article-summary{padding:24px;border-left:4px solid #ed1c24;border-radius:0 15px 15px 0;background:#fff5f5;margin-bottom:52px}.article-summary strong{display:block;margin-bottom:8px}.article-summary p{margin:0;color:#596277;line-height:1.65}.article-section{scroll-margin-top:25px;margin-bottom:56px}.article-step{font-size:.75rem;font-weight:900;letter-spacing:.1em;color:#d31820}.article-section h2{font-size:clamp(1.7rem,3vw,2.35rem);line-height:1.15;margin:8px 0 18px}.article-section>p{font-size:1.03rem;line-height:1.78;color:#4f596d;margin:0 0 15px}.article-list{display:grid;gap:9px;padding:0;margin:22px 0;list-style:none}.article-list li{display:flex;gap:10px;align-items:flex-start;padding:13px 15px;border-radius:12px;background:#f7f8fa}.article-list li span{color:#159455;font-weight:900}.article-checklist{display:grid;gap:10px;padding:22px;border-radius:16px;background:#f7f8fa;margin-top:22px}.article-checklist strong{margin-bottom:4px}.article-checklist span{display:flex;gap:10px;color:#4f596d}.article-checklist i{width:18px;height:18px;border:2px solid #c8cdd7;border-radius:5px;background:#fff}.article-example{display:grid;gap:12px;padding:22px;border:1px solid #e7e9ee;border-radius:16px;margin-top:22px}.article-example>strong{font-size:1.05rem}.article-example>div{display:grid;grid-template-columns:60px 1fr;gap:10px;align-items:start}.article-example p{margin:0;color:#4f596d}.example-bad,.example-good{font-size:.7rem;font-weight:850;text-transform:uppercase}.example-bad{color:#c73b42}.example-good{color:#15834d}.article-inline-cta{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px;border-radius:17px;background:#1d2433;color:#fff;margin:-15px 0 55px}.article-inline-cta div{display:grid;gap:5px}.article-inline-cta small{color:#c9ced8}.article-inline-cta a{white-space:nowrap;color:#fff;text-decoration:none;font-weight:850}.article-faq{padding:55px 0;border-top:1px solid #edf0f3}.article-faq h2,.article-related h2{font-size:2rem}.article-faq details{padding:18px 0;border-bottom:1px solid #e7e9ee}.article-faq summary{font-weight:800;cursor:pointer}.article-faq p{color:#596277;line-height:1.65}.article-related{padding:55px 0;background:#f7f8fa}.article-related-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.article-related a{display:flex;flex-direction:column;gap:10px;padding:22px;border:1px solid #e3e6eb;border-radius:16px;background:#fff;color:#172033;text-decoration:none}.article-related small{color:#d31820;font-weight:800;text-transform:uppercase}.article-final{padding:70px 0}.article-final-box{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:42px;border-radius:24px;background:#fff1f1}.article-final h2{margin:0 0 8px;font-size:2rem}.article-final p{margin:0;color:#596277}.article-footer{border-top:1px solid #edf0f3;padding:34px 0}.article-footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.article-footer a{color:#667085;text-decoration:none;margin-left:15px}
+    @media(max-width:850px){.article-layout{grid-template-columns:1fr;gap:30px}.article-toc{position:static}.article-visual{grid-template-columns:1fr}.article-related-grid{grid-template-columns:1fr}.article-final-box{display:block}.article-final .home-button{margin-top:22px}.home-nav{display:none}}
+    @media(max-width:560px){.article-hero{padding:40px 0 30px}.article-layout{padding:45px 0}.article-visual{padding:18px}.article-inline-cta{display:block}.article-inline-cta a{display:inline-block;margin-top:16px}.article-final-box{padding:28px}}
+  </style>
+</head><body class="article-page">
+  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav"><a href="/guias">Guias</a><a href="/cardapio-digital">Cardápio digital</a><a href="/sistema-de-pedidos-online">Pedidos</a><a href="/planos">Planos</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Testar grátis</a></div></div></header>
+  <main>
+    <div class="home-container article-breadcrumb"><a href="/">Início</a><span>/</span><a href="/guias">Guias</a><span>/</span><span>${emailEscapeHtml(article.category)}</span></div>
+    <section class="home-container article-hero"><span class="article-category">${emailEscapeHtml(article.category)}</span><h1>${emailEscapeHtml(page.heading)}</h1><p class="article-lead">${emailEscapeHtml(page.intro)}</p><div class="article-meta"><span>${emailEscapeHtml(article.author)}</span><span>•</span><span>Atualizado em ${emailEscapeHtml(article.updatedAt)}</span><span>•</span><span>${emailEscapeHtml(article.readTime)} de leitura</span></div></section>
+    <section class="home-container article-visual" role="img" aria-label="Principais etapas deste guia">${sections.slice(0, 3).map((section, index) => `<div class="article-visual-card"><span>${index + 1}</span><strong>${emailEscapeHtml(section.title)}</strong><small>${emailEscapeHtml((section.paragraphs?.[0] || section.bullets?.[0] || '').slice(0, 105))}</small></div>`).join('')}</section>
+    <div class="home-container article-layout"><aside class="article-toc"><strong>Neste guia</strong>${sections.map((section, index) => `<a href="#${emailEscapeAttribute(cleanSlug(section.title) || `passo-${index + 1}`)}">${index + 1}. ${emailEscapeHtml(section.title)}</a>`).join('')}</aside><article><div class="article-summary"><strong>Resumo rápido</strong><p>${emailEscapeHtml(article.takeaway)}</p></div>${sections.map(renderSection).join('')}</article></div>
+    <section class="article-faq"><div class="home-container" style="max-width:760px"><span class="article-category">Dúvidas comuns</span><h2>Perguntas frequentes</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</div></section>
+    <section class="article-related"><div class="home-container"><span class="article-category">Continue aprendendo</span><h2>Guias relacionados</h2><div class="article-related-grid">${related.map((entry) => `<a href="/${entry.slug}"><small>${emailEscapeHtml(entry.article?.category || 'Guia prático')}</small><strong>${emailEscapeHtml(entry.heading)}</strong><span>Ler guia →</span></a>`).join('')}</div></div></section>
+    <section class="home-container article-final"><div class="article-final-box"><div><h2>Monte o cardápio da sua loja</h2><p>Comece pelos produtos mais vendidos e teste o pedido antes de divulgar.</p></div><a class="home-button" href="/cadastro">Criar meu cardápio</a></div></section>
+  </main><footer class="article-footer"><div class="home-container article-footer-row"><strong>TáPronto · Cardápio digital, pedidos organizados.</strong><nav><a href="/guias">Guias</a><a href="/planos">Planos</a><a href="/privacidade">Privacidade</a><a href="/termos">Termos</a></nav></div></footer><script src="/seo-landing.js" type="module"></script>
 </body></html>`;
   seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
 }

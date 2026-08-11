@@ -21,14 +21,86 @@ export const seoLandingPages = [
 ];
 
 function guide(slug, heading, intro, benefits) {
-  return page(
+  return {
+    ...page(
     `guias/${slug}`,
     `${heading}: guia prático | TáPronto`,
     `${intro} Confira o guia prático do TáPronto para pequenos negócios de alimentação.`,
     heading,
     intro,
     benefits
-  );
+    ),
+    article: guideDetails(slug)
+  };
+}
+
+function guideDetails(slug) {
+  const shared = { updatedAt: '11 de agosto de 2026', author: 'Equipe TáPronto' };
+  const articles = {
+    'como-criar-cardapio-digital': {
+      readTime: '6 min', category: 'Cardápio digital', takeaway: 'Você não precisa cadastrar tudo de uma vez. Comece pelos produtos mais vendidos, teste o pedido pelo celular e melhore o cardápio aos poucos.',
+      sections: [
+        { title: 'O que é um cardápio digital?', paragraphs: ['É uma página da sua loja que abre pelo celular e apresenta produtos, preços, fotos e opções de forma atualizada.', 'Diferente de um PDF ou imagem, um cardápio digital pode organizar adicionais, entrega, retirada e pagamento antes de o pedido chegar para a equipe.'] },
+        { title: 'Separe as informações antes de começar', paragraphs: ['Reúna o que já existe no balcão, no WhatsApp ou no cardápio impresso. Não espere tudo ficar perfeito para iniciar.'], bullets: ['Nome e preço dos produtos', 'Categorias como lanches, pizzas, bebidas e sobremesas', 'Adicionais e observações permitidas', 'Horários, retirada, entrega e bairros atendidos', 'Logo e pelo menos uma boa foto dos campeões de venda'] },
+        { title: 'Crie uma ordem fácil para o cliente', paragraphs: ['A pessoa deve entender rapidamente o que sua loja vende. Use categorias curtas e coloque os itens mais procurados primeiro.'], bullets: ['Destaques ou mais pedidos', 'Categorias principais', 'Combos e complementos', 'Bebidas', 'Sobremesas'] },
+        { title: 'Cadastre produtos com clareza', paragraphs: ['O nome identifica o produto. A descrição deve explicar o que vem nele. Evite repetir frases ou usar nomes que só sua equipe entende.'], example: { bad: 'X-Tudo Especial', good: 'X-Tudo — hambúrguer, queijo, bacon, ovo, presunto, alface e tomate' } },
+        { title: 'Configure adicionais sem confusão', paragraphs: ['Adicionais claros evitam mensagens de confirmação e erros na cozinha. Informe o que é obrigatório, quantas opções podem ser escolhidas e o valor de cada extra.'], bullets: ['Escolha do tamanho', 'Ponto da carne', 'Borda ou sabor', 'Remoção de ingredientes', 'Extras pagos'] },
+        { title: 'Teste como se fosse um cliente', paragraphs: ['Abra o link em outro celular e faça um pedido completo. Confira se a equipe recebe produto, adicionais, endereço, entrega e pagamento corretamente.'], checklist: ['Os preços estão corretos?', 'As fotos carregam rápido?', 'Os adicionais chegam completos?', 'A taxa de entrega está certa?', 'O pedido aparece no painel?'] },
+        { title: 'Publique e divulgue', paragraphs: ['Depois do teste, coloque o link na bio do Instagram, envie pelo WhatsApp e imprima o QR Code para balcão, mesa ou embalagem. O mesmo link continua funcionando quando você atualizar produtos e preços.'] }
+      ]
+    },
+    'como-criar-qr-code-cardapio': {
+      readTime: '5 min', category: 'QR Code e salão', takeaway: 'O QR Code deve abrir um link permanente, ser testado em celulares diferentes e ficar acompanhado de uma instrução clara.',
+      sections: [
+        { title: 'Como funciona o QR Code do cardápio?', paragraphs: ['O cliente aponta a câmera do celular, toca no aviso e abre o cardápio no navegador. Não precisa instalar aplicativo.'] },
+        { title: 'Use um link que não muda', paragraphs: ['O QR Code aponta para o endereço da sua loja. Produtos e preços podem mudar sem ser necessário imprimir outro código.'] },
+        { title: 'Teste antes de imprimir', bullets: ['Leia com Android e iPhone', 'Teste sob luz forte e em ambiente escuro', 'Confirme o funcionamento a uma distância normal', 'Faça um pedido completo pelo link'] },
+        { title: 'Escolha os locais certos', bullets: ['Mesas e balcão', 'Embalagens e sacolas', 'Cartão de visita ou panfleto', 'Vitrine e caixa', 'Posts e destaques do Instagram'] },
+        { title: 'Não deixe o código sozinho', paragraphs: ['Escreva uma instrução como “Aponte a câmera e veja o cardápio”. O cliente precisa entender o que vai acontecer antes de escanear.'], checklist: ['Contraste forte', 'Margem branca ao redor', 'Tamanho suficiente', 'Link correto', 'Instrução visível'] }
+      ]
+    },
+    'como-organizar-pedidos-delivery': {
+      readTime: '7 min', category: 'Pedidos e delivery', takeaway: 'O WhatsApp pode continuar como apoio, mas cada pedido precisa chegar com os mesmos campos e seguir etapas visíveis para toda a equipe.',
+      sections: [
+        { title: 'Onde o pedido costuma se perder?', paragraphs: ['Nos horários de pico, produto, adicional, endereço e pagamento podem ficar espalhados em várias mensagens. O primeiro passo é padronizar o que precisa chegar.'] },
+        { title: 'Defina os dados obrigatórios', bullets: ['Produto e quantidade', 'Adicionais e observações', 'Nome e telefone', 'Entrega ou retirada', 'Endereço e bairro', 'Forma de pagamento'] },
+        { title: 'Crie etapas simples', paragraphs: ['Use poucos status que representem o trabalho real. A equipe deve saber quem precisa agir em cada etapa.'], bullets: ['Novo', 'Aceito', 'Em preparo', 'Pronto', 'Saiu para entrega', 'Concluído ou cancelado'] },
+        { title: 'Configure entrega antes de divulgar', paragraphs: ['Cadastre bairros, taxas, pedido mínimo e horários. Isso evita calcular frete no meio da conversa e reduz surpresa no checkout.'] },
+        { title: 'Faça um pedido teste', checklist: ['Pedido chegou completo?', 'Cozinha viu as observações?', 'Pagamento ficou claro?', 'Taxa e total conferem?', 'Status funcionam para a equipe?'] }
+      ]
+    },
+    'como-tirar-fotos-para-cardapio': {
+      readTime: '5 min', category: 'Fotos e produtos', takeaway: 'Luz natural, fundo simples e enquadramento consistente costumam melhorar mais a foto do que filtros pesados.',
+      sections: [
+        { title: 'Prepare o produto e o ambiente', paragraphs: ['Monte o prato como ele realmente será entregue. Limpe a lente do celular e fotografe perto de uma janela.'] },
+        { title: 'Use luz lateral e fundo simples', bullets: ['Desligue luzes de cores diferentes', 'Evite flash direto', 'Retire objetos que disputam atenção', 'Mantenha o mesmo fundo na sequência'] },
+        { title: 'Escolha um enquadramento consistente', paragraphs: ['Fotografe produtos semelhantes pelo mesmo ângulo. Para hambúrgueres, um ângulo mais baixo mostra as camadas; para pratos, a foto de cima costuma funcionar.'] },
+        { title: 'Edite sem mudar o produto', paragraphs: ['Ajuste claridade, corte e contraste com moderação. A foto deve criar expectativa sem mostrar algo diferente do que o cliente receberá.'] },
+        { title: 'Otimize antes de publicar', checklist: ['Imagem nítida', 'Produto centralizado', 'Cores naturais', 'Mesmo formato', 'Arquivo leve para carregar rápido'] }
+      ]
+    },
+    'como-divulgar-cardapio-digital': {
+      readTime: '6 min', category: 'Marketing da loja', takeaway: 'Divulgar bem é colocar o link no caminho do cliente e repetir a chamada nos momentos em que ele está mais propenso a pedir.',
+      sections: [
+        { title: 'Comece pelos canais que você já tem', bullets: ['Link na bio do Instagram', 'Mensagem de saudação no WhatsApp', 'Perfil da Empresa no Google', 'QR Code em embalagem, mesa e balcão'] },
+        { title: 'Mostre o produto antes do link', paragraphs: ['Uma foto ou vídeo do prato cria vontade. Depois, use uma chamada direta como “Veja o cardápio e faça seu pedido”.'] },
+        { title: 'Publique nos horários certos', paragraphs: ['Observe quando seus clientes costumam pedir. Divulgue antes do almoço, do jantar ou do pico de fim de semana, não apenas quando a loja estiver vazia.'] },
+        { title: 'Use links rastreáveis', paragraphs: ['Links com identificação de origem ajudam a descobrir se os pedidos vieram do Instagram, Google, WhatsApp ou parceiro.'] },
+        { title: 'Repita sem copiar a mesma publicação', checklist: ['Produto diferente', 'Dor diferente', 'Formato diferente', 'Mesmo link correto', 'Uma chamada por peça'] }
+      ]
+    },
+    'como-aumentar-pedidos-restaurante': {
+      readTime: '7 min', category: 'Vendas e operação', takeaway: 'Antes de dar desconto, remova os atritos que impedem o cliente de encontrar, entender e concluir o pedido.',
+      sections: [
+        { title: 'Descubra onde o cliente para', paragraphs: ['Compare visitas ao cardápio, inícios de pedido e pedidos concluídos. A etapa com maior queda merece atenção primeiro.'] },
+        { title: 'Deixe os campeões de venda visíveis', bullets: ['Destaques no topo', 'Fotos claras', 'Descrição objetiva', 'Preço sem surpresa', 'Combos realmente simples'] },
+        { title: 'Reduza escolhas desnecessárias', paragraphs: ['Muitas opções obrigatórias cansam. Peça apenas o que a cozinha precisa para preparar e entregar corretamente.'] },
+        { title: 'Revise entrega e pagamento', paragraphs: ['Taxa desconhecida, bairro ausente ou pagamento confuso interrompem o pedido perto do fim. Teste o checkout regularmente.'] },
+        { title: 'Trabalhe recorrência', paragraphs: ['Facilite para o cliente encontrar novamente o link e repetir a compra. Use embalagem, WhatsApp e redes sociais para manter o canal próprio acessível.'], checklist: ['Cardápio atualizado', 'Loja aberta no horário correto', 'Pedido teste concluído', 'Link visível', 'Métricas acompanhadas'] }
+      ]
+    }
+  };
+  return { ...shared, ...(articles[slug] || { readTime: '5 min', category: 'Guia prático', takeaway: '', sections: [] }) };
 }
 
 function page(slug, title, description, heading, intro, benefits) {

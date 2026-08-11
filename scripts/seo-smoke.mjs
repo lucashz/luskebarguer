@@ -38,6 +38,12 @@ try {
   assert(guidesHub.status === 200, 'Hub de guias nao respondeu 200.');
   assert(guidesHub.body.includes('/guias/como-criar-cardapio-digital'), 'Hub nao aponta para os guias publicados.');
 
+  const guideArticle = await page('/guias/como-criar-cardapio-digital', 'taprontomenu.com.br');
+  assert(guideArticle.status === 200, 'Artigo de guia nao respondeu 200.');
+  assert(guideArticle.body.includes('Neste guia') && guideArticle.body.includes('Resumo rápido'), 'Artigo nao possui estrutura editorial completa.');
+  assert(guideArticle.body.includes('Article') && guideArticle.body.includes('FAQPage'), 'Dados estruturados do artigo incompletos.');
+  assert(!guideArticle.body.includes('class="seo-shot"'), 'Artigo ainda usa a imagem distorcida do template antigo.');
+
   const privatePage = await page('/admin.html', 'app.taprontomenu.com.br');
   assert(/noindex/i.test(privatePage.robots), 'Painel privado nao retorna X-Robots-Tag noindex.');
 
