@@ -29,7 +29,9 @@ Distribuição mensal recomendada:
 
 ## Automações de ciclo de vida
 
-A rotina fica ativa por padrão e roda a cada seis horas. Ela considera apenas empresas com opt-in ativo, seleciona onboarding incompleto após 24 horas e avisos de trial a 5 e 2 dias do fim. Cada disparo recebe chave idempotente e registro em `marketing_automation_runs`, evitando repetição no mesmo dia. Falhas de SMTP ficam registradas para diagnóstico.
+A rotina fica ativa por padrão e roda a cada seis horas. Ela considera apenas empresas com opt-in ativo e trabalha os gatilhos de onboarding incompleto, primeiro produto, publicação, pedido teste, inatividade e avisos de trial a 5 e 2 dias do fim. Existe um limite global de uma mensagem por empresa a cada 48 horas. Cada disparo recebe chave idempotente e registro em `marketing_automation_runs`; falhas de SMTP ficam visíveis na Central para diagnóstico.
+
+O botão **Exportar leads CSV** gera uma planilha compatível com Excel contendo os dados atuais do CRM. Use a exportação para análises e cópias operacionais, sem enviar a lista para serviços sem base legal e controle de acesso.
 
 Para desligar imediatamente, configure `MARKETING_AUTOMATION_ENABLED=false` e reinicie o serviço. Templates e SMTP são administrados em **Comunicação**.
 

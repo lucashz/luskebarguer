@@ -25,6 +25,7 @@ try {
   const pages = await page('/sitemap-pages.xml', 'taprontomenu.com.br');
   assert(pages.body.includes('/cardapio-digital</loc>'), 'Landing principal ausente no sitemap.');
   assert(pages.body.includes('/sistema-de-pedidos-online</loc>'), 'Landing de pedidos ausente no sitemap.');
+  assert(pages.body.includes('/guias</loc>') && pages.body.includes('/guias/como-criar-cardapio-digital</loc>'), 'Hub ou guias ausentes no sitemap.');
   assert(!pages.body.includes('/painel') && !pages.body.includes('/pagamento'), 'Sitemap contem rota privada.');
 
   const landing = await page('/cardapio-digital', 'taprontomenu.com.br');
@@ -32,6 +33,10 @@ try {
   assert(landing.body.includes('<link rel="canonical" href="https://taprontomenu.com.br/cardapio-digital">'), 'Canonical da landing ausente.');
   assert(landing.body.includes('FAQPage') && landing.body.includes('BreadcrumbList'), 'Dados estruturados da landing incompletos.');
   assert(landing.body.includes('<h1>'), 'Landing nao possui H1 renderizado no servidor.');
+
+  const guidesHub = await page('/guias', 'taprontomenu.com.br');
+  assert(guidesHub.status === 200, 'Hub de guias nao respondeu 200.');
+  assert(guidesHub.body.includes('/guias/como-criar-cardapio-digital'), 'Hub nao aponta para os guias publicados.');
 
   const privatePage = await page('/admin.html', 'app.taprontomenu.com.br');
   assert(/noindex/i.test(privatePage.robots), 'Painel privado nao retorna X-Robots-Tag noindex.');

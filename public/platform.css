@@ -3015,4 +3015,5 @@ body.platform-redesign [hidden] {
 .platform-marketing-row > div { display: grid; gap: .25rem; min-width: 0; }
 .platform-marketing-row small, .platform-marketing-row code { color: #667085; overflow-wrap: anywhere; }
 .platform-marketing-row p { margin: 0; }
+.platform-marketing-automation-card { margin-top: 1rem; }
 @media (max-width: 900px) { .platform-marketing-grid { grid-template-columns: 1fr; } .platform-marketing-row { align-items: flex-start; flex-wrap: wrap; } }

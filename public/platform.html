@@ -6,7 +6,7 @@
     <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
-    <link rel="stylesheet" href="/platform.css?v=20260811-marketing">
+    <link rel="stylesheet" href="/platform.css?v=20260811-marketing-v2">
   </head>
   <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
@@ -405,7 +405,7 @@
               <h2>Operação de aquisição</h2>
               <p class="muted">Planeje campanhas, acompanhe leads e aprove conteúdos em um só lugar.</p>
             </div>
-            <button class="ghost-button compact" id="refreshMarketingButton" type="button">Atualizar marketing</button>
+            <div class="row-actions"><button class="ghost-button compact" id="exportMarketingLeadsButton" type="button">Exportar leads CSV</button><button class="ghost-button compact" id="refreshMarketingButton" type="button">Atualizar marketing</button></div>
           </div>
           <section class="platform-kpi-grid" id="platformMarketingSummary"></section>
           <div class="platform-marketing-tabs" role="tablist" aria-label="Marketing">
@@ -447,6 +447,10 @@
             </form>
             <article class="platform-chart-card"><h3>Fila editorial</h3><p class="muted">A publicação sempre exige aprovação humana.</p><div id="marketingContentList"></div></article>
           </section>
+          <article class="platform-chart-card platform-marketing-automation-card">
+            <div class="section-actions"><div><h3>Automações de ciclo de vida</h3><p class="muted">Onboarding, primeiro produto, publicação, pedido teste, inatividade e fim do trial. Limite de um contato por empresa a cada 48 horas.</p></div><span class="status-pill success">Ativas</span></div>
+            <div id="marketingAutomationList"></div>
+          </article>
         </section>
 
         <section class="panel platform-billing-panel" data-platform-section="billing" hidden>
@@ -806,7 +810,7 @@
       </form>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260811-marketing"></script>
+    <script src="/platform.js?v=20260811-marketing-v2"></script>
   </body>
 </html>
 

@@ -198,6 +198,7 @@ const els = {
   openCommunicationFromHealth: document.querySelector('#openCommunicationFromHealth'),
   refreshCommunicationButton: document.querySelector('#refreshCommunicationButton'),
   refreshMarketingButton: document.querySelector('#refreshMarketingButton'),
+  exportMarketingLeadsButton: document.querySelector('#exportMarketingLeadsButton'),
   platformMarketingSummary: document.querySelector('#platformMarketingSummary'),
   marketingCampaignForm: document.querySelector('#marketingCampaignForm'),
   marketingLeadForm: document.querySelector('#marketingLeadForm'),
@@ -205,6 +206,7 @@ const els = {
   marketingCampaignList: document.querySelector('#marketingCampaignList'),
   marketingLeadList: document.querySelector('#marketingLeadList'),
   marketingContentList: document.querySelector('#marketingContentList'),
+  marketingAutomationList: document.querySelector('#marketingAutomationList'),
   marketingTabs: [...document.querySelectorAll('[data-marketing-tab]')],
   marketingPanels: [...document.querySelectorAll('[data-marketing-panel]')],
   platformSmtpForm: document.querySelector('#platformSmtpForm'),
@@ -254,6 +256,7 @@ els.previewLogCleanupButton?.addEventListener('click', previewLogCleanup);
 els.refreshBillingButton?.addEventListener('click', loadBilling);
 els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshMarketingButton?.addEventListener('click', loadMarketing);
+els.exportMarketingLeadsButton?.addEventListener('click', exportMarketingLeadsCsv);
 els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
 els.marketingLeadForm?.addEventListener('submit', submitMarketingLead);
 els.marketingContentForm?.addEventListener('submit', submitMarketingContent);
@@ -800,7 +803,34 @@ function renderMarketing() {
   els.marketingLeadList.innerHTML = leads.length ? leads.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';
   const content = data.content || [];
   els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)}</small><p>${escapeHtml(item.hook || '')}</p></div>${item.status === 'draft' ? `<button class="ghost-button compact" data-marketing-update="content:${item.id}:status:review" type="button">Enviar para revisão</button>` : item.status === 'review' ? `<button class="primary-button compact" data-marketing-update="content:${item.id}:status:approved" type="button">Aprovar</button>` : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
+  const automationRuns = data.automation_runs || [];
+  if (els.marketingAutomationList) els.marketingAutomationList.innerHTML = automationRuns.length ? automationRuns.slice(0, 12).map((run) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(marketingAutomationLabel(run.automation_key))}</strong><small>${escapeHtml(run.status)} · ${formatDateTime(run.executed_at || run.created_at)}</small></div><span class="status-pill ${run.status === 'sent' ? 'success' : run.status === 'failed' ? 'danger' : ''}">${escapeHtml(run.status)}</span></div>`).join('') : '<p class="muted">Nenhum disparo registrado ainda. A rotina verifica os gatilhos a cada seis horas.</p>';
   activateMarketingTab(state.marketingActiveTab);
+}
+
+function marketingAutomationLabel(key = '') {
+  if (key.startsWith('onboarding_incomplete')) return 'Onboarding incompleto';
+  if (key.startsWith('first_product')) return 'Primeiro produto';
+  if (key.startsWith('publish_menu')) return 'Publicação do cardápio';
+  if (key.startsWith('first_order')) return 'Primeiro pedido teste';
+  if (key.startsWith('inactive_store')) return 'Loja sem pedidos recentes';
+  if (key.startsWith('trial_ending')) return 'Fim do período de teste';
+  return key || 'Automação';
+}
+
+function exportMarketingLeadsCsv() {
+  const leads = state.marketing?.leads || [];
+  if (!leads.length) return toast('Não há leads para exportar.');
+  const columns = ['business_name', 'contact_name', 'phone', 'email', 'niche', 'city', 'state', 'origin', 'stage', 'consent', 'next_contact_at', 'loss_reason', 'notes'];
+  const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  const csv = `\uFEFF${columns.join(';')}\n${leads.map((lead) => columns.map((column) => quote(lead[column])).join(';')).join('\n')}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tapronto-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  toast('CRM exportado em CSV.');
 }
 
 async function loadSupportSnapshot() {

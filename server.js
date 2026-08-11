@@ -11207,16 +11207,24 @@ function smtpSend(settings, message, to) {
 
 async function runMarketingLifecycleAutomations() {
   try {
-    const [companies, stores, admins, subscriptions, plans] = await Promise.all([
+    const [companies, stores, admins, subscriptions, plans, products, orders] = await Promise.all([
       dbRequest('GET', 'companies', { select: 'id,name,billing_email,created_at,marketing_opt_in,marketing_unsubscribed_at', marketing_opt_in: 'eq.true', marketing_unsubscribed_at: 'is.null', limit: '1000' }),
-      dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+      dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,onboarding_completed,created_at', limit: '2000' }),
       dbRequest('GET', 'admin_users', { select: 'id,company_id,email,name,role,is_active', is_active: 'eq.true', limit: '2000' }),
       dbRequest('GET', 'company_subscriptions', { select: 'id,company_id,plan_id,status,trial_ends_at,created_at', status: 'eq.trial', limit: '1000' }),
-      dbRequest('GET', 'subscription_plans', { select: 'id,name', limit: '100' })
+      dbRequest('GET', 'subscription_plans', { select: 'id,name', limit: '100' }),
+      dbRequest('GET', 'menu_items', { select: 'id,store_id,created_at', limit: '10000' }),
+      dbRequest('GET', 'orders', { select: 'id,store_id,status,created_at', order: 'created_at.desc', limit: '10000' })
     ]);
     const storeByCompany = new Map(stores.map((store) => [store.company_id, store]));
     const adminByCompany = new Map(admins.map((admin) => [admin.company_id, admin]));
     const planById = new Map(plans.map((plan) => [plan.id, plan]));
+    const productStores = new Set(products.map((item) => item.store_id));
+    const ordersByStore = new Map();
+    for (const order of orders) {
+      if (!ordersByStore.has(order.store_id)) ordersByStore.set(order.store_id, []);
+      ordersByStore.get(order.store_id).push(order);
+    }
     const now = Date.now();
     const candidates = [];
     for (const company of companies) {
@@ -11224,9 +11232,13 @@ async function runMarketingLifecycleAutomations() {
       const recipient = cleanEmail(company.billing_email || adminByCompany.get(company.id)?.email || '');
       if (!recipient) continue;
       const ageHours = (now - new Date(company.created_at).getTime()) / 36e5;
-      if (ageHours >= 24 && (!store || store.is_active !== true)) {
-        candidates.push({ key: 'onboarding_incomplete_d1', template: 'onboarding_incomplete', company, store, recipient, due: 'd1' });
-      }
+      if (ageHours >= 24 && (!store || store.onboarding_completed !== true)) candidates.push({ key: 'onboarding_incomplete_d1', template: 'onboarding_incomplete', company, store, recipient });
+      if (store && ageHours >= 24 && !productStores.has(store.id)) candidates.push({ key: 'first_product_d1', template: 'first_product_reminder', company, store, recipient });
+      if (store && productStores.has(store.id) && store.onboarding_completed !== true && ageHours >= 48) candidates.push({ key: 'publish_menu_d2', template: 'publish_menu_reminder', company, store, recipient });
+      const storeOrders = store ? (ordersByStore.get(store.id) || []) : [];
+      if (store?.onboarding_completed === true && !storeOrders.length && ageHours >= 72) candidates.push({ key: 'first_order_d3', template: 'first_order_reminder', company, store, recipient });
+      const lastOrderAt = storeOrders[0]?.created_at ? new Date(storeOrders[0].created_at).getTime() : 0;
+      if (storeOrders.length && lastOrderAt < now - (7 * 864e5)) candidates.push({ key: `inactive_store:${new Date().toISOString().slice(0, 7)}`, template: 'inactive_store_checkin', company, store, recipient });
     }
     for (const subscription of subscriptions) {
       if (!subscription.trial_ends_at) continue;
@@ -11238,10 +11250,11 @@ async function runMarketingLifecycleAutomations() {
       if (recipient) candidates.push({ key: `trial_ending_d${days}`, template: 'trial_ending', company, store: storeByCompany.get(company.id), recipient, due: String(days), subscription });
     }
     for (const candidate of candidates) {
-      const dateKey = new Date().toISOString().slice(0, 10);
-      const idempotencyKey = `${candidate.key}:${candidate.company.id}:${dateKey}`;
+      const idempotencyKey = `${candidate.key}:${candidate.company.id}`;
       const exists = await dbRequest('GET', 'marketing_automation_runs', { select: 'id', idempotency_key: `eq.${idempotencyKey}`, limit: '1' });
       if (exists[0]) continue;
+      const recentContact = await dbRequest('GET', 'marketing_automation_runs', { select: 'id', company_id: `eq.${candidate.company.id}`, status: 'eq.sent', executed_at: `gte.${new Date(now - (48 * 36e5)).toISOString()}`, limit: '1' });
+      if (recentContact[0]) continue;
       const [run] = await dbRequest('POST', 'marketing_automation_runs', {}, { automation_key: candidate.key, company_id: candidate.company.id, idempotency_key: idempotencyKey, recipient: candidate.recipient, status: 'pending', details: { template: candidate.template } }, ['Prefer: return=representation']);
       try {
         await sendPlatformTemplateEmail({
@@ -11255,7 +11268,9 @@ async function runMarketingLifecycleAutomations() {
             plan_name: planById.get(candidate.subscription?.plan_id)?.name || 'Teste grátis',
             due_date: candidate.subscription?.trial_ends_at ? new Intl.DateTimeFormat('pt-BR').format(new Date(candidate.subscription.trial_ends_at)) : '',
             dashboard_url: absolutePanelUrl('/'),
-            payment_url: absolutePanelUrl('/?tab=plans')
+            payment_url: absolutePanelUrl('/?tab=plans'),
+            support_url: absolutePanelUrl('/?tab=support'),
+            cardapio_url: candidate.store?.slug ? absolutePublicUrl(`/${candidate.store.slug}`) : absolutePublicUrl('/')
           }
         });
         await dbRequest('PATCH', 'marketing_automation_runs', { id: `eq.${run.id}` }, { status: 'sent', executed_at: new Date().toISOString() });
@@ -11375,6 +11390,10 @@ const EMAIL_TEMPLATE_DEFINITIONS = [
   { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada com sucesso.\n\nAcesse o painel para concluir a configuração, cadastrar produtos e publicar seu cardápio:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
   { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao painel da sua loja.\n\nClique no link abaixo para criar uma nova senha:\n{{reset_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não solicitou isso, ignore este e-mail.' },
   { key: 'onboarding_incomplete', name: 'Onboarding incompleto', subject: 'Finalize a configuração da sua loja', body: 'Olá {{company_name}},\n\nSua loja {{store_name}} ainda não está totalmente configurada.\n\nFinalize o onboarding para ajustar horários, pagamentos, entrega e cardápio inicial:\n{{dashboard_url}}\n\nIsso ajuda sua loja a ficar pronta para receber pedidos sem retrabalho.' },
+  { key: 'first_product_reminder', name: 'Primeiro produto pendente', subject: 'Cadastre os primeiros produtos da {{store_name}}', body: 'Olá {{company_name}},\n\nComece pelos três produtos mais vendidos da sua loja. Depois você pode completar o restante com calma.\n\nContinue pelo painel:\n{{dashboard_url}}\n\nSe alguma etapa travar, fale com nosso suporte.' },
+  { key: 'publish_menu_reminder', name: 'Cardápio pronto para publicar', subject: 'Seu cardápio está quase pronto', body: 'Olá {{company_name}},\n\nVocê já começou o cardápio da {{store_name}}. Revise horários, entrega e pagamento para publicar o link.\n\nContinuar configuração:\n{{dashboard_url}}' },
+  { key: 'first_order_reminder', name: 'Primeiro pedido teste', subject: 'Teste o pedido da {{store_name}} pelo celular', body: 'Olá {{company_name}},\n\nSeu cardápio está publicado. Abra o link pelo celular e faça um pedido teste para conferir produtos, adicionais, entrega e pagamento.\n\nCardápio:\n{{cardapio_url}}\n\nAcompanhe pelo painel:\n{{dashboard_url}}' },
+  { key: 'inactive_store_checkin', name: 'Loja sem pedidos recentes', subject: 'Podemos ajudar com a {{store_name}}?', body: 'Olá {{company_name}},\n\nPercebemos que a {{store_name}} está há alguns dias sem novos pedidos no painel. Alguma configuração está dificultando o uso?\n\nRevise a loja pelo painel:\n{{dashboard_url}}\n\nSe precisar, abra um chamado e conte o que aconteceu:\n{{support_url}}' },
   { key: 'store_published', name: 'Loja publicada', subject: 'Seu cardápio já está publicado', body: 'Olá {{company_name}},\n\nBoa notícia: o cardápio da {{store_name}} foi publicado com sucesso.\n\nVocê já pode compartilhar o link com seus clientes:\n{{cardapio_url}}\n\nAcompanhe os pedidos pelo painel:\n{{dashboard_url}}' },
   { key: 'first_order_received', name: 'Primeiro pedido recebido', subject: 'Seu primeiro pedido chegou', body: 'Olá {{company_name}},\n\nA loja {{store_name}} recebeu o primeiro pedido pelo cardápio digital.\n\nPedido: {{order_id}}\nValor: {{order_total}}\n\nAcesse o painel para acompanhar o preparo, entrega e conclusão:\n{{dashboard_url}}' },
   { key: 'trial_ending', name: 'Trial acabando', subject: 'Seu teste grátis termina em breve', body: 'Olá {{company_name}},\n\nSeu período de teste do plano {{plan_name}} termina em {{due_date}}.\n\nPara manter o cardápio ativo e continuar recebendo pedidos, escolha um plano no painel:\n{{payment_url}}' },
@@ -18030,7 +18049,10 @@ function sendSeoLandingPage(req, res, page) {
       })) }
     ]
   };
-  const related = seoLandingPages.filter((entry) => entry.slug !== page.slug).slice(0, 4);
+  const related = seoLandingPages
+    .filter((entry) => entry.slug !== page.slug)
+    .sort((a, b) => page.slug === 'guias' ? Number(b.slug.startsWith('guias/')) - Number(a.slug.startsWith('guias/')) : 0)
+    .slice(0, page.slug === 'guias' ? 12 : 4);
   const html = `<!doctype html>
 <html lang="pt-BR"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
