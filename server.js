@@ -11214,9 +11214,10 @@ function smtpSend(settings, message, to) {
 
 async function runMarketingLifecycleAutomations() {
   try {
-    const [companies, stores, admins, subscriptions, plans, products, orders] = await Promise.all([
+    const [companies, stores, settings, admins, subscriptions, plans, products, orders] = await Promise.all([
       dbRequest('GET', 'companies', { select: 'id,name,billing_email,created_at,marketing_opt_in,marketing_unsubscribed_at', marketing_opt_in: 'eq.true', marketing_unsubscribed_at: 'is.null', limit: '1000' }),
-      dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,onboarding_completed,created_at', limit: '2000' }),
+      dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+      dbRequest('GET', 'store_settings', { select: 'store_id,onboarding_completed', limit: '2000' }),
       dbRequest('GET', 'admin_users', { select: 'id,company_id,email,name,role,is_active', is_active: 'eq.true', limit: '2000' }),
       dbRequest('GET', 'company_subscriptions', { select: 'id,company_id,plan_id,status,trial_ends_at,created_at', status: 'eq.trial', limit: '1000' }),
       dbRequest('GET', 'subscription_plans', { select: 'id,name', limit: '100' }),
@@ -11224,6 +11225,7 @@ async function runMarketingLifecycleAutomations() {
       dbRequest('GET', 'orders', { select: 'id,store_id,status,created_at', order: 'created_at.desc', limit: '10000' })
     ]);
     const storeByCompany = new Map(stores.map((store) => [store.company_id, store]));
+    const settingsByStore = new Map(settings.map((setting) => [setting.store_id, setting]));
     const adminByCompany = new Map(admins.map((admin) => [admin.company_id, admin]));
     const planById = new Map(plans.map((plan) => [plan.id, plan]));
     const productStores = new Set(products.map((item) => item.store_id));
@@ -11236,14 +11238,15 @@ async function runMarketingLifecycleAutomations() {
     const candidates = [];
     for (const company of companies) {
       const store = storeByCompany.get(company.id);
+      const storeSettings = store ? settingsByStore.get(store.id) : null;
       const recipient = cleanEmail(company.billing_email || adminByCompany.get(company.id)?.email || '');
       if (!recipient) continue;
       const ageHours = (now - new Date(company.created_at).getTime()) / 36e5;
-      if (ageHours >= 24 && (!store || store.onboarding_completed !== true)) candidates.push({ key: 'onboarding_incomplete_d1', template: 'onboarding_incomplete', company, store, recipient });
+      if (ageHours >= 24 && (!store || storeSettings?.onboarding_completed !== true)) candidates.push({ key: 'onboarding_incomplete_d1', template: 'onboarding_incomplete', company, store, recipient });
       if (store && ageHours >= 24 && !productStores.has(store.id)) candidates.push({ key: 'first_product_d1', template: 'first_product_reminder', company, store, recipient });
-      if (store && productStores.has(store.id) && store.onboarding_completed !== true && ageHours >= 48) candidates.push({ key: 'publish_menu_d2', template: 'publish_menu_reminder', company, store, recipient });
+      if (store && productStores.has(store.id) && storeSettings?.onboarding_completed !== true && ageHours >= 48) candidates.push({ key: 'publish_menu_d2', template: 'publish_menu_reminder', company, store, recipient });
       const storeOrders = store ? (ordersByStore.get(store.id) || []) : [];
-      if (store?.onboarding_completed === true && !storeOrders.length && ageHours >= 72) candidates.push({ key: 'first_order_d3', template: 'first_order_reminder', company, store, recipient });
+      if (storeSettings?.onboarding_completed === true && !storeOrders.length && ageHours >= 72) candidates.push({ key: 'first_order_d3', template: 'first_order_reminder', company, store, recipient });
       const lastOrderAt = storeOrders[0]?.created_at ? new Date(storeOrders[0].created_at).getTime() : 0;
       if (storeOrders.length && lastOrderAt < now - (7 * 864e5)) candidates.push({ key: `inactive_store:${new Date().toISOString().slice(0, 7)}`, template: 'inactive_store_checkin', company, store, recipient });
     }
