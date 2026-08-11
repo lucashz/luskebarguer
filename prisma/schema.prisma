@@ -156,6 +156,7 @@ model Store {
   description String?
   publicUrl   String?  @map("public_url")
   isActive    Boolean  @default(true) @map("is_active")
+  seoIndexEnabled Boolean @default(false) @map("seo_index_enabled")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -195,6 +196,7 @@ model Store {
   referralRewards      ReferralReward[]
 
   @@index([companyId, isActive, name])
+  @@index([seoIndexEnabled, isActive, updatedAt])
   @@map("stores")
 }
 

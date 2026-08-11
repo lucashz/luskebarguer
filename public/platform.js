@@ -1121,6 +1121,7 @@ function renderAccessMetrics() {
   const access = state.analytics?.access || {};
   const byDevice = access.by_device || [];
   const byPage = access.by_page || [];
+  const byChannel = access.by_channel || [];
   const topStores = access.top_stores || [];
   const maxStoreViews = Math.max(1, ...topStores.map((row) => Number(row.views || 0)));
   const deviceLabel = {
@@ -1166,6 +1167,12 @@ function renderAccessMetrics() {
         ${(byDevice.length ? byDevice : []).slice(0, 5).map((row) => `
           <p><span>${escapeHtml(deviceLabel[row.device_type] || row.device_type || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
         `).join('') || '<p class="empty-state">Sem dispositivos registrados.</p>'}
+      </section>
+      <section>
+        <h4>Por canal</h4>
+        ${(byChannel.length ? byChannel : []).slice(0, 5).map((row) => `
+          <p><span>${escapeHtml(row.channel || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
+        `).join('') || '<p class="empty-state">Sem canais registrados.</p>'}
       </section>
     </div>
     <div class="platform-access-ranking">

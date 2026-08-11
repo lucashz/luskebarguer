@@ -9174,6 +9174,7 @@ function fillStoreForm() {
   setValue(els.storeForm.elements.favicon_url, store.favicon_url);
   setValue(els.storeForm.elements.logo_url, store.logo_url);
   setValue(els.storeForm.elements.cover_url, store.cover_url);
+  if (els.storeForm.elements.seo_index_enabled) els.storeForm.elements.seo_index_enabled.checked = store.seo_index_enabled === true;
   setValue(els.storeForm.elements.delivery_fee, store.delivery_fee);
   setValue(els.storeForm.elements.minimum_order, store.minimum_order);
   setValue(els.storeForm.elements.delivery_neighborhood_fees, neighborhoodFeesToText(store.delivery_neighborhood_fees));
@@ -9510,6 +9511,7 @@ function formToStore(form) {
     favicon_url: data.get('favicon_url'),
     logo_url: data.get('logo_url'),
     cover_url: data.get('cover_url'),
+    seo_index_enabled: data.get('seo_index_enabled') === 'on',
     delivery_fee: data.get('delivery_fee'),
     delivery_neighborhood_fees: parseNeighborhoodFees(data.get('delivery_neighborhood_fees')),
     minimum_order: data.get('minimum_order'),

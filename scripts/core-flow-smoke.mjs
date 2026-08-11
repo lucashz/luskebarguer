@@ -36,7 +36,8 @@ try {
   assert(missingStore.data.code === 'STORE_NOT_FOUND', 'Loja inexistente deveria retornar codigo STORE_NOT_FOUND.');
   const missingStorePage = await fetch(`${baseUrl}/loja-inexistente-smoke`);
   const missingStoreHtml = await missingStorePage.text();
-  assert(missingStorePage.ok && missingStoreHtml.includes('storeNotFound'), 'Pagina de loja inexistente nao carregou o estado visual.');
+  assert(missingStorePage.status === 404 && missingStoreHtml.includes('Página não encontrada'), 'Pagina de loja inexistente nao retornou o 404 amigavel.');
+  assert(/noindex/i.test(missingStorePage.headers.get('x-robots-tag') || ''), 'Pagina de loja inexistente pode ser indexada.');
 
   const signup = await request('/api/portal/signup', {
     method: 'POST',

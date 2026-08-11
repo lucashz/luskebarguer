@@ -22,7 +22,7 @@
     "billing:sync:apply": "node scripts/billing-sync.mjs --apply",
     "billing:check": "node scripts/check-billing-config.mjs",
     "admin:create": "node scripts/create-admin.mjs",
-    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/ajuda.js",
+    "test:syntax": "node --check server.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/ajuda.js && node --check public/seo-landing.js",
     "test:local": "node scripts/local-db-smoke.mjs",
     "test:plans": "node scripts/plan-matrix-smoke.mjs",
     "test:trial": "node scripts/trial-expired-smoke.mjs",
@@ -30,7 +30,8 @@
     "test:flows": "node scripts/core-flow-smoke.mjs",
     "test:platform-health": "node scripts/platform-health-smoke.mjs",
     "test:payments": "node scripts/payment-hardening-smoke.mjs",
-    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:payments && npm run test:flows && npm run test:platform-health"
+    "test:seo": "node scripts/seo-smoke.mjs",
+    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:payments && npm run test:flows && npm run test:platform-health && npm run test:seo"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

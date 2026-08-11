@@ -15,6 +15,7 @@ import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import pg from 'pg';
 import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
+import { seoLandingPages } from './src/data/seo-pages.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -95,6 +96,7 @@ const mimeTypes = new Map([
 const staticFileCache = new Map();
 const compressibleStaticExtensions = new Set(['.html', '.css', '.js', '.json', '.svg']);
 const inflightDbReads = new Map();
+const seoLandingByPath = new Map(seoLandingPages.map((page) => [`/${page.slug}`, page]));
 
 const server = createServer(async (req, res) => {
   const startedAt = performance.now();
@@ -4192,6 +4194,7 @@ function platformAccessSnapshot(events = [], period, storeById = new Map()) {
   const byPage = new Map();
   const byDevice = new Map();
   const byReferrer = new Map();
+  const byChannel = new Map();
   const byStore = new Map();
   for (const event of events) {
     const dateKey = new Date(event.created_at).toISOString().slice(0, 10);
@@ -4206,6 +4209,8 @@ function platformAccessSnapshot(events = [], period, storeById = new Map()) {
     byDevice.set(device, (byDevice.get(device) || 0) + 1);
     const referrer = event.referrer_host || 'Direto';
     byReferrer.set(referrer, (byReferrer.get(referrer) || 0) + 1);
+    const channel = accessAcquisitionChannel(event.referrer_host);
+    byChannel.set(channel, (byChannel.get(channel) || 0) + 1);
     if (event.store_id) {
       const store = storeById.get(event.store_id) || {};
       const current = byStore.get(event.store_id) || {
@@ -4231,11 +4236,21 @@ function platformAccessSnapshot(events = [], period, storeById = new Map()) {
     by_page: mapped(byPage, 'page_type'),
     by_device: mapped(byDevice, 'device_type'),
     by_referrer: mapped(byReferrer, 'referrer'),
+    by_channel: mapped(byChannel, 'channel'),
     top_stores: [...byStore.values()]
       .map((row) => ({ ...row, visitors: row.visitors.size }))
       .sort((a, b) => b.views - a.views)
       .slice(0, 8)
   };
+}
+
+function accessAcquisitionChannel(referrerHost = '') {
+  const host = String(referrerHost || '').trim().toLowerCase().replace(/^www\./, '');
+  if (!host) return 'Direto';
+  if (/(^|\.)(google\.|bing\.com$|yahoo\.|duckduckgo\.com$|ecosia\.org$)/.test(host)) return 'Busca orgânica';
+  if (/(^|\.)(instagram\.com$|facebook\.com$|fb\.com$|tiktok\.com$|youtube\.com$|linkedin\.com$)/.test(host)) return 'Redes sociais';
+  if (host === 'taprontomenu.com.br' || host.endsWith('.taprontomenu.com.br')) return 'Interno';
+  return 'Referência';
 }
 
 function platformGroupOrders(orders, field) {
@@ -5927,13 +5942,24 @@ function reservedPublicSlugs() {
     'suporte',
     'dashboard',
     'platform',
+    'plataform',
     'plataforma',
+    'central',
     'cardapio',
     'cozinha',
     'pagamento',
     'pedidos',
     'conta',
-    'cliente'
+    'cliente',
+    'ajuda',
+    'help',
+    'termos',
+    'privacidade',
+    'confirmar-email',
+    'ativar-conta',
+    'redefinir-senha',
+    'convite',
+    ...seoLandingPages.map((page) => page.slug)
   ]);
 }
 
@@ -13584,6 +13610,7 @@ async function getStoreSettings(storeId, options = {}) {
     slug: canonicalStore?.slug || store.slug || '',
     public_url: canonicalStore?.public_url || (canonicalStore?.slug ? `/${canonicalStore.slug}` : store.public_url || ''),
     store_is_active: canonicalStore?.is_active !== false,
+    seo_index_enabled: canonicalStore?.seo_index_enabled === true,
     company_id: canonicalStore?.company_id || store.company_id || null,
     delivery_neighborhood_fees: isPlainObject(store.delivery_neighborhood_fees) ? store.delivery_neighborhood_fees : defaultNeighborhoodFees(),
     business_hours: isPlainObject(store.business_hours) ? store.business_hours : defaultBusinessHours(),
@@ -13655,6 +13682,8 @@ async function updateStoreSettings(data, storeId, options = {}) {
   const current = await getStoreSettings(storeId, options);
   const resolvedStoreId = cleanUuid(storeId) || current.store_id || null;
   const payload = sanitizeStore(data);
+  const seoIndexEnabled = 'seo_index_enabled' in payload ? payload.seo_index_enabled === true : current.seo_index_enabled === true;
+  delete payload.seo_index_enabled;
   const nextSlug = cleanSlug(payload.slug || current.slug || payload.name || '');
   if (!nextSlug) throw httpError(422, 'Informe o caminho público da loja.');
   if (reservedPublicSlugs().has(nextSlug)) {
@@ -13671,6 +13700,7 @@ async function updateStoreSettings(data, storeId, options = {}) {
       ...(payload.name ? { name: payload.name } : {}),
       slug: nextSlug,
       public_url: `/${nextSlug}`,
+      seo_index_enabled: seoIndexEnabled,
       ...(payload.description !== undefined ? { description: payload.description || null } : {})
     };
     await dbRequest('PATCH', 'stores', { id: `eq.${resolvedStoreId}` }, storePayload, ['Prefer: return=minimal']);
@@ -17474,6 +17504,14 @@ async function localDbRequest(config, method, table, query = {}, payload, extraH
   }
 }
 async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch = '') {
+  if (await serveSeoResource(req, res, requestPath, hostHeader)) return;
+
+  const seoLanding = seoLandingByPath.get(requestPath);
+  if (seoLanding && !isPrivateSeoHost(String(hostHeader || '').split(':')[0].toLowerCase())) {
+    sendSeoLandingPage(req, res, seoLanding);
+    return;
+  }
+
   if (requestPath.startsWith('/uploads/')) {
     await serveUpload(req, res, requestPath);
     return;
@@ -17499,15 +17537,235 @@ async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch
     return;
   }
 
+  const storeSlug = seoStoreSlugCandidate(requestPath, hostHeader);
+  if (storeSlug) {
+    const store = await getStoreBySlug(storeSlug);
+    if (!store) {
+      await sendFile(req, res, path.join(publicDir, '404.html'), { status: 404, headers: { 'X-Robots-Tag': 'noindex, follow' } });
+      return;
+    }
+    await sendSeoStorePage(req, res, store);
+    return;
+  }
+
   const routedPath = routePath(requestPath, hostHeader);
   const filePath = path.normalize(path.join(publicDir, routedPath));
 
   if (!filePath.startsWith(publicDir) || !existsSync(filePath)) {
-    await sendFile(req, res, path.join(publicDir, 'app.html'));
+    await sendFile(req, res, path.join(publicDir, '404.html'), { status: 404, headers: { 'X-Robots-Tag': 'noindex, follow' } });
     return;
   }
 
   await sendFile(req, res, filePath);
+}
+
+const SEO_PUBLIC_PAGES = [
+  { path: '/', file: 'home.html', priority: '1.0', changefreq: 'weekly' },
+  { path: '/planos', file: 'plans.html', priority: '0.9', changefreq: 'weekly' },
+  { path: '/cardapio', file: 'app.html', priority: '0.7', changefreq: 'monthly' },
+  { path: '/termos', file: 'terms.html', priority: '0.2', changefreq: 'yearly' },
+  { path: '/privacidade', file: 'privacy.html', priority: '0.2', changefreq: 'yearly' },
+  ...seoLandingPages.map((page) => ({ path: `/${page.slug}`, priority: '0.8', changefreq: 'monthly' }))
+];
+
+async function serveSeoResource(req, res, requestPath, hostHeader = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  if (requestPath === '/robots.txt') {
+    const privateHost = isPrivateSeoHost(hostname);
+    const helpHost = isHelpHostname(hostname);
+    const origin = helpHost ? (helpBaseUrl() || requestOrigin(req)) : (publicBaseUrl() || 'https://taprontomenu.com.br');
+    const body = privateHost
+      ? 'User-agent: *\nDisallow: /\n'
+      : [
+          'User-agent: *',
+          'Allow: /',
+          'Disallow: /api/',
+          'Disallow: /pagamento',
+          'Disallow: /conta',
+          'Disallow: /pedidos',
+          'Disallow: /cadastro',
+          'Disallow: /confirmar-email',
+          'Disallow: /ativar-conta',
+          'Disallow: /redefinir-senha',
+          'Disallow: /convite',
+          `Sitemap: ${origin}/sitemap.xml`,
+          ''
+        ].join('\n');
+    seoTextResponse(req, res, 200, body, 'text/plain; charset=utf-8', { 'Cache-Control': 'public, max-age=3600' });
+    return true;
+  }
+  if (!['/sitemap.xml', '/sitemap-pages.xml', '/sitemap-stores.xml'].includes(requestPath)) return false;
+  if (isPrivateSeoHost(hostname)) {
+    seoTextResponse(req, res, 404, '', 'application/xml; charset=utf-8', { 'X-Robots-Tag': 'noindex' });
+    return true;
+  }
+  if (isHelpHostname(hostname)) {
+    const origin = helpBaseUrl() || requestOrigin(req);
+    const body = xmlUrlSet([{ loc: `${origin}/`, changefreq: 'weekly', priority: '0.6' }]);
+    seoTextResponse(req, res, 200, body, 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
+    return true;
+  }
+  const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
+  if (requestPath === '/sitemap.xml') {
+    const body = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>${seoEscapeXml(origin)}/sitemap-pages.xml</loc></sitemap>\n  <sitemap><loc>${seoEscapeXml(origin)}/sitemap-stores.xml</loc></sitemap>\n</sitemapindex>\n`;
+    seoTextResponse(req, res, 200, body, 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
+    return true;
+  }
+  if (requestPath === '/sitemap-pages.xml') {
+    const rows = await Promise.all(SEO_PUBLIC_PAGES.map(async (page) => {
+      const fileStat = page.file ? await stat(path.join(publicDir, page.file)).catch(() => null) : await stat(path.join(__dirname, 'src', 'data', 'seo-pages.js')).catch(() => null);
+      return { loc: `${origin}${page.path}`, lastmod: fileStat?.mtime?.toISOString(), changefreq: page.changefreq, priority: page.priority };
+    }));
+    seoTextResponse(req, res, 200, xmlUrlSet(rows), 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
+    return true;
+  }
+  const stores = await dbRequest('GET', 'stores', {
+    select: 'slug,updated_at', seo_index_enabled: 'eq.true', is_active: 'eq.true', order: 'updated_at.desc', limit: '10000'
+  }).catch(() => []);
+  seoTextResponse(req, res, 200, xmlUrlSet(stores.map((store) => ({
+    loc: `${origin}/${encodeURIComponent(store.slug)}`,
+    lastmod: store.updated_at,
+    changefreq: 'weekly',
+    priority: '0.6'
+  }))), 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
+  return true;
+}
+
+function sendSeoLandingPage(req, res, page) {
+  const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
+  const canonical = `${origin}/${page.slug}`;
+  const structured = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      { '@type': 'WebPage', name: page.heading, description: page.description, url: canonical, inLanguage: 'pt-BR' },
+      { '@type': 'BreadcrumbList', itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Início', item: `${origin}/` },
+        { '@type': 'ListItem', position: 2, name: page.heading, item: canonical }
+      ] },
+      { '@type': 'FAQPage', mainEntity: page.faq.map(([question, answer]) => ({
+        '@type': 'Question', name: question, acceptedAnswer: { '@type': 'Answer', text: answer }
+      })) }
+    ]
+  };
+  const related = seoLandingPages.filter((entry) => entry.slug !== page.slug).slice(0, 4);
+  const html = `<!doctype html>
+<html lang="pt-BR"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${emailEscapeHtml(page.title)}</title>
+  <meta name="description" content="${emailEscapeAttribute(page.description)}">
+  <link rel="canonical" href="${emailEscapeAttribute(canonical)}">
+  <meta property="og:type" content="website"><meta property="og:title" content="${emailEscapeAttribute(page.title)}">
+  <meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}">
+  <meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css">
+  <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
+  <style>.seo-main{color:#172033}.seo-hero{padding:72px 0 52px;display:grid;grid-template-columns:1.1fr .9fr;gap:42px;align-items:center}.seo-hero h1{font-size:clamp(2.3rem,5vw,4.6rem);line-height:1.02;margin:14px 0}.seo-hero p,.seo-copy p{font-size:1.08rem;line-height:1.7;color:#596277}.seo-shot{width:100%;border-radius:24px;box-shadow:0 24px 70px #17203324}.seo-section{padding:56px 0}.seo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.seo-card{padding:24px;border:1px solid #e5e7eb;border-radius:18px;background:#fff}.seo-card strong{display:block;font-size:1.08rem;margin-bottom:8px}.seo-faq details{padding:18px 0;border-bottom:1px solid #e5e7eb}.seo-faq summary{font-weight:750;cursor:pointer}.seo-related{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.seo-related a{padding:16px;border:1px solid #e5e7eb;border-radius:14px;text-decoration:none;color:#172033;font-weight:700}@media(max-width:800px){.seo-hero,.seo-grid{grid-template-columns:1fr}.seo-related{grid-template-columns:1fr}}</style>
+</head><body class="seo-main">
+  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav"><a href="/cardapio-digital">Cardápio digital</a><a href="/sistema-de-pedidos-online">Pedidos</a><a href="/planos">Planos</a><a href="/cardapio">Demonstração</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Testar grátis</a></div></div></header>
+  <main>
+    <section class="home-container seo-hero"><div><p class="home-badge">TáPronto para vender</p><h1>${emailEscapeHtml(page.heading)}</h1><p>${emailEscapeHtml(page.intro)}</p><div class="home-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div><ul class="home-trust"><li>Teste grátis</li><li>Sem taxa por pedido</li><li>Cancele quando quiser</li></ul></div><img class="seo-shot" src="/assets/sistema-cardapio-preview.png" alt="Exemplo do cardápio digital TáPronto no celular" width="1440" height="980"></section>
+    <section class="seo-section" style="background:#f7f8fb"><div class="home-container"><p class="home-badge">Benefícios</p><h2>Menos atrito para o cliente. Mais controle para sua equipe.</h2><div class="seo-grid">${page.benefits.map((benefit) => `<article class="seo-card"><strong>${emailEscapeHtml(benefit)}</strong><p>Configure pelo painel e publique as mudanças sem depender de aplicativo ou material impresso.</p></article>`).join('')}</div></div></section>
+    <section class="home-container seo-section seo-copy"><p class="home-badge">Como começar</p><h2>Publique em três etapas</h2><div class="seo-grid">${page.steps.map((step, index) => `<article class="seo-card"><strong>${index + 1}. ${emailEscapeHtml(step)}</strong><p>O onboarding orienta cada configuração importante antes da publicação.</p></article>`).join('')}</div></section>
+    <section class="seo-section" style="background:#fff5f5"><div class="home-container"><h2>Experimente com a sua operação</h2><p>Cadastre produtos reais, teste o pedido no celular e escolha o plano apenas depois de validar o fluxo.</p><div class="home-actions"><a class="home-button" href="/cadastro">Começar teste grátis</a><a class="home-button ghost" href="/planos">Comparar planos</a></div></div></section>
+    <section class="home-container seo-section seo-faq"><p class="home-badge">Dúvidas frequentes</p><h2>O que você precisa saber</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</section>
+    <section class="home-container seo-section"><h2>Veja também</h2><div class="seo-related">${related.map((entry) => `<a href="/${entry.slug}">${emailEscapeHtml(entry.heading)}</a>`).join('')}</div></section>
+  </main>
+  <footer class="home-container seo-section"><strong>TáPronto</strong><p>Cardápio digital e pedidos organizados para restaurantes.</p><nav><a href="/">Início</a> · <a href="/planos">Planos</a> · <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos</a></nav></footer>
+  <script src="/seo-landing.js" type="module"></script>
+</body></html>`;
+  seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
+}
+
+function isPrivateSeoHost(hostname = '') {
+  const panelHosts = csvEnv('PANEL_HOSTS');
+  const platformHosts = csvEnv('PLATFORM_HOSTS');
+  return panelHosts.includes(hostname) || platformHosts.includes(hostname) || /^(app|painel|central|platform)\./.test(hostname);
+}
+
+function seoStoreSlugCandidate(requestPath = '', hostHeader = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  if (isPrivateSeoHost(hostname) || isHelpHostname(hostname)) return '';
+  const parts = String(requestPath || '').split('/').filter(Boolean);
+  if (parts.length !== 1 || path.extname(parts[0])) return '';
+  const slug = cleanSlug(parts[0]);
+  return slug && !reservedPublicSlugs().has(slug) ? slug : '';
+}
+
+async function sendSeoStorePage(req, res, store) {
+  const [settings] = await dbRequest('GET', 'store_settings', {
+    select: 'name,description,address,page_title,logo_url,cover_url,business_hours,updated_at',
+    store_id: `eq.${store.id}`, limit: '1'
+  }).catch(() => []);
+  const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
+  const canonical = `${origin}/${encodeURIComponent(store.slug)}`;
+  const name = cleanText(settings?.name || store.name || 'Cardápio');
+  const description = cleanText(settings?.description || store.description || `Confira o cardápio online de ${name} e faça seu pedido.`).slice(0, 240);
+  const title = cleanText(settings?.page_title || `Cardápio de ${name} | TáPronto`).slice(0, 90);
+  const image = absoluteSeoAssetUrl(settings?.cover_url || settings?.logo_url || '/assets/tapronto-logo.png', origin);
+  const structured = {
+    '@context': 'https://schema.org',
+    '@type': 'Restaurant',
+    name,
+    description,
+    url: canonical,
+    image,
+    ...(cleanText(settings?.address || '') ? { address: cleanText(settings.address) } : {})
+  };
+  let html = await readFile(path.join(publicDir, 'app.html'), 'utf8');
+  html = html
+    .replace(/<title>[\s\S]*?<\/title>/i, `<title>${emailEscapeHtml(title)}</title>`)
+    .replace(/<meta name="description"[^>]*>/i, `<meta name="description" content="${emailEscapeAttribute(description)}">`)
+    .replace('</head>', `${store.seo_index_enabled ? '' : '<meta name="robots" content="noindex, follow">'}\n    <link rel="canonical" href="${emailEscapeAttribute(canonical)}">\n    <meta property="og:type" content="website">\n    <meta property="og:title" content="${emailEscapeAttribute(title)}">\n    <meta property="og:description" content="${emailEscapeAttribute(description)}">\n    <meta property="og:url" content="${emailEscapeAttribute(canonical)}">\n    <meta property="og:image" content="${emailEscapeAttribute(image)}">\n    <meta name="twitter:card" content="summary_large_image">\n    <script type="application/ld+json">${safeJsonForHtml(structured)}</script>\n  </head>`);
+  seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', {
+    'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+    ...(!store.seo_index_enabled ? { 'X-Robots-Tag': 'noindex, follow' } : {})
+  });
+}
+
+function xmlUrlSet(rows = []) {
+  const entries = rows.map((row) => `  <url>\n    <loc>${seoEscapeXml(row.loc)}</loc>${row.lastmod ? `\n    <lastmod>${seoEscapeXml(new Date(row.lastmod).toISOString())}</lastmod>` : ''}${row.changefreq ? `\n    <changefreq>${seoEscapeXml(row.changefreq)}</changefreq>` : ''}${row.priority ? `\n    <priority>${seoEscapeXml(row.priority)}</priority>` : ''}\n  </url>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries}\n</urlset>\n`;
+}
+
+function seoEscapeXml(value = '') {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+function absoluteSeoAssetUrl(value = '', origin = '') {
+  const text = String(value || '');
+  if (/^https?:\/\//i.test(text)) return text;
+  return absoluteFromBase(origin, text || '/assets/tapronto-logo.png');
+}
+
+function safeJsonForHtml(value) {
+  return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+}
+
+function seoTextResponse(req, res, status, body, contentType, headers = {}) {
+  const raw = Buffer.from(String(body || ''), 'utf8');
+  const acceptsGzip = /(?:^|,)\s*gzip\s*(?:,|$)/i.test(String(req.headers['accept-encoding'] || ''));
+  const compressed = acceptsGzip && raw.length >= 1024 ? gzipSync(raw, { level: 6 }) : null;
+  const responseBody = compressed || raw;
+  res.writeHead(status, {
+    ...securityHeaders({ allowSameOriginFrame: contentType.startsWith('text/html') }),
+    'Content-Type': contentType,
+    'Content-Length': responseBody.length,
+    Vary: 'Accept-Encoding',
+    ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
+    ...headers
+  });
+  if (req.method === 'HEAD') res.end();
+  else res.end(responseBody);
+}
+
+function shouldNoIndexResponse(req, filePath = '') {
+  const hostname = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].split(':')[0].toLowerCase();
+  if (isPrivateSeoHost(hostname)) return true;
+  const privateFiles = new Set([
+    'admin.html', 'platform.html', 'kitchen.html', 'payment.html', 'account.html', 'orders.html',
+    'signup.html', 'confirm-email.html', 'activate-account.html', 'reset-password.html', 'invite.html'
+  ]);
+  return privateFiles.has(path.basename(filePath));
 }
 
 function canonicalHostRedirectUrl(requestPath, hostHeader = '', requestSearch = '') {
@@ -17637,7 +17895,7 @@ function csvEnv(name) {
     .filter(Boolean);
 }
 
-async function sendFile(req, res, filePath) {
+async function sendFile(req, res, filePath, options = {}) {
   const ext = path.extname(filePath);
   const fileStat = await stat(filePath);
   const cacheableInMemory = filePath.startsWith(publicDir) && fileStat.size <= 2 * 1024 * 1024;
@@ -17663,7 +17921,9 @@ async function sendFile(req, res, filePath) {
     'Cache-Control': cacheControl,
     ETag: entry.etag,
     Vary: 'Accept-Encoding',
-    'Content-Type': mimeTypes.get(ext) || 'application/octet-stream'
+    'Content-Type': mimeTypes.get(ext) || 'application/octet-stream',
+    ...(shouldNoIndexResponse(req, filePath) ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),
+    ...(options.headers || {})
   };
   if (req.headers['if-none-match'] === entry.etag) {
     res.writeHead(304, baseHeaders);
@@ -17672,7 +17932,7 @@ async function sendFile(req, res, filePath) {
   }
   const acceptsGzip = /(?:^|,)\s*gzip\s*(?:,|$)/i.test(String(req.headers['accept-encoding'] || ''));
   const body = acceptsGzip && entry.gzip ? entry.gzip : entry.content;
-  res.writeHead(200, {
+  res.writeHead(options.status || 200, {
     ...baseHeaders,
     ...(body === entry.gzip ? { 'Content-Encoding': 'gzip' } : {}),
     'Content-Length': body.length
@@ -17732,6 +17992,7 @@ function sanitizeStore(data) {
     theme_settings: 'object',
     print_settings: 'object',
     integration_settings: 'object',
+    seo_index_enabled: 'boolean',
     onboarding_completed: 'boolean'
   }, ['name']);
   if ('whatsapp_number' in store) store.whatsapp_number = normalizeBrazilLocalPhone(store.whatsapp_number);
