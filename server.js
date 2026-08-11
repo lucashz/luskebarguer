@@ -150,6 +150,11 @@ server.listen(PORT, HOST, () => {
 
 setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
 setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
+const MARKETING_AUTOMATION_ENABLED = parseBoolean(process.env.MARKETING_AUTOMATION_ENABLED, process.env.NODE_ENV === 'production');
+if (MARKETING_AUTOMATION_ENABLED) {
+  setInterval(runMarketingLifecycleAutomations, 1000 * 60 * 60 * 6).unref?.();
+  setTimeout(runMarketingLifecycleAutomations, 1000 * 60).unref?.();
+}
 
 async function handleApi(req, res, url) {
   const method = req.method || 'GET';
@@ -1034,6 +1039,42 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     json(res, 200, await updatePlatformEmailTemplates(req, admin, await readJson(req)));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/marketing') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformMarketingWorkspace());
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/campaigns') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 201, { campaign: await createPlatformMarketingCampaign(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/leads') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 201, { lead: await createPlatformMarketingLead(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/content') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 201, { content: await createPlatformMarketingContent(req, admin, await readJson(req)) });
+    return;
+  }
+
+  const platformMarketingItemMatch = url.pathname.match(/^\/api\/platform\/marketing\/(campaigns|leads|content)\/([a-f0-9-]+)$/i);
+  if (platformMarketingItemMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, { item: await updatePlatformMarketingItem(req, admin, platformMarketingItemMatch[1], platformMarketingItemMatch[2], await readJson(req)) });
     return;
   }
 
@@ -4911,6 +4952,7 @@ async function createPortalSignup(req, data = {}) {
       billing_email: parsed.owner.email,
       phone: parsed.owner.phone,
       marketing_attribution: parsed.attribution,
+      marketing_opt_in: parsed.marketingOptIn,
       status: 'trial'
     }, ['Prefer: return=representation']);
     created.company = company;
@@ -11161,6 +11203,171 @@ function smtpSend(settings, message, to) {
       }
     });
   });
+}
+
+async function runMarketingLifecycleAutomations() {
+  try {
+    const [companies, stores, admins, subscriptions, plans] = await Promise.all([
+      dbRequest('GET', 'companies', { select: 'id,name,billing_email,created_at,marketing_opt_in,marketing_unsubscribed_at', marketing_opt_in: 'eq.true', marketing_unsubscribed_at: 'is.null', limit: '1000' }),
+      dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+      dbRequest('GET', 'admin_users', { select: 'id,company_id,email,name,role,is_active', is_active: 'eq.true', limit: '2000' }),
+      dbRequest('GET', 'company_subscriptions', { select: 'id,company_id,plan_id,status,trial_ends_at,created_at', status: 'eq.trial', limit: '1000' }),
+      dbRequest('GET', 'subscription_plans', { select: 'id,name', limit: '100' })
+    ]);
+    const storeByCompany = new Map(stores.map((store) => [store.company_id, store]));
+    const adminByCompany = new Map(admins.map((admin) => [admin.company_id, admin]));
+    const planById = new Map(plans.map((plan) => [plan.id, plan]));
+    const now = Date.now();
+    const candidates = [];
+    for (const company of companies) {
+      const store = storeByCompany.get(company.id);
+      const recipient = cleanEmail(company.billing_email || adminByCompany.get(company.id)?.email || '');
+      if (!recipient) continue;
+      const ageHours = (now - new Date(company.created_at).getTime()) / 36e5;
+      if (ageHours >= 24 && (!store || store.is_active !== true)) {
+        candidates.push({ key: 'onboarding_incomplete_d1', template: 'onboarding_incomplete', company, store, recipient, due: 'd1' });
+      }
+    }
+    for (const subscription of subscriptions) {
+      if (!subscription.trial_ends_at) continue;
+      const days = Math.ceil((new Date(subscription.trial_ends_at).getTime() - now) / 864e5);
+      if (![5, 2].includes(days)) continue;
+      const company = companies.find((item) => item.id === subscription.company_id);
+      if (!company) continue;
+      const recipient = cleanEmail(company.billing_email || adminByCompany.get(company.id)?.email || '');
+      if (recipient) candidates.push({ key: `trial_ending_d${days}`, template: 'trial_ending', company, store: storeByCompany.get(company.id), recipient, due: String(days), subscription });
+    }
+    for (const candidate of candidates) {
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const idempotencyKey = `${candidate.key}:${candidate.company.id}:${dateKey}`;
+      const exists = await dbRequest('GET', 'marketing_automation_runs', { select: 'id', idempotency_key: `eq.${idempotencyKey}`, limit: '1' });
+      if (exists[0]) continue;
+      const [run] = await dbRequest('POST', 'marketing_automation_runs', {}, { automation_key: candidate.key, company_id: candidate.company.id, idempotency_key: idempotencyKey, recipient: candidate.recipient, status: 'pending', details: { template: candidate.template } }, ['Prefer: return=representation']);
+      try {
+        await sendPlatformTemplateEmail({
+          to: candidate.recipient,
+          templateKey: candidate.template,
+          requireActive: true,
+          variables: {
+            company_name: candidate.company.name,
+            customer_name: adminByCompany.get(candidate.company.id)?.name || candidate.company.name,
+            store_name: candidate.store?.name || candidate.company.name,
+            plan_name: planById.get(candidate.subscription?.plan_id)?.name || 'Teste grátis',
+            due_date: candidate.subscription?.trial_ends_at ? new Intl.DateTimeFormat('pt-BR').format(new Date(candidate.subscription.trial_ends_at)) : '',
+            dashboard_url: absolutePanelUrl('/'),
+            payment_url: absolutePanelUrl('/?tab=plans')
+          }
+        });
+        await dbRequest('PATCH', 'marketing_automation_runs', { id: `eq.${run.id}` }, { status: 'sent', executed_at: new Date().toISOString() });
+      } catch (error) {
+        await dbRequest('PATCH', 'marketing_automation_runs', { id: `eq.${run.id}` }, { status: 'failed', executed_at: new Date().toISOString(), details: { template: candidate.template, error: String(error.message || error).slice(0, 500) } });
+      }
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ scope: 'marketing-lifecycle', message: error.message }));
+  }
+}
+
+const MARKETING_ITEM_CONFIG = {
+  campaigns: {
+    table: 'marketing_campaigns',
+    statuses: ['draft', 'active', 'paused', 'completed'],
+    fields: ['name', 'objective', 'niche', 'status', 'source', 'medium', 'campaign_code', 'landing_url', 'starts_at', 'ends_at', 'budget_cents']
+  },
+  leads: {
+    table: 'marketing_leads',
+    statuses: ['new', 'contacted', 'qualified', 'trial', 'customer', 'lost'],
+    fields: ['business_name', 'contact_name', 'phone', 'email', 'niche', 'city', 'state', 'origin', 'stage', 'campaign_id', 'consent', 'next_contact_at', 'last_contact_at', 'contact_attempts', 'loss_reason', 'notes']
+  },
+  content: {
+    table: 'marketing_content_items',
+    statuses: ['idea', 'draft', 'review', 'approved', 'scheduled', 'published'],
+    fields: ['title', 'channel', 'format', 'pillar', 'funnel_stage', 'niche', 'hook', 'script', 'caption', 'cta', 'status', 'scheduled_at', 'published_at', 'published_url', 'campaign_id', 'performance']
+  }
+};
+
+async function platformMarketingWorkspace() {
+  const [campaigns, leads, content, automationRuns] = await Promise.all([
+    dbRequest('GET', 'marketing_campaigns', { select: '*', order: 'created_at.desc', limit: '100' }),
+    dbRequest('GET', 'marketing_leads', { select: '*', order: 'updated_at.desc', limit: '250' }),
+    dbRequest('GET', 'marketing_content_items', { select: '*', order: 'scheduled_at.asc.nullslast,created_at.desc', limit: '250' }),
+    dbRequest('GET', 'marketing_automation_runs', { select: '*', order: 'created_at.desc', limit: '50' })
+  ]);
+  const leadStages = Object.fromEntries(MARKETING_ITEM_CONFIG.leads.statuses.map((stage) => [stage, leads.filter((lead) => lead.stage === stage).length]));
+  const contentStatuses = Object.fromEntries(MARKETING_ITEM_CONFIG.content.statuses.map((status) => [status, content.filter((item) => item.status === status).length]));
+  return {
+    summary: {
+      active_campaigns: campaigns.filter((item) => item.status === 'active').length,
+      open_leads: leads.filter((item) => !['customer', 'lost'].includes(item.stage)).length,
+      scheduled_content: content.filter((item) => item.status === 'scheduled').length,
+      overdue_contacts: leads.filter((item) => item.next_contact_at && new Date(item.next_contact_at) < new Date() && !['customer', 'lost'].includes(item.stage)).length,
+      lead_stages: leadStages,
+      content_statuses: contentStatuses
+    },
+    campaigns,
+    leads,
+    content,
+    automation_runs: automationRuns,
+    safeguards: {
+      consent_required: true,
+      editorial_approval_required: true,
+      duplicate_prevention: 'idempotency_key',
+      automatic_social_publishing: false
+    }
+  };
+}
+
+function marketingPayload(kind, data = {}, partial = false) {
+  const config = MARKETING_ITEM_CONFIG[kind];
+  if (!config) throw httpError(404, 'Recurso de marketing inválido.');
+  const payload = {};
+  for (const field of config.fields) {
+    if (!(field in data)) continue;
+    if (['consent'].includes(field)) payload[field] = data[field] === true;
+    else if (['budget_cents', 'contact_attempts'].includes(field)) payload[field] = Math.max(0, Number.parseInt(data[field], 10) || 0);
+    else if (field === 'performance') payload[field] = data[field] && typeof data[field] === 'object' ? data[field] : {};
+    else if (['starts_at', 'ends_at', 'next_contact_at', 'last_contact_at', 'scheduled_at', 'published_at', 'campaign_id'].includes(field)) payload[field] = data[field] || null;
+    else payload[field] = cleanText(data[field] || '').slice(0, ['script', 'caption', 'notes'].includes(field) ? 8000 : 500);
+  }
+  const statusField = kind === 'leads' ? 'stage' : 'status';
+  if (payload[statusField] && !config.statuses.includes(payload[statusField])) throw httpError(422, 'Status de marketing inválido.');
+  const required = kind === 'campaigns' ? ['name'] : kind === 'leads' ? ['business_name'] : ['title'];
+  if (!partial && required.some((field) => !payload[field])) throw httpError(422, 'Preencha os campos obrigatórios.');
+  if (!partial && kind === 'leads' && !payload.phone && !payload.email) throw httpError(422, 'Informe telefone ou e-mail do lead.');
+  if (kind === 'campaigns' && !payload.campaign_code && payload.name) payload.campaign_code = payload.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+  payload.updated_at = new Date().toISOString();
+  return payload;
+}
+
+async function createPlatformMarketingCampaign(req, admin, data) {
+  const payload = { ...marketingPayload('campaigns', data), created_by: admin.id };
+  const [row] = await dbRequest('POST', 'marketing_campaigns', {}, payload, ['Prefer: return=representation']);
+  await audit('platform.marketing.campaign.create', { req, actor_admin_id: admin.id, entity_type: 'marketing_campaign', entity_id: row.id, after_data: row });
+  return row;
+}
+
+async function createPlatformMarketingLead(req, admin, data) {
+  const payload = { ...marketingPayload('leads', data), created_by: admin.id };
+  const [row] = await dbRequest('POST', 'marketing_leads', {}, payload, ['Prefer: return=representation']);
+  await audit('platform.marketing.lead.create', { req, actor_admin_id: admin.id, entity_type: 'marketing_lead', entity_id: row.id, after_data: { ...row, phone: row.phone ? '***' : null, email: row.email ? '***' : null } });
+  return row;
+}
+
+async function createPlatformMarketingContent(req, admin, data) {
+  const payload = { ...marketingPayload('content', data), created_by: admin.id };
+  const [row] = await dbRequest('POST', 'marketing_content_items', {}, payload, ['Prefer: return=representation']);
+  await audit('platform.marketing.content.create', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: row.id, after_data: { title: row.title, status: row.status } });
+  return row;
+}
+
+async function updatePlatformMarketingItem(req, admin, kind, id, data) {
+  const config = MARKETING_ITEM_CONFIG[kind];
+  const payload = marketingPayload(kind, data, true);
+  if (kind === 'content' && ['approved', 'scheduled', 'published'].includes(payload.status)) payload.approved_by = admin.id;
+  const [row] = await dbRequest('PATCH', config.table, { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
+  if (!row) throw httpError(404, 'Item de marketing não encontrado.');
+  await audit(`platform.marketing.${kind}.update`, { req, actor_admin_id: admin.id, entity_type: `marketing_${kind}`, entity_id: id, after_data: { status: row.status || row.stage } });
+  return row;
 }
 
 const EMAIL_TEMPLATE_DEFINITIONS = [

@@ -1,0 +1,35 @@
+INSERT INTO "marketing_content_items" ("title", "channel", "format", "pillar", "funnel_stage", "niche", "hook", "cta", "status", "scheduled_at")
+SELECT item.title, item.channel, item.format, item.pillar, item.funnel_stage, item.niche, item.hook, item.cta, 'draft', CURRENT_DATE + (item.day_no || ' days')::interval
+FROM (VALUES
+  (1,'Seu cardápio ainda é um PDF?','instagram','reel','produto_na_pratica','awareness','alimentacao','Seu cardápio ainda é um PDF?','Teste grátis'),
+  (2,'Onde seus pedidos mais se perdem?','instagram','story','dores_reais','awareness','alimentacao','Onde seus pedidos mais se perdem?','Responda'),
+  (3,'5 detalhes que fazem o cliente desistir','instagram','carousel','educacao_pratica','awareness','alimentacao','Seu cliente pode estar desistindo por estes detalhes','Salve'),
+  (4,'Adicionais sem conversa longa','instagram','reel','produto_na_pratica','consideration','alimentacao','Pare de perguntar o adicional no WhatsApp','Veja a demonstração'),
+  (5,'Da edição à publicação','instagram','story','bastidores','consideration','alimentacao','Da edição à publicação em minutos','Conheça'),
+  (6,'Cardápio para pizzaria','instagram','reel','conteudo_por_nicho','consideration','pizzaria','Sabores, tamanhos e bordas sem confusão','Teste'),
+  (7,'Checklist do fim de semana','instagram','carousel','educacao_pratica','consideration','alimentacao','Seu cardápio está pronto para o fim de semana?','Salve'),
+  (8,'QR Code sem reimpressão','instagram','reel','produto_na_pratica','consideration','alimentacao','Mude o preço sem reimprimir o QR Code','Crie sua loja'),
+  (9,'Maior dificuldade do delivery','instagram','story','dores_reais','awareness','delivery','Qual parte do delivery dá mais trabalho?','Responda'),
+  (10,'WhatsApp como alerta','instagram','carousel','operacao','consideration','alimentacao','WhatsApp como alerta, painel como controle','Compartilhe'),
+  (11,'Cardápio para hamburgueria','instagram','reel','conteudo_por_nicho','consideration','hamburgueria','Combo e adicionais em uma tela','Teste'),
+  (12,'Pedido entrando no painel','instagram','story','produto_na_pratica','consideration','alimentacao','Veja um pedido entrando no painel','Veja os planos'),
+  (13,'Fotos melhores com celular','instagram','reel','educacao_pratica','awareness','alimentacao','Uma luz simples melhora seu cardápio','Leia o guia'),
+  (14,'Divulgue seu cardápio','instagram','carousel','educacao_pratica','awareness','alimentacao','Como divulgar o link do cardápio','Leia o guia'),
+  (15,'Status do pedido','instagram','reel','produto_na_pratica','consideration','alimentacao','Cozinha e atendimento vendo a mesma etapa','Teste'),
+  (16,'Canal de atendimento','instagram','story','pesquisa','awareness','alimentacao','Delivery, retirada ou salão?','Responda'),
+  (17,'Checkout sem atrito','instagram','carousel','conversao','consideration','alimentacao','O caminho curto até concluir o pedido','Salve'),
+  (18,'Cardápio para açaí','instagram','reel','conteudo_por_nicho','consideration','acai','Complementos com limite e clareza','Teste'),
+  (19,'Sem aplicativo','instagram','story','faq','consideration','alimentacao','Precisa instalar aplicativo?','Conheça'),
+  (20,'Taxa por bairro','instagram','reel','produto_na_pratica','consideration','delivery','Pare de calcular entrega na conversa','Teste'),
+  (21,'Antes de divulgar o QR Code','instagram','carousel','educacao_pratica','consideration','alimentacao','Antes de divulgar seu QR Code','Salve'),
+  (22,'Cardápio para bar','instagram','reel','conteudo_por_nicho','consideration','bar','Mesa e comanda organizadas','Veja a demonstração'),
+  (23,'Antes e depois da operação','instagram','story','prova','consideration','alimentacao','Antes e depois da organização','Conheça'),
+  (24,'Depois do primeiro pedido','instagram','carousel','operacao','retention','alimentacao','O que acompanhar depois do primeiro pedido','Salve'),
+  (25,'Pix confirmado','instagram','reel','produto_na_pratica','conversion','delivery','Confirme o pagamento antes de avisar a loja','Veja os planos'),
+  (26,'Sem comissão por pedido','instagram','story','faq','conversion','alimentacao','O TáPronto cobra comissão?','Veja os planos'),
+  (27,'Cardápio para lanchonete','instagram','reel','conteudo_por_nicho','consideration','lanchonete','Retirada e balcão sem papel perdido','Teste'),
+  (28,'Mais pedidos sem desconto','instagram','carousel','educacao_pratica','awareness','alimentacao','Como aumentar pedidos sem depender de desconto','Leia o guia'),
+  (29,'Item indisponível','instagram','reel','produto_na_pratica','consideration','alimentacao','Item acabou? Tire do ar em segundos','Crie sua loja'),
+  (30,'Canal próprio de pedidos','instagram','carousel','oferta','conversion','alimentacao','Seu canal próprio de pedidos começa aqui','Teste grátis')
+) AS item(day_no,title,channel,format,pillar,funnel_stage,niche,hook,cta)
+WHERE NOT EXISTS (SELECT 1 FROM "marketing_content_items");

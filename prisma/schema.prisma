@@ -119,6 +119,8 @@ model Company {
   billingEmail String?       @map("billing_email")
   phone        String?
   marketingAttribution Json          @default("{}") @map("marketing_attribution")
+  marketingOptIn Boolean             @default(false) @map("marketing_opt_in")
+  marketingUnsubscribedAt DateTime?  @map("marketing_unsubscribed_at") @db.Timestamptz(6)
   status       CompanyStatus @default(trial)
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

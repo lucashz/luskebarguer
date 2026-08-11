@@ -6,7 +6,7 @@
     <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
-    <link rel="stylesheet" href="/platform.css?v=20260730-desktop-fit">
+    <link rel="stylesheet" href="/platform.css?v=20260811-marketing">
   </head>
   <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
@@ -22,6 +22,7 @@
           <span class="platform-sidebar-label">Menu</span>
           <button class="active" data-platform-view="overview" type="button"><span aria-hidden="true">⌂</span>Visão Geral</button>
           <button data-platform-view="commercial" type="button"><span aria-hidden="true">▥</span>Métricas Comerciais</button>
+          <button data-platform-view="marketing" type="button"><span aria-hidden="true">◎</span>Marketing</button>
           <button data-platform-view="clients" type="button"><span aria-hidden="true">◎</span>Clientes</button>
           <button data-platform-view="billing" type="button"><span aria-hidden="true">□</span>Billing</button>
           <button data-platform-view="support" type="button"><span aria-hidden="true">☏</span>Atendimentos</button>
@@ -397,6 +398,57 @@
           </section>
         </section>
 
+        <section class="panel platform-marketing-panel" data-platform-section="marketing" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Marketing e crescimento</p>
+              <h2>Operação de aquisição</h2>
+              <p class="muted">Planeje campanhas, acompanhe leads e aprove conteúdos em um só lugar.</p>
+            </div>
+            <button class="ghost-button compact" id="refreshMarketingButton" type="button">Atualizar marketing</button>
+          </div>
+          <section class="platform-kpi-grid" id="platformMarketingSummary"></section>
+          <div class="platform-marketing-tabs" role="tablist" aria-label="Marketing">
+            <button class="ghost-button compact active" data-marketing-tab="campaigns" type="button">Campanhas</button>
+            <button class="ghost-button compact" data-marketing-tab="leads" type="button">CRM de leads</button>
+            <button class="ghost-button compact" data-marketing-tab="content" type="button">Calendário editorial</button>
+          </div>
+          <section data-marketing-panel="campaigns" class="platform-marketing-grid">
+            <form id="marketingCampaignForm" class="platform-chart-card platform-compact-form">
+              <h3>Nova campanha</h3>
+              <label>Nome<input name="name" required placeholder="Ex.: Cardápio para pizzarias"></label>
+              <label>Objetivo<input name="objective" placeholder="Gerar testes qualificados"></label>
+              <div class="field-grid two-columns"><label>Origem<input name="source" value="instagram"></label><label>Mídia<input name="medium" value="organic"></label></div>
+              <label>Página de destino<input name="landing_url" type="url" value="https://taprontomenu.com.br/"></label>
+              <button class="primary-button compact" type="submit">Criar campanha e UTM</button>
+            </form>
+            <article class="platform-chart-card"><h3>Campanhas</h3><div id="marketingCampaignList"></div></article>
+          </section>
+          <section data-marketing-panel="leads" class="platform-marketing-grid" hidden>
+            <form id="marketingLeadForm" class="platform-chart-card platform-compact-form">
+              <h3>Novo lead</h3>
+              <label>Negócio<input name="business_name" required placeholder="Nome da loja"></label>
+              <label>Contato<input name="contact_name" placeholder="Nome da pessoa"></label>
+              <div class="field-grid two-columns"><label>WhatsApp<input name="phone" placeholder="(11) 99999-9999"></label><label>E-mail<input name="email" type="email"></label></div>
+              <label class="inline-check"><input name="consent" type="checkbox"> Autorizou contato comercial</label>
+              <button class="primary-button compact" type="submit">Adicionar ao CRM</button>
+            </form>
+            <article class="platform-chart-card"><h3>Pipeline</h3><div id="marketingLeadList"></div></article>
+          </section>
+          <section data-marketing-panel="content" class="platform-marketing-grid" hidden>
+            <form id="marketingContentForm" class="platform-chart-card platform-compact-form">
+              <h3>Novo conteúdo</h3>
+              <label>Título<input name="title" required placeholder="Tema do conteúdo"></label>
+              <div class="field-grid two-columns"><label>Formato<select name="format"><option value="reel">Reel</option><option value="carousel">Carrossel</option><option value="story">Story</option><option value="article">Artigo</option></select></label><label>Canal<select name="channel"><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="youtube">YouTube Shorts</option><option value="blog">Blog</option></select></label></div>
+              <label>Gancho<input name="hook" placeholder="Primeira frase que prende atenção"></label>
+              <label>Roteiro<textarea name="script" rows="5" placeholder="Cena, texto na tela e demonstração"></textarea></label>
+              <label>CTA<input name="cta" placeholder="Teste grátis pelo link"></label>
+              <button class="primary-button compact" type="submit">Salvar rascunho</button>
+            </form>
+            <article class="platform-chart-card"><h3>Fila editorial</h3><p class="muted">A publicação sempre exige aprovação humana.</p><div id="marketingContentList"></div></article>
+          </section>
+        </section>
+
         <section class="panel platform-billing-panel" data-platform-section="billing" hidden>
           <div class="section-actions">
             <div>
@@ -754,7 +806,7 @@
       </form>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260727-evolution-whatsapp"></script>
+    <script src="/platform.js?v=20260811-marketing"></script>
   </body>
 </html>
 

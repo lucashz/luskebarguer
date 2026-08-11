@@ -11,7 +11,24 @@ export const seoLandingPages = [
   segment('cardapio-digital-para-lanchonete', 'lanchonete', 'lanches, combos, bebidas e retirada', 'Agilize pedidos de balcão, retirada e entrega com produtos fáceis de localizar e personalizar.'),
   segment('cardapio-digital-para-acai', 'loja de açaí', 'tamanhos, frutas, coberturas e complementos', 'Deixe o cliente montar o açaí passo a passo, respeitando quantidades e adicionais disponíveis.'),
   segment('cardapio-digital-para-bar', 'bar', 'porções, bebidas, mesas e comandas', 'Organize pedidos no salão, mesas e comandas e atualize rapidamente itens indisponíveis.'),
+  guide('como-criar-cardapio-digital', 'Como criar um cardápio digital', 'Um passo a passo para organizar produtos, fotos, adicionais, preços e publicar um cardápio que funciona bem no celular.', ['Organize categorias conforme a forma de compra do cliente', 'Use fotos leves, descrições objetivas e preços claros', 'Teste o pedido completo antes de divulgar o link']),
+  guide('como-criar-qr-code-cardapio', 'Como criar QR Code para cardápio', 'Aprenda a gerar, testar e posicionar o QR Code do cardápio em mesas, balcão, embalagens e redes sociais.', ['Use um link permanente para não reimprimir materiais', 'Teste em celulares diferentes e sob pouca luz', 'Inclua uma chamada clara perto do código']),
+  guide('como-organizar-pedidos-delivery', 'Como organizar pedidos de delivery', 'Veja como reduzir erros ao centralizar itens, adicionais, endereço, pagamento e andamento de cada pedido.', ['Defina etapas simples para atendimento e cozinha', 'Configure taxas e bairros antes de divulgar', 'Mantenha o WhatsApp como alerta e o painel como registro']),
+  guide('como-tirar-fotos-para-cardapio', 'Como tirar fotos para cardápio', 'Um guia prático para fotografar pratos e lanches com celular, luz natural e enquadramento consistente.', ['Fotografe perto de uma janela e evite misturar luzes', 'Mantenha o mesmo fundo e proporção', 'Comprima as imagens para o cardápio carregar rápido']),
+  guide('como-divulgar-cardapio-digital', 'Como divulgar seu cardápio digital', 'Ideias práticas para levar clientes ao cardápio por Instagram, WhatsApp, Google, QR Code e embalagens.', ['Use links com UTM para descobrir a origem das visitas', 'Mostre o produto e facilite o próximo passo', 'Repita a divulgação nos momentos de maior procura']),
+  guide('como-aumentar-pedidos-restaurante', 'Como aumentar pedidos no restaurante', 'Melhore conversão com cardápio claro, produtos principais visíveis, adicionais simples e um checkout sem atrito.', ['Coloque os campeões de venda em destaque', 'Evite opções desnecessárias no checkout', 'Acompanhe visitas, inícios de pedido e pedidos concluídos']),
 ];
+
+function guide(slug, heading, intro, benefits) {
+  return page(
+    `guias/${slug}`,
+    `${heading}: guia prático | TáPronto`,
+    `${intro} Confira o guia prático do TáPronto para pequenos negócios de alimentação.`,
+    heading,
+    intro,
+    benefits
+  );
+}
 
 function page(slug, title, description, heading, intro, benefits) {
   return {

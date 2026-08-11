@@ -22,6 +22,9 @@
   smtp: null,
   whatsappSettings: null,
   emailTemplates: [],
+  marketing: null,
+  marketingLoaded: false,
+  marketingActiveTab: 'campaigns',
   supportTickets: [],
   supportActiveTab: 'queue',
   selectedSupportTicketId: null,
@@ -94,6 +97,10 @@ const PLATFORM_VIEW_META = {
   communication: {
     title: 'Comunicação',
     subtitle: 'Configure SMTP, templates automáticos e testes de entrega.',
+  },
+  marketing: {
+    title: 'Marketing',
+    subtitle: 'Campanhas, leads, conteúdo e automações de crescimento com controle e rastreabilidade.',
   },
   audit: {
     title: 'Auditoria',
@@ -190,6 +197,16 @@ const els = {
   testBillingConfigButtonHealth: document.querySelector('#testBillingConfigButtonHealth'),
   openCommunicationFromHealth: document.querySelector('#openCommunicationFromHealth'),
   refreshCommunicationButton: document.querySelector('#refreshCommunicationButton'),
+  refreshMarketingButton: document.querySelector('#refreshMarketingButton'),
+  platformMarketingSummary: document.querySelector('#platformMarketingSummary'),
+  marketingCampaignForm: document.querySelector('#marketingCampaignForm'),
+  marketingLeadForm: document.querySelector('#marketingLeadForm'),
+  marketingContentForm: document.querySelector('#marketingContentForm'),
+  marketingCampaignList: document.querySelector('#marketingCampaignList'),
+  marketingLeadList: document.querySelector('#marketingLeadList'),
+  marketingContentList: document.querySelector('#marketingContentList'),
+  marketingTabs: [...document.querySelectorAll('[data-marketing-tab]')],
+  marketingPanels: [...document.querySelectorAll('[data-marketing-panel]')],
   platformSmtpForm: document.querySelector('#platformSmtpForm'),
   platformSmtpTestForm: document.querySelector('#platformSmtpTestForm'),
   smtpStatusText: document.querySelector('#smtpStatusText'),
@@ -236,6 +253,21 @@ els.refreshServicesButton?.addEventListener('click', loadServices);
 els.previewLogCleanupButton?.addEventListener('click', previewLogCleanup);
 els.refreshBillingButton?.addEventListener('click', loadBilling);
 els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
+els.refreshMarketingButton?.addEventListener('click', loadMarketing);
+els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
+els.marketingLeadForm?.addEventListener('submit', submitMarketingLead);
+els.marketingContentForm?.addEventListener('submit', submitMarketingContent);
+els.marketingTabs.forEach((button) => button.addEventListener('click', () => activateMarketingTab(button.dataset.marketingTab)));
+document.addEventListener('click', (event) => {
+  const button = event.target.closest?.('[data-marketing-update]');
+  if (button) updateMarketingStatus(button);
+});
+document.addEventListener('change', (event) => {
+  const select = event.target.closest?.('[data-marketing-lead-stage]');
+  if (!select) return;
+  const button = select.parentElement?.querySelector('[data-marketing-update]');
+  if (button) button.dataset.marketingUpdate = `leads:${select.dataset.marketingLeadStage}:stage:${select.value}`;
+});
 els.refreshSupportButton?.addEventListener('click', loadSupport);
 els.platformSmtpForm?.addEventListener('submit', submitSmtpSettings);
 els.platformSmtpTestForm?.addEventListener('submit', submitSmtpTest);
@@ -523,6 +555,8 @@ async function ensurePlatformViewData(view, options = {}) {
     await loadBilling({ silent: true });
   } else if (view === 'communication' && (force || !state.communicationLoaded)) {
     await loadCommunication({ silent: true });
+  } else if (view === 'marketing' && (force || !state.marketingLoaded)) {
+    await loadMarketing({ silent: true });
   } else if (view === 'support' && (force || !state.supportLoaded)) {
     await loadSupport({ silent: true });
   } else if (view === 'audit' && (force || !state.auditLoaded)) {
@@ -679,6 +713,96 @@ async function loadCommunication(options = {}) {
   }
 }
 
+async function loadMarketing(options = {}) {
+  if (els.refreshMarketingButton) els.refreshMarketingButton.disabled = true;
+  try {
+    state.marketing = await request('/api/platform/marketing');
+    state.marketingLoaded = true;
+    renderMarketing();
+    if (!options.silent) toast('Marketing atualizado.');
+  } catch (error) {
+    state.marketingLoaded = false;
+    if (!options.silent) toast(error.message || 'Não foi possível carregar marketing.');
+  } finally {
+    if (els.refreshMarketingButton) els.refreshMarketingButton.disabled = false;
+  }
+}
+
+function activateMarketingTab(tab = 'campaigns') {
+  state.marketingActiveTab = tab;
+  els.marketingTabs.forEach((button) => button.classList.toggle('active', button.dataset.marketingTab === tab));
+  els.marketingPanels.forEach((panel) => { panel.hidden = panel.dataset.marketingPanel !== tab; });
+}
+
+function marketingFormPayload(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (form === els.marketingLeadForm) data.consent = form.elements.consent.checked;
+  return data;
+}
+
+async function submitMarketingForm(event, endpoint, successMessage) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  if (button) button.disabled = true;
+  try {
+    await request(endpoint, { method: 'POST', body: JSON.stringify(marketingFormPayload(form)) });
+    form.reset();
+    if (form === els.marketingCampaignForm) {
+      form.elements.source.value = 'instagram';
+      form.elements.medium.value = 'organic';
+      form.elements.landing_url.value = 'https://taprontomenu.com.br/';
+    }
+    await loadMarketing({ silent: true });
+    toast(successMessage);
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar.');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function submitMarketingCampaign(event) { return submitMarketingForm(event, '/api/platform/marketing/campaigns', 'Campanha criada com rastreamento UTM.'); }
+function submitMarketingLead(event) { return submitMarketingForm(event, '/api/platform/marketing/leads', 'Lead adicionado ao CRM.'); }
+function submitMarketingContent(event) { return submitMarketingForm(event, '/api/platform/marketing/content', 'Conteúdo salvo como rascunho.'); }
+
+async function updateMarketingStatus(button) {
+  button.disabled = true;
+  try {
+    const [kind, id, field, value] = button.dataset.marketingUpdate.split(':');
+    await request(`/api/platform/marketing/${kind}/${id}`, { method: 'PATCH', body: JSON.stringify({ [field]: value }) });
+    await loadMarketing({ silent: true });
+    toast('Status atualizado.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível atualizar.');
+    button.disabled = false;
+  }
+}
+
+function renderMarketing() {
+  if (!els.platformMarketingSummary) return;
+  const data = state.marketing || {};
+  const summary = data.summary || {};
+  const metrics = [
+    ['Campanhas ativas', summary.active_campaigns || 0],
+    ['Leads em aberto', summary.open_leads || 0],
+    ['Conteúdos agendados', summary.scheduled_content || 0],
+    ['Contatos atrasados', summary.overdue_contacts || 0]
+  ];
+  els.platformMarketingSummary.innerHTML = metrics.map(([label, value]) => `<article class="platform-kpi-card"><span>${escapeHtml(label)}</span><strong>${value}</strong></article>`).join('');
+  const campaigns = data.campaigns || [];
+  els.marketingCampaignList.innerHTML = campaigns.length ? campaigns.map((item) => {
+    const utm = new URLSearchParams({ utm_source: item.source, utm_medium: item.medium, utm_campaign: item.campaign_code });
+    const link = `${item.landing_url}${item.landing_url.includes('?') ? '&' : '?'}${utm}`;
+    return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.objective || 'Sem objetivo informado')} · ${escapeHtml(item.status)}</small><code>${escapeHtml(link)}</code></div><button class="ghost-button compact" data-marketing-update="campaigns:${item.id}:status:${item.status === 'active' ? 'paused' : 'active'}" type="button">${item.status === 'active' ? 'Pausar' : 'Ativar'}</button></div>`;
+  }).join('') : '<p class="muted">Crie a primeira campanha para gerar links rastreáveis.</p>';
+  const leads = data.leads || [];
+  els.marketingLeadList.innerHTML = leads.length ? leads.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';
+  const content = data.content || [];
+  els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)}</small><p>${escapeHtml(item.hook || '')}</p></div>${item.status === 'draft' ? `<button class="ghost-button compact" data-marketing-update="content:${item.id}:status:review" type="button">Enviar para revisão</button>` : item.status === 'review' ? `<button class="primary-button compact" data-marketing-update="content:${item.id}:status:approved" type="button">Aprovar</button>` : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
+  activateMarketingTab(state.marketingActiveTab);
+}
+
 async function loadSupportSnapshot() {
   try {
     const data = await request(supportUrl());
@@ -807,6 +931,7 @@ function render() {
   renderServices();
   renderBilling();
   renderCommunication();
+  renderMarketing();
   renderSupport();
   activatePlatformView(state.activeView);
 }
