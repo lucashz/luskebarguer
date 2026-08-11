@@ -18078,6 +18078,10 @@ async function serveSeoResource(req, res, requestPath, hostHeader = '') {
 }
 
 function sendSeoLandingPage(req, res, page) {
+  if (page.slug === 'guias') {
+    sendSeoGuidesHubPage(req, res, page);
+    return;
+  }
   const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
   const canonical = `${origin}/${page.slug}`;
   const structured = {
@@ -18120,6 +18124,66 @@ function sendSeoLandingPage(req, res, page) {
     <section class="home-container seo-section"><h2>Veja também</h2><div class="seo-related">${related.map((entry) => `<a href="/${entry.slug}">${emailEscapeHtml(entry.heading)}</a>`).join('')}</div></section>
   </main>
   <footer class="home-container seo-section"><strong>TáPronto</strong><p>Cardápio digital e pedidos organizados para restaurantes.</p><nav><a href="/">Início</a> · <a href="/planos">Planos</a> · <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos</a></nav></footer>
+  <script src="/seo-landing.js" type="module"></script>
+</body></html>`;
+  seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
+}
+
+function sendSeoGuidesHubPage(req, res, page) {
+  const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
+  const canonical = `${origin}/guias`;
+  const guides = seoLandingPages.filter((entry) => entry.slug.startsWith('guias/'));
+  const guideMeta = {
+    'guias/como-criar-cardapio-digital': { category: 'Cardápio digital', icon: '▤', time: '6 min', color: 'coral' },
+    'guias/como-criar-qr-code-cardapio': { category: 'QR Code e salão', icon: '▦', time: '5 min', color: 'violet' },
+    'guias/como-organizar-pedidos-delivery': { category: 'Pedidos e delivery', icon: '☰', time: '7 min', color: 'blue' },
+    'guias/como-tirar-fotos-para-cardapio': { category: 'Cardápio digital', icon: '◉', time: '5 min', color: 'amber' },
+    'guias/como-divulgar-cardapio-digital': { category: 'Marketing da loja', icon: '↗', time: '6 min', color: 'green' },
+    'guias/como-aumentar-pedidos-restaurante': { category: 'Vendas e operação', icon: '↑', time: '7 min', color: 'red' }
+  };
+  const cards = guides.map((guide) => ({ ...guide, ...(guideMeta[guide.slug] || { category: 'Guia prático', icon: '•', time: '5 min', color: 'coral' }) }));
+  const featured = cards[0];
+  const structured = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      { '@type': 'CollectionPage', name: page.heading, description: page.description, url: canonical, inLanguage: 'pt-BR' },
+      { '@type': 'BreadcrumbList', itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Início', item: `${origin}/` },
+        { '@type': 'ListItem', position: 2, name: 'Guias', item: canonical }
+      ] },
+      { '@type': 'ItemList', itemListElement: cards.map((guide, index) => ({ '@type': 'ListItem', position: index + 1, name: guide.heading, url: `${origin}/${guide.slug}` })) }
+    ]
+  };
+  const topics = [
+    ['Cardápio digital', 'Monte um menu claro, bonito e fácil de atualizar.', '▤'],
+    ['Pedidos e delivery', 'Reduza pedido incompleto e organize a rotina.', '☰'],
+    ['Marketing da loja', 'Leve mais clientes ao seu link de pedidos.', '↗'],
+    ['QR Code e salão', 'Facilite o acesso pelo celular na mesa.', '▦']
+  ];
+  const html = `<!doctype html>
+<html lang="pt-BR"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${emailEscapeHtml(page.title)}</title><meta name="description" content="${emailEscapeAttribute(page.description)}">
+  <link rel="canonical" href="${emailEscapeAttribute(canonical)}"><meta property="og:type" content="website">
+  <meta property="og:title" content="${emailEscapeAttribute(page.title)}"><meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}">
+  <meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css">
+  <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
+  <style>
+    .guides-page{color:#172033;background:#fff}.guides-page *{box-sizing:border-box}.guides-nav{border-bottom:1px solid #edf0f3;background:#fff}.guides-hero{padding:72px 0 48px;text-align:center;max-width:820px}.guides-hero h1{font-size:clamp(2.45rem,6vw,4.8rem);line-height:1.02;letter-spacing:-.045em;margin:15px 0 20px}.guides-hero>p{font-size:1.16rem;line-height:1.7;color:#667085;max-width:680px;margin:0 auto}.guides-eyebrow{display:inline-flex;padding:8px 13px;border-radius:999px;background:#fff1f1;color:#d31820;font-size:.78rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.guides-topics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding-bottom:64px}.guides-topic{padding:20px;border:1px solid #e7e9ee;border-radius:18px;text-decoration:none;color:#172033;background:#fff;transition:.2s ease}.guides-topic:hover{transform:translateY(-3px);border-color:#efb1b4;box-shadow:0 12px 34px #1720330d}.guides-topic b{display:block;margin:10px 0 6px}.guides-topic span:last-child{display:block;color:#667085;font-size:.9rem;line-height:1.45}.guides-topic-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:#fff1f1;color:#d31820;font-size:1.25rem}.guides-feature-wrap{background:#f7f8fa;padding:64px 0}.guides-section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:24px}.guides-section-head h2{font-size:clamp(1.8rem,3vw,2.6rem);margin:6px 0}.guides-section-head p{margin:0;color:#667085}.guides-feature{display:grid;grid-template-columns:.9fr 1.1fr;min-height:350px;border-radius:26px;overflow:hidden;background:#fff;box-shadow:0 20px 60px #17203310;border:1px solid #e7e9ee}.guides-feature-art{display:grid;place-items:center;background:linear-gradient(145deg,#ef2029,#a9070e);padding:50px;position:relative}.guides-feature-phone{width:190px;padding:13px;border-radius:29px;background:#1b1f2a;box-shadow:0 25px 55px #47000455;transform:rotate(-5deg)}.guides-feature-phone img{width:100%;display:block;border-radius:19px}.guides-feature-copy{padding:48px;display:flex;flex-direction:column;justify-content:center}.guides-category{font-size:.75rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;color:#d31820}.guides-feature-copy h2{font-size:clamp(2rem,4vw,3rem);line-height:1.08;margin:12px 0 16px}.guides-feature-copy p{color:#667085;line-height:1.65}.guides-read{display:flex;gap:10px;align-items:center;color:#858c9b;font-size:.86rem;margin:4px 0 24px}.guides-link{font-weight:800;color:#d31820;text-decoration:none}.guides-library{padding:70px 0}.guides-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.guide-card{display:flex;flex-direction:column;border:1px solid #e7e9ee;border-radius:20px;overflow:hidden;text-decoration:none;color:#172033;background:#fff;transition:.2s ease}.guide-card:hover{transform:translateY(-4px);box-shadow:0 18px 44px #17203312;border-color:#d9dce3}.guide-card-art{height:128px;display:grid;place-items:center;font-size:2.4rem}.guide-card-art.coral{background:#fff0ee;color:#e23a32}.guide-card-art.violet{background:#f4efff;color:#7556c9}.guide-card-art.blue{background:#edf6ff;color:#2672bb}.guide-card-art.amber{background:#fff7e7;color:#c87a12}.guide-card-art.green{background:#edf9f2;color:#228957}.guide-card-art.red{background:#fff0f1;color:#d31820}.guide-card-copy{padding:22px;display:flex;flex-direction:column;flex:1}.guide-card h3{font-size:1.22rem;line-height:1.28;margin:9px 0}.guide-card p{color:#667085;line-height:1.55;font-size:.94rem;margin:0 0 18px}.guide-card .guides-read{margin-top:auto;margin-bottom:0}.guides-cta{padding:0 0 72px}.guides-cta-box{display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:30px;padding:48px;border-radius:26px;background:#1d2433;color:#fff;overflow:hidden}.guides-cta h2{font-size:clamp(1.8rem,4vw,3rem);margin:8px 0 13px}.guides-cta p{color:#c9ced8;line-height:1.6}.guides-cta-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}.guides-cta .home-button.ghost{color:#fff;border-color:#ffffff55}.guides-footer{border-top:1px solid #edf0f3;padding:35px 0 48px}.guides-footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.guides-footer a{color:#667085;text-decoration:none;margin-left:18px}
+    @media(max-width:850px){.guides-topics,.guides-grid{grid-template-columns:repeat(2,1fr)}.guides-feature,.guides-cta-box{grid-template-columns:1fr}.guides-feature-art{min-height:290px}.guides-cta-actions{justify-content:flex-start}.home-nav{display:none}}
+    @media(max-width:560px){.guides-hero{padding:48px 20px 35px}.guides-topics,.guides-grid{grid-template-columns:1fr}.guides-feature-copy,.guides-cta-box{padding:30px}.guides-section-head{display:block}.guides-feature-wrap,.guides-library{padding:48px 0}.guides-topic{padding:17px}}
+  </style>
+</head><body class="guides-page">
+  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav"><a href="/guias">Guias</a><a href="/cardapio-digital">Cardápio digital</a><a href="/sistema-de-pedidos-online">Pedidos</a><a href="/planos">Planos</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Testar grátis</a></div></div></header>
+  <main>
+    <section class="home-container guides-hero"><span class="guides-eyebrow">Conteúdo prático para sua loja</span><h1>Menos bagunça.<br>Mais pedidos organizados.</h1><p>Guias diretos para montar seu cardápio, divulgar a loja e melhorar o atendimento sem complicação.</p></section>
+    <section class="home-container guides-topics" aria-label="Navegue por assunto">${topics.map(([title, description, icon]) => `<a class="guides-topic" href="#todos"><span class="guides-topic-icon" aria-hidden="true">${icon}</span><b>${emailEscapeHtml(title)}</b><span>${emailEscapeHtml(description)}</span></a>`).join('')}</section>
+    <section class="guides-feature-wrap"><div class="home-container"><div class="guides-section-head"><div><span class="guides-eyebrow">Comece por aqui</span><h2>Guia em destaque</h2></div><p>Leitura rápida e aplicável hoje.</p></div><article class="guides-feature"><div class="guides-feature-art"><div class="guides-feature-phone"><img src="/assets/sistema-cardapio-preview.png" alt="Cardápio digital TáPronto no celular" width="1440" height="980"></div></div><div class="guides-feature-copy"><span class="guides-category">${emailEscapeHtml(featured.category)}</span><h2>${emailEscapeHtml(featured.heading)}</h2><p>${emailEscapeHtml(featured.intro)}</p><div class="guides-read"><span>${emailEscapeHtml(featured.time)} de leitura</span><span>•</span><span>Passo a passo</span></div><a class="guides-link" href="/${featured.slug}">Ler guia completo →</a></div></article></div></section>
+    <section class="home-container guides-library" id="todos"><div class="guides-section-head"><div><span class="guides-eyebrow">Biblioteca TáPronto</span><h2>Todos os guias</h2><p>Escolha uma dor da sua operação e veja como resolver.</p></div></div><div class="guides-grid">${cards.map((guide) => `<a class="guide-card" href="/${guide.slug}"><span class="guide-card-art ${guide.color}" aria-hidden="true">${guide.icon}</span><span class="guide-card-copy"><span class="guides-category">${emailEscapeHtml(guide.category)}</span><h3>${emailEscapeHtml(guide.heading)}</h3><p>${emailEscapeHtml(guide.intro)}</p><span class="guides-read">${emailEscapeHtml(guide.time)} de leitura · Guia prático</span></span></a>`).join('')}</div></section>
+    <section class="home-container guides-cta"><div class="guides-cta-box"><div><span class="guides-eyebrow">Coloque em prática</span><h2>Seu cardápio pode ficar pronto hoje.</h2><p>Cadastre os produtos mais vendidos, teste um pedido pelo celular e publique quando estiver seguro.</p></div><div class="guides-cta-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div></div></section>
+  </main>
+  <footer class="guides-footer"><div class="home-container guides-footer-row"><div><strong>TáPronto</strong><p>Cardápio digital, pedidos organizados.</p></div><nav><a href="/">Início</a><a href="/planos">Planos</a><a href="/privacidade">Privacidade</a><a href="/termos">Termos</a></nav></div></footer>
   <script src="/seo-landing.js" type="module"></script>
 </body></html>`;
   seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
