@@ -204,9 +204,11 @@ const els = {
   marketingCampaignForm: document.querySelector('#marketingCampaignForm'),
   marketingLeadForm: document.querySelector('#marketingLeadForm'),
   marketingContentForm: document.querySelector('#marketingContentForm'),
+  marketingExperimentForm: document.querySelector('#marketingExperimentForm'),
   marketingCampaignList: document.querySelector('#marketingCampaignList'),
   marketingLeadList: document.querySelector('#marketingLeadList'),
   marketingContentList: document.querySelector('#marketingContentList'),
+  marketingExperimentList: document.querySelector('#marketingExperimentList'),
   marketingAutomationList: document.querySelector('#marketingAutomationList'),
   marketingTabs: [...document.querySelectorAll('[data-marketing-tab]')],
   marketingPanels: [...document.querySelectorAll('[data-marketing-panel]')],
@@ -261,6 +263,7 @@ els.exportMarketingLeadsButton?.addEventListener('click', exportMarketingLeadsCs
 els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
 els.marketingLeadForm?.addEventListener('submit', submitMarketingLead);
 els.marketingContentForm?.addEventListener('submit', submitMarketingContent);
+els.marketingExperimentForm?.addEventListener('submit', submitMarketingExperiment);
 els.marketingTabs.forEach((button) => button.addEventListener('click', () => activateMarketingTab(button.dataset.marketingTab)));
 document.addEventListener('click', (event) => {
   const button = event.target.closest?.('[data-marketing-update]');
@@ -769,6 +772,7 @@ async function submitMarketingForm(event, endpoint, successMessage) {
 function submitMarketingCampaign(event) { return submitMarketingForm(event, '/api/platform/marketing/campaigns', 'Campanha criada com rastreamento UTM.'); }
 function submitMarketingLead(event) { return submitMarketingForm(event, '/api/platform/marketing/leads', 'Lead adicionado ao CRM.'); }
 function submitMarketingContent(event) { return submitMarketingForm(event, '/api/platform/marketing/content', 'Conteúdo salvo como rascunho.'); }
+function submitMarketingExperiment(event) { return submitMarketingForm(event, '/api/platform/marketing/experiments', 'Experimento registrado no backlog.'); }
 
 async function updateMarketingStatus(button) {
   button.disabled = true;
@@ -791,7 +795,8 @@ function renderMarketing() {
     ['Campanhas ativas', summary.active_campaigns || 0],
     ['Leads em aberto', summary.open_leads || 0],
     ['Conteúdos agendados', summary.scheduled_content || 0],
-    ['Contatos atrasados', summary.overdue_contacts || 0]
+    ['Contatos atrasados', summary.overdue_contacts || 0],
+    ['Experimentos ativos', summary.running_experiments || 0]
   ];
   els.platformMarketingSummary.innerHTML = metrics.map(([label, value]) => `<article class="platform-kpi-card"><span>${escapeHtml(label)}</span><strong>${value}</strong></article>`).join('');
   const funnel = data.funnel || {};
@@ -815,7 +820,13 @@ function renderMarketing() {
   els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)}</small><p>${escapeHtml(item.hook || '')}</p></div>${item.status === 'draft' ? `<button class="ghost-button compact" data-marketing-update="content:${item.id}:status:review" type="button">Enviar para revisão</button>` : item.status === 'review' ? `<button class="primary-button compact" data-marketing-update="content:${item.id}:status:approved" type="button">Aprovar</button>` : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
   const automationRuns = data.automation_runs || [];
   if (els.marketingAutomationList) els.marketingAutomationList.innerHTML = automationRuns.length ? automationRuns.slice(0, 12).map((run) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(marketingAutomationLabel(run.automation_key))}</strong><small>${escapeHtml(run.status)} · ${formatDateTime(run.executed_at || run.created_at)}</small></div><span class="status-pill ${run.status === 'sent' ? 'success' : run.status === 'failed' ? 'danger' : ''}">${escapeHtml(run.status)}</span></div>`).join('') : '<p class="muted">Nenhum disparo registrado ainda. A rotina verifica os gatilhos a cada seis horas.</p>';
+  const experiments = data.experiments || [];
+  if (els.marketingExperimentList) els.marketingExperimentList.innerHTML = experiments.length ? experiments.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.surface)} · KPI: ${escapeHtml(item.primary_kpi)} · ${escapeHtml(item.status)}</small><p>${escapeHtml(item.hypothesis)}</p>${item.decision ? `<small>Decisão: ${escapeHtml(marketingDecisionLabel(item.decision))}</small>` : ''}</div><div class="row-actions">${item.status === 'draft' ? `<button class="primary-button compact" data-marketing-update="experiments:${item.id}:status:running" type="button">Iniciar</button>` : item.status === 'running' ? `<button class="ghost-button compact" data-marketing-update="experiments:${item.id}:status:completed" type="button">Concluir</button>` : ''}${item.status === 'completed' && !item.decision ? `<button class="ghost-button compact" data-marketing-update="experiments:${item.id}:decision:iterate" type="button">Iterar</button>` : ''}</div></div>`).join('') : '<p class="muted">Nenhuma hipótese registrada.</p>';
   activateMarketingTab(state.marketingActiveTab);
+}
+
+function marketingDecisionLabel(value) {
+  return ({ keep: 'manter', iterate: 'iterar', stop: 'encerrar' })[value] || value;
 }
 
 function marketingAutomationLabel(key = '') {

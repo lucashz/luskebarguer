@@ -6,7 +6,7 @@
     <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
-    <link rel="stylesheet" href="/platform.css?v=20260811-marketing-v3">
+    <link rel="stylesheet" href="/platform.css?v=20260811-marketing-v4">
   </head>
   <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
@@ -413,6 +413,7 @@
             <button class="ghost-button compact active" data-marketing-tab="campaigns" type="button">Campanhas</button>
             <button class="ghost-button compact" data-marketing-tab="leads" type="button">CRM de leads</button>
             <button class="ghost-button compact" data-marketing-tab="content" type="button">Calendário editorial</button>
+            <button class="ghost-button compact" data-marketing-tab="experiments" type="button">Experimentos</button>
           </div>
           <section data-marketing-panel="campaigns" class="platform-marketing-grid">
             <form id="marketingCampaignForm" class="platform-chart-card platform-compact-form">
@@ -447,6 +448,20 @@
               <button class="primary-button compact" type="submit">Salvar rascunho</button>
             </form>
             <article class="platform-chart-card"><h3>Fila editorial</h3><p class="muted">A publicação sempre exige aprovação humana.</p><div id="marketingContentList"></div></article>
+          </section>
+          <section data-marketing-panel="experiments" class="platform-marketing-grid" hidden>
+            <form id="marketingExperimentForm" class="platform-chart-card platform-compact-form">
+              <h3>Novo experimento</h3>
+              <label>Nome<input name="name" required placeholder="Ex.: CTA da demonstração na home"></label>
+              <label>Hipótese<textarea name="hypothesis" required rows="3" placeholder="Se mostrarmos o fluxo antes dos recursos, mais visitantes iniciarão a demonstração."></textarea></label>
+              <div class="field-grid two-columns"><label>Superfície<select name="surface"><option value="home">Home</option><option value="plans">Planos</option><option value="signup">Cadastro</option><option value="onboarding">Onboarding</option><option value="campaign">Campanha</option></select></label><label>KPI principal<input name="primary_kpi" required placeholder="home_to_demo"></label></div>
+              <label>Variação atual<input name="variant_a" placeholder="CTA: Criar meu cardápio"></label>
+              <label>Nova variação<input name="variant_b" placeholder="CTA: Ver pedido completo"></label>
+              <div class="field-grid two-columns"><label>Baseline<input name="baseline_value" type="number" step="0.01" placeholder="0"></label><label>Meta<input name="target_value" type="number" step="0.01" placeholder="0"></label></div>
+              <label>Proteções<input name="guardrails" placeholder="Não reduzir cadastro concluído"></label>
+              <button class="primary-button compact" type="submit">Registrar experimento</button>
+            </form>
+            <article class="platform-chart-card"><h3>Backlog e testes ativos</h3><p class="muted">Todo teste deve terminar em manter, iterar ou encerrar.</p><div id="marketingExperimentList"></div></article>
           </section>
           <article class="platform-chart-card platform-marketing-automation-card">
             <div class="section-actions"><div><h3>Automações de ciclo de vida</h3><p class="muted">Onboarding, primeiro produto, publicação, pedido teste, inatividade e fim do trial. Limite de um contato por empresa a cada 48 horas.</p></div><span class="status-pill success">Ativas</span></div>
@@ -811,7 +826,7 @@
       </form>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260811-marketing-v3"></script>
+    <script src="/platform.js?v=20260811-marketing-v4"></script>
   </body>
 </html>
 

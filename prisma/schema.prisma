@@ -1357,3 +1357,28 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_logs")
 }
+model MarketingExperiment {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  hypothesis    String
+  surface       String    @default("home")
+  audience      String    @default("")
+  variantA      String    @default("") @map("variant_a")
+  variantB      String    @default("") @map("variant_b")
+  primaryKpi    String    @map("primary_kpi")
+  baselineValue Decimal?  @map("baseline_value") @db.Decimal(12, 4)
+  targetValue   Decimal?  @map("target_value") @db.Decimal(12, 4)
+  guardrails    String    @default("")
+  status        String    @default("draft")
+  startsAt      DateTime? @map("starts_at") @db.Timestamptz(6)
+  endsAt        DateTime? @map("ends_at") @db.Timestamptz(6)
+  resultSummary String    @default("") @map("result_summary")
+  decision      String    @default("")
+  createdBy     String?   @map("created_by") @db.Uuid
+  updatedBy     String?   @map("updated_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@map("marketing_experiments")
+}

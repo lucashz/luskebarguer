@@ -43,6 +43,10 @@ Segunda: revisar métricas, leads atrasados e pauta. Terça a quinta: produzir, 
 
 Acompanhe visitas por UTM, cadastro iniciado, cadastro concluído, primeiro produto, publicação do cardápio, primeiro pedido e contratação. Para conteúdo, registre alcance, retenção, cliques e cadastros; curtidas isoladas não são o objetivo final.
 
+## Experimentos
+
+Na aba **Experimentos**, registre a hipótese antes de alterar a página ou campanha. Informe a versão atual, a nova versão, o KPI principal, baseline, meta e proteções. Inicie somente um teste principal por superfície. Ao concluir, registre o resultado e escolha uma decisão: manter, iterar ou encerrar. Não declare uma variação vencedora com amostra pequena; quando o volume for baixo, trate entrevistas e observações como evidência qualitativa.
+
 ## SEO
 
 As páginas de solução, nicho e os seis guias públicos entram automaticamente no sitemap. Após publicar um conteúdo novo, confira a URL, links internos, Search Console e indexação. Atualize páginas existentes quando houver informação melhor em vez de criar variações rasas.
