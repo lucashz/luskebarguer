@@ -68,6 +68,7 @@
   setupImageModal();
 
   trackHomeAccess();
+  trackMarketingCtas();
 
   function trackHomeAccess() {
     const payload = {
@@ -77,9 +78,40 @@
       referrer: document.referrer,
       device_type: accessDeviceType(),
       visitor_key: accessVisitorKey(),
+      attribution: marketingAttribution(),
       source: 'home'
     };
     postAccessMetric(payload);
+  }
+
+  function trackMarketingCtas() {
+    document.addEventListener('click', (event) => {
+      const link = event.target.closest('a[href]');
+      if (!link) return;
+      const href = String(link.getAttribute('href') || '');
+      const eventName = /cardapio|demonstracao|demo/.test(href) ? 'demo_started' : /cadastro|criar-conta/.test(href) ? 'signup_started' : '';
+      if (!eventName) return;
+      fetch('/api/analytics/funnel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({ event_name: eventName, path: location.pathname, placement: link.textContent?.trim(), attribution: marketingAttribution() })
+      }).catch(() => {});
+    });
+  }
+
+  function marketingAttribution() {
+    const params = new URLSearchParams(location.search);
+    const value = {
+      utm_source: params.get('utm_source') || '', utm_medium: params.get('utm_medium') || '',
+      utm_campaign: params.get('utm_campaign') || '', utm_content: params.get('utm_content') || '',
+      utm_term: params.get('utm_term') || '', landing_path: location.pathname,
+      referrer_host: document.referrer, visitor_key: accessVisitorKey()
+    };
+    try {
+      const previous = JSON.parse(localStorage.getItem('tapronto_marketing_attribution') || '{}');
+      const merged = { ...value, ...Object.fromEntries(Object.entries(previous).filter(([, item]) => item)) };
+      localStorage.setItem('tapronto_marketing_attribution', JSON.stringify(merged));
+      return merged;
+    } catch { return value; }
   }
 
   function setupImageModal() {
@@ -204,7 +236,7 @@
   }
 
   function accessVisitorKey() {
-    const key = 'tapronto_access_visitor';
+    const key = 'tapronto_visitor_key';
     try {
       let value = localStorage.getItem(key);
       if (!value) {

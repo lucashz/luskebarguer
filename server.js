@@ -34,6 +34,7 @@ const REFERRAL_REWARD_CENTS = 1000;
 const REFERRAL_MONTHLY_LIMIT_CENTS = 3000;
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
+const MARKETING_ATTRIBUTION_COOKIE = 'tapronto_attribution';
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 30), 1, 90);
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
@@ -175,7 +176,13 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && url.pathname === '/api/analytics/access') {
-    await recordAccessEvent(req, await readJson(req));
+    const result = await recordAccessEvent(req, await readJson(req));
+    json(res, 202, { ok: true }, result.attribution ? { 'Set-Cookie': marketingAttributionCookie(req, result.attribution) } : {});
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/analytics/funnel') {
+    await recordPublicMarketingEvent(req, await readJson(req));
     json(res, 202, { ok: true });
     return;
   }
@@ -1956,6 +1963,12 @@ async function handleApi(req, res, url) {
       entity_id: result[0]?.id || null,
       after_data: result[0] || null
     });
+    await recordMarketingMilestone('first_product_created', {
+      companyId: admin.company_id,
+      storeId: admin.store_id,
+      idempotencyKey: `first_product_created:${admin.store_id}`,
+      properties: { source: 'admin' }
+    });
     clearMenuCache();
     json(res, 201, result);
     return;
@@ -3591,7 +3604,7 @@ async function platformCommercialSummary() {
 
 async function platformCommercialAnalytics(params = new URLSearchParams()) {
   const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
-  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents] = await Promise.all([
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents] = await Promise.all([
     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
@@ -3618,6 +3631,11 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
       select: 'id,store_id,page_type,path,referrer_host,device_type,visitor_key,created_at',
       created_at: `gte.${period.since.toISOString()}`,
       limit: '10000'
+    }).catch(() => []),
+    dbRequest('GET', 'marketing_events', {
+      select: 'id,company_id,store_id,event_name,visitor_key,attribution,properties,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '10000'
     }).catch(() => [])
   ]);
   const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
@@ -3636,7 +3654,33 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
     conversion,
     new_clients_daily: platformNewClientsDaily(companies, period),
     mrr_by_plan: revenue.mrr_by_plan,
+    marketing: platformMarketingFunnelSnapshot(marketingEvents, subscriptionEvents),
     access: platformAccessSnapshot(accessEvents, period, context.storeById)
+  };
+}
+
+function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
+  const names = ['demo_started', 'signup_started', 'signup_completed', 'first_product_created', 'menu_published', 'first_order_received'];
+  const eventCompanies = (name) => new Set(events.filter((event) => event.event_name === name).map((event) => event.company_id || event.visitor_key || event.id));
+  const counts = Object.fromEntries(names.map((name) => [name, eventCompanies(name).size]));
+  counts.subscription_activated = new Set(subscriptionEvents
+    .filter((event) => /(paid|payment_approved|activate|active)/i.test(event.event_type || ''))
+    .map((event) => event.company_id).filter(Boolean)).size;
+  const sources = new Map();
+  for (const event of events.filter((entry) => entry.event_name === 'signup_completed')) {
+    const source = cleanText(event.attribution?.utm_source || event.attribution?.referrer_host || 'Direto');
+    sources.set(source, (sources.get(source) || 0) + 1);
+  }
+  const rate = (part, total) => total ? Number(((part / total) * 100).toFixed(1)) : 0;
+  return {
+    stages: counts,
+    rates: {
+      signup_to_publish: rate(counts.menu_published, counts.signup_completed),
+      publish_to_first_order: rate(counts.first_order_received, counts.menu_published),
+      signup_to_paid: rate(counts.subscription_activated, counts.signup_completed)
+    },
+    attributed_signups: events.filter((event) => event.event_name === 'signup_completed' && hasMarketingAttribution(event.attribution || {})).length,
+    by_source: [...sources.entries()].map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count).slice(0, 8)
   };
 }
 
@@ -4125,6 +4169,17 @@ async function recordAccessEvent(req, data = {}) {
   const pathValue = cleanPublicPath(data.path || data.pathname || '');
   const referrerHost = referrerHostFromValue(data.referrer || data.referrer_host || req.headers.referer || '');
   const visitorKey = accessVisitorKey(req, data.visitor_key || data.visitorKey || '');
+  const attribution = sanitizeMarketingAttribution({
+    ...(isPlainObject(data.attribution) ? data.attribution : {}),
+    utm_source: data.utm_source,
+    utm_medium: data.utm_medium,
+    utm_campaign: data.utm_campaign,
+    utm_content: data.utm_content,
+    utm_term: data.utm_term,
+    landing_path: pathValue,
+    referrer_host: referrerHost,
+    visitor_key: visitorKey
+  });
   const store = await resolveAccessStore(req, data, pathValue).catch(() => null);
   await dbRequest('POST', 'access_events', {}, {
     company_id: store?.company_id || null,
@@ -4136,9 +4191,100 @@ async function recordAccessEvent(req, data = {}) {
     visitor_key: visitorKey,
     metadata: {
       title: cleanText(data.title || '').slice(0, 120),
-      source: cleanText(data.source || 'web').slice(0, 40)
+      source: cleanText(data.source || 'web').slice(0, 40),
+      attribution
     }
   }, ['Prefer: return=minimal']);
+  return { attribution: hasMarketingAttribution(attribution) ? attribution : null };
+}
+
+async function recordPublicMarketingEvent(req, data = {}) {
+  const eventName = cleanMarketingEventName(data.event_name || data.eventName || '');
+  const allowed = new Set(['content_view', 'landing_view', 'demo_started', 'signup_started']);
+  if (!allowed.has(eventName)) throw httpError(422, 'Evento de marketing inválido.');
+  const attribution = marketingAttributionFromRequest(req, data.attribution);
+  await recordMarketingMilestone(eventName, {
+    visitorKey: attribution.visitor_key || accessVisitorKey(req, data.visitor_key || ''),
+    attribution,
+    properties: {
+      path: cleanPublicPath(data.path || '/'),
+      content_id: cleanText(data.content_id || '').slice(0, 100),
+      placement: cleanText(data.placement || '').slice(0, 80)
+    }
+  });
+}
+
+async function recordMarketingMilestone(eventName, options = {}) {
+  const database = options.db || dbRequest;
+  const payload = {
+    company_id: cleanUuid(options.companyId) || null,
+    store_id: cleanUuid(options.storeId) || null,
+    event_name: cleanMarketingEventName(eventName),
+    visitor_key: cleanText(options.visitorKey || '').slice(0, 80) || null,
+    idempotency_key: cleanText(options.idempotencyKey || '').slice(0, 180) || null,
+    attribution: sanitizeMarketingAttribution(options.attribution),
+    properties: sanitizeMarketingProperties(options.properties)
+  };
+  if (!payload.event_name) return null;
+  if (payload.idempotency_key) {
+    const existing = await database('GET', 'marketing_events', {
+      select: 'id', idempotency_key: `eq.${payload.idempotency_key}`, limit: '1'
+    }).catch(() => []);
+    if (existing[0]) return existing[0];
+  }
+  const rows = await database('POST', 'marketing_events', {}, payload, ['Prefer: return=representation']).catch((error) => {
+    if (isUniqueViolation(error)) return [];
+    throw error;
+  });
+  return rows[0] || null;
+}
+
+function cleanMarketingEventName(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 80);
+}
+
+function sanitizeMarketingAttribution(value = {}) {
+  const data = isPlainObject(value) ? value : {};
+  const limited = (key, max = 100) => cleanText(data[key] || '').slice(0, max);
+  return {
+    utm_source: limited('utm_source', 80),
+    utm_medium: limited('utm_medium', 80),
+    utm_campaign: limited('utm_campaign', 120),
+    utm_content: limited('utm_content', 120),
+    utm_term: limited('utm_term', 120),
+    landing_path: cleanPublicPath(data.landing_path || '/').slice(0, 220),
+    referrer_host: referrerHostFromValue(data.referrer_host || ''),
+    visitor_key: limited('visitor_key', 80)
+  };
+}
+
+function sanitizeMarketingProperties(value = {}) {
+  if (!isPlainObject(value)) return {};
+  return Object.fromEntries(Object.entries(value).slice(0, 20).map(([key, item]) => [
+    cleanSlug(key).slice(0, 60),
+    typeof item === 'number' || typeof item === 'boolean' ? item : cleanText(item || '').slice(0, 240)
+  ]).filter(([key]) => key));
+}
+
+function hasMarketingAttribution(value = {}) {
+  return Boolean(value.utm_source || value.utm_medium || value.utm_campaign || value.referrer_host);
+}
+
+function marketingAttributionFromRequest(req, explicit = {}) {
+  let stored = {};
+  const raw = parseCookies(req || { headers: {} })[MARKETING_ATTRIBUTION_COOKIE] || '';
+  if (raw) {
+    try { stored = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')); } catch {}
+  }
+  return sanitizeMarketingAttribution({ ...stored, ...(isPlainObject(explicit) ? explicit : {}) });
+}
+
+function marketingAttributionCookie(req, attribution = {}) {
+  const secure = COOKIE_SECURE ? '; Secure' : '';
+  const hostname = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].split(':')[0].toLowerCase();
+  const domain = hostname === 'taprontomenu.com.br' || hostname.endsWith('.taprontomenu.com.br') ? '; Domain=taprontomenu.com.br' : '';
+  const encoded = Buffer.from(JSON.stringify(sanitizeMarketingAttribution(attribution)), 'utf8').toString('base64url');
+  return `${MARKETING_ATTRIBUTION_COOKIE}=${encodeURIComponent(encoded)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 90}${domain}${secure}`;
 }
 
 async function resolveAccessStore(req, data = {}, pathValue = '') {
@@ -4764,6 +4910,7 @@ async function createPortalSignup(req, data = {}) {
       document: parsed.company.document || null,
       billing_email: parsed.owner.email,
       phone: parsed.owner.phone,
+      marketing_attribution: parsed.attribution,
       status: 'trial'
     }, ['Prefer: return=representation']);
     created.company = company;
@@ -4801,6 +4948,14 @@ async function createPortalSignup(req, data = {}) {
     await createPortalStoreSettings(store.id, parsed);
     await createStarterMenu(store.id, parsed.businessType);
     await createOnboardingProgress(company.id, store.id, parsed);
+    await recordMarketingMilestone('signup_completed', {
+      companyId: company.id,
+      storeId: store.id,
+      visitorKey: parsed.attribution.visitor_key,
+      attribution: parsed.attribution,
+      properties: { plan_code: parsed.planCode, business_type: parsed.businessType },
+      idempotencyKey: `signup_completed:${company.id}`
+    });
     await recordReferralSignup(req, parsed.referralCode, {
       company,
       store,
@@ -5083,6 +5238,7 @@ function sanitizePortalSignup(data = {}, req = null) {
     referralCode: cleanReferralCode(data.referral_code || data.referralCode || data.ref || signupUrl?.searchParams.get('ref') || ''),
     businessType: cleanSlug(business.type || 'outro') || 'outro',
     marketingOptIn: Boolean(data.marketing_opt_in || data.marketingOptIn),
+    attribution: marketingAttributionFromRequest(req, data.attribution),
     owner: {
       name: ownerName,
       email: ownerEmail,
@@ -5545,6 +5701,12 @@ async function publishAdminOnboarding(req, admin) {
     entity_type: 'store_settings',
     entity_id: current.id,
     after_data: { onboarding_completed: true, is_open: true }
+  });
+  await recordMarketingMilestone('menu_published', {
+    companyId: admin.company_id,
+    storeId: admin.store_id,
+    idempotencyKey: `menu_published:${admin.store_id}`,
+    properties: { source: 'onboarding' }
   });
   return getAdminOnboarding(admin);
 }
@@ -8190,7 +8352,8 @@ async function companyCommercialStatusByStore(storeId) {
     id: `eq.${cleanUuid(storeId)}`,
     limit: '1'
   }).catch(() => []);
-  return companyCommercialStatus(store?.company_id);
+  const status = await companyCommercialStatus(store?.company_id);
+  return { ...status, company_id: store?.company_id || null };
 }
 
 async function listCompanyPlanFeatures(planId) {
@@ -14155,6 +14318,19 @@ async function createOrder(req, data, options = {}) {
   }
   if (['table', 'tab'].includes(fulfillmentMethod)) clearAdminTablesCache();
   if (customerRow?.id) clearAdminCustomersCache();
+
+  const existingOrders = await db('GET', 'orders', {
+    select: 'id', store_id: `eq.${storeId}`, order: 'created_at.asc', limit: '2'
+  });
+  if (existingOrders.length === 1 && existingOrders[0]?.id === order.id) {
+    await recordMarketingMilestone('first_order_received', {
+      db,
+      companyId: commercial.company_id,
+      storeId,
+      idempotencyKey: `first_order_received:${storeId}`,
+      properties: { fulfillment_method: fulfillmentMethod, payment_method: paymentMethod }
+    });
+  }
 
   return {
     order: { ...stripPaymentAccessSecrets(finalOrder), items: itemsWithOrder, ...(paymentAccessToken ? { payment_access_token: paymentAccessToken } : {}) },

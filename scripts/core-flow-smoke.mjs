@@ -44,6 +44,13 @@ try {
     body: {
       plan_code: 'essential',
       accept_terms: true,
+      attribution: {
+        utm_source: 'smoke',
+        utm_medium: 'test',
+        utm_campaign: 'marketing-funnel-smoke',
+        landing_path: '/cardapio-digital',
+        visitor_key: `visitor-${suffix}`
+      },
       owner: {
         name: 'Smoke Admin',
         email,
@@ -67,6 +74,8 @@ try {
   storeId = signup.data.admin?.store_id || signup.data.store?.id || null;
   assert(signup.data.needs_activation === true, 'Cadastro deveria exigir ativacao por e-mail.');
   assert(companyId && storeId, 'Cadastro nao retornou empresa/loja.');
+  const attribution = await client.query('select marketing_attribution from public.companies where id = $1', [companyId]);
+  assert(attribution.rows[0]?.marketing_attribution?.utm_source === 'smoke', 'Origem de marketing nao foi persistida na empresa.');
   const inactiveLogin = await request('/api/admin/login', {
     method: 'POST',
     allowFailure: true,
@@ -170,6 +179,15 @@ try {
   });
   const order = orderCreated.data.order;
   assert(order?.id && order.public_code, 'Pedido nao foi criado.');
+  const milestones = await client.query(`
+    select event_name from public.marketing_events
+     where company_id = $1
+       and event_name in ('signup_completed', 'menu_published', 'first_product_created', 'first_order_received')
+  `, [companyId]);
+  const milestoneNames = new Set(milestones.rows.map((row) => row.event_name));
+  for (const expected of ['signup_completed', 'menu_published', 'first_product_created', 'first_order_received']) {
+    assert(milestoneNames.has(expected), `Marco de marketing ausente: ${expected}.`);
+  }
   const statusUpdated = await request(`/api/admin/orders/${order.id}/status`, {
     method: 'PATCH',
     cookie: adminCookie,

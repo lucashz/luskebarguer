@@ -135,6 +135,7 @@ const els = {
   platformDailyDetails: document.querySelector('#platformDailyDetails'),
   platformStoreRanking: document.querySelector('#platformStoreRanking'),
   platformAccessMetrics: document.querySelector('#platformAccessMetrics'),
+  platformMarketingFunnel: document.querySelector('#platformMarketingFunnel'),
   platformBillingMetrics: document.querySelector('#platformBillingMetrics'),
   platformCommercialAlerts: document.querySelector('#platformCommercialAlerts'),
   platformOperationalOverviewAlerts: document.querySelector('#platformOperationalOverviewAlerts'),
@@ -869,6 +870,7 @@ function renderCommercialDashboard() {
   renderDailyChart();
   renderStoreRanking();
   renderAccessMetrics();
+  renderMarketingFunnel();
   renderBillingMetrics();
   renderCommercialAlerts();
   renderOperationalOverviewAlerts();
@@ -1189,6 +1191,38 @@ function renderAccessMetrics() {
       `).join('') : '<p class="empty-state">Nenhum cardápio público acessado no período.</p>'}
     </div>
   ` : '<p class="empty-state">Ainda não há acessos registrados no período. As visitas começam a aparecer após alguém abrir a Home, Ajuda ou um cardápio público.</p>';
+}
+
+function renderMarketingFunnel() {
+  if (!els.platformMarketingFunnel) return;
+  const marketing = state.analytics?.marketing || {};
+  const stages = marketing.stages || {};
+  const rows = [
+    ['Demonstração', stages.demo_started],
+    ['Cadastro iniciado', stages.signup_started],
+    ['Cadastro concluído', stages.signup_completed],
+    ['Primeiro produto', stages.first_product_created],
+    ['Cardápio publicado', stages.menu_published],
+    ['Primeiro pedido', stages.first_order_received],
+    ['Plano ativado', stages.subscription_activated]
+  ];
+  const hasData = rows.some(([, value]) => Number(value || 0) > 0);
+  if (!hasData) {
+    els.platformMarketingFunnel.innerHTML = '<p class="empty-state">O baseline começará a aparecer com os novos eventos do funil.</p>';
+    return;
+  }
+  const max = Math.max(1, ...rows.map(([, value]) => Number(value || 0)));
+  els.platformMarketingFunnel.innerHTML = `
+    <div class="platform-access-ranking">
+      ${rows.map(([label, value]) => `<article><div><strong>${escapeHtml(label)}</strong></div><span>${Number(value || 0)}</span><i style="--value:${Math.max(4, (Number(value || 0) / max) * 100)}%"></i></article>`).join('')}
+    </div>
+    <div class="platform-access-summary">
+      <article><span>Cadastro → publicação</span><strong>${Number(marketing.rates?.signup_to_publish || 0)}%</strong></article>
+      <article><span>Publicação → pedido</span><strong>${Number(marketing.rates?.publish_to_first_order || 0)}%</strong></article>
+      <article><span>Cadastros atribuídos</span><strong>${Number(marketing.attributed_signups || 0)}</strong></article>
+    </div>
+    ${(marketing.by_source || []).length ? `<section class="platform-access-columns"><section><h4>Origem dos cadastros</h4>${marketing.by_source.map((row) => `<p><span>${escapeHtml(row.source)}</span><strong>${Number(row.count || 0)}</strong></p>`).join('')}</section></section>` : ''}
+  `;
 }
 
 function renderBillingMetrics() {

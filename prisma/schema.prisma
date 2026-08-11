@@ -118,6 +118,7 @@ model Company {
   document     String?
   billingEmail String?       @map("billing_email")
   phone        String?
+  marketingAttribution Json          @default("{}") @map("marketing_attribution")
   status       CompanyStatus @default(trial)
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -140,6 +141,7 @@ model Company {
   auditLogs            AuditLog[]
   sessions             AppSession[]
   accessEvents         AccessEvent[]
+  marketingEvents      MarketingEvent[]
   referralCodes        ReferralCode[]
   referralsMade        Referral[]                       @relation("ReferralReferrerCompany")
   referralsReceived    Referral[]                       @relation("ReferralReferredCompany")
@@ -189,6 +191,7 @@ model Store {
   usageEvents          UsageEvent[]
   onboarding           OnboardingProgress[]
   auditLogs            AuditLog[]
+  marketingEvents      MarketingEvent[]
   accessEvents         AccessEvent[]
   referralCodes        ReferralCode[]
   referralsMade        Referral[]                 @relation("ReferralReferrerStore")
@@ -1118,6 +1121,27 @@ model AccessEvent {
   @@index([companyId, createdAt])
   @@index([pageType, createdAt])
   @@map("access_events")
+}
+
+model MarketingEvent {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId      String?  @map("company_id") @db.Uuid
+  storeId        String?  @map("store_id") @db.Uuid
+  eventName      String   @map("event_name")
+  visitorKey     String?  @map("visitor_key")
+  idempotencyKey String?  @unique @map("idempotency_key")
+  attribution    Json     @default("{}")
+  properties     Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  store   Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([eventName, createdAt])
+  @@index([companyId, createdAt])
+  @@index([storeId, createdAt])
+  @@index([visitorKey, createdAt])
+  @@map("marketing_events")
 }
 
 model ReferralCode {

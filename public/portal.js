@@ -226,6 +226,7 @@ async function submitSignup(event) {
     referral_code: new URLSearchParams(location.search).get('ref') || '',
     accept_terms: form.get('accept_terms') === 'on',
     marketing_opt_in: form.get('marketing_opt_in') === 'on',
+    attribution: signupMarketingAttribution(),
     owner: {
       name: form.get('owner_name'),
       email: form.get('owner_email'),
@@ -247,6 +248,10 @@ async function submitSignup(event) {
   };
   setSignupLoading(true);
   try {
+    fetch('/api/analytics/funnel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ event_name: 'signup_started', path: location.pathname, placement: 'signup_form', attribution: payload.attribution })
+    }).catch(() => {});
     const data = await request('/api/portal/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -312,6 +317,19 @@ async function resendSignupActivationEmail(button) {
       button.textContent = originalText;
     }
   }
+}
+
+function signupMarketingAttribution() {
+  const params = new URLSearchParams(location.search);
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem('tapronto_marketing_attribution') || '{}'); } catch {}
+  const direct = {
+    utm_source: params.get('utm_source') || '', utm_medium: params.get('utm_medium') || '',
+    utm_campaign: params.get('utm_campaign') || '', utm_content: params.get('utm_content') || '',
+    utm_term: params.get('utm_term') || '', landing_path: stored.landing_path || location.pathname,
+    referrer_host: stored.referrer_host || document.referrer, visitor_key: stored.visitor_key || ''
+  };
+  return Object.fromEntries(Object.entries({ ...stored, ...Object.fromEntries(Object.entries(direct).filter(([, value]) => value)) }).filter(([, value]) => value));
 }
 
 function initConfirmEmailPage() {
