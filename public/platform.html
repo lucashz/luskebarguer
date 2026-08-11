@@ -6,7 +6,7 @@
     <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
-    <link rel="stylesheet" href="/platform.css?v=20260811-marketing-v2">
+    <link rel="stylesheet" href="/platform.css?v=20260811-marketing-v3">
   </head>
   <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
@@ -408,6 +408,7 @@
             <div class="row-actions"><button class="ghost-button compact" id="exportMarketingLeadsButton" type="button">Exportar leads CSV</button><button class="ghost-button compact" id="refreshMarketingButton" type="button">Atualizar marketing</button></div>
           </div>
           <section class="platform-kpi-grid" id="platformMarketingSummary"></section>
+          <article class="platform-chart-card platform-marketing-funnel-card"><h3>Funil atribuído · 90 dias</h3><p class="muted">Da visita ao pagamento, usando UTMs preservadas no cadastro.</p><div class="platform-marketing-funnel" id="marketingAttributedFunnel"></div></article>
           <div class="platform-marketing-tabs" role="tablist" aria-label="Marketing">
             <button class="ghost-button compact active" data-marketing-tab="campaigns" type="button">Campanhas</button>
             <button class="ghost-button compact" data-marketing-tab="leads" type="button">CRM de leads</button>
@@ -810,7 +811,7 @@
       </form>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260811-marketing-v2"></script>
+    <script src="/platform.js?v=20260811-marketing-v3"></script>
   </body>
 </html>
 

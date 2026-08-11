@@ -200,6 +200,7 @@ const els = {
   refreshMarketingButton: document.querySelector('#refreshMarketingButton'),
   exportMarketingLeadsButton: document.querySelector('#exportMarketingLeadsButton'),
   platformMarketingSummary: document.querySelector('#platformMarketingSummary'),
+  marketingAttributedFunnel: document.querySelector('#marketingAttributedFunnel'),
   marketingCampaignForm: document.querySelector('#marketingCampaignForm'),
   marketingLeadForm: document.querySelector('#marketingLeadForm'),
   marketingContentForm: document.querySelector('#marketingContentForm'),
@@ -793,11 +794,20 @@ function renderMarketing() {
     ['Contatos atrasados', summary.overdue_contacts || 0]
   ];
   els.platformMarketingSummary.innerHTML = metrics.map(([label, value]) => `<article class="platform-kpi-card"><span>${escapeHtml(label)}</span><strong>${value}</strong></article>`).join('');
+  const funnel = data.funnel || {};
+  const funnelSteps = [['landing_view', 'Visitas'], ['demo_started', 'Demos'], ['signup_completed', 'Cadastros'], ['menu_published', 'Publicados'], ['first_order_received', '1º pedido'], ['subscription_activated', 'Pagos']];
+  if (els.marketingAttributedFunnel) els.marketingAttributedFunnel.innerHTML = funnelSteps.map(([key, label], index) => {
+    const value = Number(funnel[key] || 0);
+    const previous = index ? Number(funnel[funnelSteps[index - 1][0]] || 0) : 0;
+    const rate = previous ? Math.round((value / previous) * 100) : null;
+    return `<div class="platform-funnel-step"><span>${escapeHtml(label)}</span><strong>${value}</strong><small>${rate === null ? 'base' : `${rate}% da etapa anterior`}</small></div>`;
+  }).join('');
   const campaigns = data.campaigns || [];
   els.marketingCampaignList.innerHTML = campaigns.length ? campaigns.map((item) => {
     const utm = new URLSearchParams({ utm_source: item.source, utm_medium: item.medium, utm_campaign: item.campaign_code });
     const link = `${item.landing_url}${item.landing_url.includes('?') ? '&' : '?'}${utm}`;
-    return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.objective || 'Sem objetivo informado')} · ${escapeHtml(item.status)}</small><code>${escapeHtml(link)}</code></div><button class="ghost-button compact" data-marketing-update="campaigns:${item.id}:status:${item.status === 'active' ? 'paused' : 'active'}" type="button">${item.status === 'active' ? 'Pausar' : 'Ativar'}</button></div>`;
+    const performance = data.campaign_metrics?.[item.id] || {};
+    return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.objective || 'Sem objetivo informado')} · ${escapeHtml(item.status)}</small><small>${Number(performance.landing_view || 0)} visitas · ${Number(performance.signup_completed || 0)} cadastros · ${Number(performance.subscription_activated || 0)} pagos</small><code>${escapeHtml(link)}</code></div><button class="ghost-button compact" data-marketing-update="campaigns:${item.id}:status:${item.status === 'active' ? 'paused' : 'active'}" type="button">${item.status === 'active' ? 'Pausar' : 'Ativar'}</button></div>`;
   }).join('') : '<p class="muted">Crie a primeira campanha para gerar links rastreáveis.</p>';
   const leads = data.leads || [];
   els.marketingLeadList.innerHTML = leads.length ? leads.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';

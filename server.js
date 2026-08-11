@@ -8139,6 +8139,13 @@ async function receiveBillingWebhook(data, options = {}) {
     }
   }, ['Prefer: return=minimal']);
   if (status === 'active') {
+    const [marketingCompany] = await dbRequest('GET', 'companies', { select: 'marketing_attribution', id: `eq.${subscription.company_id}`, limit: '1' }).catch(() => []);
+    await recordMarketingMilestone('subscription_activated', {
+      companyId: subscription.company_id,
+      attribution: marketingCompany?.marketing_attribution || {},
+      properties: { plan_code: planCode || null, amount_cents: amountCents || transaction?.amount_cents || 0 },
+      idempotencyKey: `subscription_activated:${transaction?.id || eventId}`
+    }).catch(() => {});
     await processReferralPayment(reqLikeFromWebhook(), {
       companyId: subscription.company_id,
       transactionId: transaction?.id || null,
@@ -11302,14 +11309,21 @@ const MARKETING_ITEM_CONFIG = {
 };
 
 async function platformMarketingWorkspace() {
-  const [campaigns, leads, content, automationRuns] = await Promise.all([
+  const [campaigns, leads, content, automationRuns, events] = await Promise.all([
     dbRequest('GET', 'marketing_campaigns', { select: '*', order: 'created_at.desc', limit: '100' }),
     dbRequest('GET', 'marketing_leads', { select: '*', order: 'updated_at.desc', limit: '250' }),
     dbRequest('GET', 'marketing_content_items', { select: '*', order: 'scheduled_at.asc.nullslast,created_at.desc', limit: '250' }),
-    dbRequest('GET', 'marketing_automation_runs', { select: '*', order: 'created_at.desc', limit: '50' })
+    dbRequest('GET', 'marketing_automation_runs', { select: '*', order: 'created_at.desc', limit: '50' }),
+    dbRequest('GET', 'marketing_events', { select: 'event_name,attribution,created_at', created_at: `gte.${new Date(Date.now() - (90 * 864e5)).toISOString()}`, order: 'created_at.desc', limit: '10000' })
   ]);
   const leadStages = Object.fromEntries(MARKETING_ITEM_CONFIG.leads.statuses.map((stage) => [stage, leads.filter((lead) => lead.stage === stage).length]));
   const contentStatuses = Object.fromEntries(MARKETING_ITEM_CONFIG.content.statuses.map((status) => [status, content.filter((item) => item.status === status).length]));
+  const eventNames = ['landing_view', 'demo_started', 'signup_started', 'signup_completed', 'first_product_created', 'menu_published', 'first_order_received', 'subscription_activated'];
+  const funnel = Object.fromEntries(eventNames.map((name) => [name, events.filter((event) => event.event_name === name).length]));
+  const campaignMetrics = Object.fromEntries(campaigns.map((campaign) => {
+    const attributed = events.filter((event) => cleanText(event.attribution?.utm_campaign || '') === campaign.campaign_code);
+    return [campaign.id, Object.fromEntries(eventNames.map((name) => [name, attributed.filter((event) => event.event_name === name).length]))];
+  }));
   return {
     summary: {
       active_campaigns: campaigns.filter((item) => item.status === 'active').length,
@@ -11319,6 +11333,8 @@ async function platformMarketingWorkspace() {
       lead_stages: leadStages,
       content_statuses: contentStatuses
     },
+    funnel,
+    campaign_metrics: campaignMetrics,
     campaigns,
     leads,
     content,

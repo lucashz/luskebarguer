@@ -3016,4 +3016,10 @@ body.platform-redesign [hidden] {
 .platform-marketing-row small, .platform-marketing-row code { color: #667085; overflow-wrap: anywhere; }
 .platform-marketing-row p { margin: 0; }
 .platform-marketing-automation-card { margin-top: 1rem; }
+.platform-marketing-funnel-card { margin-top: 1rem; }
+.platform-marketing-funnel { display: grid; grid-template-columns: repeat(6, minmax(100px, 1fr)); gap: .6rem; margin-top: .8rem; }
+.platform-funnel-step { display: grid; gap: .2rem; padding: .75rem; border-radius: 12px; background: #f7f8fa; border: 1px solid #eaecf0; }
+.platform-funnel-step span, .platform-funnel-step small { color: #667085; }
+.platform-funnel-step strong { font-size: 1.45rem; }
 @media (max-width: 900px) { .platform-marketing-grid { grid-template-columns: 1fr; } .platform-marketing-row { align-items: flex-start; flex-wrap: wrap; } }
+@media (max-width: 900px) { .platform-marketing-funnel { grid-template-columns: repeat(2, 1fr); } }
