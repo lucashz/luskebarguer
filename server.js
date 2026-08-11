@@ -150,7 +150,7 @@ server.listen(PORT, HOST, () => {
 
 setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
 setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
-const MARKETING_AUTOMATION_ENABLED = parseBoolean(process.env.MARKETING_AUTOMATION_ENABLED, process.env.NODE_ENV === 'production');
+const MARKETING_AUTOMATION_ENABLED = parseBoolean(process.env.MARKETING_AUTOMATION_ENABLED, true);
 if (MARKETING_AUTOMATION_ENABLED) {
   setInterval(runMarketingLifecycleAutomations, 1000 * 60 * 60 * 6).unref?.();
   setTimeout(runMarketingLifecycleAutomations, 1000 * 60).unref?.();

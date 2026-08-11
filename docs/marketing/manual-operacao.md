@@ -29,7 +29,7 @@ Distribuição mensal recomendada:
 
 ## Automações de ciclo de vida
 
-Em produção, a rotina roda a cada seis horas quando `MARKETING_AUTOMATION_ENABLED=true` ou quando `NODE_ENV=production`. Ela considera apenas empresas com opt-in ativo, seleciona onboarding incompleto após 24 horas e avisos de trial a 5 e 2 dias do fim. Cada disparo recebe chave idempotente e registro em `marketing_automation_runs`, evitando repetição no mesmo dia. Falhas de SMTP ficam registradas para diagnóstico.
+A rotina fica ativa por padrão e roda a cada seis horas. Ela considera apenas empresas com opt-in ativo, seleciona onboarding incompleto após 24 horas e avisos de trial a 5 e 2 dias do fim. Cada disparo recebe chave idempotente e registro em `marketing_automation_runs`, evitando repetição no mesmo dia. Falhas de SMTP ficam registradas para diagnóstico.
 
 Para desligar imediatamente, configure `MARKETING_AUTOMATION_ENABLED=false` e reinicie o serviço. Templates e SMTP são administrados em **Comunicação**.
 
@@ -44,4 +44,3 @@ Acompanhe visitas por UTM, cadastro iniciado, cadastro concluído, primeiro prod
 ## SEO
 
 As páginas de solução, nicho e os seis guias públicos entram automaticamente no sitemap. Após publicar um conteúdo novo, confira a URL, links internos, Search Console e indexação. Atualize páginas existentes quando houver informação melhor em vez de criar variações rasas.
-
