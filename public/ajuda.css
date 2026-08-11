@@ -397,6 +397,102 @@ body.help-page {
   font-weight: 900;
 }
 
+.help-article-lead {
+  font-size: 1.08rem;
+}
+
+.help-before,
+.help-outcome,
+.help-troubleshooting {
+  max-width: 880px;
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid var(--help-line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.help-before {
+  background: #f8fafc;
+}
+
+.help-before h2,
+.help-outcome h2,
+.help-troubleshooting h2,
+.help-article-panel > article > h2 {
+  margin: 0 0 12px;
+  font: 800 1.25rem/1.25 var(--help-display);
+}
+
+.help-before ul,
+.help-troubleshooting ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--help-muted);
+  line-height: 1.55;
+}
+
+.help-step-list {
+  display: grid !important;
+  gap: 12px !important;
+  padding: 0 !important;
+  list-style: none;
+}
+
+.help-step-list > li {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--help-line);
+  border-radius: 15px;
+  background: #fff;
+}
+
+.help-step-list > li > span {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--help-soft);
+  color: var(--help-red);
+  font-weight: 900;
+}
+
+.help-step-list strong {
+  display: block;
+  line-height: 1.4;
+}
+
+.help-step-list p {
+  margin: 6px 0 0;
+  font-size: .92rem;
+}
+
+.help-outcome {
+  border-left: 4px solid #16a05d;
+  background: #f0fdf4;
+}
+
+.help-outcome p {
+  margin: 0;
+}
+
+.help-troubleshooting {
+  background: #fffafa;
+}
+
+.help-troubleshooting a {
+  display: inline-flex;
+  margin-top: 15px;
+  color: var(--help-red);
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .help-tip {
   display: block;
   max-width: 880px;

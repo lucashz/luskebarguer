@@ -18,6 +18,12 @@ try {
   const privateRobots = await page('/robots.txt', 'app.taprontomenu.com.br');
   assert(privateRobots.body.includes('Disallow: /'), 'Host privado nao bloqueia rastreadores.');
 
+  const helpHome = await page('/ajuda.html', 'taprontomenu.com.br');
+  const helpScript = await page('/ajuda.js', 'taprontomenu.com.br');
+  assert(helpHome.status === 200 && helpHome.body.includes('Como podemos ajudar?'), 'Central de Ajuda nao respondeu corretamente.');
+  assert(helpScript.status === 200 && helpScript.body.includes('Como usar os relat') && helpScript.body.includes('Como convidar usu'), 'Ajuda nao contempla recursos recentes do painel.');
+  assert(helpScript.body.includes('Antes de come') && helpScript.body.includes('Resultado esperado') && helpScript.body.includes('Se algo n'), 'Artigos de ajuda continuam sem estrutura detalhada.');
+
   const sitemap = await page('/sitemap.xml', 'taprontomenu.com.br');
   assert(sitemap.status === 200 && sitemap.type.includes('application/xml'), 'Indice de sitemap invalido.');
   assert(sitemap.body.includes('/sitemap-pages.xml') && sitemap.body.includes('/sitemap-stores.xml'), 'Indice de sitemap incompleto.');

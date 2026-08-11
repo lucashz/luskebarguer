@@ -1,14 +1,20 @@
 const HELP_CATEGORIES = [
   'Todos',
   'Primeiros passos',
+  'Onboarding',
   'Cadastro e login',
   'Configuração da loja',
   'Cardápio e produtos',
   'Pedidos',
+  'Relatórios',
+  'Clientes e promoções',
   'WhatsApp',
   'Pagamento online',
   'Mesas e QR Code',
+  'Mesas e comandas',
   'Planos e assinatura',
+  'Indicações',
+  'Conta e equipe',
   'Suporte'
 ];
 
@@ -153,7 +159,152 @@ const HELP_ARTICLES = [
     'Clique no chamado para abrir a conversa.',
     'Leia a resposta da equipe.',
     'Envie uma nova mensagem ou encerre o atendimento quando resolver.'
-  ], 'Notas internas da equipe não aparecem para o lojista.')
+  ], 'Notas internas da equipe não aparecem para o lojista.'),
+  article('concluir-onboarding', 'Como concluir a configuração inicial', 'Onboarding', 'Complete o checklist necessário para publicar a loja com segurança.', [
+    'Entre no painel e abra o checklist de configuração inicial.',
+    'Confirme os dados e a identidade visual da loja.',
+    'Defina atendimento, formas de pagamento, entrega e retirada.',
+    'Cadastre pelo menos uma categoria e um produto disponível.',
+    'Revise o resumo, resolva os itens pendentes e clique em Publicar cardápio.',
+    'Abra o link público pelo celular e faça um pedido teste.'
+  ], 'A loja só deve ser divulgada depois que o pedido teste chegar corretamente ao painel.'),
+  article('configurar-horarios', 'Como configurar horários de funcionamento', 'Configuração da loja', 'Defina os dias e horários em que o cardápio pode aceitar pedidos.', [
+    'Acesse Configurações da Loja e localize Horários.',
+    'Ative apenas os dias em que a loja atende.',
+    'Informe abertura e fechamento de cada período.',
+    'Se houver intervalo, cadastre dois períodos no mesmo dia.',
+    'Salve e confira no cardápio se o status aberto ou fechado está correto.'
+  ], 'A abertura manual não substitui uma grade de horários incorreta. Revise também o fuso e o horário do servidor.'),
+  article('configurar-entrega-retirada', 'Como configurar entrega e retirada', 'Configuração da loja', 'Escolha como o cliente receberá o pedido e defina taxas por bairro.', [
+    'Abra Configurações da Loja e entre em Entrega.',
+    'Ative entrega, retirada ou as duas modalidades.',
+    'Informe pedido mínimo e taxa padrão, quando existirem.',
+    'Cadastre cada bairro atendido com sua respectiva taxa.',
+    'Salve e simule endereços diferentes no checkout.'
+  ], 'Evite nomes duplicados para o mesmo bairro. Isso facilita a escolha e reduz cobrança incorreta.'),
+  article('configurar-pagamentos-pedido', 'Como configurar formas de pagamento do pedido', 'Configuração da loja', 'Informe se a loja aceita Pix, cartão ou dinheiro na entrega e retirada.', [
+    'Acesse Configurações da Loja e abra Pagamentos.',
+    'Marque apenas os meios realmente aceitos pela operação.',
+    'Diferencie Pix informado pela loja de Pix online integrado.',
+    'Se aceitar dinheiro, confirme se o checkout solicita troco.',
+    'Salve e faça um pedido teste para cada modalidade.'
+  ], 'Pagamento manual não recebe confirmação automática. Para isso, configure o Pix online em Integrações.'),
+  article('personalizar-aparencia', 'Como personalizar logo, capa e cores', 'Configuração da loja', 'Aplique a identidade da sua loja ao cardápio público.', [
+    'Abra Configurações da Loja e entre em Aparência.',
+    'Envie uma logo nítida e uma imagem de capa horizontal.',
+    'Escolha cores com bom contraste para texto e botões.',
+    'Salve as alterações.',
+    'Abra o cardápio no celular e confira legibilidade e recorte das imagens.'
+  ], 'Use imagens leves em JPG, PNG ou WebP. Arquivos muito grandes deixam a primeira abertura mais lenta.'),
+  article('imprimir-pedido', 'Como imprimir um pedido', 'Pedidos', 'Imprima os detalhes para balcão ou cozinha quando o recurso estiver disponível.', [
+    'Abra Pedidos e selecione o pedido desejado.',
+    'Confira itens, adicionais, observações e modalidade.',
+    'Clique em Imprimir pedido.',
+    'Escolha a impressora no diálogo do navegador.',
+    'Confirme se todas as linhas ficaram legíveis antes de enviar à produção.'
+  ], 'Faça uma impressão teste depois de trocar impressora, navegador ou tamanho do papel.'),
+  article('cancelar-pedido', 'Como cancelar um pedido', 'Pedidos', 'Registre o cancelamento sem apagar o histórico da operação.', [
+    'Abra o pedido e confirme que ele ainda pode ser cancelado.',
+    'Selecione o status Cancelado.',
+    'Informe ou registre o motivo quando solicitado.',
+    'Se houve pagamento online, verifique a situação financeira separadamente.',
+    'Avise o cliente e confirme que cozinha e entrega interromperam o atendimento.'
+  ], 'Cancelar o pedido não significa necessariamente estornar um pagamento. Confira o evento financeiro.'),
+  article('usar-relatorios', 'Como usar os relatórios da loja', 'Relatórios', 'Acompanhe pedidos, receita, ticket médio, produtos e formas de atendimento.', [
+    'Abra a aba Relatórios.',
+    'Escolha o período que deseja analisar.',
+    'Confira pedidos concluídos, cancelados e receita do período.',
+    'Compare produtos, horários e modalidades com maior movimento.',
+    'Use a informação para ajustar cardápio, equipe e divulgação.'
+  ], 'Relatório serve para orientar uma decisão. Evite concluir tendências usando apenas um dia atípico.'),
+  article('consultar-clientes', 'Como consultar clientes e histórico', 'Clientes e promoções', 'Encontre contatos e pedidos anteriores vinculados à sua loja.', [
+    'Acesse Clientes.',
+    'Use nome, telefone ou outros filtros disponíveis.',
+    'Abra o cadastro para conferir informações e histórico.',
+    'Use os dados apenas para atendimento e comunicações autorizadas.',
+    'Mantenha observações objetivas e respeite pedidos de exclusão.'
+  ], 'Não exporte ou compartilhe dados de clientes com pessoas que não precisam acessá-los.'),
+  article('criar-cupom', 'Como criar um cupom de desconto', 'Clientes e promoções', 'Configure código, benefício, validade e limite de utilização.', [
+    'Abra Cupons e Campanhas.',
+    'Clique em criar uma nova ação e escolha cupom.',
+    'Defina código, desconto fixo, percentual ou entrega grátis.',
+    'Configure período, pedido mínimo, limite total e limite por cliente.',
+    'Escolha produtos ou categorias quando a oferta não valer para tudo.',
+    'Salve e teste o cupom antes de divulgar.'
+  ], 'Use limites coerentes com sua margem. O sistema bloqueia utilizações simultâneas acima do limite configurado.'),
+  article('configurar-fidelidade', 'Como configurar o programa de fidelidade', 'Clientes e promoções', 'Defina a regra para recompensar clientes recorrentes.', [
+    'Acesse Cupons e Campanhas.',
+    'Abra a seção Programa de fidelidade.',
+    'Ative o programa e defina a regra de acúmulo.',
+    'Informe quando a recompensa poderá ser usada.',
+    'Salve e faça uma simulação antes de anunciar.'
+  ], 'Explique a regra em uma frase simples para que o cliente saiba como ganhar e usar o benefício.'),
+  article('abrir-comanda', 'Como abrir e usar uma comanda', 'Mesas e comandas', 'Agrupe consumos de mesa, balcão ou cliente até o fechamento.', [
+    'Acesse Mesas e comandas.',
+    'Clique em Abrir comanda.',
+    'Identifique a mesa ou o cliente e confirme a abertura.',
+    'Adicione pedidos e itens à comanda correta.',
+    'Revise o consumo antes de fechar.',
+    'Confirme pagamento e encerramento para liberar a mesa.'
+  ], 'Antes de adicionar itens, confira sempre o nome ou número da comanda para evitar transferência manual depois.'),
+  article('gerenciar-mesas', 'Como gerenciar mesas e disponibilidade', 'Mesas e comandas', 'Acompanhe mesas livres, ocupadas e comandas abertas.', [
+    'Abra Mesas e comandas.',
+    'Cadastre ou revise a identificação das mesas.',
+    'Use o status visual para localizar mesas ocupadas.',
+    'Abra a comanda relacionada para conferir consumo.',
+    'Finalize corretamente para devolver a mesa ao status livre.'
+  ], 'Use nomes curtos e visíveis no ambiente, como Mesa 01, Varanda 02 ou Balcão 01.'),
+  article('contratar-whatsapp-adicional', 'Como contratar WhatsApp automático', 'WhatsApp', 'Adicione notificações automáticas ao plano quando o recurso não estiver incluído.', [
+    'Abra Meu plano ou Integrações.',
+    'Localize o adicional WhatsApp automático.',
+    'Confira preço, recorrência e recursos incluídos.',
+    'Avance para o checkout e conclua o pagamento.',
+    'Depois da ativação, volte a Integrações e conecte pelo QR Code.'
+  ], 'Todos os planos podem contratar o adicional, exceto aquele que já inclui o WhatsApp automático.'),
+  article('solicitar-configuracao-integracao', 'Como solicitar configuração assistida', 'Pagamento online', 'Contrate ajuda para configurar uma ou mais integrações em um único pedido.', [
+    'Abra Integrações.',
+    'Confira o banner de pendências no topo da página.',
+    'Clique em Solicitar configuração.',
+    'Selecione as configurações que deseja contratar e revise os valores.',
+    'Conclua o checkout.',
+    'Acompanhe o chamado criado automaticamente na aba Suporte.'
+  ], 'O banner desaparece quando não há pendências ou quando já existe um chamado em andamento.'),
+  article('usar-indicacoes', 'Como indicar o TáPronto e acompanhar créditos', 'Indicações', 'Compartilhe seu código e acompanhe indicações qualificadas.', [
+    'Acesse Indicações.',
+    'Copie seu link ou código individual.',
+    'Compartilhe somente com estabelecimentos que possam se beneficiar.',
+    'Acompanhe quando a conta indicada for criada.',
+    'O crédito é liberado conforme as regras exibidas quando a indicação contratar.'
+  ], 'Não publique seu código em listas de spam. Indicações relevantes têm maior chance de concluir o teste.'),
+  article('alterar-dados-conta', 'Como alterar os dados da conta', 'Conta e equipe', 'Atualize nome, telefone e demais informações do seu acesso.', [
+    'Abra Conta e Usuários.',
+    'Localize Dados da conta.',
+    'Atualize apenas as informações necessárias.',
+    'Confirme o e-mail quando a alteração exigir nova validação.',
+    'Salve e entre novamente se a sessão for renovada.'
+  ], 'Dados da conta de acesso são diferentes dos dados públicos da loja.'),
+  article('trocar-senha-conta', 'Como trocar a senha pelo painel', 'Conta e equipe', 'Crie uma nova senha quando ainda consegue acessar sua conta.', [
+    'Acesse Conta e Usuários.',
+    'Abra Trocar senha.',
+    'Informe a senha atual.',
+    'Digite e confirme uma nova senha forte.',
+    'Salve e use a nova senha no próximo acesso.'
+  ], 'Nunca compartilhe senha entre atendentes. Crie um acesso individual para cada pessoa.'),
+  article('convidar-usuario-permissoes', 'Como convidar usuários e definir permissões', 'Conta e equipe', 'Dê a cada pessoa acesso somente ao que precisa usar.', [
+    'Abra Conta e Usuários.',
+    'Clique em convidar ou criar acesso.',
+    'Informe nome e e-mail da pessoa.',
+    'Escolha função e lojas permitidas.',
+    'Envie o convite e aguarde a ativação.',
+    'Revise ou remova o acesso quando a responsabilidade mudar.'
+  ], 'Cozinha, entrega e atendimento não precisam receber permissões administrativas.'),
+  article('excluir-conta-dados', 'Como solicitar exclusão da conta e dos dados', 'Conta e equipe', 'Entenda a confirmação necessária e os efeitos da exclusão.', [
+    'Abra Conta e Usuários e localize Sua conta.',
+    'Leia quais lojas, acessos e dados serão afetados.',
+    'Regularize ou cancele assinaturas e pendências quando necessário.',
+    'Confirme a solicitação com sua senha.',
+    'Aguarde a confirmação e guarde os dados que precisa manter por obrigação legal.'
+  ], 'A exclusão é uma ação crítica e pode ser irreversível. Não use essa opção apenas para fechar temporariamente a loja.')
 ];
 
 const state = {
@@ -178,7 +329,41 @@ const els = {
 initHelp();
 
 function article(slug, title, category, summary, steps, tip = '') {
-  return { slug, title, category, summary, steps, tip };
+  const guidance = categoryGuidance(category);
+  return {
+    slug, title, category, summary, steps, tip,
+    updatedAt: '11/08/2026',
+    readTime: Math.max(3, Math.ceil((steps.length + 3) / 2)),
+    before: guidance.before,
+    outcome: guidance.outcome,
+    troubleshooting: guidance.troubleshooting
+  };
+}
+
+function categoryGuidance(category) {
+  const common = {
+    before: ['Entre no painel com um usuário que tenha permissão para essa área.', 'Confirme que está trabalhando na loja correta.'],
+    outcome: 'A alteração deve aparecer no painel e permanecer depois de atualizar a página.',
+    troubleshooting: ['Atualize a página e tente novamente.', 'Confira se seu plano e sua permissão liberam o recurso.', 'Se aparecer uma mensagem de erro, copie o texto e envie em um chamado.']
+  };
+  const byCategory = {
+    'Primeiros passos': { before: ['Tenha em mãos um e-mail válido, telefone e nome da loja.'], outcome: 'Sua conta deve abrir o checklist inicial e mostrar a loja criada.' },
+    'Cadastro e login': { before: ['Use o mesmo e-mail informado no cadastro.', 'Tenha acesso à caixa de entrada e ao spam.'], outcome: 'Você deve conseguir entrar no painel com uma sessão protegida.' },
+    'Onboarding': { before: ['Tenha logo, horários, formas de atendimento e ao menos um produto.'], outcome: 'O checklist deve ficar concluído e o cardápio pronto para publicação.' },
+    'Cardápio e produtos': { before: ['Crie ao menos uma categoria antes de cadastrar produtos.', 'Prepare nome, preço e foto do item.'], outcome: 'O item deve aparecer na categoria correta do cardápio público.' },
+    'Pedidos': { before: ['Deixe a loja aberta e faça um pedido teste.', 'Confira se produtos e formas de atendimento estão ativos.'], outcome: 'O pedido deve permanecer no histórico com itens, total, cliente e status corretos.' },
+    'Pagamento online': { before: ['Tenha uma conta ativa no provedor e credenciais válidas.', 'Nunca envie a chave da API em conversas ou capturas públicas.'], outcome: 'Um pedido teste deve aguardar a confirmação e avançar somente após o pagamento.' },
+    'WhatsApp': { before: ['Use o celular e o número oficial da loja.', 'Confirme que o adicional ou plano está ativo.'], outcome: 'A conexão deve mostrar status ativo e receber a mensagem de teste.' },
+    'Relatórios': { before: ['Escolha um período com pedidos reais ou de teste concluídos.'], outcome: 'Os totais e indicadores devem corresponder aos pedidos do período selecionado.' },
+    'Clientes e promoções': { before: ['Defina objetivo, validade e limite antes de criar uma campanha.'], outcome: 'A regra deve funcionar no checkout sem ultrapassar os limites configurados.' },
+    'Mesas e QR Code': { before: ['Defina uma identificação única para cada mesa da loja.'], outcome: 'O QR Code deve abrir o cardápio vinculado à mesa correta.' },
+    'Mesas e comandas': { before: ['Cadastre as mesas e confirme que não existe uma comanda duplicada.'], outcome: 'A mesa e sua comanda devem refletir consumo e status corretos até o fechamento.' },
+    'Planos e assinatura': { before: ['Confira plano atual, ciclo de cobrança e valor antes de confirmar.'], outcome: 'O novo status deve aparecer em Meu plano e liberar os recursos contratados.' },
+    'Indicações': { before: ['Copie o link individual exibido no painel.'], outcome: 'A indicação deve aparecer no histórico conforme avançar no cadastro e pagamento.' },
+    'Conta e equipe': { before: ['Use uma conta proprietária ou com permissão para gerenciar acessos.'], outcome: 'As alterações devem respeitar as permissões sem compartilhar senhas.' },
+    'Suporte': { before: ['Anote o que tentou fazer, horário e mensagem exibida.'], outcome: 'O chamado deve aparecer no histórico e receber atualizações na mesma conversa.' }
+  };
+  return { ...common, ...(byCategory[category] || {}) };
 }
 
 function initHelp() {
@@ -307,7 +492,7 @@ function renderArticles() {
 function getFilteredArticles() {
   return HELP_ARTICLES.filter((articleItem) => {
     const matchesCategory = state.category === 'Todos' || articleItem.category === state.category;
-    const haystack = normalizeText(`${articleItem.title} ${articleItem.category} ${articleItem.summary} ${articleItem.steps.join(' ')}`);
+    const haystack = normalizeText(`${articleItem.title} ${articleItem.category} ${articleItem.summary} ${articleItem.steps.join(' ')} ${articleItem.before.join(' ')} ${articleItem.troubleshooting.join(' ')}`);
     const matchesQuery = !state.query || haystack.includes(state.query);
     return matchesCategory && matchesQuery;
   });
@@ -329,15 +514,14 @@ function openArticle(slug, updateHash = true) {
   els.detail.innerHTML = `
     <p class="help-eyebrow">${escapeHtml(articleItem.category)}</p>
     <h1>${escapeHtml(articleItem.title)}</h1>
-    <div class="article-meta">
-      <span>Guia rápido</span>
-      <span>${articleItem.steps.length} passos</span>
-    </div>
-    <p>${escapeHtml(articleItem.summary)}</p>
-    <ol>
-      ${articleItem.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
-    </ol>
+    <div class="article-meta"><span>Atualizado em ${escapeHtml(articleItem.updatedAt)}</span><span>${articleItem.readTime} min de leitura</span><span>${articleItem.steps.length} passos</span></div>
+    <p class="help-article-lead">${escapeHtml(articleItem.summary)}</p>
+    <section class="help-before"><h2>Antes de começar</h2><ul>${articleItem.before.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></section>
+    <h2>Passo a passo</h2>
+    <ol class="help-step-list">${articleItem.steps.map((step, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(step)}</strong><p>${escapeHtml(stepDetail(articleItem.category, index))}</p></div></li>`).join('')}</ol>
+    <section class="help-outcome"><h2>Resultado esperado</h2><p>${escapeHtml(articleItem.outcome)}</p></section>
     ${articleItem.tip ? `<strong class="help-tip">Dica: ${escapeHtml(articleItem.tip)}</strong>` : ''}
+    <section class="help-troubleshooting"><h2>Se algo não funcionar</h2><ul>${articleItem.troubleshooting.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul><a href="https://app.taprontomenu.com.br/?tab=support">Abrir um chamado no painel</a></section>
     ${related.length ? `
       <h2>Artigos relacionados</h2>
       <div class="help-related">
@@ -352,6 +536,23 @@ function openArticle(slug, updateHash = true) {
   els.panel.querySelectorAll('[data-help-open]').forEach((button) => {
     button.addEventListener('click', () => openArticle(button.dataset.helpOpen || ''));
   });
+}
+
+function stepDetail(category, index) {
+  const details = [
+    'Confira os dados antes de avançar para evitar retrabalho nas próximas etapas.',
+    'Faça a alteração com calma e use somente informações confirmadas pela loja.',
+    'Observe avisos e campos obrigatórios mostrados pelo painel.',
+    'Salve a etapa e espere a confirmação antes de fechar a tela.',
+    'Valide o resultado em outra tela ou pelo cardápio do cliente.',
+    'Se for um teste, registre o resultado e corrija qualquer diferença encontrada.'
+  ];
+  const categoryNotes = {
+    'Pagamento online': 'Não exponha credenciais e use um pedido de baixo valor na validação.',
+    'Pedidos': 'Confirme sempre loja, número do pedido e status antes de alterar.',
+    'Conta e equipe': 'Use acesso individual e conceda apenas as permissões necessárias.'
+  };
+  return index === 1 && categoryNotes[category] ? categoryNotes[category] : details[index % details.length];
 }
 
 function hideArticleList() {
