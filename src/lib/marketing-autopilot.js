@@ -15,6 +15,17 @@ const TOPICS = [
   { key: 'whatsapp-organizado', title: 'WhatsApp com menos bagunça', pillar: 'dor real', niche: 'pequenos restaurantes', hook: 'Seu WhatsApp virou uma fila sem controle?', overlay: 'WhatsApp aberto. Pedidos organizados.', caption: 'Você não precisa abandonar o WhatsApp. Use o TáPronto para receber o pedido completo e mantenha a conversa para o que realmente precisa de atendimento.\n\nVeja como funciona.', cta: 'Ver demonstração', reference: 'sistema-admin-pedidos-original.png' }
 ];
 
+const BASE_HASHTAGS = ['TáPronto', 'CardápioDigital', 'PedidosOnline'];
+const NICHE_HASHTAGS = {
+  restaurantes: ['Restaurante', 'GestãoDeRestaurante'],
+  lanchonetes: ['Lanchonete', 'Delivery'],
+  hamburguerias: ['Hamburgueria', 'Delivery'],
+  pizzarias: ['Pizzaria', 'Delivery'],
+  'bares e cafeterias': ['Cafeteria', 'Bar'],
+  delivery: ['Delivery', 'PedidoOnline'],
+  'pequenos restaurantes': ['PequenoRestaurante', 'Delivery']
+};
+
 let pool;
 function databasePool(env = process.env) {
   if (!pool) pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: 2, ssl: env.DB_SSL === 'true' || /sslmode=require/i.test(env.DATABASE_URL || '') ? { rejectUnauthorized: false } : false });
@@ -116,7 +127,8 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     const account = (await db.query(`select id from social_accounts where status='connected' order by mode='live' desc,created_at desc limit 1`)).rows[0];
     const scheduledAt = futurePublicationTime(runDate, String(settings?.publication_time || '10:00'));
     const contentFormat = settings?.image_aspect_ratio === '9:16' ? 'story' : 'post';
-    const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram',$2,$3,'consideration',$4,'Gerar interesse qualificado',$5,$6,$7,$8,$9,$10,'America/Sao_Paulo',$11,'draft',$12,$13,$14::jsonb,$15,$16,now()) returning *`, [topic.title, contentFormat, topic.pillar, topic.niche, topic.hook, topic.caption, topic.cta, topic.overlay, settings?.image_aspect_ratio || '1:1', topic.overlay, account?.id || null, scheduledAt, ['tapronto','cardapiodigital','pedidosonline','restaurante','delivery'], JSON.stringify([topic.reference]), `${config.baseUrl}/?utm_source=instagram&utm_medium=organic&utm_campaign=post-diario-${topic.key}`, createdBy]);
+    const postPackage = buildPostPackage(topic, settings, config);
+    const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram',$2,$3,'consideration',$4,'Gerar interesse qualificado',$5,$6,$7,$8,$9,$10,'America/Sao_Paulo',$11,'draft',$12,$13,$14::jsonb,$15,$16,now()) returning *`, [topic.title, contentFormat, topic.pillar, topic.niche, topic.hook, postPackage.caption, postPackage.cta, topic.overlay, settings?.image_aspect_ratio || '1:1', postPackage.altText, account?.id || null, scheduledAt, postPackage.hashtags, JSON.stringify([topic.reference]), postPackage.utmUrl, createdBy]);
     const content = contentResult.rows[0];
     await db.query(`insert into social_content_assets(content_id,asset_id,sort_order,role) values($1,$2,0,'media')`, [content.id, asset.id]);
     await db.query(`update marketing_autopilot_runs set status='ready',content_id=$1,asset_id=$2,updated_at=now() where id=$3`, [content.id, asset.id, run.id]);
@@ -127,6 +139,21 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     if (run?.id) await db.query(`update marketing_autopilot_runs set status='failed',error_message=$1,updated_at=now() where id=$2`, [String(error.message || error).slice(0, 1000), run.id]).catch(() => {});
     throw error;
   } finally { client.release(); }
+}
+
+function buildPostPackage(topic, settings, config) {
+  const preferredCta = arrayValues(settings?.preferred_ctas).map((value) => cleanText(value, 80)).find(Boolean);
+  const cta = preferredCta || topic.cta;
+  const hashtags = [...new Set([...BASE_HASHTAGS, ...(NICHE_HASHTAGS[topic.niche] || ['Restaurante', 'Delivery'])])].slice(0, 7);
+  const caption = cleanText(topic.caption, 1850);
+  if (!caption || caption.length > 1850 || hashtags.length < 3) throw new Error('O pacote do post não passou pela validação automática.');
+  return {
+    caption,
+    cta,
+    hashtags: hashtags.map((tag) => `#${tag}`),
+    altText: `Tela do TáPronto mostrando ${topic.pillar}, com a mensagem: ${topic.overlay}`,
+    utmUrl: `${config.baseUrl}/?utm_source=instagram&utm_medium=organic&utm_campaign=post-diario-${topic.key}`
+  };
 }
 
 async function createAutopilotAsset(topic, run, config, settings, createdBy, db) {

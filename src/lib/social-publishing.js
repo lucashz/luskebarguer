@@ -184,7 +184,8 @@ export async function processClaimedPublication(client, publication, env = proce
 
 async function createMetaContainer(content, assets, account, token, config) {
   const format = String(content.format).toLowerCase();
-  const caption = [content.caption, ...(content.hashtags || [])].filter(Boolean).join('\n\n').slice(0, 2200);
+  const hashtags = (content.hashtags || []).map((tag) => String(tag).trim()).filter(Boolean).map((tag) => tag.startsWith('#') ? tag : `#${tag}`);
+  const caption = [content.caption, hashtags.join(' ')].filter(Boolean).join('\n\n').slice(0, 2200);
   if (format === 'carousel') {
     const children = [];
     for (const asset of assets.filter((a) => a.role === 'media')) {
