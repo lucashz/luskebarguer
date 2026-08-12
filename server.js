@@ -1192,6 +1192,12 @@ async function handleApi(req, res, url) {
     json(res, 200, { item: await updatePlatformMarketingItem(req, admin, platformMarketingItemMatch[1], platformMarketingItemMatch[2], await readJson(req)) });
     return;
   }
+  if (platformMarketingItemMatch && method === 'DELETE' && platformMarketingItemMatch[1] === 'content') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await deletePlatformMarketingContent(req, admin, platformMarketingItemMatch[2], await readJson(req)));
+    return;
+  }
 
   const platformPilotMatch = url.pathname.match(/^\/api\/platform\/marketing\/pilots\/([a-f0-9-]+)$/i);
   if (platformPilotMatch && method === 'PATCH') {
@@ -1248,6 +1254,14 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     json(res, 200, await attachPlatformSocialAsset(req, admin, socialContentAssetMatch[1], await readJson(req)));
+    return;
+  }
+
+  const socialContentAssetDeleteMatch = url.pathname.match(/^\/api\/platform\/social\/content\/([a-f0-9-]+)\/assets\/([a-f0-9-]+)$/i);
+  if (socialContentAssetDeleteMatch && method === 'DELETE') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await removePlatformSocialAsset(req, admin, socialContentAssetDeleteMatch[1], socialContentAssetDeleteMatch[2]));
     return;
   }
 
@@ -11681,6 +11695,7 @@ async function updatePlatformMarketingItem(req, admin, kind, id, data) {
   if (kind === 'content' && currentContent.channel === 'instagram') {
     const protectedFields = ['caption', 'cta', 'scheduled_at', 'social_account_id', 'format', 'alt_text', 'location_name'];
     if (protectedFields.some((field) => field in payload && JSON.stringify(payload[field]) !== JSON.stringify(currentContent[field]))) {
+      await cancelQueuedSocialPublication(id);
       Object.assign(payload, invalidateSocialApprovalPatch(currentContent, admin.id));
     }
   }
@@ -11689,6 +11704,17 @@ async function updatePlatformMarketingItem(req, admin, kind, id, data) {
   if (!row) throw httpError(404, 'Item de marketing não encontrado.');
   await audit(`platform.marketing.${kind}.update`, { req, actor_admin_id: admin.id, entity_type: `marketing_${kind}`, entity_id: id, after_data: { status: row.status || row.stage } });
   return row;
+}
+
+async function deletePlatformMarketingContent(req, admin, id, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const current = (await dbRequest('GET', 'marketing_content_items', { select: '*', id: `eq.${id}`, limit: '1' }))[0];
+  if (!current) return { ok: true, already_deleted: true };
+  if (['publishing', 'processing', 'published'].includes(current.status)) throw httpError(409, 'Um post já enviado ao Instagram deve ser excluído pelo aplicativo do Instagram.', { published_url: current.published_url || '' });
+  await cancelQueuedSocialPublication(id);
+  await dbRequest('DELETE', 'marketing_content_items', { id: `eq.${id}` }, undefined, ['Prefer: return=minimal']);
+  await audit('platform.marketing.content.delete', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: id, before_data: { title: current.title, status: current.status } });
+  return { ok: true };
 }
 
 async function importPlatformMarketingLeads(req, admin, data = {}) {
@@ -11955,10 +11981,28 @@ async function attachPlatformSocialAsset(req, admin, contentId, data = {}) {
   const assetId = cleanUuid(data.asset_id);
   const [contentRows, assetRows] = await Promise.all([dbRequest('GET', 'marketing_content_items', { select: '*', id: `eq.${contentId}`, channel: 'eq.instagram', limit: '1' }), dbRequest('GET', 'social_media_assets', { select: '*', id: `eq.${assetId}`, processing_status: 'eq.ready', limit: '1' })]);
   if (!contentRows[0] || !assetRows[0]) throw httpError(404, 'Conteúdo ou asset não encontrado.');
+  if (['publishing', 'processing', 'published'].includes(contentRows[0].status)) throw httpError(409, 'A imagem de um post já enviado deve ser alterada pelo Instagram.');
+  await cancelQueuedSocialPublication(contentId);
+  if (data.replace === true) await dbRequest('DELETE', 'social_content_assets', { content_id: `eq.${contentId}`, role: 'eq.media' }, undefined, ['Prefer: return=minimal']);
   await dbRequest('POST', 'social_content_assets', { on_conflict: 'content_id,asset_id' }, { content_id: contentId, asset_id: assetId, sort_order: clampInteger(data.sort_order, 0, 20), role: ['media', 'cover', 'thumbnail'].includes(data.role) ? data.role : 'media' }, ['Prefer: resolution=merge-duplicates,return=minimal']);
   if (['approved', 'scheduled'].includes(contentRows[0].status)) await invalidateSocialContentApproval(contentRows[0], admin.id, 'Asset alterado depois da aprovação.');
   await audit('platform.social.asset.attach', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, after_data: { asset_id: assetId } });
   return { ok: true };
+}
+
+async function removePlatformSocialAsset(req, admin, contentId, assetId) {
+  const context = await socialContentContext(contentId);
+  if (['publishing', 'processing', 'published'].includes(context.content.status)) throw httpError(409, 'A imagem de um post já enviado deve ser alterada pelo Instagram.');
+  if (!context.assets.some((asset) => asset.id === assetId)) return { ok: true, already_removed: true };
+  await cancelQueuedSocialPublication(contentId);
+  await dbRequest('DELETE', 'social_content_assets', { content_id: `eq.${contentId}`, asset_id: `eq.${assetId}` }, undefined, ['Prefer: return=minimal']);
+  if (['approved', 'scheduled'].includes(context.content.status)) await invalidateSocialContentApproval(context.content, admin.id, 'Imagem removida depois da aprovação.');
+  await audit('platform.social.asset.remove', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, after_data: { asset_id: assetId } });
+  return { ok: true };
+}
+
+async function cancelQueuedSocialPublication(contentId) {
+  await dbRequest('PATCH', 'social_publications', { content_id: `eq.${contentId}`, status: 'in.(queued,retry)' }, { status: 'cancelled', lock_expires_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
 }
 
 async function socialContentContext(contentId) {
