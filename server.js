@@ -11977,6 +11977,12 @@ async function transitionPlatformSocialContent(req, admin, contentId, data = {})
   const target = cleanText(data.status || '').toLowerCase();
   if (!SOCIAL_CONTENT_STATUSES.includes(target)) throw httpError(422, 'Status editorial inválido.');
   const context = await socialContentContext(contentId);
+  const approvalAlreadyApplied = target === 'approved' && ['approved', 'scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(context.content.status);
+  const scheduleAlreadyApplied = target === 'scheduled' && ['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(context.content.status);
+  if (approvalAlreadyApplied || scheduleAlreadyApplied) {
+    const publications = await dbRequest('GET', 'social_publications', { select: '*', content_id: `eq.${contentId}`, order: 'created_at.desc', limit: '1' });
+    return { content: context.content, publication: publications[0] || null, already_applied: true };
+  }
   assertTransition(context.content.status, target);
   const revisionHistory = [...(Array.isArray(context.content.revision_history) ? context.content.revision_history : []), { at: new Date().toISOString(), from: context.content.status, to: target, admin_id: admin.id, note: cleanText(data.note || '').slice(0, 500) }].slice(-100);
   const patch = { status: target, updated_at: new Date().toISOString(), revision_history: JSON.stringify(revisionHistory) };

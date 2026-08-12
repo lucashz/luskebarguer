@@ -1279,7 +1279,8 @@ function openMarketingContentDetails(id) {
   if (form.elements.hashtags) form.elements.hashtags.value = (item.hashtags || []).join(' ');
   if (form.elements.assets_text) form.elements.assets_text.value = (item.assets || []).join('\n');
   const title = document.querySelector('#marketingContentEditorTitle'); if (title) title.textContent = `Editar: ${item.title}`;
-  if (item.channel === 'instagram') mountSocialPublishingTools(item.id);
+  if (item.channel === 'instagram' && item.status === 'review') mountSocialPublishingTools(item.id);
+  else restoreSocialPublishingTools();
   renderMarketingEditorPreview(); form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -1453,7 +1454,12 @@ async function approveAndScheduleSocialContent(event) {
   data.scheduled_at = new Date(data.scheduled_at).toISOString();
   const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
   try {
-    await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
+    const latest = (state.social?.content || []).find((item) => item.id === data.content_id);
+    if (latest && ['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(latest.status)) {
+      await refreshSocial();
+      return toast(latest.status === 'published' ? 'Este post já foi publicado.' : 'Este post já está agendado.');
+    }
+    if (!latest || latest.status === 'review') await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
     await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'scheduled', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id }) });
     event.currentTarget.reset(); await refreshSocial(); toast('Conteúdo aprovado e agendado.');
   } catch (error) { toast(error.message || 'Não foi possível aprovar e agendar.'); }
