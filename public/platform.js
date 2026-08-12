@@ -25,7 +25,8 @@
   marketing: null,
   social: null,
   marketingLoaded: false,
-  marketingActiveTab: 'campaigns',
+  marketingActiveTab: new URLSearchParams(window.location.search).get('marketing_tab') || 'overview',
+  marketingCalendarAnchor: new Date(),
   supportTickets: [],
   supportActiveTab: 'queue',
   selectedSupportTicketId: null,
@@ -101,7 +102,7 @@ const PLATFORM_VIEW_META = {
   },
   marketing: {
     title: 'Marketing',
-    subtitle: 'Campanhas, leads, conteúdo e automações de crescimento com controle e rastreabilidade.',
+    subtitle: 'Próximas ações, conteúdos, calendário, resultados e contatos em um fluxo simples.',
   },
   audit: {
     title: 'Auditoria',
@@ -219,6 +220,28 @@ const els = {
   marketingContentList: document.querySelector('#marketingContentList'),
   marketingExperimentList: document.querySelector('#marketingExperimentList'),
   marketingAutomationList: document.querySelector('#marketingAutomationList'),
+  newMarketingContentButton: document.querySelector('#newMarketingContentButton'),
+  closeMarketingContentEditor: document.querySelector('#closeMarketingContentEditor'),
+  newMarketingLeadButton: document.querySelector('#newMarketingLeadButton'),
+  marketingContentStatusFilter: document.querySelector('#marketingContentStatusFilter'),
+  marketingNextAction: document.querySelector('#marketingNextAction'),
+  marketingAttentionList: document.querySelector('#marketingAttentionList'),
+  marketingUpcomingList: document.querySelector('#marketingUpcomingList'),
+  marketingRecentContent: document.querySelector('#marketingRecentContent'),
+  marketingCalendarGrid: document.querySelector('#marketingCalendarGrid'),
+  marketingCalendarSummary: document.querySelector('#marketingCalendarSummary'),
+  marketingCalendarView: document.querySelector('#marketingCalendarView'),
+  marketingCalendarPrevious: document.querySelector('#marketingCalendarPrevious'),
+  marketingCalendarToday: document.querySelector('#marketingCalendarToday'),
+  marketingCalendarNext: document.querySelector('#marketingCalendarNext'),
+  marketingResultsPeriod: document.querySelector('#marketingResultsPeriod'),
+  marketingResultsSummary: document.querySelector('#marketingResultsSummary'),
+  marketingTopContent: document.querySelector('#marketingTopContent'),
+  marketingRecommendations: document.querySelector('#marketingRecommendations'),
+  marketingContactSummary: document.querySelector('#marketingContactSummary'),
+  marketingEditorPreview: document.querySelector('#marketingEditorPreview'),
+  marketingContentPublishingTools: document.querySelector('#marketingContentPublishingTools'),
+  socialToolsHome: document.querySelector('#socialToolsHome'),
   socialConfigMessage: document.querySelector('#socialConfigMessage'),
   socialAccountActions: document.querySelector('#socialAccountActions'),
   socialSummary: document.querySelector('#socialSummary'),
@@ -290,6 +313,16 @@ els.marketingContentMetricsForm?.addEventListener('submit', submitMarketingConte
 els.marketingLeadCsvInput?.addEventListener('change', importMarketingLeadsCsv);
 els.generateMarketingReportButton?.addEventListener('click', generateMarketingWeeklyReport);
 els.marketingPilotForm?.addEventListener('submit', submitMarketingPilot);
+els.newMarketingContentButton?.addEventListener('click', openMarketingContentEditor);
+els.closeMarketingContentEditor?.addEventListener('click', closeMarketingContentEditor);
+els.newMarketingLeadButton?.addEventListener('click', () => { els.marketingLeadForm.hidden = !els.marketingLeadForm.hidden; });
+els.marketingContentStatusFilter?.addEventListener('change', renderMarketingContentLibrary);
+els.marketingCalendarView?.addEventListener('change', renderMarketingCalendar);
+els.marketingCalendarPrevious?.addEventListener('click', () => moveMarketingCalendar(-1));
+els.marketingCalendarNext?.addEventListener('click', () => moveMarketingCalendar(1));
+els.marketingCalendarToday?.addEventListener('click', () => { state.marketingCalendarAnchor = new Date(); renderMarketingCalendar(); });
+els.marketingResultsPeriod?.addEventListener('change', renderMarketingResults);
+els.marketingContentForm?.addEventListener('input', renderMarketingEditorPreview);
 els.socialAssetForm?.addEventListener('submit', uploadSocialAsset);
 els.socialScheduleForm?.addEventListener('submit', approveAndScheduleSocialContent);
 els.socialStatusFilter?.addEventListener('change', renderSocialPublishing);
@@ -302,6 +335,22 @@ document.addEventListener('click', (event) => {
   const socialButton = event.target.closest?.('[data-social-action]');
   if (socialButton) handleSocialAction(socialButton);
   if (event.target.closest?.('[data-marketing-open-social]')) activateMarketingTab('social');
+  const tabButton = event.target.closest?.('[data-open-marketing-tab]');
+  if (tabButton) activateMarketingTab(tabButton.dataset.openMarketingTab);
+  if (event.target.closest?.('[data-new-marketing-content]')) openMarketingContentEditor();
+  const contentButton = event.target.closest?.('[data-marketing-content-id]');
+  if (contentButton) openMarketingContentDetails(contentButton.dataset.marketingContentId);
+  const reviewButton = event.target.closest?.('[data-review-marketing-content]');
+  if (reviewButton) {
+    openMarketingContentDetails(reviewButton.dataset.reviewMarketingContent);
+    els.marketingContentPublishingTools?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  const calendarCreate = event.target.closest?.('[data-calendar-create]');
+  if (calendarCreate) {
+    openMarketingContentEditor();
+    const scheduled = els.marketingContentForm?.elements?.scheduled_at;
+    if (scheduled) scheduled.value = `${calendarCreate.dataset.calendarCreate}T10:00`;
+  }
 });
 document.addEventListener('change', (event) => {
   const select = event.target.closest?.('[data-marketing-lead-stage]');
@@ -772,10 +821,19 @@ async function loadMarketing(options = {}) {
   }
 }
 
-function activateMarketingTab(tab = 'campaigns') {
+function activateMarketingTab(tab = 'overview') {
   state.marketingActiveTab = tab;
   els.marketingTabs.forEach((button) => button.classList.toggle('active', button.dataset.marketingTab === tab));
-  els.marketingPanels.forEach((panel) => { panel.hidden = panel.dataset.marketingPanel !== tab; });
+  els.marketingPanels.forEach((panel) => {
+    const advanced = panel.hasAttribute('data-marketing-advanced');
+    panel.hidden = advanced ? tab !== 'more' : panel.dataset.marketingPanel !== tab;
+  });
+  document.querySelectorAll('[data-marketing-advanced]:not([data-marketing-panel])').forEach((item) => { item.hidden = tab !== 'more'; });
+  const url = new URL(window.location.href);
+  if (tab === 'overview') url.searchParams.delete('marketing_tab'); else url.searchParams.set('marketing_tab', tab);
+  history.replaceState(null, '', url);
+  if (tab === 'calendar') renderMarketingCalendar();
+  if (tab === 'results') renderMarketingResults();
 }
 
 function marketingFormPayload(form) {
@@ -818,7 +876,21 @@ async function submitMarketingForm(event, endpoint, successMessage) {
 
 function submitMarketingCampaign(event) { return submitMarketingForm(event, '/api/platform/marketing/campaigns', 'Campanha criada com rastreamento UTM.'); }
 function submitMarketingLead(event) { return submitMarketingForm(event, '/api/platform/marketing/leads', 'Lead adicionado ao CRM.'); }
-function submitMarketingContent(event) { return submitMarketingForm(event, '/api/platform/marketing/content', 'Conteúdo salvo como rascunho.'); }
+async function submitMarketingContent(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const id = form.dataset.contentId || '';
+    const endpoint = id ? `/api/platform/marketing/content/${id}` : '/api/platform/marketing/content';
+    await request(endpoint, { method: id ? 'PATCH' : 'POST', body: JSON.stringify(marketingFormPayload(form)) });
+    restoreSocialPublishingTools(); form.reset(); delete form.dataset.contentId; form.hidden = true;
+    await loadMarketing({ silent: true });
+    toast(id ? 'Conteúdo atualizado. A aprovação foi revista quando necessário.' : 'Conteúdo salvo como rascunho.');
+  } catch (error) { toast(error.message || 'Não foi possível salvar o conteúdo.'); }
+  finally { button.disabled = false; }
+}
 function submitMarketingExperiment(event) { return submitMarketingForm(event, '/api/platform/marketing/experiments', 'Experimento registrado no backlog.'); }
 function submitMarketingPilot(event) { return submitMarketingForm(event, '/api/platform/marketing/pilots', 'Loja piloto adicionada.'); }
 
@@ -907,15 +979,15 @@ function renderMarketing() {
   if (!els.platformMarketingSummary) return;
   const data = state.marketing || {};
   const summary = data.summary || {};
-  const metrics = [
-    ['Campanhas ativas', summary.active_campaigns || 0],
-    ['Leads em aberto', summary.open_leads || 0],
-    ['Conteúdos agendados', summary.scheduled_content || 0],
-    ['Contatos atrasados', summary.overdue_contacts || 0],
-    ['Experimentos ativos', summary.running_experiments || 0]
-  ];
-  els.platformMarketingSummary.innerHTML = metrics.map(([label, value]) => `<article class="platform-kpi-card"><span>${escapeHtml(label)}</span><strong>${value}</strong></article>`).join('');
+  const content = data.content || [];
   const funnel = data.funnel || {};
+  const metrics = [
+    ['Publicados', content.filter((item) => ['published', 'simulated'].includes(item.status)).length, 'Conteúdos concluídos'],
+    ['Alcance', content.reduce((total, item) => total + Number(item.reach || 0), 0), 'Pessoas alcançadas'],
+    ['Visitas', funnel.landing_view || 0, 'Acessos identificados'],
+    ['Cadastros', funnel.signup_completed || 0, 'Contas criadas']
+  ];
+  els.platformMarketingSummary.innerHTML = metrics.map(([label, value, help]) => `<article class="platform-kpi-card"><span>${escapeHtml(label)}</span><strong>${value}</strong><small>${escapeHtml(help)}</small><button class="marketing-text-button" data-open-marketing-tab="results" type="button">Ver detalhes</button></article>`).join('');
   const funnelSteps = [['landing_view', 'Visitas'], ['demo_started', 'Demos'], ['signup_completed', 'Cadastros'], ['menu_published', 'Publicados'], ['first_order_received', '1º pedido'], ['subscription_activated', 'Pagos']];
   if (els.marketingAttributedFunnel) els.marketingAttributedFunnel.innerHTML = funnelSteps.map(([key, label], index) => {
     const value = Number(funnel[key] || 0);
@@ -933,10 +1005,8 @@ function renderMarketing() {
   const leads = data.leads || [];
   els.marketingLeadList.innerHTML = leads.length ? leads.map((item) => {
     const overdue = item.next_contact_at && new Date(item.next_contact_at) < new Date() && !['customer', 'lost'].includes(item.stage);
-    return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}${item.do_not_contact ? ' · não contatar' : ''}</small><small class="${overdue ? 'text-danger' : ''}">${escapeHtml(item.next_action || 'Definir próxima ação')} · ${item.next_contact_at ? formatDateTime(item.next_contact_at) : 'sem data'} · etapa D${[0, 2, 5, 9, 14][Number(item.cadence_step || 0)] || 0}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`;
+    return `<div class="platform-marketing-row marketing-contact-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(marketingLeadStageLabel(item.stage))} ${item.consent ? '· contato autorizado' : '· sem autorização de contato'}${item.do_not_contact ? ' · não contatar' : ''}</small><small class="${overdue ? 'text-danger' : ''}">${escapeHtml(item.next_action || 'Definir próxima ação')} · ${item.next_contact_at ? formatDateTime(item.next_contact_at) : 'sem data definida'}</small></div><select data-marketing-lead-stage="${item.id}" aria-label="Etapa de ${escapeHtml(item.business_name)}"><option value="contacted">Contato iniciado</option><option value="qualified">Demonstrou interesse</option><option value="trial">Testando</option><option value="customer">Tornou-se cliente</option><option value="lost">Não tem interesse</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`;
   }).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';
-  const content = data.content || [];
-  els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${item.is_pinned ? '📌 ' : ''}${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)} · ${Number(item.reach || 0)} alcance · ${Number(item.clicks || 0)} cliques · ${Number(item.signups || 0)} cadastros</small><p>${escapeHtml(item.hook || '')}</p><small>${item.script ? 'roteiro ✓' : 'roteiro pendente'} · ${item.caption ? 'legenda ✓' : 'legenda pendente'} · ${item.utm_url ? 'UTM ✓' : 'UTM pendente'}</small></div>${item.channel === 'instagram' ? '<button class="ghost-button compact" data-marketing-open-social type="button">Abrir fluxo social</button>' : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
   if (els.marketingContentMetricSelect) els.marketingContentMetricSelect.innerHTML = content.map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join('');
   const automationRuns = data.automation_runs || [];
   if (els.marketingAutomationList) els.marketingAutomationList.innerHTML = automationRuns.length ? automationRuns.slice(0, 12).map((run) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(marketingAutomationLabel(run.automation_key))}</strong><small>${escapeHtml(run.status)} · ${formatDateTime(run.executed_at || run.created_at)}</small></div><span class="status-pill ${run.status === 'sent' ? 'success' : run.status === 'failed' ? 'danger' : ''}">${escapeHtml(run.status)}</span></div>`).join('') : '<p class="muted">Nenhum disparo registrado ainda. A rotina verifica os gatilhos a cada seis horas.</p>';
@@ -948,7 +1018,173 @@ function renderMarketing() {
   renderMarketingWeeklyReport(data.weekly_reports || []);
   renderMarketingAttributionJourneys(data.attribution_journeys || []);
   renderMarketingPilots(data.pilots || []);
+  renderMarketingOverview();
+  renderMarketingContentLibrary();
+  renderMarketingCalendar();
+  renderMarketingResults();
+  renderMarketingContactsSummary();
   activateMarketingTab(state.marketingActiveTab);
+}
+
+function marketingStatusLabel(value = '') {
+  return ({ idea: 'Ideia', draft: 'Rascunho', production: 'Em produção', review: 'Aguardando aprovação', changes_requested: 'Ajustes solicitados', approved: 'Aprovado', scheduled: 'Agendado', publishing: 'Publicando', processing: 'Processando', published: 'Publicado', simulated: 'Simulado', failed: 'Com erro', cancelled: 'Cancelado' })[value] || value;
+}
+
+function marketingChannelLabel(value = '') {
+  return ({ instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube Shorts', blog: 'Artigo' })[value] || value || 'Canal não definido';
+}
+
+function renderMarketingOverview() {
+  if (!els.marketingNextAction) return;
+  const data = state.marketing || {};
+  const social = state.social || {};
+  const content = data.content || [];
+  const accounts = social.accounts || [];
+  const connected = accounts.some((item) => item.status === 'connected');
+  const reviews = content.filter((item) => item.status === 'review');
+  const failures = (social.publications || []).filter((item) => item.status === 'failed');
+  const scheduled = content.filter((item) => item.status === 'scheduled');
+  let next = { eyebrow: 'Comece por aqui', title: 'Crie seu primeiro conteúdo', text: 'Escolha um formato, defina o objetivo e salve a ideia para continuar depois.', action: 'Criar conteúdo', tab: 'contents', create: true };
+  if (!connected) next = { eyebrow: 'Primeiro passo', title: 'Conecte seu canal', text: 'Conecte o Instagram ou ative a simulação para testar todo o fluxo sem publicar nada.', action: 'Configurar canais', tab: 'more' };
+  else if (reviews.length) next = { eyebrow: 'Próxima ação recomendada', title: `Revise ${reviews.length} conteúdo${reviews.length > 1 ? 's' : ''}`, text: 'Confira legenda, mídia, conta e horário antes de aprovar.', action: 'Abrir conteúdos', tab: 'contents' };
+  else if (failures.length) next = { eyebrow: 'Atenção necessária', title: `${failures.length} publicação${failures.length > 1 ? 'ões falharam' : ' falhou'}`, text: 'Veja a causa e tente novamente somente depois de corrigir o problema.', action: 'Ver canais', tab: 'more' };
+  else if (content.length && !scheduled.length) next = { eyebrow: 'Sua fila está vazia', title: 'Agende o próximo conteúdo', text: 'Há conteúdos salvos, mas nada preparado para publicação.', action: 'Abrir conteúdos', tab: 'contents' };
+  else if (scheduled.length) next = { eyebrow: 'Tudo encaminhado', title: `${scheduled.length} conteúdo${scheduled.length > 1 ? 's agendados' : ' agendado'}`, text: 'Sua programação está pronta. Confira os próximos dias ou veja o que já trouxe resultado.', action: 'Ver calendário', tab: 'calendar' };
+  els.marketingNextAction.innerHTML = `<div><span>${escapeHtml(next.eyebrow)}</span><h3>${escapeHtml(next.title)}</h3><p>${escapeHtml(next.text)}</p></div><button class="primary-button" ${next.create ? 'data-new-marketing-content' : `data-open-marketing-tab="${next.tab}"`} type="button">${escapeHtml(next.action)}</button>`;
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowKey = localDateKey(tomorrow);
+  const attention = [];
+  if (reviews.length) attention.push({ tone: 'attention', title: `${reviews.length} aguardando aprovação`, text: 'Revise antes do horário planejado.', tab: 'contents' });
+  if (!scheduled.some((item) => item.scheduled_at && localDateKey(new Date(item.scheduled_at)) === tomorrowKey)) attention.push({ tone: 'neutral', title: 'Amanhã ainda está livre', text: 'Planeje um conteúdo se fizer sentido para sua rotina.', tab: 'calendar' });
+  if (!connected) attention.push({ tone: 'danger', title: 'Instagram não conectado', text: 'A publicação automática está indisponível.', tab: 'more' });
+  if (failures.length) attention.push({ tone: 'danger', title: `${failures.length} publicação${failures.length > 1 ? 'ões com erro' : ' com erro'}`, text: 'Veja a causa antes de reenviar.', tab: 'more' });
+  if (Number(data.summary?.overdue_contacts || 0)) attention.push({ tone: 'attention', title: `${data.summary.overdue_contacts} contatos atrasados`, text: 'Defina a próxima ação de cada contato.', tab: 'contacts' });
+  els.marketingAttentionList.innerHTML = attention.slice(0, 5).map((item) => `<button class="marketing-attention-item ${item.tone}" data-open-marketing-tab="${item.tab}" type="button"><span></span><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.text)}</small></div><b>→</b></button>`).join('') || '<div class="marketing-empty-state compact"><strong>Nenhuma pendência importante</strong><p>Sua operação de marketing está em dia.</p></div>';
+  const upcoming = content.filter((item) => ['approved', 'scheduled', 'publishing', 'processing'].includes(item.status) && item.scheduled_at && new Date(item.scheduled_at) >= new Date() && new Date(item.scheduled_at) <= new Date(Date.now() + 7 * 864e5)).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+  els.marketingUpcomingList.innerHTML = upcoming.map(marketingCompactContentRow).join('') || '<div class="marketing-empty-state compact"><strong>Nada programado nos próximos 7 dias</strong><p>Use o calendário para planejar sua semana.</p><button class="ghost-button compact" data-new-marketing-content type="button">Criar conteúdo</button></div>';
+  els.marketingRecentContent.innerHTML = content.slice(0, 5).map(marketingCompactContentRow).join('') || '<div class="marketing-empty-state"><strong>Seus conteúdos aparecerão aqui</strong><p>Comece com uma ideia simples. Você poderá completar roteiro, legenda e mídia depois.</p><button class="primary-button compact" data-new-marketing-content type="button">Criar primeiro conteúdo</button></div>';
+}
+
+function marketingCompactContentRow(item) {
+  return `<button class="marketing-compact-row" data-marketing-content-id="${item.id}" type="button"><span class="marketing-format-icon">${escapeHtml((item.format || 'P').slice(0, 1).toUpperCase())}</span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(marketingChannelLabel(item.channel))} · ${escapeHtml(marketingStatusLabel(item.status))}${item.scheduled_at ? ` · ${formatDateTime(item.scheduled_at)}` : ''}</small></span><b>→</b></button>`;
+}
+
+function renderMarketingContentLibrary() {
+  if (!els.marketingContentList) return;
+  const data = state.marketing || {};
+  const campaigns = new Map((data.campaigns || []).map((item) => [item.id, item.name]));
+  const filter = els.marketingContentStatusFilter?.value || '';
+  const content = (data.content || []).filter((item) => !filter || item.status === filter);
+  els.marketingContentList.innerHTML = content.map((item) => {
+    const socialAssets = state.social?.content_assets?.[item.id] || [];
+    const issue = item.publication_error ? `<small class="text-danger">${escapeHtml(item.publication_error)}</small>` : '';
+    return `<article class="marketing-content-card status-${escapeHtml(item.status)}"><button class="marketing-content-main" data-marketing-content-id="${item.id}" type="button"><span class="marketing-content-thumb">${socialAssets[0]?.public_url ? `<img src="${escapeHtml(socialAssets[0].public_url)}" alt="">` : `<b>${escapeHtml((item.format || 'P').slice(0, 1).toUpperCase())}</b>`}</span><span class="marketing-content-copy"><span class="status-pill">${escapeHtml(marketingStatusLabel(item.status))}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(marketingChannelLabel(item.channel))} · ${escapeHtml(item.format || 'formato não definido')}${item.scheduled_at ? ` · ${formatDateTime(item.scheduled_at)}` : ''}</small>${item.campaign_id ? `<small>Campanha: ${escapeHtml(campaigns.get(item.campaign_id) || 'Campanha')}</small>` : ''}${issue}</span></button><div class="marketing-content-actions">${['draft', 'production', 'changes_requested'].includes(item.status) && item.channel === 'instagram' ? `<button class="ghost-button compact" data-social-action="transition" data-content-id="${item.id}" data-status="review" type="button">Enviar para aprovação</button>` : ''}${item.status === 'review' && item.channel === 'instagram' ? `<button class="primary-button compact" data-review-marketing-content="${item.id}" type="button">Revisar e agendar</button>` : ''}${['approved', 'failed', 'simulated'].includes(item.status) && item.channel === 'instagram' ? `<button class="primary-button compact" data-social-action="publish-now" data-content-id="${item.id}" type="button">Publicar agora</button>` : ''}</div></article>`;
+  }).join('') || `<div class="marketing-empty-state"><strong>${filter ? 'Nenhum conteúdo neste status' : 'Sua biblioteca ainda está vazia'}</strong><p>${filter ? 'Escolha outro filtro ou crie um conteúdo.' : 'Crie uma ideia e avance no seu ritmo até a publicação.'}</p><button class="primary-button compact" data-new-marketing-content type="button">Criar conteúdo</button></div>`;
+}
+
+function openMarketingContentEditor() {
+  activateMarketingTab('contents');
+  const form = els.marketingContentForm; if (!form) return;
+  form.reset(); delete form.dataset.contentId; form.hidden = false;
+  restoreSocialPublishingTools();
+  const title = document.querySelector('#marketingContentEditorTitle'); if (title) title.textContent = 'Novo conteúdo';
+  renderMarketingEditorPreview();
+  form.querySelector('input[name="title"]')?.focus();
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeMarketingContentEditor() { restoreSocialPublishingTools(); if (els.marketingContentForm) { els.marketingContentForm.hidden = true; delete els.marketingContentForm.dataset.contentId; } }
+
+function openMarketingContentDetails(id) {
+  const item = (state.marketing?.content || []).find((entry) => entry.id === id); if (!item) return;
+  activateMarketingTab('contents');
+  const form = els.marketingContentForm; form.hidden = false; form.dataset.contentId = id;
+  for (const field of ['title', 'format', 'channel', 'objective', 'niche', 'pillar', 'hook', 'script', 'caption', 'utm_url', 'cta']) if (form.elements[field]) form.elements[field].value = item[field] || '';
+  if (form.elements.hashtags) form.elements.hashtags.value = (item.hashtags || []).join(' ');
+  if (form.elements.assets_text) form.elements.assets_text.value = (item.assets || []).join('\n');
+  const title = document.querySelector('#marketingContentEditorTitle'); if (title) title.textContent = `Editar: ${item.title}`;
+  if (item.channel === 'instagram') mountSocialPublishingTools(item.id);
+  renderMarketingEditorPreview(); form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function mountSocialPublishingTools(contentId) {
+  const target = els.marketingContentPublishingTools;
+  if (!target) return;
+  target.hidden = false;
+  if (els.socialAssetForm) target.append(els.socialAssetForm);
+  if (els.socialScheduleForm) target.append(els.socialScheduleForm);
+  if (els.socialContentSelect) els.socialContentSelect.value = contentId;
+}
+
+function restoreSocialPublishingTools() {
+  if (els.socialToolsHome) {
+    if (els.socialAssetForm) els.socialToolsHome.append(els.socialAssetForm);
+    if (els.socialScheduleForm) els.socialToolsHome.append(els.socialScheduleForm);
+  }
+  if (els.marketingContentPublishingTools) els.marketingContentPublishingTools.hidden = true;
+}
+
+function renderMarketingEditorPreview() {
+  if (!els.marketingEditorPreview || !els.marketingContentForm) return;
+  const form = els.marketingContentForm;
+  const hook = form.elements.hook?.value || form.elements.title?.value || 'Seu conteúdo aparecerá aqui';
+  const caption = form.elements.caption?.value || 'Preencha a legenda quando estiver pronto.';
+  els.marketingEditorPreview.innerHTML = `<span>3. Prévia do conteúdo</span><strong>${escapeHtml(hook)}</strong><p>${escapeHtml(caption)}</p><small>${escapeHtml(marketingChannelLabel(form.elements.channel?.value))} · ${escapeHtml(form.elements.format?.value || '')}</small>`;
+}
+
+function localDateKey(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+
+function moveMarketingCalendar(direction) {
+  const date = new Date(state.marketingCalendarAnchor || new Date());
+  if (els.marketingCalendarView?.value === 'month') date.setMonth(date.getMonth() + direction); else date.setDate(date.getDate() + direction * 7);
+  state.marketingCalendarAnchor = date; renderMarketingCalendar();
+}
+
+function renderMarketingCalendar() {
+  if (!els.marketingCalendarGrid) return;
+  const view = els.marketingCalendarView?.value || 'week';
+  const anchor = new Date(state.marketingCalendarAnchor || new Date());
+  const start = new Date(anchor); start.setHours(0, 0, 0, 0);
+  if (view === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); else { start.setDate(1); start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); }
+  const days = view === 'week' ? 7 : 42;
+  const content = state.marketing?.content || [];
+  const cells = Array.from({ length: days }, (_, index) => { const date = new Date(start); date.setDate(start.getDate() + index); return date; });
+  els.marketingCalendarGrid.classList.toggle('month', view === 'month');
+  els.marketingCalendarGrid.innerHTML = cells.map((date) => {
+    const key = localDateKey(date); const items = content.filter((item) => item.scheduled_at && localDateKey(new Date(item.scheduled_at)) === key);
+    return `<div class="marketing-calendar-day ${key === localDateKey(new Date()) ? 'today' : ''} ${view === 'month' && date.getMonth() !== anchor.getMonth() ? 'outside' : ''}"><button class="marketing-calendar-date" data-calendar-create="${key}" type="button"><span>${new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(date)}</span><strong>${date.getDate()}</strong></button><div>${items.map((item) => `<button class="marketing-calendar-item ${item.status}" data-marketing-content-id="${item.id}" type="button"><strong>${escapeHtml(item.title)}</strong><small>${new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(item.scheduled_at))} · ${escapeHtml(marketingStatusLabel(item.status))}</small></button>`).join('')}</div></div>`;
+  }).join('');
+  const weekEnd = new Date(start); weekEnd.setDate(start.getDate() + days - 1);
+  const visible = content.filter((item) => item.scheduled_at && new Date(item.scheduled_at) >= start && new Date(item.scheduled_at) <= weekEnd);
+  const reviews = content.filter((item) => item.status === 'review').length;
+  els.marketingCalendarSummary.textContent = `${visible.length} conteúdo(s) neste período · ${reviews} aguardando aprovação.`;
+}
+
+function renderMarketingResults() {
+  if (!els.marketingResultsSummary) return;
+  const days = Number(els.marketingResultsPeriod?.value || 30); const since = Date.now() - days * 864e5;
+  const content = (state.marketing?.content || []).filter((item) => !item.published_at || new Date(item.published_at).getTime() >= since);
+  const totals = { reach: 0, interactions: 0, clicks: 0, signups: 0, customers: Number(state.marketing?.funnel?.subscription_activated || 0) };
+  for (const item of content) { totals.reach += Number(item.reach || 0); totals.interactions += Number(item.saves || 0) + Number(item.shares || 0); totals.clicks += Number(item.clicks || 0); totals.signups += Number(item.signups || 0); }
+  els.marketingResultsSummary.innerHTML = [['Alcance', totals.reach], ['Interações', totals.interactions], ['Visitas', totals.clicks || Number(state.marketing?.funnel?.landing_view || 0)], ['Cadastros', totals.signups || Number(state.marketing?.funnel?.signup_completed || 0)], ['Clientes', totals.customers]].map(([label, value]) => `<article class="platform-kpi-card"><span>${label}</span><strong>${value}</strong></article>`).join('');
+  const ranked = [...content].sort((a, b) => (Number(b.signups || 0) * 10 + Number(b.clicks || 0) + Number(b.saves || 0)) - (Number(a.signups || 0) * 10 + Number(a.clicks || 0) + Number(a.saves || 0))).slice(0, 6);
+  els.marketingTopContent.innerHTML = ranked.map((item, index) => `<button class="marketing-ranking-row" data-marketing-content-id="${item.id}" type="button"><b>${index + 1}</b><span><strong>${escapeHtml(item.title)}</strong><small>${Number(item.reach || 0)} alcance · ${Number(item.clicks || 0)} visitas · ${Number(item.signups || 0)} cadastros</small></span></button>`).join('') || '<div class="marketing-empty-state compact"><strong>Ainda não há resultados suficientes</strong><p>As comparações aparecerão depois das primeiras publicações.</p></div>';
+  const recommendations = [];
+  const averageClicks = content.length ? totals.clicks / content.length : 0;
+  const highClicks = content.find((item) => Number(item.clicks || 0) > averageClicks * 1.5 && Number(item.clicks || 0) > 0);
+  const highSaves = [...content].sort((a, b) => Number(b.saves || 0) - Number(a.saves || 0))[0];
+  if (highClicks) recommendations.push({ title: 'Reaproveite este tema', text: `${highClicks.title} gerou mais visitas que a média dos conteúdos.` });
+  if (highSaves && Number(highSaves.saves || 0) > 0) recommendations.push({ title: 'Transforme em outro formato', text: `${highSaves.title} teve mais salvamentos; experimente uma versão em Reel.` });
+  if (!content.some((item) => item.niche)) recommendations.push({ title: 'Teste um nicho específico', text: 'Crie uma peça para pizzarias, hamburguerias ou marmitarias e compare os cadastros.' });
+  els.marketingRecommendations.innerHTML = recommendations.map((item) => `<div class="marketing-recommendation"><span>Ideia</span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.text)}</p><small>Recomendação baseada nos dados disponíveis.</small></div>`).join('') || '<div class="marketing-empty-state compact"><strong>Continue coletando dados</strong><p>As recomendações explicarão o motivo assim que houver uma amostra útil.</p></div>';
+}
+
+function renderMarketingContactsSummary() {
+  if (!els.marketingContactSummary) return;
+  const leads = state.marketing?.leads || []; const now = new Date();
+  const overdue = leads.filter((item) => item.next_contact_at && new Date(item.next_contact_at) < now && !['customer', 'lost'].includes(item.stage)).length;
+  const newCount = leads.filter((item) => item.stage === 'new').length; const trials = leads.filter((item) => item.stage === 'trial').length;
+  els.marketingContactSummary.innerHTML = `<span><strong>${overdue}</strong> precisam de ação</span><span><strong>${newCount}</strong> novos contatos</span><span><strong>${trials}</strong> testando o TáPronto</span>`;
 }
 
 function socialStatusLabel(value = '') {
@@ -1069,6 +1305,10 @@ function renderMarketingPilots(pilots) {
 
 function marketingDecisionLabel(value) {
   return ({ keep: 'manter', iterate: 'iterar', stop: 'encerrar' })[value] || value;
+}
+
+function marketingLeadStageLabel(value) {
+  return ({ new: 'Novo contato', contacted: 'Contato iniciado', qualified: 'Demonstrou interesse', trial: 'Testando', customer: 'Tornou-se cliente', lost: 'Não tem interesse' })[value] || value;
 }
 
 function marketingAutomationLabel(key = '') {

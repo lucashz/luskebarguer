@@ -34,6 +34,7 @@
     "test:payments": "node scripts/payment-hardening-smoke.mjs",
     "test:seo": "node scripts/seo-smoke.mjs",
     "test:marketing": "node scripts/marketing-growth-smoke.mjs",
+    "capture:marketing": "node scripts/capture-marketing-workspace.mjs",
     "test:social": "node scripts/social-publishing-smoke.mjs",
     "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:payments && npm run test:flows && npm run test:platform-health && npm run test:marketing && npm run test:social && npm run test:seo"
   },
