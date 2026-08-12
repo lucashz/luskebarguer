@@ -128,7 +128,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    await serveStatic(req, res, url.pathname, req.headers.host, url.search);
+    await serveStatic(req, res, url.pathname, req.headers['x-forwarded-host'] || req.headers.host, url.search);
   } catch (error) {
     logServerError(error, req);
     const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
@@ -15683,6 +15683,10 @@ function helpBaseUrl() {
   return subdomainBaseUrl('HELP_BASE_URL', 'HELP_HOSTS', 'ajuda.taprontomenu.com.br');
 }
 
+function guidesBaseUrl() {
+  return subdomainBaseUrl('GUIDES_BASE_URL', 'GUIDES_HOSTS', 'guias.taprontomenu.com.br');
+}
+
 function subdomainBaseUrl(baseEnv, hostsEnv, fallbackHost) {
   const explicit = String(process.env[baseEnv] || '').trim().replace(/\/+$/, '');
   if (explicit) return explicit;
@@ -18516,9 +18520,15 @@ async function localDbRequest(config, method, table, query = {}, payload, extraH
   }
 }
 async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch = '') {
+  const guidesRedirectUrl = guidesHostRedirectUrl(requestPath, hostHeader, requestSearch);
+  if (guidesRedirectUrl) {
+    res.writeHead(301, { Location: guidesRedirectUrl, 'Cache-Control': 'public, max-age=3600' });
+    res.end();
+    return;
+  }
   if (await serveSeoResource(req, res, requestPath, hostHeader)) return;
 
-  const seoLanding = seoLandingByPath.get(requestPath);
+  const seoLanding = seoLandingByPath.get(guidesLandingPath(requestPath, hostHeader));
   if (seoLanding && !isPrivateSeoHost(String(hostHeader || '').split(':')[0].toLowerCase())) {
     sendSeoLandingPage(req, res, seoLanding);
     return;
@@ -18585,7 +18595,8 @@ async function serveSeoResource(req, res, requestPath, hostHeader = '') {
   if (requestPath === '/robots.txt') {
     const privateHost = isPrivateSeoHost(hostname);
     const helpHost = isHelpHostname(hostname);
-    const origin = helpHost ? (helpBaseUrl() || requestOrigin(req)) : (publicBaseUrl() || 'https://taprontomenu.com.br');
+    const guidesHost = isGuidesHostname(hostname);
+    const origin = helpHost ? (helpBaseUrl() || requestOrigin(req)) : guidesHost ? guidesBaseUrl() : (publicBaseUrl() || 'https://taprontomenu.com.br');
     const body = privateHost
       ? 'User-agent: *\nDisallow: /\n'
       : [
@@ -18617,14 +18628,21 @@ async function serveSeoResource(req, res, requestPath, hostHeader = '') {
     seoTextResponse(req, res, 200, body, 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
     return true;
   }
+  if (isGuidesHostname(hostname)) {
+    if (requestPath !== '/sitemap.xml') return false;
+    const rows = seoLandingPages.filter((page) => page.slug.startsWith('guias/')).map((page) => ({ loc: `${guidesBaseUrl()}/${page.slug.replace(/^guias\//, '')}`, changefreq: 'monthly', priority: '0.8' }));
+    rows.unshift({ loc: `${guidesBaseUrl()}/`, changefreq: 'weekly', priority: '0.9' });
+    seoTextResponse(req, res, 200, xmlUrlSet(rows), 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
+    return true;
+  }
   const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
   if (requestPath === '/sitemap.xml') {
-    const body = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>${seoEscapeXml(origin)}/sitemap-pages.xml</loc></sitemap>\n  <sitemap><loc>${seoEscapeXml(origin)}/sitemap-stores.xml</loc></sitemap>\n</sitemapindex>\n`;
+    const body = `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>${seoEscapeXml(origin)}/sitemap-pages.xml</loc></sitemap>\n  <sitemap><loc>${seoEscapeXml(origin)}/sitemap-stores.xml</loc></sitemap>\n  <sitemap><loc>${seoEscapeXml(guidesBaseUrl())}/sitemap.xml</loc></sitemap>\n</sitemapindex>\n`;
     seoTextResponse(req, res, 200, body, 'application/xml; charset=utf-8', { 'Cache-Control': 'public, max-age=900' });
     return true;
   }
   if (requestPath === '/sitemap-pages.xml') {
-    const rows = await Promise.all(SEO_PUBLIC_PAGES.map(async (page) => {
+    const rows = await Promise.all(SEO_PUBLIC_PAGES.filter((page) => !page.path.startsWith('/guias')).map(async (page) => {
       const fileStat = page.file ? await stat(path.join(publicDir, page.file)).catch(() => null) : await stat(path.join(__dirname, 'src', 'data', 'seo-pages.js')).catch(() => null);
       return { loc: `${origin}${page.path}`, lastmod: fileStat?.mtime?.toISOString(), changefreq: page.changefreq, priority: page.priority };
     }));
@@ -18684,7 +18702,7 @@ function sendSeoLandingPage(req, res, page) {
   <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>.seo-main{color:#172033}.seo-hero{padding:72px 0 52px;display:grid;grid-template-columns:1.1fr .9fr;gap:42px;align-items:center}.seo-hero h1{font-size:clamp(2.3rem,5vw,4.6rem);line-height:1.02;margin:14px 0}.seo-hero p,.seo-copy p{font-size:1.08rem;line-height:1.7;color:#596277}.seo-shot{width:100%;border-radius:24px;box-shadow:0 24px 70px #17203324}.seo-section{padding:56px 0}.seo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.seo-card{padding:24px;border:1px solid #e5e7eb;border-radius:18px;background:#fff}.seo-card strong{display:block;font-size:1.08rem;margin-bottom:8px}.seo-faq details{padding:18px 0;border-bottom:1px solid #e5e7eb}.seo-faq summary{font-weight:750;cursor:pointer}.seo-related{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.seo-related a{padding:16px;border:1px solid #e5e7eb;border-radius:14px;text-decoration:none;color:#172033;font-weight:700}@media(max-width:800px){.seo-hero,.seo-grid{grid-template-columns:1fr}.seo-related{grid-template-columns:1fr}}</style>
 </head><body class="seo-main">
-  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="/guias">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="${guidesBaseUrl()}/">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container seo-hero"><div><p class="home-badge">TáPronto para vender</p><h1>${emailEscapeHtml(page.heading)}</h1><p>${emailEscapeHtml(page.intro)}</p><div class="home-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div><ul class="home-trust"><li>Teste grátis</li><li>Sem taxa por pedido</li><li>Cancele quando quiser</li></ul></div><img class="seo-shot" src="/assets/sistema-cardapio-preview.png" alt="Exemplo do cardápio digital TáPronto no celular" width="1440" height="980"></section>
     <section class="seo-section" style="background:#f7f8fb"><div class="home-container"><p class="home-badge">Benefícios</p><h2>Menos atrito para o cliente. Mais controle para sua equipe.</h2><div class="seo-grid">${page.benefits.map((benefit) => `<article class="seo-card"><strong>${emailEscapeHtml(benefit)}</strong><p>Configure pelo painel e publique as mudanças sem depender de aplicativo ou material impresso.</p></article>`).join('')}</div></div></section>
@@ -18701,7 +18719,8 @@ function sendSeoLandingPage(req, res, page) {
 
 function sendSeoGuideArticlePage(req, res, page) {
   const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
-  const canonical = `${origin}/${page.slug}`;
+  const guideOrigin = guidesBaseUrl();
+  const canonical = `${guideOrigin}/${page.slug.replace(/^guias\//, '')}`;
   const article = page.article || { sections: [], category: 'Guia prático', readTime: '5 min', author: 'Equipe TáPronto', updatedAt: '11 de agosto de 2026', takeaway: '' };
   const sections = Array.isArray(article.sections) ? article.sections : [];
   const related = seoLandingPages.filter((entry) => entry.slug.startsWith('guias/') && entry.slug !== page.slug).slice(0, 3);
@@ -18711,7 +18730,7 @@ function sendSeoGuideArticlePage(req, res, page) {
       { '@type': 'Article', headline: page.heading, description: page.description, url: canonical, inLanguage: 'pt-BR', dateModified: '2026-08-11', author: { '@type': 'Organization', name: 'TáPronto', url: origin }, publisher: { '@type': 'Organization', name: 'TáPronto', url: origin } },
       { '@type': 'BreadcrumbList', itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'Início', item: `${origin}/` },
-        { '@type': 'ListItem', position: 2, name: 'Guias', item: `${origin}/guias` },
+        { '@type': 'ListItem', position: 2, name: 'Guias', item: `${guideOrigin}/` },
         { '@type': 'ListItem', position: 3, name: page.heading, item: canonical }
       ] },
       { '@type': 'FAQPage', mainEntity: page.faq.map(([question, answer]) => ({ '@type': 'Question', name: question, acceptedAnswer: { '@type': 'Answer', text: answer } })) }
@@ -18723,7 +18742,7 @@ function sendSeoGuideArticlePage(req, res, page) {
     const bullets = section.bullets?.length ? `<ul class="article-list">${section.bullets.map((text) => `<li><span aria-hidden="true">✓</span>${emailEscapeHtml(text)}</li>`).join('')}</ul>` : '';
     const checklist = section.checklist?.length ? `<div class="article-checklist"><strong>Confira antes de continuar</strong>${section.checklist.map((text) => `<span><i aria-hidden="true"></i>${emailEscapeHtml(text)}</span>`).join('')}</div>` : '';
     const example = section.example ? `<div class="article-example"><strong>Exemplo prático</strong><div><span class="example-bad">Evite</span><p>${emailEscapeHtml(section.example.bad)}</p></div><div><span class="example-good">Prefira</span><p>${emailEscapeHtml(section.example.good)}</p></div></div>` : '';
-    const middleCta = index === 2 ? `<aside class="article-inline-cta"><div><small>Quer montar enquanto aprende?</small><strong>Cadastre os três produtos mais vendidos e teste pelo celular.</strong></div><a href="/cadastro">Começar grátis →</a></aside>` : '';
+    const middleCta = index === 2 ? `<aside class="article-inline-cta"><div><small>Quer montar enquanto aprende?</small><strong>Cadastre os três produtos mais vendidos e teste pelo celular.</strong></div><a href="${origin}/cadastro">Começar grátis →</a></aside>` : '';
     return `<section class="article-section" id="${emailEscapeAttribute(id)}"><span class="article-step">${String(index + 1).padStart(2, '0')}</span><h2>${emailEscapeHtml(section.title)}</h2>${paragraphs}${bullets}${example}${checklist}</section>${middleCta}`;
   };
   const html = `<!doctype html>
@@ -18738,23 +18757,24 @@ function sendSeoGuideArticlePage(req, res, page) {
     @media(max-width:560px){.article-hero{padding:40px 0 30px}.article-layout{padding:45px 0}.article-visual{padding:18px}.article-inline-cta{display:block}.article-inline-cta a{display:inline-block;margin-top:16px}.article-final-box{padding:28px}}
   </style>
 </head><body class="article-page">
-  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="/guias" aria-current="page">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
-    <div class="home-container article-breadcrumb"><a href="/">Início</a><span>/</span><a href="/guias">Guias</a><span>/</span><span>${emailEscapeHtml(article.category)}</span></div>
+    <div class="home-container article-breadcrumb"><a href="${origin}/">Início</a><span>/</span><a href="${guideOrigin}/">Guias</a><span>/</span><span>${emailEscapeHtml(article.category)}</span></div>
     <section class="home-container article-hero"><span class="article-category">${emailEscapeHtml(article.category)}</span><h1>${emailEscapeHtml(page.heading)}</h1><p class="article-lead">${emailEscapeHtml(page.intro)}</p><div class="article-meta"><span>${emailEscapeHtml(article.author)}</span><span>•</span><span>Atualizado em ${emailEscapeHtml(article.updatedAt)}</span><span>•</span><span>${emailEscapeHtml(article.readTime)} de leitura</span></div></section>
     <section class="home-container article-visual" role="img" aria-label="Principais etapas deste guia">${sections.slice(0, 3).map((section, index) => `<div class="article-visual-card"><span>${index + 1}</span><strong>${emailEscapeHtml(section.title)}</strong><small>${emailEscapeHtml((section.paragraphs?.[0] || section.bullets?.[0] || '').slice(0, 105))}</small></div>`).join('')}</section>
     <div class="home-container article-layout"><aside class="article-toc"><strong>Neste guia</strong>${sections.map((section, index) => `<a href="#${emailEscapeAttribute(cleanSlug(section.title) || `passo-${index + 1}`)}">${index + 1}. ${emailEscapeHtml(section.title)}</a>`).join('')}</aside><article><div class="article-summary"><strong>Resumo rápido</strong><p>${emailEscapeHtml(article.takeaway)}</p></div>${sections.map(renderSection).join('')}</article></div>
     <section class="article-faq"><div class="home-container" style="max-width:760px"><span class="article-category">Dúvidas comuns</span><h2>Perguntas frequentes</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</div></section>
-    <section class="article-related"><div class="home-container"><span class="article-category">Continue aprendendo</span><h2>Guias relacionados</h2><div class="article-related-grid">${related.map((entry) => `<a href="/${entry.slug}"><small>${emailEscapeHtml(entry.article?.category || 'Guia prático')}</small><strong>${emailEscapeHtml(entry.heading)}</strong><span>Ler guia →</span></a>`).join('')}</div></div></section>
-    <section class="home-container article-final"><div class="article-final-box"><div><h2>Monte o cardápio da sua loja</h2><p>Comece pelos produtos mais vendidos e teste o pedido antes de divulgar.</p></div><a class="home-button" href="/cadastro">Criar meu cardápio</a></div></section>
-  </main><footer class="article-footer"><div class="home-container article-footer-row"><strong>TáPronto · Cardápio digital, pedidos organizados.</strong><nav><a href="/guias">Guias</a><a href="/planos">Planos</a><a href="/privacidade">Privacidade</a><a href="/termos">Termos</a></nav></div></footer><script src="/seo-landing.js" type="module"></script>
+    <section class="article-related"><div class="home-container"><span class="article-category">Continue aprendendo</span><h2>Guias relacionados</h2><div class="article-related-grid">${related.map((entry) => `<a href="/${entry.slug.replace(/^guias\//, '')}"><small>${emailEscapeHtml(entry.article?.category || 'Guia prático')}</small><strong>${emailEscapeHtml(entry.heading)}</strong><span>Ler guia →</span></a>`).join('')}</div></div></section>
+    <section class="home-container article-final"><div class="article-final-box"><div><h2>Monte o cardápio da sua loja</h2><p>Comece pelos produtos mais vendidos e teste o pedido antes de divulgar.</p></div><a class="home-button" href="${origin}/cadastro">Criar meu cardápio</a></div></section>
+  </main><footer class="article-footer"><div class="home-container article-footer-row"><strong>TáPronto · Cardápio digital, pedidos organizados.</strong><nav><a href="${guideOrigin}/">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/privacidade">Privacidade</a><a href="${origin}/termos">Termos</a></nav></div></footer><script src="/seo-landing.js" type="module"></script>
 </body></html>`;
   seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
 }
 
 function sendSeoGuidesHubPage(req, res, page) {
   const origin = publicBaseUrl() || 'https://taprontomenu.com.br';
-  const canonical = `${origin}/guias`;
+  const guideOrigin = guidesBaseUrl();
+  const canonical = `${guideOrigin}/`;
   const guides = seoLandingPages.filter((entry) => entry.slug.startsWith('guias/'));
   const guideMeta = {
     'guias/como-criar-cardapio-digital': { category: 'Cardápio digital', icon: '▤', time: '6 min', color: 'coral' },
@@ -18799,12 +18819,12 @@ function sendSeoGuidesHubPage(req, res, page) {
     @media(max-width:560px){.guides-hero{padding:48px 20px 35px}.guides-topics,.guides-grid{grid-template-columns:1fr}.guides-feature-copy,.guides-cta-box{padding:30px}.guides-section-head{display:block}.guides-feature-wrap,.guides-library{padding:48px 0}.guides-topic{padding:17px}}
   </style>
 </head><body class="guides-page">
-  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="/guias" aria-current="page">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo.png" alt="TáPronto" width="300" height="82"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container guides-hero"><span class="guides-eyebrow">Conteúdo prático para sua loja</span><h1>Menos bagunça.<br>Mais pedidos organizados.</h1><p>Guias diretos para montar seu cardápio, divulgar a loja e melhorar o atendimento sem complicação.</p></section>
     <section class="home-container guides-topics" aria-label="Navegue por assunto">${topics.map(([title, description, icon]) => `<a class="guides-topic" href="#todos"><span class="guides-topic-icon" aria-hidden="true">${icon}</span><b>${emailEscapeHtml(title)}</b><span>${emailEscapeHtml(description)}</span></a>`).join('')}</section>
     <section class="guides-feature-wrap"><div class="home-container"><div class="guides-section-head"><div><span class="guides-eyebrow">Comece por aqui</span><h2>Guia em destaque</h2></div><p>Leitura rápida e aplicável hoje.</p></div><article class="guides-feature"><div class="guides-feature-art"><div class="guides-menu-mock" role="img" aria-label="Exemplo de cardápio digital organizado no celular"><div class="guides-menu-screen"><div class="guides-menu-top"><span class="guides-menu-brand"><i>T</i>Sabor da Casa</span><span class="guides-menu-cart">Pedido · 2</span></div><div class="guides-menu-cover"><b>Seu pedido começa aqui</b><span>Escolha, personalize e finalize pelo celular.</span></div><div class="guides-menu-chips"><span>Destaques</span><span>Lanches</span><span>Combos</span></div><div class="guides-menu-products"><div class="guides-menu-product"><div><b>Combo da Casa</b><p>Hambúrguer, fritas e bebida</p><strong>R$ 29,90</strong></div><span class="guides-food-thumb">🍔</span></div><div class="guides-menu-product"><div><b>Monte do seu jeito</b><p>Escolha adicionais sem confusão</p><strong>A partir de R$ 18,90</strong></div><span class="guides-food-thumb">🍟</span></div></div></div></div></div><div class="guides-feature-copy"><span class="guides-category">${emailEscapeHtml(featured.category)}</span><h2>${emailEscapeHtml(featured.heading)}</h2><p>${emailEscapeHtml(featured.intro)}</p><div class="guides-read"><span>${emailEscapeHtml(featured.time)} de leitura</span><span>•</span><span>Passo a passo</span></div><a class="guides-link" href="/${featured.slug}">Ler guia completo →</a></div></article></div></section>
-    <section class="home-container guides-library" id="todos"><div class="guides-section-head"><div><span class="guides-eyebrow">Biblioteca TáPronto</span><h2>Todos os guias</h2><p>Escolha uma dor da sua operação e veja como resolver.</p></div></div><div class="guides-grid">${cards.map((guide) => `<a class="guide-card" href="/${guide.slug}"><span class="guide-card-art ${guide.color}" aria-hidden="true">${guide.icon}</span><span class="guide-card-copy"><span class="guides-category">${emailEscapeHtml(guide.category)}</span><h3>${emailEscapeHtml(guide.heading)}</h3><p>${emailEscapeHtml(guide.intro)}</p><span class="guides-read">${emailEscapeHtml(guide.time)} de leitura · Guia prático</span></span></a>`).join('')}</div></section>
+    <section class="home-container guides-library" id="todos"><div class="guides-section-head"><div><span class="guides-eyebrow">Biblioteca TáPronto</span><h2>Todos os guias</h2><p>Escolha uma dor da sua operação e veja como resolver.</p></div></div><div class="guides-grid">${cards.map((guide) => `<a class="guide-card" href="/${guide.slug.replace(/^guias\//, '')}"><span class="guide-card-art ${guide.color}" aria-hidden="true">${guide.icon}</span><span class="guide-card-copy"><span class="guides-category">${emailEscapeHtml(guide.category)}</span><h3>${emailEscapeHtml(guide.heading)}</h3><p>${emailEscapeHtml(guide.intro)}</p><span class="guides-read">${emailEscapeHtml(guide.time)} de leitura · Guia prático</span></span></a>`).join('')}</div></section>
     <section class="home-container guides-cta"><div class="guides-cta-box"><div><span class="guides-eyebrow">Coloque em prática</span><h2>Seu cardápio pode ficar pronto hoje.</h2><p>Cadastre os produtos mais vendidos, teste um pedido pelo celular e publique quando estiver seguro.</p></div><div class="guides-cta-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div></div></section>
   </main>
   <footer class="guides-footer"><div class="home-container guides-footer-row"><div><strong>TáPronto</strong><p>Cardápio digital, pedidos organizados.</p></div><nav><a href="/">Início</a><a href="/planos">Planos</a><a href="/privacidade">Privacidade</a><a href="/termos">Termos</a></nav></div></footer>
@@ -18971,6 +18991,32 @@ function helpHostRedirectUrl(requestPath, hostHeader = '') {
 function isHelpHostname(hostname = '') {
   const helpHosts = csvEnv('HELP_HOSTS');
   return helpHosts.includes(hostname) || hostname.startsWith('ajuda.');
+}
+
+function isGuidesHostname(hostname = '') {
+  const guidesHosts = csvEnv('GUIDES_HOSTS');
+  return guidesHosts.includes(hostname) || hostname.startsWith('guias.');
+}
+
+function guidesLandingPath(requestPath = '/', hostHeader = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  if (!isGuidesHostname(hostname)) return requestPath;
+  if (requestPath === '/') return '/guias';
+  return `/guias${requestPath}`.replace(/\/{2,}/g, '/');
+}
+
+function guidesHostRedirectUrl(requestPath = '/', hostHeader = '', requestSearch = '') {
+  const hostname = String(hostHeader || '').split(':')[0].toLowerCase();
+  if (!hostname || ['localhost', '127.0.0.1', '0.0.0.0'].includes(hostname)) return '';
+  if (requestPath.startsWith('/api/') || requestPath.startsWith('/assets/') || requestPath.startsWith('/uploads/') || path.extname(requestPath)) return '';
+  const isGuidesHost = isGuidesHostname(hostname);
+  const legacyGuidesPath = requestPath === '/guias' || requestPath.startsWith('/guias/');
+  const publicSitePaths = ['/cadastro', '/planos', '/cardapio', '/privacidade', '/termos', '/recursos', '/demonstracao'];
+  if (isGuidesHost && publicSitePaths.includes(requestPath)) return `${publicBaseUrl() || 'https://taprontomenu.com.br'}${requestPath}${requestSearch || ''}`;
+  if (!isGuidesHost && !legacyGuidesPath) return '';
+  if (isGuidesHost && !legacyGuidesPath) return '';
+  const cleanPath = requestPath.replace(/^\/guias/, '') || '/';
+  return `${guidesBaseUrl()}${cleanPath === '/' ? '/' : cleanPath}${requestSearch || ''}`;
 }
 
 async function serveUpload(req, res, requestPath) {

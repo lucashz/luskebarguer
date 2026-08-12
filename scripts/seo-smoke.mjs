@@ -26,13 +26,12 @@ try {
 
   const sitemap = await page('/sitemap.xml', 'taprontomenu.com.br');
   assert(sitemap.status === 200 && sitemap.type.includes('application/xml'), 'Indice de sitemap invalido.');
-  assert(sitemap.body.includes('/sitemap-pages.xml') && sitemap.body.includes('/sitemap-stores.xml'), 'Indice de sitemap incompleto.');
+  assert(sitemap.body.includes('/sitemap-pages.xml') && sitemap.body.includes('/sitemap-stores.xml') && sitemap.body.includes('https://guias.taprontomenu.com.br/sitemap.xml'), 'Indice de sitemap incompleto.');
 
   const pages = await page('/sitemap-pages.xml', 'taprontomenu.com.br');
   assert(pages.body.includes('/cardapio-digital</loc>'), 'Landing principal ausente no sitemap.');
   assert(pages.body.includes('/sistema-de-pedidos-online</loc>'), 'Landing de pedidos ausente no sitemap.');
-  assert(pages.body.includes('/guias</loc>') && pages.body.includes('/guias/como-criar-cardapio-digital</loc>'), 'Hub ou guias ausentes no sitemap.');
-  assert(pages.body.includes('/guias/indicadores-pedidos-restaurante</loc>') && pages.body.includes('/guias/cardapio-proprio-ou-marketplace</loc>'), 'Novos guias do plano SEO ausentes no sitemap.');
+  assert(!pages.body.includes('/guias</loc>'), 'Sitemap principal ainda mistura URLs do subdominio de guias.');
   assert(!pages.body.includes('/painel') && !pages.body.includes('/pagamento'), 'Sitemap contem rota privada.');
 
   const landing = await page('/cardapio-digital', 'taprontomenu.com.br');
@@ -41,20 +40,26 @@ try {
   assert(landing.body.includes('FAQPage') && landing.body.includes('BreadcrumbList'), 'Dados estruturados da landing incompletos.');
   assert(landing.body.includes('<h1>'), 'Landing nao possui H1 renderizado no servidor.');
 
-  const guidesHub = await page('/guias', 'taprontomenu.com.br');
+  const legacyGuidesHub = await page('/guias', 'taprontomenu.com.br');
+  assert(legacyGuidesHub.status === 301 && legacyGuidesHub.location === 'https://guias.taprontomenu.com.br/', `Hub antigo não redireciona permanentemente ao subdomínio (${legacyGuidesHub.status} ${legacyGuidesHub.location}).`);
+  const guidesSitemap = await page('/sitemap.xml', 'guias.taprontomenu.com.br');
+  assert(guidesSitemap.body.includes('https://guias.taprontomenu.com.br/como-criar-cardapio-digital') && guidesSitemap.body.includes('https://guias.taprontomenu.com.br/cardapio-proprio-ou-marketplace'), 'Sitemap próprio dos guias está incompleto.');
+  const guidesHub = await page('/', 'guias.taprontomenu.com.br');
   assert(guidesHub.status === 200, 'Hub de guias nao respondeu 200.');
-  assert(guidesHub.body.includes('/guias/como-criar-cardapio-digital'), 'Hub nao aponta para os guias publicados.');
+  assert(guidesHub.body.includes('/como-criar-cardapio-digital'), 'Hub nao aponta para os guias publicados.');
   for (const label of ['Recursos', 'Guias', 'Planos', 'Comparativo', 'FAQ', 'Ajuda']) assert(guidesHub.body.includes(`>${label}</a>`), `Menu global dos guias nao inclui ${label}.`);
   assert(guidesHub.body.includes('Criar meu Cardápio'), 'CTA global dos guias diverge da Home.');
   assert((guidesHub.body.match(/class="guide-card"/g) || []).length >= 24, 'Hub ainda nao exibe os 24 guias planejados.');
 
-  const guideArticle = await page('/guias/como-criar-cardapio-digital', 'taprontomenu.com.br');
+  const legacyArticle = await page('/guias/como-criar-cardapio-digital', 'taprontomenu.com.br');
+  assert(legacyArticle.status === 301 && legacyArticle.location === 'https://guias.taprontomenu.com.br/como-criar-cardapio-digital', 'Artigo antigo não redireciona permanentemente.');
+  const guideArticle = await page('/como-criar-cardapio-digital', 'guias.taprontomenu.com.br');
   assert(guideArticle.status === 200, 'Artigo de guia nao respondeu 200.');
   assert(guideArticle.body.includes('Neste guia') && guideArticle.body.includes('Resumo rápido'), 'Artigo nao possui estrutura editorial completa.');
   assert(guideArticle.body.includes('Article') && guideArticle.body.includes('FAQPage'), 'Dados estruturados do artigo incompletos.');
   assert(!guideArticle.body.includes('class="seo-shot"'), 'Artigo ainda usa a imagem distorcida do template antigo.');
 
-  const newGuideArticle = await page('/guias/indicadores-pedidos-restaurante', 'taprontomenu.com.br');
+  const newGuideArticle = await page('/indicadores-pedidos-restaurante', 'guias.taprontomenu.com.br');
   assert(newGuideArticle.status === 200 && newGuideArticle.body.includes('Teste pelo ponto de vista do cliente'), 'Novo guia SEO nao possui conteudo editorial completo.');
 
   const privatePage = await page('/admin.html', 'app.taprontomenu.com.br');
@@ -74,11 +79,12 @@ try {
 }
 
 async function page(pathname, host) {
-  const response = await fetch(`${baseUrl}${pathname}`, { headers: { Host: host } });
+  const response = await fetch(`${baseUrl}${pathname}`, { headers: { Host: host, 'X-Forwarded-Host': host }, redirect: 'manual' });
   return {
     status: response.status,
     type: response.headers.get('content-type') || '',
     robots: response.headers.get('x-robots-tag') || '',
+    location: response.headers.get('location') || '',
     body: await response.text()
   };
 }
