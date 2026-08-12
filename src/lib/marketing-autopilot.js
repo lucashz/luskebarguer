@@ -96,7 +96,7 @@ export async function selectAutopilotVersion(runId, env = process.env) {
   } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
 }
 
-export async function generateDailyAutopilotPost({ force = false, createdBy = null, env = process.env } = {}) {
+export async function generateDailyAutopilotPost({ force = false, createdBy = null, targetDate = '', planning = false, env = process.env } = {}) {
   const config = autopilotConfig(env);
   const db = databasePool(env);
   const client = await db.connect();
@@ -107,10 +107,10 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     const settingsResult = await client.query('select * from marketing_autopilot_settings where id=1 for update');
     const settings = settingsResult.rows[0];
     if (!settings?.enabled && !force) { await client.query('rollback'); return null; }
-    const weekday = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(new Date()) === 'Sun' ? 7 : new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })).getDay());
+    const runDate = /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? targetDate : localDateKey(new Date());
+    const targetDay = new Date(`${runDate}T12:00:00-03:00`); const weekday = targetDay.getDay() || 7;
     if (!force && Array.isArray(settings?.days_of_week) && !settings.days_of_week.includes(weekday)) { await client.query('rollback'); return null; }
-    if (!force && localTimeKey(new Date()) < String(settings?.generation_time || '08:00').slice(0, 5)) { await client.query('rollback'); return null; }
-    const runDate = localDateKey(new Date());
+    if (!force && !planning && localTimeKey(new Date()) < String(settings?.generation_time || '08:00').slice(0, 5)) { await client.query('rollback'); return null; }
     if (!force && (settings?.pause_dates || []).some((value) => databaseDateKey(value) === runDate)) { await client.query('rollback'); return null; }
     const monthUsage = Number((await client.query(`select count(*)::int total from marketing_autopilot_runs where provider='openai' and status not in ('failed') and run_date>=date_trunc('month',$1::date)`, [runDate])).rows[0]?.total || 0);
     if (config.imageProvider === 'openai' && config.apiKey && monthUsage >= Number(settings?.monthly_image_limit || 60)) throw new Error('Limite mensal de imagens atingido. Ajuste o limite nas Configurações.');
@@ -141,6 +141,16 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     if (run?.id) await db.query(`update marketing_autopilot_runs set status='failed',error_message=$1,updated_at=now() where id=$2`, [String(error.message || error).slice(0, 1000), run.id]).catch(() => {});
     throw error;
   } finally { client.release(); }
+}
+
+export async function generateAutopilotSchedule({ days = 7, createdBy = null, env = process.env } = {}) {
+  const total = Math.max(1, Math.min(30, Number(days) || 7)); const posts = [];
+  for (let offset = 0; offset < total; offset += 1) {
+    const date = new Date(); date.setDate(date.getDate() + offset);
+    const result = await generateDailyAutopilotPost({ createdBy, targetDate: localDateKey(date), planning: true, env });
+    if (result) posts.push(result);
+  }
+  return posts;
 }
 
 function buildPostPackage(topic, settings, config, recentContent = []) {

@@ -17,7 +17,7 @@ import pg from 'pg';
 import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
-import { autopilotDashboard, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
+import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1096,6 +1096,14 @@ async function handleApi(req, res, url) {
     await audit('platform.marketing.autopilot.generate', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_run', entity_id: run?.id, after_data: { provider: run?.provider, status: run?.status } });
     json(res, 201, { run });
     return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/autopilot/schedule') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const data = await readJson(req); const posts = await generateAutopilotSchedule({ days: Math.min(30, Math.max(1, Number(data.days) || 7)), createdBy: admin.id });
+    await audit('platform.marketing.autopilot.schedule', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_run', after_data: { posts: posts.length } });
+    json(res, 201, { posts }); return;
   }
 
   if (method === 'PATCH' && url.pathname === '/api/platform/marketing/autopilot/settings') {

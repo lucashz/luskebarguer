@@ -202,6 +202,7 @@ const els = {
   refreshCommunicationButton: document.querySelector('#refreshCommunicationButton'),
   refreshMarketingButton: document.querySelector('#refreshMarketingButton'),
   generateDailyPostButton: document.querySelector('#generateDailyPostButton'),
+  generateWeeklyScheduleButton: document.querySelector('#generateWeeklyScheduleButton'),
   autopilotStatusStrip: document.querySelector('#autopilotStatusStrip'),
   autopilotTodayCard: document.querySelector('#autopilotTodayCard'),
   autopilotUpcomingList: document.querySelector('#autopilotUpcomingList'),
@@ -312,6 +313,7 @@ els.refreshBillingButton?.addEventListener('click', loadBilling);
 els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshMarketingButton?.addEventListener('click', loadMarketing);
 els.generateDailyPostButton?.addEventListener('click', () => generateAutopilotPost(Boolean(state.autopilot?.today)));
+els.generateWeeklyScheduleButton?.addEventListener('click', generateWeeklyAutopilotSchedule);
 els.autopilotSettingsForm?.addEventListener('submit', saveAutopilotSettings);
 els.autopilotSettingsForm?.addEventListener('input', () => { const status = document.querySelector('#marketingSettingsSavedState'); if (status) { status.textContent = 'Alterações ainda não salvas'; status.classList.add('pending'); } });
 els.exportMarketingLeadsButton?.addEventListener('click', exportMarketingLeadsCsv);
@@ -855,6 +857,16 @@ async function generateAutopilotPost(regenerate = false) {
     renderAutopilotStatus();
   }
   finally { buttons.forEach((button) => { button.disabled = false; }); }
+}
+
+async function generateWeeklyAutopilotSchedule() {
+  const button = els.generateWeeklyScheduleButton; button.disabled = true; const label = button.textContent; button.textContent = 'Montando a semana…';
+  try {
+    const result = await request('/api/platform/marketing/autopilot/schedule', { method: 'POST', body: JSON.stringify({ days: 7 }) });
+    await loadMarketing({ silent: true }); activateMarketingTab('calendar');
+    toast(`${result.posts?.length || 0} post(s) preparado(s) na agenda.`);
+  } catch (error) { toast(error.message || 'Não foi possível gerar a agenda.'); }
+  finally { button.disabled = false; button.textContent = label; }
 }
 
 async function handleAutopilotAction(button) {
