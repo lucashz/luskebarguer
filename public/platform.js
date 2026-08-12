@@ -347,6 +347,8 @@ document.addEventListener('click', (event) => {
   if (pilotButton) advanceMarketingPilot(pilotButton);
   const socialButton = event.target.closest?.('[data-social-action]');
   if (socialButton) handleSocialAction(socialButton);
+  const repurposeButton = event.target.closest?.('[data-marketing-repurpose]');
+  if (repurposeButton) repurposeMarketingContent(repurposeButton);
   if (event.target.closest?.('[data-marketing-open-social]')) openMarketingAdvancedSection('social');
   const advancedButton = event.target.closest?.('[data-open-advanced-section]');
   if (advancedButton) openMarketingAdvancedSection(advancedButton.dataset.openAdvancedSection);
@@ -1245,10 +1247,18 @@ function renderMarketingContentLibrary() {
   const search = String(els.marketingContentSearch?.value || '').trim().toLocaleLowerCase('pt-BR');
   const content = (data.content || []).filter((item) => (!filter || item.status === filter) && (!search || [item.title,item.caption,item.hook,item.niche].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(search))));
   els.marketingContentList.innerHTML = content.map((item) => {
+    const audit = data.content_intelligence?.audits?.[item.id] || { score: 0, status: 'improve', blockers: [] };
     const socialAssets = state.social?.content_assets?.[item.id] || [];
     const issue = item.publication_error ? `<small class="text-danger">${escapeHtml(item.publication_error)}</small>` : '';
-    return `<article class="marketing-content-card status-${escapeHtml(item.status)}"><button class="marketing-content-main" data-marketing-content-id="${item.id}" type="button"><span class="marketing-content-thumb">${socialAssets[0]?.public_url ? `<img src="${escapeHtml(socialAssets[0].public_url)}" alt="">` : `<b>${escapeHtml((item.format || 'P').slice(0, 1).toUpperCase())}</b>`}</span><span class="marketing-content-copy"><span class="status-pill">${escapeHtml(marketingStatusLabel(item.status))}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(marketingChannelLabel(item.channel))} · ${escapeHtml(item.format || 'formato não definido')}${item.scheduled_at ? ` · ${formatDateTime(item.scheduled_at)}` : ''}</small>${item.campaign_id ? `<small>Campanha: ${escapeHtml(campaigns.get(item.campaign_id) || 'Campanha')}</small>` : ''}${issue}</span></button><div class="marketing-content-actions">${['draft', 'production', 'changes_requested'].includes(item.status) && item.channel === 'instagram' ? `<button class="ghost-button compact" data-social-action="transition" data-content-id="${item.id}" data-status="review" type="button">Enviar para aprovação</button>` : ''}${item.status === 'review' && item.channel === 'instagram' ? `<button class="primary-button compact" data-review-marketing-content="${item.id}" type="button">Revisar e agendar</button>` : ''}${['approved', 'failed', 'simulated'].includes(item.status) && item.channel === 'instagram' ? `<button class="primary-button compact" data-social-action="publish-now" data-content-id="${item.id}" type="button">Publicar agora</button>` : ''}</div></article>`;
+    return `<article class="marketing-content-card status-${escapeHtml(item.status)}"><button class="marketing-content-main" data-marketing-content-id="${item.id}" type="button"><span class="marketing-content-thumb">${socialAssets[0]?.public_url ? `<img src="${escapeHtml(socialAssets[0].public_url)}" alt="">` : `<b>${escapeHtml((item.format || 'P').slice(0, 1).toUpperCase())}</b>`}</span><span class="marketing-content-copy"><span><span class="status-pill">${escapeHtml(marketingStatusLabel(item.status))}</span><span class="content-quality-pill ${audit.status}">${audit.score}% qualidade</span></span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(marketingChannelLabel(item.channel))} · ${escapeHtml(item.format || 'formato não definido')}${item.scheduled_at ? ` · ${formatDateTime(item.scheduled_at)}` : ''}</small>${audit.blockers?.[0] ? `<small class="content-quality-hint">Sugestão: ${escapeHtml(audit.blockers[0])}</small>` : ''}${item.campaign_id ? `<small>Campanha: ${escapeHtml(campaigns.get(item.campaign_id) || 'Campanha')}</small>` : ''}${issue}</span></button><div class="marketing-content-actions"><button class="ghost-button compact" data-marketing-repurpose="${item.id}" type="button">Reaproveitar</button>${['draft', 'production', 'changes_requested'].includes(item.status) && item.channel === 'instagram' ? `<button class="ghost-button compact" data-social-action="transition" data-content-id="${item.id}" data-status="review" type="button">Enviar para aprovação</button>` : ''}${item.status === 'review' && item.channel === 'instagram' ? `<button class="primary-button compact" data-review-marketing-content="${item.id}" type="button">Revisar e agendar</button>` : ''}${['approved', 'failed', 'simulated'].includes(item.status) && item.channel === 'instagram' ? `<button class="primary-button compact" data-social-action="publish-now" data-content-id="${item.id}" type="button">Publicar agora</button>` : ''}</div></article>`;
   }).join('') || `<div class="marketing-empty-state"><strong>${filter ? 'Nenhum conteúdo neste status' : 'Sua biblioteca ainda está vazia'}</strong><p>${filter ? 'Escolha outro filtro ou crie um conteúdo.' : 'Crie uma ideia e avance no seu ritmo até a publicação.'}</p><button class="primary-button compact" data-new-marketing-content type="button">Criar conteúdo</button></div>`;
+}
+
+async function repurposeMarketingContent(button) {
+  button.disabled = true; button.textContent = 'Criando versões…';
+  try { const result = await request(`/api/platform/marketing/content/${button.dataset.marketingRepurpose}/repurpose`, { method: 'POST', body: '{}' }); await loadMarketing({ silent: true }); toast(`${result.content?.length || 3} versões criadas como rascunho.`); }
+  catch (error) { toast(error.message || 'Não foi possível reaproveitar o conteúdo.'); }
+  finally { button.disabled = false; button.textContent = 'Reaproveitar'; }
 }
 
 function openMarketingContentEditor() {
@@ -1339,11 +1349,13 @@ function renderMarketingResults() {
   const ranked = [...content].sort((a, b) => (Number(b.signups || 0) * 10 + Number(b.clicks || 0) + Number(b.saves || 0)) - (Number(a.signups || 0) * 10 + Number(a.clicks || 0) + Number(a.saves || 0))).slice(0, 6);
   els.marketingTopContent.innerHTML = ranked.map((item, index) => `<button class="marketing-ranking-row" data-marketing-content-id="${item.id}" type="button"><b>${index + 1}</b><span><strong>${escapeHtml(item.title)}</strong><small>${Number(item.reach || 0)} alcance · ${Number(item.clicks || 0)} visitas · ${Number(item.signups || 0)} cadastros</small></span></button>`).join('') || '<div class="marketing-empty-state compact"><strong>Ainda não há resultados suficientes</strong><p>As comparações aparecerão depois das primeiras publicações.</p></div>';
   const recommendations = [];
+  const fatigue = state.marketing?.content_intelligence?.fatigue?.find((item) => item.fatigued);
   const averageClicks = content.length ? totals.clicks / content.length : 0;
   const highClicks = content.find((item) => Number(item.clicks || 0) > averageClicks * 1.5 && Number(item.clicks || 0) > 0);
   const highSaves = [...content].sort((a, b) => Number(b.saves || 0) - Number(a.saves || 0))[0];
   if (highClicks) recommendations.push({ title: 'Reaproveite este tema', text: `${highClicks.title} gerou mais visitas que a média dos conteúdos.` });
   if (highSaves && Number(highSaves.saves || 0) > 0) recommendations.push({ title: 'Transforme em outro formato', text: `${highSaves.title} teve mais salvamentos; experimente uma versão em Reel.` });
+  if (fatigue) recommendations.push({ title: 'Varie o assunto', text: `${fatigue.share}% dos conteúdos recentes falam de ${fatigue.topic}. Alterne com outro pilar antes de repetir.` });
   if (!content.some((item) => item.niche)) recommendations.push({ title: 'Teste um nicho específico', text: 'Crie uma peça para pizzarias, hamburguerias ou marmitarias e compare os cadastros.' });
   els.marketingRecommendations.innerHTML = recommendations.map((item) => `<div class="marketing-recommendation"><span>Ideia</span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.text)}</p><small>Recomendação baseada nos dados disponíveis.</small></div>`).join('') || '<div class="marketing-empty-state compact"><strong>Continue coletando dados</strong><p>As recomendações explicarão o motivo assim que houver uma amostra útil.</p></div>';
 }

@@ -58,6 +58,12 @@ try {
   assert(settingsSaved, 'Formulário de configurações não foi encontrado.'); await delay(700);
   const updatedSettings = (await pool.query(`select image_style,image_aspect_ratio,monthly_image_limit,topic_cooldown_days from marketing_autopilot_settings where id=1`)).rows[0];
   assert(updatedSettings.image_style === 'before_after' && updatedSettings.image_aspect_ratio === '4:5' && updatedSettings.monthly_image_limit === 37 && updatedSettings.topic_cooldown_days === 9, 'Configurações do estúdio não foram persistidas.');
+  await evaluate(`document.querySelector('[data-marketing-tab="contents"]').click()`); await delay(400);
+  const repurposed = await evaluate(`(() => { const b=document.querySelector('[data-marketing-repurpose]'); if(!b) return {status:0}; return fetch('/api/platform/marketing/content/'+b.dataset.marketingRepurpose+'/repurpose',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(async r=>({status:r.status,body:await r.text()})); })()`);
+  assert(repurposed.status === 201, `Ação Reaproveitar falhou: ${JSON.stringify(repurposed)}`);
+  let derived;
+  for (let attempt = 0; attempt < 20; attempt += 1) { derived = await pool.query(`select count(*)::int total from marketing_content_items where created_by=$1 and format in ('carousel','reel','story')`, [adminId]); if (derived.rows[0].total >= 3) break; await delay(200); }
+  assert(derived.rows[0].total >= 3, 'O reaproveitamento não criou carrossel, Reel e Stories.');
   console.log('Marketing autopilot UI smoke: OK');
 } finally {
   cdp?.close(); browser?.kill(); server?.kill();

@@ -18,6 +18,7 @@ import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-pos
 import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
+import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -1063,6 +1064,16 @@ async function handleApi(req, res, url) {
     if (!admin) return;
     json(res, 200, await platformMarketingWorkspace());
     return;
+  }
+
+  const marketingRepurposeMatch = url.pathname.match(/^\/api\/platform\/marketing\/content\/([a-f0-9-]+)\/repurpose$/i);
+  if (method === 'POST' && marketingRepurposeMatch) {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage'); if (!admin) return;
+    const source = (await dbRequest('GET', 'marketing_content_items', { select: '*', id: `eq.${cleanUuid(marketingRepurposeMatch[1])}`, limit: '1' }))[0];
+    if (!source) throw httpError(404, 'Publicação não encontrada.');
+    const created = [];
+    for (const variant of repurposeVariants(source)) created.push(await createPlatformMarketingContent(req, admin, { ...variant, channel: source.channel || 'instagram', pillar: source.pillar || '', funnel_stage: source.funnel_stage || 'consideration', niche: source.niche || '', objective: source.objective || '', cta: source.cta || 'Testar o TáPronto', aspect_ratio: variant.format === 'story' ? '9:16' : '1:1', alt_text: variant.overlay_text, timezone: source.timezone || 'America/Sao_Paulo', hashtags: Array.isArray(source.hashtags) ? source.hashtags : [], assets: [], utm_url: source.utm_url || 'https://taprontomenu.com.br/', status: 'draft' }));
+    json(res, 201, { content: created }); return;
   }
 
   if (method === 'GET' && url.pathname === '/api/platform/marketing/autopilot') {
@@ -11555,6 +11566,7 @@ async function platformMarketingWorkspace() {
     weekly_reports: weeklyReports,
     attribution_journeys: attributedCompanies,
     automation_runs: automationRuns,
+    content_intelligence: { audits: Object.fromEntries(content.map((item) => [item.id, auditMarketingContent(item, content.slice(0, 30))])), fatigue: contentFatigue(content) },
     safeguards: {
       consent_required: true,
       editorial_approval_required: true,
