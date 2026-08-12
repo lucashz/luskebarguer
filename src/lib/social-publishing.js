@@ -238,20 +238,43 @@ export async function claimNextPublication(client) {
   } catch (error) { await client.query('rollback'); throw error; }
 }
 
-export async function syncPublicationMetrics(client, env = process.env) {
+export async function syncPublicationMetrics(client, env = process.env, options = {}) {
   const config = socialConfig(env);
-  const result = await client.query(`select p.*,a.access_token_encrypted,a.mode account_mode from social_publications p join social_accounts a on a.id=p.account_id where p.status='published' and p.provider_media_id<>'' and (a.last_sync_at is null or a.last_sync_at<now()-($1||' hours')::interval) limit 25`, [String(config.metricsIntervalHours)]);
+  const result = await client.query(`select p.*,a.access_token_encrypted,a.mode account_mode from social_publications p join social_accounts a on a.id=p.account_id where p.status='published' and p.provider_media_id<>'' and ($2::boolean or a.last_sync_at is null or a.last_sync_at<now()-($1||' hours')::interval) limit 25`, [String(config.metricsIntervalHours), options.force === true]);
   for (const publication of result.rows) {
     try {
       if (config.simulation || publication.mode === 'simulation' || publication.account_mode === 'simulation') continue;
       const token = decryptSocialSecret(publication.access_token_encrypted, config);
+      await metaRequest(`/${publication.provider_media_id}?fields=id,permalink,timestamp,media_type`, token, {}, config);
       const response = await metaRequest(`/${publication.provider_media_id}/insights?metric=reach,views,likes,comments,shares,saved`, token, {}, config);
       const metrics = Object.fromEntries((response.data || []).map((item) => [item.name, item.values?.[0]?.value ?? item.value ?? null]));
       await client.query(`insert into social_metric_snapshots(publication_id,source,metrics) values($1,'meta',$2::jsonb)`, [publication.id, JSON.stringify(metrics)]);
       await client.query(`update social_accounts set last_sync_at=now(),last_error='',updated_at=now() where id=$1`, [publication.account_id]);
-    } catch (error) { await client.query(`update social_accounts set last_error=$2,updated_at=now() where id=$1`, [publication.account_id, String(error.message || '').slice(0, 500)]); }
+    } catch (error) {
+      if (isMissingInstagramMediaError(error)) {
+        const message = 'Removido diretamente no Instagram.';
+        await client.query('begin');
+        try {
+          await client.query(`update social_publications set status='cancelled',last_error_code='media_deleted',last_error=$2,updated_at=now() where id=$1`, [publication.id, message]);
+          await client.query(`update marketing_content_items set status='cancelled',publication_error=$2,updated_at=now() where id=$1 and status='published'`, [publication.content_id, message]);
+          await client.query(`update social_accounts set last_sync_at=now(),last_error='',updated_at=now() where id=$1`, [publication.account_id]);
+          await client.query('commit');
+        } catch (updateError) {
+          await client.query('rollback').catch(() => {});
+          throw updateError;
+        }
+      } else {
+        await client.query(`update social_accounts set last_error=$2,updated_at=now() where id=$1`, [publication.account_id, String(error.message || '').slice(0, 500)]);
+      }
+    }
   }
   return result.rows.length;
+}
+
+export function isMissingInstagramMediaError(error) {
+  const code = String(error?.providerCode || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === '100' && /(unsupported get request|does not exist|cannot be loaded|não existe|não pode ser carregado)/i.test(message);
 }
 
 export function hashText(value) { return createHash('sha256').update(String(value || '')).digest('hex'); }

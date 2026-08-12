@@ -14,9 +14,9 @@ import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import pg from 'pg';
-import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
+import { getLocalPool, localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
-import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
+import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, syncPublicationMetrics, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 
@@ -103,6 +103,7 @@ const staticFileCache = new Map();
 const compressibleStaticExtensions = new Set(['.html', '.css', '.js', '.json', '.svg']);
 const inflightDbReads = new Map();
 const seoLandingByPath = new Map(seoLandingPages.map((page) => [`/${page.slug}`, page]));
+let lastSocialReconciliationAt = 0;
 
 const server = createServer(async (req, res) => {
   const startedAt = performance.now();
@@ -1228,6 +1229,7 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && url.pathname === '/api/platform/social') {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
+    await reconcilePlatformSocialPublications();
     json(res, 200, await platformSocialWorkspace());
     return;
   }
@@ -11879,6 +11881,19 @@ async function platformSocialWorkspace() {
   };
 }
 
+async function reconcilePlatformSocialPublications() {
+  if (Date.now() - lastSocialReconciliationAt < 30_000) return;
+  lastSocialReconciliationAt = Date.now();
+  const client = await getLocalPool().connect();
+  try {
+    await syncPublicationMetrics(client, process.env, { force: true });
+  } catch (error) {
+    console.warn('Não foi possível reconciliar as publicações do Instagram:', error.message);
+  } finally {
+    client.release();
+  }
+}
+
 async function beginPlatformSocialConnection(req, admin) {
   const config = socialConfig();
   if (config.simulation) {
@@ -12075,7 +12090,17 @@ async function approveAutopilotRun(req, admin, data, scheduledAt) {
   if (!run?.content_id) throw httpError(404, 'Post do dia não encontrado.');
   const accountId = cleanUuid(data.social_account_id);
   let context = await socialContentContext(run.content_id);
-  if (['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(context.content.status)) return { ok: true, content: context.content, already_applied: true };
+  if (['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(context.content.status)) {
+    await dbRequest('PATCH', 'marketing_autopilot_runs', { id: `eq.${run.id}` }, { status: 'approved', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+    return { ok: true, content: context.content, already_applied: true };
+  }
+  if (context.content.status === 'cancelled' && context.content.publication_error === 'Removido diretamente no Instagram.') {
+    const [restored] = await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${run.content_id}` }, {
+      status: 'draft', published_at: null, published_url: '', publication_error: '', scheduled_at: scheduledAt,
+      content_version: Number(context.content.content_version || 1) + 1, updated_at: new Date().toISOString()
+    }, ['Prefer: return=representation']);
+    context = await socialContentContext(restored.id);
+  }
   if (context.content.status === 'draft') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'review', note: 'Enviado pelo piloto automático.' });
   context = await socialContentContext(run.content_id);
   if (context.content.status === 'review') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'approved', social_account_id: accountId, scheduled_at: scheduledAt, note: 'Aprovado pelo administrador no post do dia.' });
