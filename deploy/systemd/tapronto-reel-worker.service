@@ -9,6 +9,8 @@ User=lucas
 Group=lucas
 WorkingDirectory=/var/www
 EnvironmentFile=/var/www/.env
+Environment=FONTCONFIG_PATH=/etc/fonts
+Environment=XDG_CACHE_HOME=/tmp
 ExecStart=/usr/bin/node /var/www/scripts/reel-render-worker.mjs
 Restart=always
 RestartSec=8
