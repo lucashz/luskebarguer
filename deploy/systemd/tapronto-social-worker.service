@@ -19,7 +19,6 @@ ProtectHome=true
 ReadWritePaths=/var/www/uploads
 CapabilityBoundingSet=
 LockPersonality=true
-MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 UMask=0027
 
