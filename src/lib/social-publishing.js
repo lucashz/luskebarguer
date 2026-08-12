@@ -175,7 +175,7 @@ export async function processClaimedPublication(client, publication, env = proce
     const published = await metaRequest(`/${account.provider_account_id}/media_publish`, token, { method: 'POST', body: { creation_id: publication.container_id } }, config);
     const media = await metaRequest(`/${published.id}?fields=id,permalink,timestamp,media_type`, token, {}, config).catch(() => ({ id: published.id, permalink: '' }));
     await logAttempt(client, publication, 'media_publish', published._meta, 'success');
-    await client.query(`update social_publications set status='published',provider_media_id=$2,permalink=$3,published_at=now(),lock_expires_at=null,updated_at=now() where id=$1`, [publication.id, published.id, media.permalink || '']);
+    await client.query(`update social_publications set status='published',provider_media_id=$2,permalink=$3,published_at=now(),lock_expires_at=null,next_attempt_at=null,last_error_code='',last_error='',updated_at=now() where id=$1`, [publication.id, published.id, media.permalink || '']);
     await client.query(`update marketing_content_items set status='published',published_at=now(),published_url=$2,publication_error='',updated_at=now() where id=$1`, [content.id, media.permalink || '']);
   } catch (error) { await failOrRetry(client, publication, error, config, error.transient !== false); }
 }
