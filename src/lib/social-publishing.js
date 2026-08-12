@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
 export const SOCIAL_CONTENT_STATUSES = ['idea', 'draft', 'production', 'review', 'changes_requested', 'approved', 'scheduled', 'publishing', 'processing', 'published', 'simulated', 'failed', 'cancelled'];
 export const SOCIAL_TRANSITIONS = Object.freeze({
@@ -59,6 +59,20 @@ export function verifyOAuthState(state, expectedHash) {
   const actual = Buffer.from(hashText(String(state || '')), 'hex');
   const expected = Buffer.from(String(expectedHash || ''), 'hex');
   return actual.length === expected.length && actual.length > 0 && timingSafeEqual(actual, expected);
+}
+
+export function verifyMetaSignedRequest(signedRequest, appSecret) {
+  const value = String(signedRequest || '').trim();
+  const secret = String(appSecret || '');
+  const [encodedSignature, encodedPayload, extra] = value.split('.');
+  if (!encodedSignature || !encodedPayload || extra !== undefined || !secret) throw new Error('Solicitação de exclusão inválida.');
+  const received = Buffer.from(encodedSignature, 'base64url');
+  const expected = createHmac('sha256', secret).update(encodedPayload).digest();
+  if (!received.length || received.length !== expected.length || !timingSafeEqual(received, expected)) throw new Error('Assinatura da Meta inválida.');
+  let payload;
+  try { payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8')); } catch { throw new Error('Payload de exclusão inválido.'); }
+  if (String(payload.algorithm || '').toUpperCase() !== 'HMAC-SHA256' || !String(payload.user_id || '').trim()) throw new Error('Payload de exclusão incompleto.');
+  return payload;
 }
 
 export function instagramAuthorizationUrl(state, config = socialConfig()) {

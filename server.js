@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { createCipheriv, createDecipheriv, createHash, pbkdf2Sync, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, pbkdf2Sync, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
@@ -16,7 +16,7 @@ import dns from 'node:dns/promises';
 import pg from 'pg';
 import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
-import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval } from './src/lib/social-publishing.js';
+import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 
@@ -127,6 +127,11 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);
+      return;
+    }
+
+    if ((req.method || 'GET') === 'GET' && url.pathname === '/privacidade/exclusao-meta') {
+      renderMetaDataDeletionStatus(res, url.searchParams.get('code'));
       return;
     }
 
@@ -1207,6 +1212,11 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     json(res, 200, await beginPlatformSocialConnection(req, admin));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/social/data-deletion') {
+    json(res, 200, await processMetaDataDeletion(req));
     return;
   }
 
@@ -11843,6 +11853,30 @@ async function beginPlatformSocialConnection(req, admin) {
   return { mode: 'live', authorization_url: instagramAuthorizationUrl(state.state, config) };
 }
 
+async function processMetaDataDeletion(req) {
+  const body = await readRequestBody(req, 64 * 1024);
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  let signedRequest = '';
+  if (contentType.includes('application/json')) {
+    try { signedRequest = JSON.parse(body || '{}').signed_request || ''; } catch { throw httpError(400, 'JSON inválido.'); }
+  } else signedRequest = new URLSearchParams(body).get('signed_request') || '';
+  let payload;
+  try { payload = verifyMetaSignedRequest(signedRequest, process.env.META_APP_SECRET); } catch (error) { throw httpError(401, error.message); }
+  const providerAccountId = cleanText(payload.user_id).slice(0, 200);
+  const confirmationCode = createHmac('sha256', process.env.SOCIAL_TOKEN_ENCRYPTION_KEY).update(`meta-delete:${providerAccountId}`).digest('hex').slice(0, 32);
+  await dbRequest('DELETE', 'social_accounts', { provider: 'eq.instagram', provider_account_id: `eq.${providerAccountId}` }, undefined, ['Prefer: return=minimal']);
+  await audit('platform.social.account.meta_data_deletion', { entity_type: 'social_account', description: 'Dados da conta do Instagram removidos a pedido da Meta.', after_data: { confirmation_code: confirmationCode } }).catch(() => {});
+  return { url: `${absolutePublicUrl('/privacidade/exclusao-meta')}?code=${encodeURIComponent(confirmationCode)}`, confirmation_code: confirmationCode };
+}
+
+function renderMetaDataDeletionStatus(res, rawCode) {
+  const code = /^[a-f0-9]{32}$/i.test(String(rawCode || '')) ? String(rawCode) : '';
+  const title = code ? 'Exclusão de dados concluída' : 'Exclusão de dados do Instagram';
+  const message = code ? 'A conexão com o Instagram e os tokens associados foram removidos do TáPronto.' : 'Para excluir os dados da integração, desconecte a conta na Central ou remova o acesso do TáPronto nas configurações do Instagram.';
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title} · TáPronto</title><style>body{margin:0;background:#f6f7f9;color:#12213d;font:16px system-ui,sans-serif}.box{max-width:680px;margin:10vh auto;padding:40px;background:#fff;border:1px solid #e4e7ec;border-radius:20px}h1{margin-top:0}.ok{color:#16803b}code{word-break:break-all}a{color:#d71920}</style></head><body><main class="box"><p class="ok">TáPronto · Privacidade</p><h1>${title}</h1><p>${message}</p>${code ? `<p>Código de confirmação: <code>${code}</code></p>` : ''}<p><a href="/privacidade">Consultar Política de Privacidade</a></p></main></body></html>`;
+  res.writeHead(200, { ...securityHeaders(), 'Cache-Control': 'no-store', 'Content-Type': 'text/html; charset=utf-8' }); res.end(html);
+}
+
 async function completePlatformSocialConnection(req, admin, params) {
   const state = cleanText(params.get('state') || '');
   const code = cleanText(params.get('code') || '');
@@ -19191,11 +19225,7 @@ async function sendFile(req, res, filePath, options = {}) {
 }
 
 async function readJson(req) {
-  let body = '';
-  for await (const chunk of req) {
-    body += chunk;
-    if (body.length > MAX_JSON_BYTES) throw httpError(413, 'Payload muito grande.');
-  }
+  const body = await readRequestBody(req, MAX_JSON_BYTES);
 
   if (!body) return {};
   try {
@@ -19203,6 +19233,18 @@ async function readJson(req) {
   } catch {
     throw httpError(400, 'JSON inválido.');
   }
+}
+
+async function readRequestBody(req, maxBytes = MAX_JSON_BYTES) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBytes) throw httpError(413, 'Payload muito grande.');
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function sanitizeAdminUser(data) {
