@@ -3037,6 +3037,7 @@ body.platform-redesign [hidden] {
 .marketing-primary-nav { position: sticky; top: 0; z-index: 8; padding: .65rem 0; background: color-mix(in srgb, #fff 94%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--marketing-border); }
 .marketing-primary-nav .ghost-button { border: 0; background: transparent; color: #667085; }
 .marketing-primary-nav .ghost-button.active { color: #b51219; background: #fff1f1; border-color: transparent; }
+.marketing-primary-nav .marketing-settings-tab { margin-left: auto; color: #7a8190; }
 .marketing-overview { display: grid; gap: 1rem; }
 .marketing-next-action { display: flex; justify-content: space-between; align-items: center; gap: 2rem; padding: 1.5rem 1.65rem; border-radius: 18px; background: linear-gradient(125deg, #fff1f1, #fff 72%); border: 1px solid #f3c9cb; }
 .marketing-next-action div { display: grid; gap: .35rem; }
@@ -3082,9 +3083,11 @@ body.platform-redesign [hidden] {
 .marketing-recommendation { display: grid; gap: .35rem; padding: 1rem; border-radius: 13px; background: #f7f8fa; margin-bottom: .7rem; }.marketing-recommendation > span { width: fit-content; padding: .2rem .45rem; border-radius: 999px; color: #175cd3; background: #eff6ff; font-size: .68rem; font-weight: 800; text-transform: uppercase; }.marketing-recommendation p { margin: 0; color: var(--marketing-muted); }.marketing-recommendation small { color: #858c9b; }
 .marketing-advanced-details { margin-top: 1rem; }.marketing-advanced-details > summary { cursor: pointer; font-weight: 800; }.marketing-inline-form { max-width: 680px; margin-top: 1rem; }
 .marketing-more-intro { padding: 1rem 0; border-bottom: 1px solid var(--marketing-border); margin-bottom: 1rem; }
+.marketing-settings-grid { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
+.marketing-settings-grid .ghost-button { min-width: 130px; justify-content: center; }
 [data-marketing-advanced] { margin-top: 1rem; }
 @media (max-width: 1100px) { .marketing-summary-grid { grid-template-columns: repeat(2, 1fr); }.marketing-overview-columns { grid-template-columns: 1fr; }.marketing-calendar { grid-template-columns: repeat(7, minmax(95px, 1fr)); } }
-@media (max-width: 700px) { .marketing-primary-nav { position: static; display: grid; grid-template-columns: repeat(3, 1fr); }.marketing-next-action { align-items: flex-start; flex-direction: column; }.marketing-summary-grid { grid-template-columns: 1fr 1fr; }.marketing-editor-steps { grid-template-columns: 1fr; }.marketing-editor-steps li:not(.active) { display: none; }.marketing-content-card { align-items: stretch; flex-direction: column; }.marketing-content-actions { justify-content: flex-start; }.marketing-calendar { grid-template-columns: repeat(7, minmax(82px, 1fr)); }.marketing-calendar-day { min-height: 150px; }.marketing-calendar-item strong { font-size: .75rem; }.marketing-calendar-item small { display: none; } }
+@media (max-width: 700px) { .marketing-primary-nav { position: static; display: grid; grid-template-columns: repeat(2, 1fr); }.marketing-primary-nav .marketing-settings-tab { grid-column: 1 / -1; margin-left: 0; }.marketing-next-action { align-items: flex-start; flex-direction: column; }.marketing-summary-grid { grid-template-columns: 1fr 1fr; }.marketing-settings-grid { display: grid; grid-template-columns: 1fr 1fr; }.marketing-settings-grid .ghost-button { min-width: 0; }.marketing-editor-steps { grid-template-columns: 1fr; }.marketing-editor-steps li:not(.active) { display: none; }.marketing-content-card { align-items: stretch; flex-direction: column; }.marketing-content-actions { justify-content: flex-start; }.marketing-calendar { grid-template-columns: repeat(7, minmax(82px, 1fr)); }.marketing-calendar-day { min-height: 150px; }.marketing-calendar-item strong { font-size: .75rem; }.marketing-calendar-item small { display: none; } }
 .marketing-publishing-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; padding-top: .4rem; }
 .marketing-publishing-tools[hidden] { display: none; }
 .marketing-publishing-tools .platform-chart-card { margin: 0; background: #fafbfc; }

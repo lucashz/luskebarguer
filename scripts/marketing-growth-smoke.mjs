@@ -16,7 +16,7 @@ let child;
 try {
   const platformHtml = readFileSync(new URL('../public/platform.html', import.meta.url), 'utf8');
   const platformJs = readFileSync(new URL('../public/platform.js', import.meta.url), 'utf8');
-  for (const label of ['Visão geral', 'Conteúdos', 'Calendário', 'Resultados', 'Contatos', 'Mais']) assert(platformHtml.includes(`>${label}</button>`), `Navegação de marketing não inclui ${label}.`);
+  for (const label of ['Hoje', 'Publicações', 'Agenda', 'Resultados', 'Configurações']) assert(platformHtml.includes(`>${label}</button>`), `Navegação de marketing não inclui ${label}.`);
   assert((platformHtml.match(/id="marketingContentList"/g) || []).length === 1, 'Existe mais de uma biblioteca editorial visível.');
   assert(platformHtml.includes('id="marketingNextAction"') && platformJs.includes('renderMarketingOverview'), 'Próxima ação do marketing não foi implementada.');
   assert(platformJs.includes('marketingStatusLabel') && platformJs.includes("Aguardando aprovação"), 'Estados editoriais não estão traduzidos.');

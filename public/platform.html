@@ -405,24 +405,23 @@
               <h2>Marketing</h2>
               <p class="muted">Saiba o que fazer hoje, organize seus conteúdos e acompanhe os resultados.</p>
             </div>
-            <div class="row-actions"><button class="ghost-button compact" id="refreshMarketingButton" type="button">Atualizar</button><button class="primary-button compact" id="newMarketingContentButton" type="button">Criar conteúdo</button></div>
+            <div class="row-actions"><button class="primary-button compact" id="newMarketingContentButton" type="button">Nova publicação</button></div>
           </div>
           <div class="platform-marketing-tabs marketing-primary-nav" role="tablist" aria-label="Áreas de marketing">
-            <button class="ghost-button compact active" data-marketing-tab="overview" type="button">Visão geral</button>
-            <button class="ghost-button compact" data-marketing-tab="contents" type="button">Conteúdos</button>
-            <button class="ghost-button compact" data-marketing-tab="calendar" type="button">Calendário</button>
+            <button class="ghost-button compact active" data-marketing-tab="overview" type="button">Hoje</button>
+            <button class="ghost-button compact" data-marketing-tab="contents" type="button">Publicações</button>
+            <button class="ghost-button compact" data-marketing-tab="calendar" type="button">Agenda</button>
             <button class="ghost-button compact" data-marketing-tab="results" type="button">Resultados</button>
-            <button class="ghost-button compact" data-marketing-tab="contacts" type="button">Contatos</button>
-            <button class="ghost-button compact" data-marketing-tab="more" type="button">Mais</button>
+            <button class="ghost-button compact marketing-settings-tab" data-marketing-tab="more" type="button">Configurações</button>
           </div>
           <section data-marketing-panel="overview" class="marketing-overview">
             <article class="marketing-next-action" id="marketingNextAction"></article>
-            <section class="platform-kpi-grid marketing-summary-grid" id="platformMarketingSummary"></section>
+            <section id="platformMarketingSummary" hidden></section>
             <div class="marketing-overview-columns">
-              <article class="platform-chart-card"><div class="section-actions"><div><h3>O que precisa de atenção</h3><p class="muted">Pendências que podem travar sua rotina.</p></div></div><div id="marketingAttentionList"></div></article>
-              <article class="platform-chart-card"><div class="section-actions"><div><h3>Próximos 7 dias</h3><p class="muted">O que está preparado para publicação.</p></div><button class="ghost-button compact" data-open-marketing-tab="calendar" type="button">Ver calendário</button></div><div id="marketingUpcomingList"></div></article>
+              <article class="platform-chart-card"><div class="section-actions"><div><h3>Para fazer</h3><p class="muted">Somente o que precisa da sua atenção.</p></div></div><div id="marketingAttentionList"></div></article>
+              <article class="platform-chart-card"><div class="section-actions"><div><h3>Próximas publicações</h3><p class="muted">O que já está preparado.</p></div><button class="ghost-button compact" data-open-marketing-tab="calendar" type="button">Ver agenda</button></div><div id="marketingUpcomingList"></div></article>
             </div>
-            <article class="platform-chart-card"><div class="section-actions"><div><h3>Conteúdos recentes</h3><p class="muted">Continue de onde parou.</p></div><button class="ghost-button compact" data-open-marketing-tab="contents" type="button">Ver todos</button></div><div id="marketingRecentContent"></div></article>
+            <details class="platform-chart-card marketing-advanced-details"><summary>Continue de onde parou</summary><div id="marketingRecentContent"></div></details>
           </section>
           <section data-marketing-panel="calendar" hidden>
             <article class="platform-chart-card"><div class="section-actions"><div><h3>Calendário editorial</h3><p class="muted" id="marketingCalendarSummary">Veja o que será publicado em cada dia.</p></div><div class="row-actions"><select id="marketingCalendarView"><option value="week">Semana</option><option value="month">Mês</option></select><button class="ghost-button compact" id="marketingCalendarPrevious" type="button" aria-label="Período anterior">←</button><button class="ghost-button compact" id="marketingCalendarToday" type="button">Hoje</button><button class="ghost-button compact" id="marketingCalendarNext" type="button" aria-label="Próximo período">→</button></div></div><div class="marketing-calendar" id="marketingCalendarGrid"></div></article>
@@ -434,8 +433,8 @@
             <div class="marketing-overview-columns"><article class="platform-chart-card"><h3>Conteúdos que mais funcionaram</h3><div id="marketingTopContent"></div></article><article class="platform-chart-card"><h3>Recomendações</h3><div id="marketingRecommendations"></div></article></div>
             <details class="platform-chart-card marketing-advanced-details"><summary>Registrar métricas manualmente</summary><form id="marketingContentMetricsForm" class="platform-compact-form marketing-inline-form"><label>Conteúdo<select name="content_id" id="marketingContentMetricSelect" required></select></label><div class="field-grid two-columns"><label>Alcance<input name="reach" type="number" min="0"></label><label>Visualizações<input name="views" type="number" min="0"></label></div><div class="field-grid two-columns"><label>Retenção (%)<input name="retention_rate" type="number" min="0" max="100" step="0.01"></label><label>Cliques<input name="clicks" type="number" min="0"></label></div><div class="field-grid two-columns"><label>Salvamentos<input name="saves" type="number" min="0"></label><label>Compartilhamentos<input name="shares" type="number" min="0"></label></div><div class="field-grid two-columns"><label>Cadastros<input name="signups" type="number" min="0"></label><label>Pedidos atribuídos<input name="attributed_orders" type="number" min="0"></label></div><label>Receita atribuída (R$)<input name="attributed_revenue" type="number" min="0" step="0.01"></label><button class="primary-button compact" type="submit">Salvar métricas</button></form></details>
           </section>
-          <section data-marketing-panel="more" class="marketing-more-intro" hidden><div><h3>Ferramentas avançadas</h3><p class="muted">Campanhas, canais conectados, testes, relatórios e estudos de caso ficam aqui para não atrapalhar a rotina diária.</p></div></section>
-          <section data-marketing-panel="campaigns" data-marketing-advanced class="platform-marketing-grid" hidden>
+          <section data-marketing-panel="more" class="marketing-more-intro" hidden><div><h3>Configurações</h3><p class="muted">Acesse uma ferramenta somente quando precisar.</p><div class="marketing-settings-grid"><button class="ghost-button" data-open-advanced-section="social" type="button">Instagram</button><button class="ghost-button" data-open-advanced-section="contacts" type="button">Contatos</button><button class="ghost-button" data-open-advanced-section="campaigns" type="button">Campanhas</button><button class="ghost-button" data-open-advanced-section="reports" type="button">Relatórios</button><button class="ghost-button" data-open-advanced-section="experiments" type="button">Testes A/B</button><button class="ghost-button" data-open-advanced-section="pilots" type="button">Lojas piloto</button><button class="ghost-button" data-open-advanced-section="automation" type="button">Automações</button><button class="ghost-button" id="refreshMarketingButton" type="button">Atualizar dados</button></div></div></section>
+          <section data-marketing-panel="campaigns" data-marketing-advanced="campaigns" class="platform-marketing-grid" hidden>
             <form id="marketingCampaignForm" class="platform-chart-card platform-compact-form">
               <h3>Nova campanha</h3>
               <label>Nome<input name="name" required placeholder="Ex.: Cardápio para pizzarias"></label>
@@ -446,7 +445,7 @@
             </form>
             <article class="platform-chart-card"><h3>Campanhas</h3><div id="marketingCampaignList"></div></article>
           </section>
-          <section data-marketing-panel="social" data-marketing-advanced hidden>
+          <section data-marketing-panel="social" data-marketing-advanced="social" hidden>
             <article class="platform-chart-card social-control-card">
               <div class="section-actions"><div><p class="eyebrow">Instagram oficial</p><h3>Publicação com aprovação</h3><p class="muted" id="socialConfigMessage">Verificando ambiente e conexão…</p></div><div class="row-actions" id="socialAccountActions"></div></div>
               <div class="platform-kpi-grid social-kpis" id="socialSummary"></div>
@@ -460,7 +459,7 @@
             </div>
             <article class="platform-chart-card"><div class="section-actions"><div><h3>Publicações e alertas</h3><p class="muted" id="socialWorkerStatus"></p></div></div><div id="socialPublicationList"></div><div id="socialAlertList"></div></article>
           </section>
-          <section data-marketing-panel="contacts" hidden>
+          <section data-marketing-panel="contacts" data-marketing-advanced="contacts" hidden>
             <div class="section-actions marketing-section-heading"><div><h3>Contatos</h3><p class="muted">Priorize quem precisa de retorno hoje.</p></div><div class="row-actions"><button class="ghost-button compact" id="exportMarketingLeadsButton" type="button">Exportar CSV</button><label class="ghost-button compact">Importar CSV<input id="marketingLeadCsvInput" type="file" accept=".csv,text/csv" hidden></label><button class="primary-button compact" id="newMarketingLeadButton" type="button">Novo contato</button></div></div>
             <form id="marketingLeadForm" class="platform-chart-card platform-compact-form marketing-collapsible-form" hidden>
               <h3>Novo lead</h3>
@@ -473,7 +472,7 @@
             <article class="platform-chart-card"><div class="marketing-contact-filters" id="marketingContactSummary"></div><div id="marketingLeadList"></div></article>
           </section>
           <section data-marketing-panel="contents" hidden>
-            <div class="section-actions marketing-section-heading"><div><h3>Conteúdos</h3><p class="muted">Uma única biblioteca da ideia até a publicação.</p></div><div class="row-actions"><select id="marketingContentStatusFilter"><option value="">Todos os status</option><option value="draft">Rascunhos</option><option value="production">Em produção</option><option value="review">Aguardando aprovação</option><option value="approved">Aprovados</option><option value="scheduled">Agendados</option><option value="published">Publicados</option><option value="simulated">Simulados</option><option value="failed">Com erro</option></select><button class="primary-button compact" data-new-marketing-content type="button">Novo conteúdo</button></div></div>
+            <div class="section-actions marketing-section-heading"><div><h3>Publicações</h3><p class="muted">Da ideia até a publicação.</p></div><div class="row-actions"><select id="marketingContentStatusFilter"><option value="">Todas</option><option value="draft">Rascunhos</option><option value="review">Para aprovar</option><option value="scheduled">Programadas</option><option value="published">Publicadas</option><option value="failed">Com erro</option></select><button class="primary-button compact" data-new-marketing-content type="button">Nova publicação</button></div></div>
             <form id="marketingContentForm" class="platform-chart-card platform-compact-form marketing-content-editor" hidden>
               <div class="section-actions"><div><p class="eyebrow">Editor de conteúdo</p><h3 id="marketingContentEditorTitle">Novo conteúdo</h3></div><button class="ghost-button compact" id="closeMarketingContentEditor" type="button">Fechar</button></div>
               <ol class="marketing-editor-steps" aria-label="Etapas do conteúdo"><li class="active">1. Ideia</li><li>2. Produção</li><li>3. Prévia</li><li>4. Aprovação</li><li>5. Agendamento</li></ol>
@@ -497,7 +496,7 @@
             </form>
             <article class="platform-chart-card marketing-content-library"><div id="marketingContentList"></div></article>
           </section>
-          <section data-marketing-panel="experiments" data-marketing-advanced class="platform-marketing-grid" hidden>
+          <section data-marketing-panel="experiments" data-marketing-advanced="experiments" class="platform-marketing-grid" hidden>
             <form id="marketingExperimentForm" class="platform-chart-card platform-compact-form">
               <h3>Novo experimento</h3>
               <label>Nome<input name="name" required placeholder="Ex.: CTA da demonstração na home"></label>
@@ -513,11 +512,11 @@
             </form>
             <article class="platform-chart-card"><h3>Backlog e testes ativos</h3><p class="muted">Todo teste deve terminar em manter, iterar ou encerrar.</p><div id="marketingExperimentList"></div></article>
           </section>
-          <section data-marketing-panel="reports" data-marketing-advanced class="platform-marketing-grid" hidden>
+          <section data-marketing-panel="reports" data-marketing-advanced="reports" class="platform-marketing-grid" hidden>
             <article class="platform-chart-card"><div class="section-actions"><div><h3>Resumo semanal automático</h3><p class="muted">Compara o funil, aponta atrasos, falhas e recomenda manter, iterar ou encerrar.</p></div><button class="primary-button compact" id="generateMarketingReportButton" type="button">Gerar agora</button></div><div id="marketingWeeklyReport"></div></article>
             <article class="platform-chart-card"><h3>Primeiro e último contato</h3><p class="muted">Veja o canal que apresentou o TáPronto e o canal que antecedeu a conversão.</p><div id="marketingAttributionJourneyList"></div></article>
           </section>
-          <section data-marketing-panel="pilots" data-marketing-advanced class="platform-marketing-grid" hidden>
+          <section data-marketing-panel="pilots" data-marketing-advanced="pilots" class="platform-marketing-grid" hidden>
             <form id="marketingPilotForm" class="platform-chart-card platform-compact-form">
               <h3>Nova loja piloto</h3>
               <label>Estabelecimento<input name="business_name" required></label>
@@ -529,7 +528,7 @@
             </form>
             <article class="platform-chart-card"><h3>Programa piloto e estudos de caso</h3><div id="marketingPilotList"></div></article>
           </section>
-          <article class="platform-chart-card platform-marketing-automation-card" data-marketing-advanced hidden>
+          <article class="platform-chart-card platform-marketing-automation-card" data-marketing-advanced="automation" hidden>
             <div class="section-actions"><div><h3>Automações de ciclo de vida</h3><p class="muted">Onboarding, primeiro produto, publicação, pedido teste, inatividade e fim do trial. Limite de um contato por empresa a cada 48 horas.</p></div><span class="status-pill success">Ativas</span></div>
             <div id="marketingAutomationList"></div>
           </article>

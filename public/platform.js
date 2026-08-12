@@ -334,7 +334,9 @@ document.addEventListener('click', (event) => {
   if (pilotButton) advanceMarketingPilot(pilotButton);
   const socialButton = event.target.closest?.('[data-social-action]');
   if (socialButton) handleSocialAction(socialButton);
-  if (event.target.closest?.('[data-marketing-open-social]')) activateMarketingTab('social');
+  if (event.target.closest?.('[data-marketing-open-social]')) openMarketingAdvancedSection('social');
+  const advancedButton = event.target.closest?.('[data-open-advanced-section]');
+  if (advancedButton) openMarketingAdvancedSection(advancedButton.dataset.openAdvancedSection);
   const tabButton = event.target.closest?.('[data-open-marketing-tab]');
   if (tabButton) activateMarketingTab(tabButton.dataset.openMarketingTab);
   if (event.target.closest?.('[data-new-marketing-content]')) openMarketingContentEditor();
@@ -822,18 +824,31 @@ async function loadMarketing(options = {}) {
 }
 
 function activateMarketingTab(tab = 'overview') {
+  const primaryTabs = ['overview', 'contents', 'calendar', 'results', 'more'];
+  if (!primaryTabs.includes(tab)) {
+    state.marketingAdvancedSection = tab;
+    tab = 'more';
+  }
   state.marketingActiveTab = tab;
   els.marketingTabs.forEach((button) => button.classList.toggle('active', button.dataset.marketingTab === tab));
   els.marketingPanels.forEach((panel) => {
-    const advanced = panel.hasAttribute('data-marketing-advanced');
-    panel.hidden = advanced ? tab !== 'more' : panel.dataset.marketingPanel !== tab;
+    const advanced = panel.dataset.marketingAdvanced;
+    panel.hidden = advanced ? tab !== 'more' || advanced !== state.marketingAdvancedSection : panel.dataset.marketingPanel !== tab;
   });
-  document.querySelectorAll('[data-marketing-advanced]:not([data-marketing-panel])').forEach((item) => { item.hidden = tab !== 'more'; });
+  document.querySelectorAll('[data-marketing-advanced]:not([data-marketing-panel])').forEach((item) => {
+    item.hidden = tab !== 'more' || item.dataset.marketingAdvanced !== state.marketingAdvancedSection;
+  });
   const url = new URL(window.location.href);
   if (tab === 'overview') url.searchParams.delete('marketing_tab'); else url.searchParams.set('marketing_tab', tab);
   history.replaceState(null, '', url);
   if (tab === 'calendar') renderMarketingCalendar();
   if (tab === 'results') renderMarketingResults();
+}
+
+function openMarketingAdvancedSection(section) {
+  state.marketingAdvancedSection = section;
+  activateMarketingTab('more');
+  document.querySelector(`[data-marketing-advanced="${section}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function marketingFormPayload(form) {
