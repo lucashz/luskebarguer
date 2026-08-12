@@ -39,7 +39,9 @@ export async function autopilotDashboard(env = process.env) {
     db.query(`select id,username,display_name,mode,status,publishing_paused from social_accounts where status='connected' order by mode='live' desc,created_at desc limit 5`)
   ]);
   const today = localDateKey(new Date());
-  return { settings: settings.rows[0], today: runs.rows.find((item) => databaseDateKey(item.run_date) === today && item.status !== 'discarded') || null, history: runs.rows, accounts: accounts.rows, image_generation_ready: Boolean(autopilotConfig(env).apiKey), mode: autopilotConfig(env).apiKey ? 'openai' : 'simulation' };
+  const todayRuns = runs.rows.filter((item) => databaseDateKey(item.run_date) === today && item.status !== 'discarded');
+  const todayRun = todayRuns.find((item) => ['ready', 'approved'].includes(item.status)) || todayRuns.find((item) => item.status === 'generating') || todayRuns.find((item) => item.status === 'failed') || null;
+  return { settings: settings.rows[0], today: todayRun, history: runs.rows, accounts: accounts.rows, image_generation_ready: Boolean(autopilotConfig(env).apiKey), mode: autopilotConfig(env).apiKey ? 'openai' : 'simulation' };
 }
 
 export async function updateAutopilotSettings(data = {}, adminId = null, env = process.env) {
@@ -66,7 +68,7 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     if (!force && localTimeKey(new Date()) < String(settings?.generation_time || '08:00').slice(0, 5)) { await client.query('rollback'); return null; }
     const runDate = localDateKey(new Date());
     const previous = await client.query('select * from marketing_autopilot_runs where run_date=$1 order by variant desc', [runDate]);
-    if (!force && previous.rows.find((item) => ['generating','ready','approved','failed'].includes(item.status))) { await client.query('rollback'); return previous.rows[0]; }
+    if (!force && previous.rows.find((item) => ['generating','ready','approved'].includes(item.status))) { await client.query('rollback'); return previous.rows.find((item) => ['generating','ready','approved'].includes(item.status)); }
     const variant = (previous.rows[0]?.variant || 0) + 1;
     if (variant > 20) throw new Error('Limite diário de novas opções atingido.');
     const topic = chooseTopic(runDate, variant);

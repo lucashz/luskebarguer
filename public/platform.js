@@ -310,7 +310,7 @@ els.previewLogCleanupButton?.addEventListener('click', previewLogCleanup);
 els.refreshBillingButton?.addEventListener('click', loadBilling);
 els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshMarketingButton?.addEventListener('click', loadMarketing);
-els.generateDailyPostButton?.addEventListener('click', () => generateAutopilotPost(false));
+els.generateDailyPostButton?.addEventListener('click', () => generateAutopilotPost(Boolean(state.autopilot?.today)));
 els.autopilotSettingsForm?.addEventListener('submit', saveAutopilotSettings);
 els.exportMarketingLeadsButton?.addEventListener('click', exportMarketingLeadsCsv);
 els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
@@ -838,12 +838,17 @@ async function loadMarketing(options = {}) {
 async function generateAutopilotPost(regenerate = false) {
   const buttons = [els.generateDailyPostButton, ...document.querySelectorAll('[data-autopilot-action="regenerate"]')].filter(Boolean);
   buttons.forEach((button) => { button.disabled = true; });
+  if (els.autopilotTodayCard) els.autopilotTodayCard.innerHTML = `<div class="autopilot-loading"><span class="autopilot-spinner" aria-hidden="true"></span><h3>${regenerate ? 'Criando uma nova opção' : 'Preparando o post de hoje'}</h3><p>Estamos escolhendo o tema, preparando a imagem e escrevendo a legenda. Isso pode levar alguns instantes.</p></div>`;
   if (els.autopilotStatusStrip) els.autopilotStatusStrip.textContent = regenerate ? 'Criando uma nova opção…' : 'Criando o post de hoje…';
   try {
     await request('/api/platform/marketing/autopilot/generate', { method: 'POST', body: JSON.stringify({ regenerate }) });
     await loadMarketing({ silent: true });
     toast(regenerate ? 'Nova opção preparada.' : 'Post de hoje preparado.');
-  } catch (error) { toast(error.message || 'Não foi possível preparar o post.'); renderAutopilot(); }
+  } catch (error) {
+    toast(error.message || 'Não foi possível preparar o post.');
+    if (els.autopilotTodayCard) els.autopilotTodayCard.innerHTML = '<div class="autopilot-empty autopilot-error"><span>Não foi possível concluir</span><h3>O post não foi preparado</h3><p>Tente novamente. Se o problema continuar, verifique a conexão nas Configurações.</p><button class="primary-button" data-autopilot-action="regenerate" type="button">Tentar novamente</button></div>';
+    renderAutopilotStatus();
+  }
   finally { buttons.forEach((button) => { button.disabled = false; }); }
 }
 
@@ -887,16 +892,19 @@ function renderAutopilot() {
   const run = data.today;
   const settings = data.settings || {};
   const account = (data.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused);
-  if (els.autopilotStatusStrip) {
-    const mode = data.image_generation_ready ? 'Imagem criada com IA' : 'Modo de simulação';
-    els.autopilotStatusStrip.innerHTML = `<span class="status-pill ${settings.enabled ? 'success' : ''}">${settings.enabled ? 'Ativo' : 'Pausado'}</span><strong>${escapeHtml(mode)}</strong><small>${account ? `Instagram: @${escapeHtml(account.username || account.display_name || 'conectado')}` : 'Instagram precisa ser conectado ou reativado'}</small>`;
-  }
+  renderAutopilotStatus();
   if (els.autopilotSettingsForm && settings.id) {
     els.autopilotSettingsForm.elements.enabled.checked = settings.enabled !== false;
     els.autopilotSettingsForm.elements.generation_time.value = String(settings.generation_time || '08:00').slice(0, 5);
     els.autopilotSettingsForm.elements.publication_time.value = String(settings.publication_time || '10:00').slice(0, 5);
   }
-  if (!run?.content) {
+  if (els.generateDailyPostButton) els.generateDailyPostButton.textContent = run?.content ? 'Gerar outra opção' : 'Preparar post de hoje';
+  if (run?.status === 'generating') {
+    els.autopilotTodayCard.innerHTML = '<div class="autopilot-loading"><span class="autopilot-spinner" aria-hidden="true"></span><h3>Seu post está sendo preparado</h3><p>Aguarde um pouco e atualize esta página.</p><button class="ghost-button" id="refreshAutopilotView" type="button">Atualizar</button></div>';
+    els.autopilotTodayCard.querySelector('#refreshAutopilotView')?.addEventListener('click', () => loadMarketing({ silent: true }));
+  } else if (run?.status === 'failed') {
+    els.autopilotTodayCard.innerHTML = '<div class="autopilot-empty autopilot-error"><span>Falha na preparação</span><h3>Vamos tentar novamente?</h3><p>A geração foi interrompida antes de terminar. Nenhum conteúdo foi publicado.</p><button class="primary-button" data-autopilot-action="regenerate" type="button">Tentar novamente</button></div>';
+  } else if (!run?.content) {
     els.autopilotTodayCard.innerHTML = `<div class="autopilot-empty"><span>Post de hoje</span><h3>Vamos preparar sua publicação?</h3><p>O TáPronto escolhe o tema, cria a arte, escreve a legenda e deixa tudo pronto para sua aprovação.</p><button class="primary-button" data-autopilot-action="generate" type="button">Preparar post de hoje</button></div>`;
   } else {
     const content = run.content;
@@ -909,6 +917,16 @@ function renderAutopilot() {
   }
   const upcoming = (state.marketing?.content || []).filter((item) => ['approved','scheduled','publishing','processing'].includes(item.status) && item.scheduled_at && new Date(item.scheduled_at) >= new Date()).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)).slice(0, 5);
   if (els.autopilotUpcomingList) els.autopilotUpcomingList.innerHTML = upcoming.length ? upcoming.map(marketingCompactContentRow).join('') : '<div class="marketing-empty-state compact"><strong>Nenhum post agendado</strong><p>Quando você aprovar o post de hoje, ele aparecerá aqui.</p></div>';
+}
+
+function renderAutopilotStatus() {
+  if (!els.autopilotStatusStrip) return;
+  const data = state.autopilot || {};
+  const settings = data.settings || {};
+  const account = (data.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused);
+  const mode = data.image_generation_ready ? 'Imagens com IA ativas' : 'Imagens de referência ativas';
+  const channel = account ? `Instagram conectado: @${escapeHtml(account.username || account.display_name || 'tapronto')}` : 'Instagram precisa ser conectado';
+  els.autopilotStatusStrip.innerHTML = `<span class="status-pill ${settings.enabled ? 'success' : ''}">${settings.enabled ? 'Automático' : 'Pausado'}</span><strong>${escapeHtml(mode)}</strong><small>${channel}</small>`;
 }
 
 function localPlatformMediaUrl(value = '') {

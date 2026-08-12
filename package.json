@@ -24,7 +24,7 @@
     "social:worker": "node scripts/social-publishing-worker.mjs",
     "social:worker:once": "node scripts/social-publishing-worker.mjs --once",
     "admin:create": "node scripts/create-admin.mjs",
-    "test:syntax": "node --check server.js && node --check src/lib/social-publishing.js && node --check src/lib/marketing-autopilot.js && node --check scripts/social-publishing-worker.mjs && node --check src/data/seo-pages.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/experiments.js && node --check public/ajuda.js && node --check public/seo-landing.js",
+    "test:syntax": "node --check server.js && node --check src/lib/social-publishing.js && node --check src/lib/marketing-autopilot.js && node --check scripts/social-publishing-worker.mjs && node --check scripts/marketing-autopilot-ui-smoke.mjs && node --check src/data/seo-pages.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/experiments.js && node --check public/ajuda.js && node --check public/seo-landing.js",
     "test:local": "node scripts/local-db-smoke.mjs",
     "test:plans": "node scripts/plan-matrix-smoke.mjs",
     "test:trial": "node scripts/trial-expired-smoke.mjs",
@@ -34,6 +34,7 @@
     "test:payments": "node scripts/payment-hardening-smoke.mjs",
     "test:seo": "node scripts/seo-smoke.mjs",
     "test:marketing": "node scripts/marketing-growth-smoke.mjs",
+    "test:marketing-ui": "node scripts/marketing-autopilot-ui-smoke.mjs",
     "capture:marketing": "node scripts/capture-marketing-workspace.mjs",
     "test:social": "node scripts/social-publishing-smoke.mjs",
     "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:payments && npm run test:flows && npm run test:platform-health && npm run test:marketing && npm run test:social && npm run test:seo"

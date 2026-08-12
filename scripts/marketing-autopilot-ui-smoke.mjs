@@ -1,0 +1,62 @@
+import { spawn } from 'node:child_process';
+import { pbkdf2Sync, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import pg from 'pg';
+
+loadEnv(new URL('../.env', import.meta.url));
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL não configurada.');
+const chrome = findChrome(); if (!chrome) throw new Error('Chrome ou Edge não encontrado.');
+const port = 4950 + Math.floor(Math.random() * 100); const debugPort = port + 150;
+const baseUrl = `http://127.0.0.1:${port}`; const profile = mkdtempSync(join(tmpdir(), 'tapronto-autopilot-ui-'));
+const email = `autopilot-ui-${Date.now()}@tapronto.local`; const password = randomBytes(24).toString('base64url');
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); let server; let browser; let adminId = ''; let cdp; let previousReadyIds = [];
+
+try {
+  adminId = (await pool.query(`insert into admin_users(name,email,password_hash,role,is_active) values('Autopilot UI Smoke',$1,$2,'superadmin',true) returning id`, [email, hashPassword(password)])).rows[0].id;
+  previousReadyIds = (await pool.query(`select id from marketing_autopilot_runs where run_date=(now() at time zone 'America/Sao_Paulo')::date and status='ready'`)).rows.map((row) => row.id);
+  server = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl, COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', OPENAI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  await waitFor(`${baseUrl}/api/health`);
+  browser = spawn(chrome, ['--headless=new', '--disable-gpu', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+  await waitFor(`http://127.0.0.1:${debugPort}/json/version`);
+  const target = await (await fetch(`http://127.0.0.1:${debugPort}/json/new?${encodeURIComponent(`${baseUrl}/platform`)}`, { method: 'PUT' })).json();
+  cdp = createCdp(target.webSocketDebuggerUrl); await cdp.ready; await cdp.call('Page.enable'); await cdp.call('Runtime.enable'); await delay(900);
+  const login = await evaluate(`fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:${JSON.stringify(email)},password:${JSON.stringify(password)}})}).then(r=>r.status)`);
+  assert(login === 200, `Login retornou ${login}.`);
+  await evaluate(`location.assign('/platform?view=marketing')`); await delay(2600);
+  await evaluate(`document.querySelector('[data-platform-view="marketing"]')?.click()`); await delay(1200);
+  const before = await pool.query(`select count(*)::int total from marketing_autopilot_runs where created_by=$1`, [adminId]);
+  const clicked = await evaluate(`Boolean(document.querySelector('#generateDailyPostButton') && (document.querySelector('#generateDailyPostButton').click(), true))`);
+  assert(clicked, 'Botão Preparar post de hoje não foi encontrado.');
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const result = await pool.query(`select status,content_id from marketing_autopilot_runs where created_by=$1 order by created_at desc limit 1`, [adminId]);
+    if (result.rows[0]?.status === 'ready' && result.rows[0]?.content_id) break;
+    await delay(250);
+  }
+  const after = await pool.query(`select status,content_id from marketing_autopilot_runs where created_by=$1 order by created_at desc limit 1`, [adminId]);
+  assert(Number(before.rows[0].total) === 0 && after.rows[0]?.status === 'ready' && after.rows[0]?.content_id, 'Clique não criou uma publicação pronta.');
+  await delay(700);
+  const title = await evaluate(`document.querySelector('#autopilotTodayCard h3')?.textContent || ''`);
+  assert(title && !/não foi preparado/i.test(title), 'A prévia não apareceu depois da geração.');
+  console.log('Marketing autopilot UI smoke: OK');
+} finally {
+  cdp?.close(); browser?.kill(); server?.kill();
+  if (adminId) {
+    const ids = (await pool.query('select content_id from marketing_autopilot_runs where created_by=$1', [adminId]).catch(() => ({ rows: [] }))).rows.map((row) => row.content_id).filter(Boolean);
+    await pool.query('delete from marketing_autopilot_runs where created_by=$1', [adminId]).catch(() => {});
+    if (previousReadyIds.length) await pool.query(`update marketing_autopilot_runs set status='ready',updated_at=now() where id=any($1::uuid[]) and status='discarded'`, [previousReadyIds]).catch(() => {});
+    if (ids.length) await pool.query('delete from marketing_content_items where id=any($1::uuid[])', [ids]).catch(() => {});
+    await pool.query('delete from admin_users where id=$1', [adminId]).catch(() => {});
+  }
+  await pool.end(); rmSync(profile, { recursive: true, force: true });
+}
+
+async function evaluate(expression) { const result = await cdp.call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); return result.result?.value; }
+function assert(condition, message) { if (!condition) throw new Error(message); }
+function createCdp(url) { const socket = new WebSocket(url); let id = 0; const pending = new Map(); socket.onmessage = (event) => { const message = JSON.parse(event.data); if (!message.id) return; const task = pending.get(message.id); if (!task) return; pending.delete(message.id); message.error ? task.reject(new Error(message.error.message)) : task.resolve(message.result); }; return { ready: new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; }), call(method, params = {}) { const callId = ++id; socket.send(JSON.stringify({ id: callId, method, params })); return new Promise((resolve, reject) => pending.set(callId, { resolve, reject })); }, close() { socket.close(); } }; }
+function findChrome() { return ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync) || ''; }
+async function waitFor(url) { for (let i = 0; i < 80; i += 1) { try { if ((await fetch(url)).ok) return; } catch {} await delay(250); } throw new Error(`Tempo esgotado: ${url}`); }
+function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function hashPassword(value) { const salt = randomBytes(16).toString('hex'); const iterations = 310000; return `pbkdf2_sha256$${iterations}$${salt}$${pbkdf2Sync(value, salt, iterations, 32, 'sha256').toString('hex')}`; }
+function loadEnv(url) { if (!existsSync(url)) return; for (const line of readFileSync(url, 'utf8').split(/\r?\n/)) { const value = line.trim(); if (!value || value.startsWith('#') || !value.includes('=')) continue; const index = value.indexOf('='); const key = value.slice(0, index).trim(); if (!(key in process.env)) process.env[key] = value.slice(index + 1).trim().replace(/^['"]|['"]$/g, ''); } }

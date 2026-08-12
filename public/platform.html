@@ -409,12 +409,14 @@
           </div>
           <div class="platform-marketing-tabs marketing-primary-nav" role="tablist" aria-label="Áreas de marketing">
             <button class="ghost-button compact active" data-marketing-tab="overview" type="button">Hoje</button>
-            <button class="ghost-button compact" data-marketing-tab="contents" type="button">Histórico</button>
+            <button class="ghost-button compact" data-marketing-tab="calendar" type="button">Agenda</button>
+            <button class="ghost-button compact" data-marketing-tab="contents" type="button">Publicações</button>
+            <button class="ghost-button compact" data-marketing-tab="results" type="button">Resultados</button>
             <button class="ghost-button compact marketing-settings-tab" data-marketing-tab="more" type="button">Configurações</button>
           </div>
           <section data-marketing-panel="overview" class="marketing-overview">
-            <article class="autopilot-status-strip" id="autopilotStatusStrip">Preparando o seu espaço…</article>
-            <article class="autopilot-today-card" id="autopilotTodayCard"></article>
+            <article class="autopilot-status-strip" id="autopilotStatusStrip" aria-live="polite">Preparando o seu espaço…</article>
+            <article class="autopilot-today-card" id="autopilotTodayCard" aria-live="polite"></article>
             <section id="platformMarketingSummary" hidden></section>
             <article class="platform-chart-card"><div class="section-actions"><div><h3>Próximos posts</h3><p class="muted">O que já está agendado.</p></div></div><div id="autopilotUpcomingList"></div></article>
             <div id="marketingNextAction" hidden></div><div id="marketingAttentionList" hidden></div><div id="marketingUpcomingList" hidden></div><div id="marketingRecentContent" hidden></div>
@@ -477,7 +479,7 @@
             <article class="platform-chart-card"><div class="marketing-contact-filters" id="marketingContactSummary"></div><div id="marketingLeadList"></div></article>
           </section>
           <section data-marketing-panel="contents" hidden>
-            <div class="section-actions marketing-section-heading"><div><h3>Publicações</h3><p class="muted">Da ideia até a publicação.</p></div><div class="row-actions"><select id="marketingContentStatusFilter"><option value="">Todas</option><option value="draft">Rascunhos</option><option value="review">Para aprovar</option><option value="scheduled">Programadas</option><option value="published">Publicadas</option><option value="failed">Com erro</option></select><button class="primary-button compact" data-new-marketing-content type="button">Nova publicação</button></div></div>
+            <div class="section-actions marketing-section-heading"><div><h3>Publicações</h3><p class="muted">Veja o que está pronto, agendado ou já foi publicado.</p></div><div class="row-actions"><select id="marketingContentStatusFilter"><option value="">Todas</option><option value="draft">Rascunhos</option><option value="review">Para aprovar</option><option value="scheduled">Programadas</option><option value="published">Publicadas</option><option value="failed">Com erro</option></select><button class="primary-button compact" data-autopilot-action="regenerate" type="button">Criar publicação</button></div></div>
             <form id="marketingContentForm" class="platform-chart-card platform-compact-form marketing-content-editor" hidden>
               <div class="section-actions"><div><p class="eyebrow">Editor de conteúdo</p><h3 id="marketingContentEditorTitle">Novo conteúdo</h3></div><button class="ghost-button compact" id="closeMarketingContentEditor" type="button">Fechar</button></div>
               <ol class="marketing-editor-steps" aria-label="Etapas do conteúdo"><li class="active">1. Ideia</li><li>2. Produção</li><li>3. Prévia</li><li>4. Aprovação</li><li>5. Agendamento</li></ol>

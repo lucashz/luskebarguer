@@ -26,7 +26,6 @@ async function runCycle() {
   let failed = 0;
   await pool.query(`insert into social_worker_state(worker_key,status,last_started_at,next_run_at,updated_at) values('instagram-publisher','running',now(),now()+($1||' seconds')::interval,now()) on conflict(worker_key) do update set status='running',last_started_at=now(),next_run_at=excluded.next_run_at,updated_at=now()`, [String(config.workerIntervalSeconds)]);
   try {
-    await generateDailyAutopilotPost().catch((error) => console.error(JSON.stringify({ scope: 'marketing-autopilot', message: error.message })));
     while (processed < 10 && !stopping) {
       const client = await pool.connect();
       try {
@@ -39,6 +38,7 @@ async function runCycle() {
     }
     const metricsClient = await pool.connect();
     try { await syncPublicationMetrics(metricsClient); } finally { metricsClient.release(); }
+    await generateDailyAutopilotPost().catch((error) => console.error(JSON.stringify({ scope: 'marketing-autopilot', message: error.message })));
     await createOperationalAlerts();
     await pool.query(`update social_worker_state set status='idle',last_finished_at=now(),processed_count=processed_count+$1,failed_count=failed_count+$2,last_error='',updated_at=now() where worker_key='instagram-publisher'`, [processed, failed]);
   } catch (error) {

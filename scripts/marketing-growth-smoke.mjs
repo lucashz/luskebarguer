@@ -16,8 +16,9 @@ let child;
 try {
   const platformHtml = readFileSync(new URL('../public/platform.html', import.meta.url), 'utf8');
   const platformJs = readFileSync(new URL('../public/platform.js', import.meta.url), 'utf8');
-  for (const label of ['Hoje', 'Histórico', 'Configurações']) assert(platformHtml.includes(`>${label}</button>`), `Navegação de marketing não inclui ${label}.`);
+  for (const label of ['Hoje', 'Agenda', 'Publicações', 'Resultados', 'Configurações']) assert(platformHtml.includes(`>${label}</button>`), `Navegação de marketing não inclui ${label}.`);
   assert(platformHtml.includes('id="autopilotTodayCard"') && platformJs.includes('renderAutopilot'), 'Post diário automático não foi implementado.');
+  assert(platformJs.includes('autopilot-loading') && platformJs.includes('Tentar novamente'), 'Feedback de carregamento e falha do post automático está incompleto.');
   assert((platformHtml.match(/id="marketingContentList"/g) || []).length === 1, 'Existe mais de uma biblioteca editorial visível.');
   assert(platformHtml.includes('id="marketingNextAction"') && platformJs.includes('renderMarketingOverview'), 'Próxima ação do marketing não foi implementada.');
   assert(platformJs.includes('marketingStatusLabel') && platformJs.includes("Aguardando aprovação"), 'Estados editoriais não estão traduzidos.');
