@@ -18,6 +18,24 @@ export const seoLandingPages = [
   guide('como-tirar-fotos-para-cardapio', 'Como tirar fotos para cardápio', 'Um guia prático para fotografar pratos e lanches com celular, luz natural e enquadramento consistente.', ['Fotografe perto de uma janela e evite misturar luzes', 'Mantenha o mesmo fundo e proporção', 'Comprima as imagens para o cardápio carregar rápido']),
   guide('como-divulgar-cardapio-digital', 'Como divulgar seu cardápio digital', 'Ideias práticas para levar clientes ao cardápio por Instagram, WhatsApp, Google, QR Code e embalagens.', ['Use links com UTM para descobrir a origem das visitas', 'Mostre o produto e facilite o próximo passo', 'Repita a divulgação nos momentos de maior procura']),
   guide('como-aumentar-pedidos-restaurante', 'Como aumentar pedidos no restaurante', 'Melhore conversão com cardápio claro, produtos principais visíveis, adicionais simples e um checkout sem atrito.', ['Coloque os campeões de venda em destaque', 'Evite opções desnecessárias no checkout', 'Acompanhe visitas, inícios de pedido e pedidos concluídos']),
+  guide('cardapio-digital-para-hamburgueria-guia', 'Cardápio digital para hamburgueria', 'Organize combos, pontos da carne, remoções e adicionais para o pedido chegar completo à cozinha.', ['Separe escolhas obrigatórias de extras pagos', 'Mostre os campeões de venda primeiro', 'Teste combinações e limites pelo celular']),
+  guide('cardapio-digital-para-pizzaria-guia', 'Cardápio digital para pizzaria', 'Estruture tamanhos, sabores, bordas e divisões sem deixar o cliente perdido no momento de pedir.', ['Defina quantos sabores cada tamanho aceita', 'Organize bordas e adicionais por grupo', 'Deixe regras e valores visíveis antes do checkout']),
+  guide('cardapio-digital-para-acai-guia', 'Cardápio digital para açaí', 'Monte tamanhos e complementos com limites claros para reduzir erro, desperdício e confirmação por mensagem.', ['Comece pelo tamanho do copo', 'Separe complementos inclusos e pagos', 'Limite escolhas conforme a montagem real']),
+  guide('cardapio-digital-para-marmitaria', 'Cardápio digital para marmitaria', 'Atualize o cardápio do dia, organize tamanhos e facilite entrega ou retirada sem reenviar imagens.', ['Destaque pratos disponíveis no dia', 'Informe acompanhamentos e trocas permitidas', 'Configure bairros, horários e pedido mínimo']),
+  guide('cardapio-digital-para-bar-com-qr-code', 'Cardápio digital para bar com QR Code', 'Use QR Code, mesas e comandas para organizar pedidos no salão sem depender de papel espalhado.', ['Identifique cada mesa corretamente', 'Separe bebidas, porções e adicionais', 'Defina como atendimento e cozinha acompanham os status']),
+  guide('como-receber-pedidos-online-sem-aplicativo', 'Como receber pedidos online sem aplicativo', 'Entenda como o cliente acessa o cardápio pelo navegador, escolhe os itens e conclui o pedido pelo celular.', ['Use um link simples e permanente', 'Evite exigir cadastro antes da escolha', 'Faça um pedido teste em Android e iPhone']),
+  guide('como-organizar-adicionais', 'Como organizar adicionais e evitar pedidos errados', 'Crie grupos claros para tamanho, sabor, remoções e extras, respeitando o jeito real de preparar cada produto.', ['Diga quando a escolha é obrigatória', 'Defina quantidade mínima e máxima', 'Mostre o preço de cada extra']),
+  guide('como-calcular-taxa-entrega-por-bairro', 'Como calcular taxa de entrega por bairro', 'Organize regiões, valores e pedido mínimo antes de divulgar o delivery e evite negociar frete durante a conversa.', ['Liste os bairros realmente atendidos', 'Considere distância e custo operacional', 'Revise taxas sempre que a rota mudar']),
+  guide('como-criar-cupom-desconto-restaurante', 'Como criar cupom de desconto para restaurante', 'Planeje cupons com objetivo, validade e limite para atrair ou recuperar clientes sem comprometer a margem.', ['Defina o comportamento que deseja incentivar', 'Use validade e limite de utilização', 'Compare pedidos com e sem o cupom']),
+  guide('como-aumentar-ticket-medio-cardapio', 'Como aumentar o ticket médio no cardápio digital', 'Facilite a escolha de combos, acompanhamentos e adicionais úteis sem empurrar opções demais ao cliente.', ['Apresente complementos relacionados', 'Monte combos fáceis de entender', 'Acompanhe ticket médio e aceitação dos extras']),
+  guide('como-usar-pix-online-delivery', 'Como usar Pix online no delivery', 'Configure o pagamento para o pedido avançar somente depois da confirmação e deixe o fluxo claro para cliente e loja.', ['Use uma conta de pagamento da própria empresa', 'Teste geração, expiração e confirmação', 'Defina como tratar pagamento pendente ou expirado']),
+  guide('como-organizar-pedidos-por-status', 'Como organizar pedidos por status', 'Crie uma rotina simples para novos pedidos, preparo, retirada, entrega, conclusão e cancelamento.', ['Use poucas etapas compreendidas pela equipe', 'Defina quem age em cada status', 'Evite deixar pedidos concluídos na fila ativa']),
+  guide('como-criar-programa-fidelidade-restaurante', 'Como criar programa de fidelidade para restaurante', 'Escolha uma recompensa sustentável e explique com clareza como o cliente avança e recebe o benefício.', ['Defina a ação que gera progresso', 'Escolha uma recompensa simples', 'Acompanhe recorrência e custo do benefício']),
+  guide('como-melhorar-experiencia-delivery', 'Como melhorar a experiência do cliente no delivery', 'Revise a jornada do cardápio à entrega para reduzir dúvida, espera e surpresa no fechamento do pedido.', ['Mantenha informações atualizadas', 'Mostre taxa, prazo e pagamento antes de confirmar', 'Comunique mudanças de status importantes']),
+  guide('cardapio-proprio-ou-marketplace', 'Cardápio próprio ou marketplace: quando usar cada canal', 'Compare alcance, relacionamento, custos e controle para decidir como combinar marketplace, WhatsApp e canal próprio.', ['Use marketplace para descoberta quando fizer sentido', 'Construa recorrência pelo canal próprio', 'Compare resultado líquido e origem dos pedidos']),
+  guide('como-divulgar-restaurante-instagram', 'Como divulgar restaurante no Instagram com link de pedidos', 'Organize perfil, conteúdo e chamadas para transformar interesse em visita ao cardápio e pedido concluído.', ['Explique o que vende na bio', 'Mostre produtos e bastidores reais', 'Use um link rastreável e uma chamada clara']),
+  guide('checklist-abrir-delivery-pequeno', 'Checklist para abrir um delivery pequeno', 'Confira cardápio, embalagem, atendimento, entrega, pagamento e testes necessários antes de começar a divulgar.', ['Comece com um cardápio enxuto', 'Teste embalagem e tempo de preparo', 'Simule um pedido completo antes da abertura']),
+  guide('indicadores-pedidos-restaurante', 'Indicadores simples para acompanhar pedidos', 'Acompanhe volume, receita, ticket médio, cancelamentos e horários de pico sem transformar a rotina em planilha complicada.', ['Compare períodos equivalentes', 'Investigue mudanças grandes', 'Escolha uma ação por vez para melhorar']),
 ];
 
 function guide(slug, heading, intro, benefits) {
@@ -30,11 +48,11 @@ function guide(slug, heading, intro, benefits) {
     intro,
     benefits
     ),
-    article: guideDetails(slug)
+    article: guideDetails(slug, { heading, intro, benefits })
   };
 }
 
-function guideDetails(slug) {
+function guideDetails(slug, context = {}) {
   const shared = { updatedAt: '11 de agosto de 2026', author: 'Equipe TáPronto' };
   const articles = {
     'como-criar-cardapio-digital': {
@@ -100,7 +118,18 @@ function guideDetails(slug) {
       ]
     }
   };
-  return { ...shared, ...(articles[slug] || { readTime: '5 min', category: 'Guia prático', takeaway: '', sections: [] }) };
+  const generated = {
+    readTime: '6 min', category: 'Guia prático',
+    takeaway: context.intro || 'Comece pelo básico, teste o fluxo completo e ajuste com base no que acontece na operação real.',
+    sections: [
+      { title: `Por que ${String(context.heading || 'este tema').toLowerCase()} importa?`, paragraphs: [context.intro || 'Uma operação clara reduz dúvidas para o cliente e retrabalho para a equipe.', 'Descreva como o pedido funciona hoje, onde a informação se perde e quem precisa agir em cada etapa.'] },
+      { title: 'Prepare as informações necessárias', paragraphs: ['Reúna preços, regras, horários e responsabilidades antes de configurar. Começar com dados confiáveis é mais importante do que cadastrar tudo de uma vez.'], bullets: context.benefits || [] },
+      { title: 'Aplique em uma situação real', paragraphs: ['Escolha um produto ou fluxo muito usado e configure do início ao fim. O cliente deve conseguir escolher, personalizar e concluir sem a equipe repetir perguntas.'], example: { bad: 'Informações espalhadas e confirmação manual', good: 'Escolhas claras reunidas no mesmo pedido' } },
+      { title: 'Teste pelo ponto de vista do cliente', paragraphs: ['Abra o link em outro celular e conclua o processo sem usar informações que só a equipe conhece. Anote qualquer dúvida, etapa repetida ou valor inesperado.'], checklist: ['Informações fáceis de encontrar', 'Valores e limites corretos', 'Boa leitura no celular', 'Pedido recebido completo', 'Próximo passo claro'] },
+      { title: 'Acompanhe e melhore', paragraphs: ['Revise dúvidas, cancelamentos e etapas em que o cliente para. Faça uma mudança por vez e compare o resultado antes de ampliar.'] }
+    ]
+  };
+  return { ...shared, ...(articles[slug] || generated) };
 }
 
 function page(slug, title, description, heading, intro, benefits) {

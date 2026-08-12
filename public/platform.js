@@ -205,6 +205,14 @@ const els = {
   marketingLeadForm: document.querySelector('#marketingLeadForm'),
   marketingContentForm: document.querySelector('#marketingContentForm'),
   marketingExperimentForm: document.querySelector('#marketingExperimentForm'),
+  marketingContentMetricsForm: document.querySelector('#marketingContentMetricsForm'),
+  marketingContentMetricSelect: document.querySelector('#marketingContentMetricSelect'),
+  marketingLeadCsvInput: document.querySelector('#marketingLeadCsvInput'),
+  generateMarketingReportButton: document.querySelector('#generateMarketingReportButton'),
+  marketingWeeklyReport: document.querySelector('#marketingWeeklyReport'),
+  marketingAttributionJourneyList: document.querySelector('#marketingAttributionJourneyList'),
+  marketingPilotForm: document.querySelector('#marketingPilotForm'),
+  marketingPilotList: document.querySelector('#marketingPilotList'),
   marketingCampaignList: document.querySelector('#marketingCampaignList'),
   marketingLeadList: document.querySelector('#marketingLeadList'),
   marketingContentList: document.querySelector('#marketingContentList'),
@@ -264,10 +272,16 @@ els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
 els.marketingLeadForm?.addEventListener('submit', submitMarketingLead);
 els.marketingContentForm?.addEventListener('submit', submitMarketingContent);
 els.marketingExperimentForm?.addEventListener('submit', submitMarketingExperiment);
+els.marketingContentMetricsForm?.addEventListener('submit', submitMarketingContentMetrics);
+els.marketingLeadCsvInput?.addEventListener('change', importMarketingLeadsCsv);
+els.generateMarketingReportButton?.addEventListener('click', generateMarketingWeeklyReport);
+els.marketingPilotForm?.addEventListener('submit', submitMarketingPilot);
 els.marketingTabs.forEach((button) => button.addEventListener('click', () => activateMarketingTab(button.dataset.marketingTab)));
 document.addEventListener('click', (event) => {
   const button = event.target.closest?.('[data-marketing-update]');
   if (button) updateMarketingStatus(button);
+  const pilotButton = event.target.closest?.('[data-marketing-pilot-next]');
+  if (pilotButton) advanceMarketingPilot(pilotButton);
 });
 document.addEventListener('change', (event) => {
   const select = event.target.closest?.('[data-marketing-lead-stage]');
@@ -744,6 +758,16 @@ function activateMarketingTab(tab = 'campaigns') {
 function marketingFormPayload(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   if (form === els.marketingLeadForm) data.consent = form.elements.consent.checked;
+  if (form === els.marketingContentForm) {
+    data.assets = String(data.assets_text || '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    delete data.assets_text;
+  }
+  if (form === els.marketingPilotForm) {
+    data.image_authorized = form.elements.image_authorized.checked;
+    data.testimonial_authorized = form.elements.testimonial_authorized.checked;
+    data.baseline = { description: data.baseline_text || '' };
+    delete data.baseline_text;
+  }
   return data;
 }
 
@@ -773,6 +797,75 @@ function submitMarketingCampaign(event) { return submitMarketingForm(event, '/ap
 function submitMarketingLead(event) { return submitMarketingForm(event, '/api/platform/marketing/leads', 'Lead adicionado ao CRM.'); }
 function submitMarketingContent(event) { return submitMarketingForm(event, '/api/platform/marketing/content', 'Conteúdo salvo como rascunho.'); }
 function submitMarketingExperiment(event) { return submitMarketingForm(event, '/api/platform/marketing/experiments', 'Experimento registrado no backlog.'); }
+function submitMarketingPilot(event) { return submitMarketingForm(event, '/api/platform/marketing/pilots', 'Loja piloto adicionada.'); }
+
+async function submitMarketingContentMetrics(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const id = data.content_id;
+  delete data.content_id;
+  data.attributed_revenue_cents = Math.round(Number(data.attributed_revenue || 0) * 100);
+  delete data.attributed_revenue;
+  try {
+    await request(`/api/platform/marketing/content/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+    await loadMarketing({ silent: true });
+    toast('Métricas do conteúdo atualizadas.');
+  } catch (error) { toast(error.message || 'Não foi possível salvar as métricas.'); }
+}
+
+async function importMarketingLeadsCsv(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean);
+    const separator = lines[0]?.includes(';') ? ';' : ',';
+    const headers = parseCsvLine(lines.shift() || '', separator).map((item) => item.trim());
+    const rows = lines.map((line) => Object.fromEntries(headers.map((header, index) => [header, parseCsvLine(line, separator)[index] || ''])));
+    const result = await request('/api/platform/marketing/leads/import', { method: 'POST', body: JSON.stringify({ rows }) });
+    await loadMarketing({ silent: true });
+    toast(`${result.imported || 0} lead(s) importado(s); ${result.skipped || 0} ignorado(s).`);
+  } catch (error) { toast(error.message || 'Não foi possível importar o CSV.'); }
+  finally { event.target.value = ''; }
+}
+
+function parseCsvLine(line, separator) {
+  const result = [];
+  let value = '';
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && line[index + 1] === '"' && quoted) { value += '"'; index += 1; }
+    else if (char === '"') quoted = !quoted;
+    else if (char === separator && !quoted) { result.push(value); value = ''; }
+    else value += char;
+  }
+  result.push(value);
+  return result;
+}
+
+async function generateMarketingWeeklyReport() {
+  if (els.generateMarketingReportButton) els.generateMarketingReportButton.disabled = true;
+  try {
+    await request('/api/platform/marketing/weekly-report', { method: 'POST', body: '{}' });
+    await loadMarketing({ silent: true });
+    toast('Relatório semanal atualizado.');
+  } catch (error) { toast(error.message || 'Não foi possível gerar o relatório.'); }
+  finally { if (els.generateMarketingReportButton) els.generateMarketingReportButton.disabled = false; }
+}
+
+async function advanceMarketingPilot(button) {
+  const statuses = ['candidate', 'invited', 'active', 'interview', 'case_draft', 'approved', 'published'];
+  const current = button.dataset.currentStatus || 'candidate';
+  const next = statuses[Math.min(statuses.indexOf(current) + 1, statuses.length - 1)];
+  button.disabled = true;
+  try {
+    await request(`/api/platform/marketing/pilots/${button.dataset.marketingPilotNext}`, { method: 'PATCH', body: JSON.stringify({ status: next }) });
+    await loadMarketing({ silent: true });
+    toast('Etapa da loja piloto atualizada.');
+  } catch (error) { toast(error.message || 'Não foi possível atualizar a loja piloto.'); button.disabled = false; }
+}
 
 async function updateMarketingStatus(button) {
   button.disabled = true;
@@ -815,14 +908,47 @@ function renderMarketing() {
     return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.objective || 'Sem objetivo informado')} · ${escapeHtml(item.status)}</small><small>${Number(performance.landing_view || 0)} visitas · ${Number(performance.signup_completed || 0)} cadastros · ${Number(performance.subscription_activated || 0)} pagos</small><code>${escapeHtml(link)}</code></div><button class="ghost-button compact" data-marketing-update="campaigns:${item.id}:status:${item.status === 'active' ? 'paused' : 'active'}" type="button">${item.status === 'active' ? 'Pausar' : 'Ativar'}</button></div>`;
   }).join('') : '<p class="muted">Crie a primeira campanha para gerar links rastreáveis.</p>';
   const leads = data.leads || [];
-  els.marketingLeadList.innerHTML = leads.length ? leads.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';
+  els.marketingLeadList.innerHTML = leads.length ? leads.map((item) => {
+    const overdue = item.next_contact_at && new Date(item.next_contact_at) < new Date() && !['customer', 'lost'].includes(item.stage);
+    return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}${item.do_not_contact ? ' · não contatar' : ''}</small><small class="${overdue ? 'text-danger' : ''}">${escapeHtml(item.next_action || 'Definir próxima ação')} · ${item.next_contact_at ? formatDateTime(item.next_contact_at) : 'sem data'} · etapa D${[0, 2, 5, 9, 14][Number(item.cadence_step || 0)] || 0}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`;
+  }).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';
   const content = data.content || [];
-  els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)}</small><p>${escapeHtml(item.hook || '')}</p></div>${item.status === 'draft' ? `<button class="ghost-button compact" data-marketing-update="content:${item.id}:status:review" type="button">Enviar para revisão</button>` : item.status === 'review' ? `<button class="primary-button compact" data-marketing-update="content:${item.id}:status:approved" type="button">Aprovar</button>` : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
+  els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${item.is_pinned ? '📌 ' : ''}${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)} · ${Number(item.reach || 0)} alcance · ${Number(item.clicks || 0)} cliques · ${Number(item.signups || 0)} cadastros</small><p>${escapeHtml(item.hook || '')}</p><small>${item.script ? 'roteiro ✓' : 'roteiro pendente'} · ${item.caption ? 'legenda ✓' : 'legenda pendente'} · ${(item.assets || []).length ? 'assets ✓' : 'assets pendentes'} · ${item.utm_url ? 'UTM ✓' : 'UTM pendente'}</small></div>${item.status === 'draft' ? `<button class="ghost-button compact" data-marketing-update="content:${item.id}:status:review" type="button">Enviar para revisão</button>` : item.status === 'review' ? `<button class="primary-button compact" data-marketing-update="content:${item.id}:status:approved" type="button">Aprovar</button>` : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
+  if (els.marketingContentMetricSelect) els.marketingContentMetricSelect.innerHTML = content.map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join('');
   const automationRuns = data.automation_runs || [];
   if (els.marketingAutomationList) els.marketingAutomationList.innerHTML = automationRuns.length ? automationRuns.slice(0, 12).map((run) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(marketingAutomationLabel(run.automation_key))}</strong><small>${escapeHtml(run.status)} · ${formatDateTime(run.executed_at || run.created_at)}</small></div><span class="status-pill ${run.status === 'sent' ? 'success' : run.status === 'failed' ? 'danger' : ''}">${escapeHtml(run.status)}</span></div>`).join('') : '<p class="muted">Nenhum disparo registrado ainda. A rotina verifica os gatilhos a cada seis horas.</p>';
   const experiments = data.experiments || [];
-  if (els.marketingExperimentList) els.marketingExperimentList.innerHTML = experiments.length ? experiments.map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.surface)} · KPI: ${escapeHtml(item.primary_kpi)} · ${escapeHtml(item.status)}</small><p>${escapeHtml(item.hypothesis)}</p>${item.decision ? `<small>Decisão: ${escapeHtml(marketingDecisionLabel(item.decision))}</small>` : ''}</div><div class="row-actions">${item.status === 'draft' ? `<button class="primary-button compact" data-marketing-update="experiments:${item.id}:status:running" type="button">Iniciar</button>` : item.status === 'running' ? `<button class="ghost-button compact" data-marketing-update="experiments:${item.id}:status:completed" type="button">Concluir</button>` : ''}${item.status === 'completed' && !item.decision ? `<button class="ghost-button compact" data-marketing-update="experiments:${item.id}:decision:iterate" type="button">Iterar</button>` : ''}</div></div>`).join('') : '<p class="muted">Nenhuma hipótese registrada.</p>';
+  if (els.marketingExperimentList) els.marketingExperimentList.innerHTML = experiments.length ? experiments.map((item) => {
+    const metrics = data.experiment_metrics?.[item.id] || { a: {}, b: {} };
+    return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.surface)} · KPI: ${escapeHtml(item.primary_kpi)} · ${escapeHtml(item.status)} · ${Number(item.traffic_percentage || 100)}% do tráfego</small><p>${escapeHtml(item.hypothesis)}</p><small>A: ${Number(metrics.a.assigned || 0)} pessoas · ${Number(metrics.a.conversion_rate || 0)}% | B: ${Number(metrics.b.assigned || 0)} pessoas · ${Number(metrics.b.conversion_rate || 0)}%</small>${item.decision ? `<small>Decisão: ${escapeHtml(marketingDecisionLabel(item.decision))}</small>` : ''}</div><div class="row-actions">${item.status === 'draft' ? `<button class="primary-button compact" data-marketing-update="experiments:${item.id}:status:running" type="button">Iniciar distribuição</button>` : item.status === 'running' ? `<button class="ghost-button compact" data-marketing-update="experiments:${item.id}:status:completed" type="button">Concluir</button>` : ''}${item.status === 'completed' && !item.decision ? `<button class="ghost-button compact" data-marketing-update="experiments:${item.id}:decision:iterate" type="button">Iterar</button>` : ''}</div></div>`;
+  }).join('') : '<p class="muted">Nenhuma hipótese registrada.</p>';
+  renderMarketingWeeklyReport(data.weekly_reports || []);
+  renderMarketingAttributionJourneys(data.attribution_journeys || []);
+  renderMarketingPilots(data.pilots || []);
   activateMarketingTab(state.marketingActiveTab);
+}
+
+function renderMarketingWeeklyReport(reports) {
+  if (!els.marketingWeeklyReport) return;
+  const report = reports[0];
+  if (!report) { els.marketingWeeklyReport.innerHTML = '<p class="muted">O primeiro relatório será gerado na segunda-feira ou pelo botão acima.</p>'; return; }
+  const summary = report.summary || {};
+  const recommendations = report.recommendations || [];
+  els.marketingWeeklyReport.innerHTML = `<div class="platform-report-summary"><small>Semana de ${escapeHtml(report.week_start)} · gerado em ${formatDateTime(report.generated_at)}</small><p>Visitas: <strong>${Number(summary.funnel?.landing_view?.current || 0)}</strong> (${Number(summary.funnel?.landing_view?.variation_percent || 0)}%) · Cadastros: <strong>${Number(summary.funnel?.signup_completed?.current || 0)}</strong> (${Number(summary.funnel?.signup_completed?.variation_percent || 0)}%)</p><p>${Number(summary.overdue_leads || 0)} leads atrasados · ${Number(summary.published_content || 0)} conteúdos publicados · ${Number(summary.failed_automations || 0)} automações com falha</p>${recommendations.map((item) => `<p><span class="status-pill">${escapeHtml(marketingDecisionLabel(item.decision))}</span> ${escapeHtml(item.reason)}</p>`).join('')}</div>`;
+}
+
+function renderMarketingAttributionJourneys(companies) {
+  if (!els.marketingAttributionJourneyList) return;
+  els.marketingAttributionJourneyList.innerHTML = companies.slice(0, 30).map((company) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(company.name)}</strong><small>Primeiro: ${escapeHtml(marketingTouchLabel(company.marketing_first_touch))}</small><small>Último: ${escapeHtml(marketingTouchLabel(company.marketing_last_touch))}</small></div></div>`).join('') || '<p class="muted">As jornadas aparecerão nos próximos cadastros atribuídos.</p>';
+}
+
+function marketingTouchLabel(touch = {}) {
+  return [touch.utm_source || touch.referrer_host || 'direto', touch.utm_campaign, touch.landing_path].filter(Boolean).join(' · ');
+}
+
+function renderMarketingPilots(pilots) {
+  if (!els.marketingPilotList) return;
+  els.marketingPilotList.innerHTML = pilots.map((pilot) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(pilot.business_name)}</strong><small>${escapeHtml(pilot.niche)} · ${escapeHtml(pilot.status)}</small><small>Imagem ${pilot.image_authorized ? '✓' : 'pendente'} · Depoimento ${pilot.testimonial_authorized ? '✓' : 'pendente'} · ${(pilot.milestones || []).length} marco(s)</small></div><button class="ghost-button compact" data-marketing-pilot-next="${pilot.id}" data-current-status="${escapeHtml(pilot.status)}" type="button">Avançar</button></div>`).join('') || '<p class="muted">Selecione até cinco lojas com disponibilidade para acompanhar resultados.</p>';
 }
 
 function marketingDecisionLabel(value) {

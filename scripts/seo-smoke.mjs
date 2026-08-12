@@ -32,6 +32,7 @@ try {
   assert(pages.body.includes('/cardapio-digital</loc>'), 'Landing principal ausente no sitemap.');
   assert(pages.body.includes('/sistema-de-pedidos-online</loc>'), 'Landing de pedidos ausente no sitemap.');
   assert(pages.body.includes('/guias</loc>') && pages.body.includes('/guias/como-criar-cardapio-digital</loc>'), 'Hub ou guias ausentes no sitemap.');
+  assert(pages.body.includes('/guias/indicadores-pedidos-restaurante</loc>') && pages.body.includes('/guias/cardapio-proprio-ou-marketplace</loc>'), 'Novos guias do plano SEO ausentes no sitemap.');
   assert(!pages.body.includes('/painel') && !pages.body.includes('/pagamento'), 'Sitemap contem rota privada.');
 
   const landing = await page('/cardapio-digital', 'taprontomenu.com.br');
@@ -43,12 +44,16 @@ try {
   const guidesHub = await page('/guias', 'taprontomenu.com.br');
   assert(guidesHub.status === 200, 'Hub de guias nao respondeu 200.');
   assert(guidesHub.body.includes('/guias/como-criar-cardapio-digital'), 'Hub nao aponta para os guias publicados.');
+  assert((guidesHub.body.match(/class="guide-card"/g) || []).length >= 24, 'Hub ainda nao exibe os 24 guias planejados.');
 
   const guideArticle = await page('/guias/como-criar-cardapio-digital', 'taprontomenu.com.br');
   assert(guideArticle.status === 200, 'Artigo de guia nao respondeu 200.');
   assert(guideArticle.body.includes('Neste guia') && guideArticle.body.includes('Resumo rápido'), 'Artigo nao possui estrutura editorial completa.');
   assert(guideArticle.body.includes('Article') && guideArticle.body.includes('FAQPage'), 'Dados estruturados do artigo incompletos.');
   assert(!guideArticle.body.includes('class="seo-shot"'), 'Artigo ainda usa a imagem distorcida do template antigo.');
+
+  const newGuideArticle = await page('/guias/indicadores-pedidos-restaurante', 'taprontomenu.com.br');
+  assert(newGuideArticle.status === 200 && newGuideArticle.body.includes('Teste pelo ponto de vista do cliente'), 'Novo guia SEO nao possui conteudo editorial completo.');
 
   const privatePage = await page('/admin.html', 'app.taprontomenu.com.br');
   assert(/noindex/i.test(privatePage.robots), 'Painel privado nao retorna X-Robots-Tag noindex.');

@@ -154,6 +154,8 @@ const MARKETING_AUTOMATION_ENABLED = parseBoolean(process.env.MARKETING_AUTOMATI
 if (MARKETING_AUTOMATION_ENABLED) {
   setInterval(runMarketingLifecycleAutomations, 1000 * 60 * 60 * 6).unref?.();
   setTimeout(runMarketingLifecycleAutomations, 1000 * 60).unref?.();
+  setInterval(runMarketingWeeklyReportAutomation, 1000 * 60 * 60 * 6).unref?.();
+  setTimeout(runMarketingWeeklyReportAutomation, 1000 * 60 * 2).unref?.();
 }
 
 async function handleApi(req, res, url) {
@@ -188,6 +190,17 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && url.pathname === '/api/analytics/funnel') {
     await recordPublicMarketingEvent(req, await readJson(req));
+    json(res, 202, { ok: true });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/experiments/assignment') {
+    json(res, 200, await assignPublicMarketingExperiment(req, url.searchParams.get('surface') || 'home'));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/experiments/event') {
+    await recordPublicExperimentEvent(req, await readJson(req));
     json(res, 202, { ok: true });
     return;
   }
@@ -1063,6 +1076,13 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/leads/import') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await importPlatformMarketingLeads(req, admin, await readJson(req)));
+    return;
+  }
+
   if (method === 'POST' && url.pathname === '/api/platform/marketing/content') {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
@@ -1077,11 +1097,33 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/pilots') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 201, { pilot: await createPlatformMarketingPilot(req, admin, await readJson(req)) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/weekly-report') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, { report: await generatePlatformMarketingWeeklyReport(req, admin) });
+    return;
+  }
+
   const platformMarketingItemMatch = url.pathname.match(/^\/api\/platform\/marketing\/(campaigns|leads|content|experiments)\/([a-f0-9-]+)$/i);
   if (platformMarketingItemMatch && method === 'PATCH') {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, { item: await updatePlatformMarketingItem(req, admin, platformMarketingItemMatch[1], platformMarketingItemMatch[2], await readJson(req)) });
+    return;
+  }
+
+  const platformPilotMatch = url.pathname.match(/^\/api\/platform\/marketing\/pilots\/([a-f0-9-]+)$/i);
+  if (platformPilotMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, { pilot: await updatePlatformMarketingPilot(req, admin, platformPilotMatch[1], await readJson(req)) });
     return;
   }
 
@@ -4306,6 +4348,19 @@ function sanitizeMarketingAttribution(value = {}) {
   };
 }
 
+async function marketingAttributionJourney(current = {}) {
+  const fallback = sanitizeMarketingAttribution(current);
+  if (!fallback.visitor_key) return { first: fallback, last: fallback };
+  const events = await dbRequest('GET', 'marketing_events', {
+    select: 'attribution,created_at',
+    visitor_key: `eq.${fallback.visitor_key}`,
+    order: 'created_at.asc',
+    limit: '500'
+  }).catch(() => []);
+  const touches = events.map((event) => sanitizeMarketingAttribution(event.attribution)).filter(hasMarketingAttribution);
+  return { first: touches[0] || fallback, last: touches[touches.length - 1] || fallback };
+}
+
 function sanitizeMarketingProperties(value = {}) {
   if (!isPlainObject(value)) return {};
   return Object.fromEntries(Object.entries(value).slice(0, 20).map(([key, item]) => [
@@ -4953,12 +5008,15 @@ async function createPortalSignup(req, data = {}) {
 
   const created = { company: null, admin: null, store: null };
   try {
+    const attributionJourney = await marketingAttributionJourney(parsed.attribution);
     const [company] = await dbRequest('POST', 'companies', {}, {
       name: parsed.company.name,
       document: parsed.company.document || null,
       billing_email: parsed.owner.email,
       phone: parsed.owner.phone,
       marketing_attribution: parsed.attribution,
+      marketing_first_touch: attributionJourney.first,
+      marketing_last_touch: attributionJourney.last,
       marketing_opt_in: parsed.marketingOptIn,
       status: 'trial'
     }, ['Prefer: return=representation']);
@@ -11309,28 +11367,32 @@ const MARKETING_ITEM_CONFIG = {
   leads: {
     table: 'marketing_leads',
     statuses: ['new', 'contacted', 'qualified', 'trial', 'customer', 'lost'],
-    fields: ['business_name', 'contact_name', 'phone', 'email', 'niche', 'city', 'state', 'origin', 'stage', 'campaign_id', 'consent', 'next_contact_at', 'last_contact_at', 'contact_attempts', 'loss_reason', 'notes']
+    fields: ['business_name', 'contact_name', 'phone', 'email', 'niche', 'city', 'state', 'origin', 'stage', 'campaign_id', 'consent', 'next_contact_at', 'last_contact_at', 'contact_attempts', 'loss_reason', 'notes', 'next_action', 'cadence_step', 'cadence_started_at', 'closed_at', 'do_not_contact', 'contact_history']
   },
   content: {
     table: 'marketing_content_items',
     statuses: ['idea', 'draft', 'review', 'approved', 'scheduled', 'published'],
-    fields: ['title', 'channel', 'format', 'pillar', 'funnel_stage', 'niche', 'hook', 'script', 'caption', 'cta', 'status', 'scheduled_at', 'published_at', 'published_url', 'campaign_id', 'performance']
+    fields: ['title', 'channel', 'format', 'pillar', 'funnel_stage', 'niche', 'hook', 'script', 'caption', 'cta', 'status', 'scheduled_at', 'published_at', 'published_url', 'campaign_id', 'performance', 'scenes', 'hashtags', 'assets', 'utm_url', 'is_pinned', 'reach', 'views', 'retention_rate', 'saves', 'shares', 'clicks', 'signups', 'attributed_orders', 'attributed_revenue_cents']
   },
   experiments: {
     table: 'marketing_experiments',
     statuses: ['draft', 'running', 'paused', 'completed', 'cancelled'],
-    fields: ['name', 'hypothesis', 'surface', 'audience', 'variant_a', 'variant_b', 'primary_kpi', 'baseline_value', 'target_value', 'guardrails', 'status', 'starts_at', 'ends_at', 'result_summary', 'decision']
+    fields: ['name', 'hypothesis', 'surface', 'audience', 'variant_a', 'variant_b', 'primary_kpi', 'baseline_value', 'target_value', 'guardrails', 'status', 'starts_at', 'ends_at', 'result_summary', 'decision', 'traffic_percentage', 'minimum_sample', 'winner']
   }
 };
 
 async function platformMarketingWorkspace() {
-  const [campaigns, leads, content, automationRuns, events, experiments] = await Promise.all([
+  const [campaigns, leads, content, automationRuns, events, experiments, assignments, pilots, weeklyReports, attributedCompanies] = await Promise.all([
     dbRequest('GET', 'marketing_campaigns', { select: '*', order: 'created_at.desc', limit: '100' }),
     dbRequest('GET', 'marketing_leads', { select: '*', order: 'updated_at.desc', limit: '250' }),
     dbRequest('GET', 'marketing_content_items', { select: '*', order: 'scheduled_at.asc.nullslast,created_at.desc', limit: '250' }),
     dbRequest('GET', 'marketing_automation_runs', { select: '*', order: 'created_at.desc', limit: '50' }),
     dbRequest('GET', 'marketing_events', { select: 'event_name,attribution,created_at', created_at: `gte.${new Date(Date.now() - (90 * 864e5)).toISOString()}`, order: 'created_at.desc', limit: '10000' }),
-    dbRequest('GET', 'marketing_experiments', { select: '*', order: 'created_at.desc', limit: '100' })
+    dbRequest('GET', 'marketing_experiments', { select: '*', order: 'created_at.desc', limit: '100' }),
+    dbRequest('GET', 'marketing_experiment_assignments', { select: 'experiment_id,variant,exposed_at,converted_at', limit: '10000' }),
+    dbRequest('GET', 'marketing_pilot_stores', { select: '*', order: 'updated_at.desc', limit: '100' }),
+    dbRequest('GET', 'marketing_weekly_reports', { select: '*', order: 'week_start.desc', limit: '12' }),
+    dbRequest('GET', 'companies', { select: 'id,name,marketing_first_touch,marketing_last_touch,created_at', order: 'created_at.desc', limit: '250' })
   ]);
   const leadStages = Object.fromEntries(MARKETING_ITEM_CONFIG.leads.statuses.map((stage) => [stage, leads.filter((lead) => lead.stage === stage).length]));
   const contentStatuses = Object.fromEntries(MARKETING_ITEM_CONFIG.content.statuses.map((status) => [status, content.filter((item) => item.status === status).length]));
@@ -11339,6 +11401,15 @@ async function platformMarketingWorkspace() {
   const campaignMetrics = Object.fromEntries(campaigns.map((campaign) => {
     const attributed = events.filter((event) => cleanText(event.attribution?.utm_campaign || '') === campaign.campaign_code);
     return [campaign.id, Object.fromEntries(eventNames.map((name) => [name, attributed.filter((event) => event.event_name === name).length]))];
+  }));
+  const experimentMetrics = Object.fromEntries(experiments.map((experiment) => {
+    const rows = assignments.filter((item) => item.experiment_id === experiment.id);
+    const summarize = (variant) => {
+      const variantRows = rows.filter((item) => item.variant === variant);
+      const conversions = variantRows.filter((item) => item.converted_at).length;
+      return { assigned: variantRows.length, exposed: variantRows.filter((item) => item.exposed_at).length, conversions, conversion_rate: variantRows.length ? Number(((conversions / variantRows.length) * 100).toFixed(2)) : 0 };
+    };
+    return [experiment.id, { a: summarize('a'), b: summarize('b') }];
   }));
   return {
     summary: {
@@ -11356,6 +11427,10 @@ async function platformMarketingWorkspace() {
     leads,
     content,
     experiments,
+    experiment_metrics: experimentMetrics,
+    pilots,
+    weekly_reports: weeklyReports,
+    attribution_journeys: attributedCompanies,
     automation_runs: automationRuns,
     safeguards: {
       consent_required: true,
@@ -11372,11 +11447,13 @@ function marketingPayload(kind, data = {}, partial = false) {
   const payload = {};
   for (const field of config.fields) {
     if (!(field in data)) continue;
-    if (['consent'].includes(field)) payload[field] = data[field] === true;
-    else if (['budget_cents', 'contact_attempts'].includes(field)) payload[field] = Math.max(0, Number.parseInt(data[field], 10) || 0);
+    if (['consent', 'do_not_contact', 'is_pinned'].includes(field)) payload[field] = data[field] === true;
+    else if (['budget_cents', 'contact_attempts', 'cadence_step', 'reach', 'views', 'saves', 'shares', 'clicks', 'signups', 'attributed_orders', 'attributed_revenue_cents', 'traffic_percentage', 'minimum_sample'].includes(field)) payload[field] = Math.max(0, Number.parseInt(data[field], 10) || 0);
     else if (['baseline_value', 'target_value'].includes(field)) payload[field] = data[field] === '' || data[field] == null ? null : Number(data[field]);
-    else if (field === 'performance') payload[field] = data[field] && typeof data[field] === 'object' ? data[field] : {};
-    else if (['starts_at', 'ends_at', 'next_contact_at', 'last_contact_at', 'scheduled_at', 'published_at', 'campaign_id'].includes(field)) payload[field] = data[field] || null;
+    else if (field === 'retention_rate') payload[field] = Math.min(100, Math.max(0, Number(data[field]) || 0));
+    else if (['performance', 'scenes', 'assets', 'contact_history'].includes(field)) payload[field] = data[field] && (typeof data[field] === 'object') ? data[field] : (field === 'performance' ? {} : []);
+    else if (field === 'hashtags') payload[field] = Array.isArray(data[field]) ? data[field].map((item) => cleanText(item).slice(0, 80)).filter(Boolean).slice(0, 20) : cleanText(data[field]).split(/[ ,]+/).filter(Boolean).slice(0, 20);
+    else if (['starts_at', 'ends_at', 'next_contact_at', 'last_contact_at', 'cadence_started_at', 'closed_at', 'scheduled_at', 'published_at', 'campaign_id'].includes(field)) payload[field] = data[field] || null;
     else payload[field] = cleanText(data[field] || '').slice(0, ['script', 'caption', 'notes'].includes(field) ? 8000 : 500);
   }
   const statusField = kind === 'leads' ? 'stage' : 'status';
@@ -11399,6 +11476,11 @@ async function createPlatformMarketingCampaign(req, admin, data) {
 
 async function createPlatformMarketingLead(req, admin, data) {
   const payload = { ...marketingPayload('leads', data), created_by: admin.id };
+  if (payload.consent && !payload.next_contact_at) {
+    payload.cadence_started_at = new Date().toISOString();
+    payload.next_contact_at = new Date().toISOString();
+    payload.next_action = payload.next_action || 'Primeiro contato personalizado (D0)';
+  }
   const [row] = await dbRequest('POST', 'marketing_leads', {}, payload, ['Prefer: return=representation']);
   await audit('platform.marketing.lead.create', { req, actor_admin_id: admin.id, entity_type: 'marketing_lead', entity_id: row.id, after_data: { ...row, phone: row.phone ? '***' : null, email: row.email ? '***' : null } });
   return row;
@@ -11421,12 +11503,184 @@ async function createPlatformMarketingExperiment(req, admin, data) {
 async function updatePlatformMarketingItem(req, admin, kind, id, data) {
   const config = MARKETING_ITEM_CONFIG[kind];
   const payload = marketingPayload(kind, data, true);
+  if (kind === 'leads' && payload.stage === 'contacted') {
+    const [current] = await dbRequest('GET', 'marketing_leads', { select: '*', id: `eq.${id}`, limit: '1' });
+    if (current && current.consent && !current.do_not_contact) {
+      const cadenceDays = [0, 2, 5, 9, 14];
+      const nextStep = Math.min(Number(current.cadence_step || 0) + 1, cadenceDays.length);
+      payload.last_contact_at = new Date().toISOString();
+      payload.contact_attempts = Number(current.contact_attempts || 0) + 1;
+      payload.cadence_step = Math.min(nextStep, cadenceDays.length - 1);
+      payload.contact_history = [...(Array.isArray(current.contact_history) ? current.contact_history : []), { at: payload.last_contact_at, action: current.next_action || 'Contato', outcome: 'contacted' }].slice(-100);
+      if (nextStep >= cadenceDays.length) {
+        payload.stage = 'lost';
+        payload.closed_at = payload.last_contact_at;
+        payload.loss_reason = 'Cadência concluída sem retorno';
+        payload.next_contact_at = null;
+        payload.next_action = 'Encerrado respeitosamente após D14';
+      } else {
+        const base = new Date(current.cadence_started_at || current.created_at || Date.now());
+        base.setUTCDate(base.getUTCDate() + cadenceDays[nextStep]);
+        payload.next_contact_at = base.toISOString();
+        payload.next_action = `Contato personalizado D${cadenceDays[nextStep]}`;
+      }
+    }
+  }
   if (kind === 'experiments') payload.updated_by = admin.id;
   if (kind === 'content' && ['approved', 'scheduled', 'published'].includes(payload.status)) payload.approved_by = admin.id;
   const [row] = await dbRequest('PATCH', config.table, { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
   if (!row) throw httpError(404, 'Item de marketing não encontrado.');
   await audit(`platform.marketing.${kind}.update`, { req, actor_admin_id: admin.id, entity_type: `marketing_${kind}`, entity_id: id, after_data: { status: row.status || row.stage } });
   return row;
+}
+
+async function importPlatformMarketingLeads(req, admin, data = {}) {
+  const rows = Array.isArray(data.rows) ? data.rows.slice(0, 1000) : [];
+  if (!rows.length) throw httpError(422, 'Envie ao menos uma linha válida do CSV.');
+  let imported = 0;
+  let skipped = 0;
+  for (const source of rows) {
+    try {
+      const candidate = marketingPayload('leads', { ...source, origin: source.origin || 'csv' });
+      const duplicateFilters = candidate.email ? { email: `eq.${candidate.email}` } : { phone: `eq.${candidate.phone}` };
+      const existing = await dbRequest('GET', 'marketing_leads', { select: 'id', ...duplicateFilters, limit: '1' });
+      if (existing[0]) { skipped += 1; continue; }
+      await dbRequest('POST', 'marketing_leads', {}, { ...candidate, created_by: admin.id }, ['Prefer: return=minimal']);
+      imported += 1;
+    } catch { skipped += 1; }
+  }
+  await audit('platform.marketing.leads.import', { req, actor_admin_id: admin.id, entity_type: 'marketing_lead', after_data: { imported, skipped } });
+  return { imported, skipped };
+}
+
+function sanitizePilotPayload(data = {}, partial = false) {
+  const payload = {};
+  const textFields = ['business_name', 'niche', 'contact_name', 'status', 'authorization_notes', 'interview_notes', 'case_study'];
+  for (const field of textFields) if (field in data) payload[field] = cleanText(data[field]).slice(0, ['interview_notes', 'case_study'].includes(field) ? 12000 : 1000);
+  for (const field of ['company_id', 'store_id']) if (field in data) payload[field] = cleanUuid(data[field]) || null;
+  for (const field of ['image_authorized', 'testimonial_authorized']) if (field in data) payload[field] = data[field] === true;
+  for (const field of ['baseline', 'milestones']) if (field in data) payload[field] = data[field] && typeof data[field] === 'object' ? data[field] : (field === 'baseline' ? {} : []);
+  const statuses = ['candidate', 'invited', 'active', 'interview', 'case_draft', 'approved', 'published', 'declined'];
+  if (payload.status && !statuses.includes(payload.status)) throw httpError(422, 'Status de piloto inválido.');
+  if (!partial && !payload.business_name) throw httpError(422, 'Informe o estabelecimento piloto.');
+  payload.updated_at = new Date().toISOString();
+  return payload;
+}
+
+async function createPlatformMarketingPilot(req, admin, data = {}) {
+  const [row] = await dbRequest('POST', 'marketing_pilot_stores', {}, { ...sanitizePilotPayload(data), created_by: admin.id }, ['Prefer: return=representation']);
+  await audit('platform.marketing.pilot.create', { req, actor_admin_id: admin.id, entity_type: 'marketing_pilot', entity_id: row.id, after_data: { business_name: row.business_name, status: row.status } });
+  return row;
+}
+
+async function updatePlatformMarketingPilot(req, admin, id, data = {}) {
+  const [row] = await dbRequest('PATCH', 'marketing_pilot_stores', { id: `eq.${id}` }, sanitizePilotPayload(data, true), ['Prefer: return=representation']);
+  if (!row) throw httpError(404, 'Loja piloto não encontrada.');
+  await audit('platform.marketing.pilot.update', { req, actor_admin_id: admin.id, entity_type: 'marketing_pilot', entity_id: id, after_data: { status: row.status } });
+  return row;
+}
+
+function startOfMarketingWeek(value = new Date()) {
+  const date = new Date(value);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - day + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+async function buildMarketingWeeklyReport() {
+  const workspace = await platformMarketingWorkspace();
+  const weekStart = startOfMarketingWeek();
+  const events = await dbRequest('GET', 'marketing_events', { select: 'event_name,attribution,created_at', created_at: `gte.${new Date(Date.now() - 14 * 864e5).toISOString()}`, limit: '10000' });
+  const midpoint = Date.now() - 7 * 864e5;
+  const current = events.filter((item) => new Date(item.created_at).getTime() >= midpoint);
+  const previous = events.filter((item) => new Date(item.created_at).getTime() < midpoint);
+  const eventDelta = (name) => {
+    const now = current.filter((item) => item.event_name === name).length;
+    const before = previous.filter((item) => item.event_name === name).length;
+    return { current: now, previous: before, variation_percent: before ? Math.round(((now - before) / before) * 100) : (now ? 100 : 0) };
+  };
+  const content = workspace.content.filter((item) => item.status === 'published' && item.published_at && new Date(item.published_at).getTime() >= midpoint);
+  const failed = workspace.automation_runs.filter((item) => item.status === 'failed');
+  const overdue = workspace.leads.filter((item) => item.next_contact_at && new Date(item.next_contact_at) < new Date() && !item.do_not_contact && !['customer', 'lost'].includes(item.stage));
+  const recommendations = [];
+  const signup = eventDelta('signup_completed');
+  if (signup.variation_percent >= 10) recommendations.push({ decision: 'keep', reason: `Cadastros cresceram ${signup.variation_percent}% na comparação semanal.` });
+  else if (signup.variation_percent <= -10) recommendations.push({ decision: 'iterate', reason: `Cadastros caíram ${Math.abs(signup.variation_percent)}%; revisar origem, mensagem e página.` });
+  else recommendations.push({ decision: 'keep', reason: 'Funil estável; manter coleta até formar amostra maior.' });
+  if (failed.length) recommendations.push({ decision: 'iterate', reason: `${failed.length} automação(ões) com falha precisam de revisão.` });
+  const summary = { funnel: { landing_view: eventDelta('landing_view'), signup_completed: signup, subscription_activated: eventDelta('subscription_activated') }, overdue_leads: overdue.length, published_content: content.length, failed_automations: failed.length, active_campaigns: workspace.summary.active_campaigns, running_experiments: workspace.summary.running_experiments };
+  return { weekStart, summary, recommendations };
+}
+
+async function generatePlatformMarketingWeeklyReport(req = null, admin = null) {
+  const built = await buildMarketingWeeklyReport();
+  const existing = await dbRequest('GET', 'marketing_weekly_reports', { select: 'id', week_start: `eq.${built.weekStart}`, limit: '1' });
+  const rows = existing[0]
+    ? await dbRequest('PATCH', 'marketing_weekly_reports', { id: `eq.${existing[0].id}` }, { summary: built.summary, recommendations: built.recommendations, generated_at: new Date().toISOString() }, ['Prefer: return=representation'])
+    : await dbRequest('POST', 'marketing_weekly_reports', {}, { week_start: built.weekStart, summary: built.summary, recommendations: built.recommendations }, ['Prefer: return=representation']);
+  if (admin) await audit('platform.marketing.weekly_report.generate', { req, actor_admin_id: admin.id, entity_type: 'marketing_weekly_report', entity_id: rows[0]?.id });
+  return rows[0];
+}
+
+async function runMarketingWeeklyReportAutomation() {
+  try {
+    const now = new Date();
+    if (now.getDay() !== 1) return;
+    const report = await generatePlatformMarketingWeeklyReport();
+    if (report.sent_at) return;
+    const summary = report.summary || {};
+    const body = [
+      `Relatório semanal de marketing — semana de ${report.week_start}`,
+      `Visitas: ${summary.funnel?.landing_view?.current || 0} (${summary.funnel?.landing_view?.variation_percent || 0}%)`,
+      `Cadastros: ${summary.funnel?.signup_completed?.current || 0} (${summary.funnel?.signup_completed?.variation_percent || 0}%)`,
+      `Assinaturas: ${summary.funnel?.subscription_activated?.current || 0}`,
+      `Leads atrasados: ${summary.overdue_leads || 0}`,
+      `Conteúdos publicados: ${summary.published_content || 0}`,
+      `Automações com falha: ${summary.failed_automations || 0}`,
+      '',
+      ...(report.recommendations || []).map((item) => `${String(item.decision || '').toUpperCase()}: ${item.reason}`),
+      '',
+      `${platformBaseUrl()}/`
+    ].join('\n');
+    await sendPlatformEmail({ to: process.env.MARKETING_REPORT_EMAIL || 'sup.tapronto@gmail.com', subject: `TáPronto — relatório semanal ${report.week_start}`, body, templateKey: 'marketing_weekly_report' });
+    await dbRequest('PATCH', 'marketing_weekly_reports', { id: `eq.${report.id}` }, { sent_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  } catch (error) {
+    console.error(JSON.stringify({ scope: 'marketing-weekly-report', message: error.message }));
+  }
+}
+
+async function assignPublicMarketingExperiment(req, rawSurface = '') {
+  const surface = cleanText(rawSurface).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 50);
+  if (!surface) return { assignment: null };
+  const experiments = await dbRequest('GET', 'marketing_experiments', { select: '*', surface: `eq.${surface}`, status: 'eq.running', order: 'starts_at.asc.nullslast,created_at.asc', limit: '1' });
+  const experiment = experiments[0];
+  if (!experiment) return { assignment: null };
+  const attribution = marketingAttributionFromRequest(req);
+  const visitorKey = attribution.visitor_key || accessVisitorKey(req);
+  const bucket = Number.parseInt(createHash('sha256').update(`${experiment.id}:${visitorKey}`).digest('hex').slice(0, 8), 16) % 100;
+  if (bucket >= Number(experiment.traffic_percentage || 100)) return { assignment: null };
+  let rows = await dbRequest('GET', 'marketing_experiment_assignments', { select: '*', experiment_id: `eq.${experiment.id}`, visitor_key: `eq.${visitorKey}`, limit: '1' });
+  if (!rows[0]) {
+    const variant = bucket % 2 === 0 ? 'a' : 'b';
+    rows = await dbRequest('POST', 'marketing_experiment_assignments', {}, { experiment_id: experiment.id, visitor_key: visitorKey, variant }, ['Prefer: return=representation']).catch(async (error) => {
+      if (!isUniqueViolation(error)) throw error;
+      return dbRequest('GET', 'marketing_experiment_assignments', { select: '*', experiment_id: `eq.${experiment.id}`, visitor_key: `eq.${visitorKey}`, limit: '1' });
+    });
+  }
+  const assignment = rows[0];
+  return { assignment: { id: assignment.id, experiment_id: experiment.id, surface, variant: assignment.variant, value: assignment.variant === 'a' ? experiment.variant_a : experiment.variant_b, target: experiment.audience || '', primary_kpi: experiment.primary_kpi } };
+}
+
+async function recordPublicExperimentEvent(req, data = {}) {
+  const assignmentId = cleanUuid(data.assignment_id || data.assignmentId);
+  const event = cleanText(data.event || '').toLowerCase();
+  if (!assignmentId || !['exposure', 'conversion'].includes(event)) throw httpError(422, 'Evento de experimento inválido.');
+  const rows = await dbRequest('GET', 'marketing_experiment_assignments', { select: '*', id: `eq.${assignmentId}`, limit: '1' });
+  if (!rows[0]) throw httpError(404, 'Atribuição de experimento não encontrada.');
+  const patch = event === 'exposure'
+    ? { exposed_at: rows[0].exposed_at || new Date().toISOString() }
+    : { converted_at: rows[0].converted_at || new Date().toISOString(), conversion_event: cleanMarketingEventName(data.conversion_event || 'click') };
+  await dbRequest('PATCH', 'marketing_experiment_assignments', { id: `eq.${assignmentId}` }, patch, ['Prefer: return=minimal']);
 }
 
 const EMAIL_TEMPLATE_DEFINITIONS = [
