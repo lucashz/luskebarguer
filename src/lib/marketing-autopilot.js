@@ -205,36 +205,38 @@ async function requestOpenAiImage(reference, fileName, prompt, config, quality, 
 
 async function renderLocalMarketingImage(topic, referencePath, config, settings = {}, variant = 1) {
   const aspect = settings?.image_aspect_ratio || '1:1';
+  const canonicalTemplate = path.join(config.rootDir, 'public', 'assets', 'marketing-template-pedido-completo.png');
+  if (topic.key === 'pedido-organizado' && aspect === '1:1' && existsSync(canonicalTemplate)) return readFile(canonicalTemplate);
   const [width, height] = aspect === '9:16' ? [1080, 1920] : aspect === '4:5' ? [1080, 1350] : [1080, 1080];
-  const padding = Math.round(width * 0.065);
-  const headerHeight = aspect === '9:16' ? 430 : Math.round(height * 0.34);
-  const screenshotTop = headerHeight;
-  const screenshotHeight = height - screenshotTop - padding;
-  const screenshotWidth = width - padding * 2;
-  const accent = variant % 3 === 0 ? '#12213d' : '#ed1c24';
-  const lines = wrapOverlay(topic.overlay, aspect === '9:16' ? 22 : 28);
-  const fontSize = aspect === '9:16' ? 78 : 66;
+  const padding = Math.round(width * 0.065); const accent = '#ed1c24';
+  const headerHeight = aspect === '9:16' ? 500 : Math.round(height * .31);
+  const deviceTop = headerHeight; const deviceWidth = width - padding * 2; const deviceHeight = height - deviceTop - Math.round(padding * .8);
+  const screenInset = Math.round(deviceWidth * .025); const baseHeight = Math.max(42, Math.round(deviceHeight * .07));
+  const screenWidth = deviceWidth - screenInset * 2; const screenHeight = deviceHeight - screenInset * 2 - baseHeight;
+  const sentences = String(topic.overlay || topic.title).match(/[^.!?]+[.!?]?/g) || [topic.title];
+  const redLine = sentences.shift()?.trim() || topic.title; const navyLines = wrapOverlay(sentences.join(' ').trim() || topic.title, aspect === '9:16' ? 20 : 25);
+  const fontSize = aspect === '9:16' ? 76 : 65;
   const lineHeight = Math.round(fontSize * 1.08);
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f3f5f8"/></linearGradient></defs>
+    <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f7f7f7"/></linearGradient></defs>
     <rect width="${width}" height="${height}" fill="url(#bg)"/>
-    <circle cx="${width - 20}" cy="20" r="190" fill="${accent}" opacity=".06"/>
-    <rect x="${padding}" y="${Math.round(padding * .7)}" width="78" height="8" rx="4" fill="${accent}"/>
-    <text x="${padding}" y="${Math.round(padding * 1.7)}" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="700" fill="${accent}" letter-spacing="1">TÁPRONTO • CARDÁPIO E PEDIDOS</text>
-    ${lines.map((line, index) => `<text x="${padding}" y="${Math.round(padding * 2.55) + index * lineHeight}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="#12213d">${escapeSvg(line)}</text>`).join('')}
-    <rect x="${padding}" y="${screenshotTop}" width="${screenshotWidth}" height="${screenshotHeight}" rx="32" fill="#ffffff" stroke="#dfe3e8" stroke-width="2"/>
-    <rect x="${padding}" y="${height - 20}" width="${screenshotWidth}" height="20" rx="10" fill="${accent}"/>
+    <path d="M0 ${height - 150} Q${width * .22} ${height - 300} ${width * .48} ${height - 100} T${width} ${height - 160} V${height} H0Z" fill="${accent}"/>
+    <text x="${padding}" y="${Math.round(padding * 1.75)}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="${accent}">${escapeSvg(redLine)}</text>
+    ${navyLines.map((line, index) => `<text x="${padding}" y="${Math.round(padding * 2.85) + index * lineHeight}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="#12213d">${escapeSvg(line)}</text>`).join('')}
+    <rect x="${padding}" y="${deviceTop}" width="${deviceWidth}" height="${deviceHeight - baseHeight}" rx="30" fill="#101214" stroke="#313438" stroke-width="8"/>
+    <circle cx="${width / 2}" cy="${deviceTop + 12}" r="4" fill="#050505"/>
+    <rect x="${padding + screenInset}" y="${deviceTop + screenInset}" width="${screenWidth}" height="${screenHeight}" rx="12" fill="#ffffff"/>
+    <path d="M${padding - 22} ${height - baseHeight - 8} H${width - padding + 22} L${width - padding + 2} ${height - 10} H${padding - 2}Z" fill="#222528" stroke="#0b0c0d" stroke-width="5"/>
+    <rect x="${width / 2 - 68}" y="${height - baseHeight - 2}" width="136" height="12" rx="6" fill="#55595d"/>
   </svg>`;
-  const innerWidth = screenshotWidth - 28;
-  const innerHeight = screenshotHeight - 28;
-  const screenshot = await sharp(referencePath).rotate().resize(innerWidth, innerHeight, { fit: 'contain', background: '#ffffff' }).png().toBuffer();
-  const mask = Buffer.from(`<svg width="${innerWidth}" height="${innerHeight}"><rect width="100%" height="100%" rx="22" fill="white"/></svg>`);
+  const screenshot = await sharp(referencePath).rotate().resize(screenWidth, screenHeight, { fit: 'contain', background: '#ffffff' }).png().toBuffer();
+  const mask = Buffer.from(`<svg width="${screenWidth}" height="${screenHeight}"><rect width="100%" height="100%" rx="10" fill="white"/></svg>`);
   const roundedScreenshot = await sharp(screenshot).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
-  const composites = [{ input: roundedScreenshot, left: padding + 14, top: screenshotTop + 14 }];
-  const iconPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-favicon.svg');
-  if (existsSync(iconPath) && settings?.logo_enabled !== false) {
-    const icon = await sharp(iconPath).resize(66, 66).png().toBuffer();
-    composites.push({ input: icon, left: width - padding - 66, top: Math.round(padding * .56) });
+  const composites = [{ input: roundedScreenshot, left: padding + screenInset, top: deviceTop + screenInset }];
+  const logoPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-logo.png');
+  if (existsSync(logoPath) && settings?.logo_enabled !== false) {
+    const logo = await sharp(logoPath).resize({ width: Math.round(width * .22) }).png().toBuffer();
+    composites.push({ input: logo, left: width - padding - Math.round(width * .22), top: Math.round(padding * .75) });
   }
   return sharp(Buffer.from(svg)).composite(composites).png({ compressionLevel: 9 }).toBuffer();
 }
