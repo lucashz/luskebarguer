@@ -17,7 +17,7 @@ import pg from 'pg';
 import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval } from './src/lib/social-publishing.js';
-import { autopilotDashboard, generateDailyAutopilotPost, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
+import { autopilotDashboard, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -1109,6 +1109,15 @@ async function handleApi(req, res, url) {
     await dbRequest('PATCH', 'marketing_autopilot_runs', { id: `eq.${run.id}` }, { status: 'approved', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
     json(res, 200, { ok: true, content: (await socialContentContext(run.content_id)).content });
     return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/autopilot/select') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const data = await readJson(req);
+    const run = await selectAutopilotVersion(cleanUuid(data.run_id));
+    await audit('platform.marketing.autopilot.select', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_run', entity_id: run.id });
+    json(res, 200, { run }); return;
   }
 
   if (method === 'POST' && url.pathname === '/api/platform/marketing/campaigns') {

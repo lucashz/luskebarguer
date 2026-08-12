@@ -230,6 +230,7 @@ const els = {
   closeMarketingContentEditor: document.querySelector('#closeMarketingContentEditor'),
   newMarketingLeadButton: document.querySelector('#newMarketingLeadButton'),
   marketingContentStatusFilter: document.querySelector('#marketingContentStatusFilter'),
+  marketingContentSearch: document.querySelector('#marketingContentSearch'),
   marketingNextAction: document.querySelector('#marketingNextAction'),
   marketingAttentionList: document.querySelector('#marketingAttentionList'),
   marketingUpcomingList: document.querySelector('#marketingUpcomingList'),
@@ -325,6 +326,7 @@ els.newMarketingContentButton?.addEventListener('click', openMarketingContentEdi
 els.closeMarketingContentEditor?.addEventListener('click', closeMarketingContentEditor);
 els.newMarketingLeadButton?.addEventListener('click', () => { els.marketingLeadForm.hidden = !els.marketingLeadForm.hidden; });
 els.marketingContentStatusFilter?.addEventListener('change', renderMarketingContentLibrary);
+els.marketingContentSearch?.addEventListener('input', renderMarketingContentLibrary);
 els.marketingCalendarView?.addEventListener('change', renderMarketingCalendar);
 els.marketingCalendarPrevious?.addEventListener('click', () => moveMarketingCalendar(-1));
 els.marketingCalendarNext?.addEventListener('click', () => moveMarketingCalendar(1));
@@ -857,6 +859,17 @@ async function handleAutopilotAction(button) {
   if (action === 'generate') return generateAutopilotPost(false);
   if (action === 'regenerate') return generateAutopilotPost(true);
   if (action === 'configure') return openMarketingAdvancedSection('social');
+  if (action === 'copy') {
+    await navigator.clipboard.writeText(state.autopilot?.today?.content?.caption || '');
+    return toast('Legenda copiada.');
+  }
+  if (action === 'select') {
+    button.disabled = true;
+    try { await request('/api/platform/marketing/autopilot/select', { method: 'POST', body: JSON.stringify({ run_id: button.dataset.runId }) }); await loadMarketing({ silent: true }); toast('Versão restaurada.'); }
+    catch (error) { toast(error.message || 'Não foi possível restaurar esta versão.'); }
+    finally { button.disabled = false; }
+    return;
+  }
   if (action !== 'approve') return;
   const run = state.autopilot?.today;
   const account = (state.autopilot?.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused) || (state.autopilot?.accounts || []).find((item) => item.status === 'connected');
@@ -879,6 +892,8 @@ async function saveAutopilotSettings(event) {
   try {
     const data = Object.fromEntries(new FormData(form).entries());
     data.enabled = form.elements.enabled.checked;
+    data.days_of_week = [...form.querySelectorAll('[name="days_of_week"]:checked')].map((input) => Number(input.value));
+    for (const name of ['notify_ready','notify_published','notify_failed','notify_disconnected']) data[name] = form.elements[name].checked;
     await request('/api/platform/marketing/autopilot/settings', { method: 'PATCH', body: JSON.stringify(data) });
     await loadMarketing({ silent: true });
     toast('Configurações salvas.');
@@ -897,6 +912,13 @@ function renderAutopilot() {
     els.autopilotSettingsForm.elements.enabled.checked = settings.enabled !== false;
     els.autopilotSettingsForm.elements.generation_time.value = String(settings.generation_time || '08:00').slice(0, 5);
     els.autopilotSettingsForm.elements.publication_time.value = String(settings.publication_time || '10:00').slice(0, 5);
+    els.autopilotSettingsForm.elements.posts_per_day.value = String(settings.posts_per_day || 1);
+    for (const input of els.autopilotSettingsForm.querySelectorAll('[name="days_of_week"]')) input.checked = (settings.days_of_week || [1,2,3,4,5,6,7]).includes(Number(input.value));
+    for (const name of ['audience','communication_tone','avoided_topics']) els.autopilotSettingsForm.elements[name].value = settings[name] || '';
+    for (const name of ['priority_niches','preferred_ctas','enabled_formats']) els.autopilotSettingsForm.elements[name].value = (settings[name] || []).join(', ');
+    for (const name of ['notify_ready','notify_published','notify_failed','notify_disconnected']) els.autopilotSettingsForm.elements[name].checked = settings[name] !== false;
+    const instagramSettings = document.querySelector('#autopilotInstagramSettings');
+    if (instagramSettings) instagramSettings.innerHTML = account ? `<span class="status-pill success">Conectado</span><strong>@${escapeHtml(account.username || account.display_name || 'instagram')}</strong>` : '<span class="status-pill">Não conectado</span><span>Conecte sua conta para agendar e publicar.</span>';
   }
   if (els.generateDailyPostButton) els.generateDailyPostButton.textContent = run?.content ? 'Gerar outra opção' : 'Preparar post de hoje';
   if (run?.status === 'generating') {
@@ -911,7 +933,9 @@ function renderAutopilot() {
     const asset = run.asset || {};
     const ready = run.status === 'ready';
     const previewUrl = localPlatformMediaUrl(asset.public_url);
-    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="Prévia do post ${escapeHtml(content.title)}">` : '<span>Imagem sendo preparada…</span>'}</div><div class="autopilot-copy"><span class="eyebrow">Post de hoje</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Programado para ${content.scheduled_at ? formatDateTime(content.scheduled_at) : '10:00'}</small>${data.mode === 'simulation' ? '<div class="autopilot-notice">A imagem de IA será ativada quando a chave da OpenAI for configurada.</div>' : ''}<div class="row-actions">${ready ? `<button class="primary-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar e publicar' : 'Conectar Instagram'}</button><button class="ghost-button" data-autopilot-action="regenerate" type="button">Gerar outra opção</button>` : '<span class="status-pill success">Aprovado e agendado</span>'}</div></div></div>`;
+    const versions = (data.history || []).filter((item) => String(item.run_date).slice(0, 10) === String(run.run_date).slice(0, 10) && item.content && ['ready','discarded'].includes(item.status));
+    const versionPicker = versions.length > 1 ? `<div class="autopilot-versions"><small>Versões preservadas</small>${versions.map((item) => item.id === run.id ? `<span class="status-pill success">Opção ${item.variant}</span>` : `<button class="ghost-button compact" data-autopilot-action="select" data-run-id="${item.id}" type="button">Voltar à opção ${item.variant}</button>`).join('')}</div>` : '';
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="Prévia do post ${escapeHtml(content.title)}">` : '<span>Imagem sendo preparada…</span>'}</div><div class="autopilot-copy"><span class="eyebrow">Post de hoje · opção ${run.variant}</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Programado para ${content.scheduled_at ? formatDateTime(content.scheduled_at) : '10:00'}</small>${data.mode === 'simulation' ? '<div class="autopilot-notice">A imagem de IA será ativada quando a chave da OpenAI for configurada.</div>' : ''}<div class="row-actions">${ready ? `<button class="primary-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar e agendar' : 'Conectar Instagram'}</button><button class="ghost-button" data-autopilot-action="regenerate" type="button">Gerar outra opção</button><button class="ghost-button" data-autopilot-action="copy" type="button">Copiar legenda</button>` : '<span class="status-pill success">Aprovado e agendado</span>'}</div>${versionPicker}</div></div>`;
     const primary = els.autopilotTodayCard.querySelector('[data-autopilot-action="approve"]');
     if (primary && !account) primary.dataset.autopilotAction = 'configure';
   }
@@ -1204,7 +1228,8 @@ function renderMarketingContentLibrary() {
   const data = state.marketing || {};
   const campaigns = new Map((data.campaigns || []).map((item) => [item.id, item.name]));
   const filter = els.marketingContentStatusFilter?.value || '';
-  const content = (data.content || []).filter((item) => !filter || item.status === filter);
+  const search = String(els.marketingContentSearch?.value || '').trim().toLocaleLowerCase('pt-BR');
+  const content = (data.content || []).filter((item) => (!filter || item.status === filter) && (!search || [item.title,item.caption,item.hook,item.niche].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(search))));
   els.marketingContentList.innerHTML = content.map((item) => {
     const socialAssets = state.social?.content_assets?.[item.id] || [];
     const issue = item.publication_error ? `<small class="text-danger">${escapeHtml(item.publication_error)}</small>` : '';

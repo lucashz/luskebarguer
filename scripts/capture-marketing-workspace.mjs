@@ -29,8 +29,11 @@ try {
   await cdp.call('Runtime.evaluate', { expression: `document.querySelector('[data-platform-view="marketing"]')?.click()` }); await delay(2500);
   for (const [name, width, height] of [['desktop', 1440, 1100], ['mobile', 390, 844]]) {
     await cdp.call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 }); await delay(800);
-    const shot = await cdp.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    const file = resolve(outputDir, `marketing-${name}.png`); writeFileSync(file, Buffer.from(shot.data, 'base64')); console.log(file);
+    for (const tab of ['overview','calendar','contents','results','more']) {
+      await cdp.call('Runtime.evaluate', { expression: `document.querySelector('[data-marketing-tab="${tab}"]')?.click(); scrollTo(0,0)` }); await delay(500);
+      const shot = await cdp.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      const file = resolve(outputDir, `marketing-${tab}-${name}.png`); writeFileSync(file, Buffer.from(shot.data, 'base64')); console.log(file);
+    }
   }
   cdp.close();
 } finally {

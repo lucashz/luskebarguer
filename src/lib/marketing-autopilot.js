@@ -49,9 +49,29 @@ export async function updateAutopilotSettings(data = {}, adminId = null, env = p
   const generationTime = validTime(data.generation_time, '08:00');
   const publicationTime = validTime(data.publication_time, '10:00');
   const quality = ['low', 'medium', 'high', 'auto'].includes(data.image_quality) ? data.image_quality : 'medium';
+  const days = arrayValues(data.days_of_week).map(Number).filter((value) => value >= 1 && value <= 7);
+  const postsPerDay = Math.max(1, Math.min(3, Number(data.posts_per_day) || 1));
+  const audience = cleanText(data.audience, 300, 'Donos de pequenos restaurantes, lanchonetes e delivery');
+  const niches = arrayValues(data.priority_niches).map((value) => cleanText(value, 60)).filter(Boolean).slice(0, 12);
+  const tone = cleanText(data.communication_tone, 160, 'simples, direto e útil');
+  const ctas = arrayValues(data.preferred_ctas).map((value) => cleanText(value, 80)).filter(Boolean).slice(0, 8);
+  const formats = arrayValues(data.enabled_formats).filter((value) => ['post','carrossel','story','reel'].includes(value));
+  const avoided = cleanText(data.avoided_topics, 600, '');
   const db = databasePool(env);
-  const result = await db.query(`update marketing_autopilot_settings set enabled=$1,generation_time=$2,publication_time=$3,image_quality=$4,approval_required=true,updated_by=$5,updated_at=now() where id=1 returning *`, [enabled, generationTime, publicationTime, quality, adminId]);
+  const result = await db.query(`update marketing_autopilot_settings set enabled=$1,generation_time=$2,publication_time=$3,image_quality=$4,approval_required=true,updated_by=$5,days_of_week=$6,posts_per_day=$7,audience=$8,priority_niches=$9,communication_tone=$10,preferred_ctas=$11,enabled_formats=$12,avoided_topics=$13,notify_ready=$14,notify_published=$15,notify_failed=$16,notify_disconnected=$17,updated_at=now() where id=1 returning *`, [enabled, generationTime, publicationTime, quality, adminId, days.length ? days : [1,2,3,4,5,6,7], postsPerDay, audience, niches, tone, ctas, formats.length ? formats : ['post'], avoided, data.notify_ready !== false, data.notify_published !== false, data.notify_failed !== false, data.notify_disconnected !== false]);
   return result.rows[0];
+}
+
+export async function selectAutopilotVersion(runId, env = process.env) {
+  const db = databasePool(env); const client = await db.connect();
+  try {
+    await client.query('begin');
+    const selected = (await client.query(`select * from marketing_autopilot_runs where id=$1 and status in ('ready','discarded') for update`, [runId])).rows[0];
+    if (!selected) throw new Error('Versão não encontrada ou já aprovada.');
+    await client.query(`update marketing_autopilot_runs set status='discarded',updated_at=now() where run_date=$1 and status='ready'`, [selected.run_date]);
+    await client.query(`update marketing_autopilot_runs set status='ready',updated_at=now() where id=$1`, [selected.id]);
+    await client.query('commit'); return selected;
+  } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
 }
 
 export async function generateDailyAutopilotPost({ force = false, createdBy = null, env = process.env } = {}) {
@@ -65,6 +85,8 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     const settingsResult = await client.query('select * from marketing_autopilot_settings where id=1 for update');
     const settings = settingsResult.rows[0];
     if (!settings?.enabled && !force) { await client.query('rollback'); return null; }
+    const weekday = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(new Date()) === 'Sun' ? 7 : new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })).getDay());
+    if (!force && Array.isArray(settings?.days_of_week) && !settings.days_of_week.includes(weekday)) { await client.query('rollback'); return null; }
     if (!force && localTimeKey(new Date()) < String(settings?.generation_time || '08:00').slice(0, 5)) { await client.query('rollback'); return null; }
     const runDate = localDateKey(new Date());
     const previous = await client.query('select * from marketing_autopilot_runs where run_date=$1 order by variant desc', [runDate]);
@@ -141,6 +163,8 @@ function chooseTopic(date, variant) {
   return TOPICS[index];
 }
 function validTime(value, fallback) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || '')) ? String(value) : fallback; }
+function arrayValues(value) { return Array.isArray(value) ? value : String(value || '').split(',').map((item) => item.trim()).filter(Boolean); }
+function cleanText(value, max, fallback = '') { const result = String(value ?? fallback).replace(/[\u0000-\u001f]/g, ' ').trim(); return (result || fallback).slice(0, max); }
 function localDateKey(date) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); }
 function databaseDateKey(value) { return value instanceof Date ? value.toISOString().slice(0, 10) : String(value || '').slice(0, 10); }
 function localTimeKey(date) { return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date); }

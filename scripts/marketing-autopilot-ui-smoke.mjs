@@ -39,6 +39,19 @@ try {
   await delay(700);
   const title = await evaluate(`document.querySelector('#autopilotTodayCard h3')?.textContent || ''`);
   assert(title && !/não foi preparado/i.test(title), 'A prévia não apareceu depois da geração.');
+  const firstContentId = after.rows[0].content_id;
+  const regenerated = await evaluate(`Boolean(document.querySelector('[data-autopilot-action="regenerate"]') && (document.querySelector('[data-autopilot-action="regenerate"]').click(), true))`);
+  assert(regenerated, 'Botão Gerar outra opção não foi encontrado.');
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const result = await pool.query(`select status,content_id from marketing_autopilot_runs where created_by=$1 order by created_at desc limit 1`, [adminId]);
+    if (result.rows[0]?.status === 'ready' && result.rows[0]?.content_id !== firstContentId) break;
+    await delay(250);
+  }
+  const versions = await pool.query(`select status,content_id from marketing_autopilot_runs where created_by=$1 order by variant`, [adminId]);
+  assert(versions.rows.length === 2 && versions.rows[0].status === 'discarded' && versions.rows[0].content_id === firstContentId && versions.rows[1].status === 'ready', 'A nova geração não preservou a versão anterior.');
+  await delay(600);
+  const restoreButton = await evaluate(`Boolean(document.querySelector('[data-autopilot-action="select"]'))`);
+  assert(restoreButton, 'O controle para voltar à versão anterior não apareceu.');
   console.log('Marketing autopilot UI smoke: OK');
 } finally {
   cdp?.close(); browser?.kill(); server?.kill();
