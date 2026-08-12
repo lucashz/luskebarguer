@@ -76,7 +76,7 @@ export function verifyMetaSignedRequest(signedRequest, appSecret) {
 }
 
 export function instagramAuthorizationUrl(state, config = socialConfig()) {
-  const query = new URLSearchParams({ client_id: config.appId, redirect_uri: config.redirectUri, response_type: 'code', scope: 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights', state });
+  const query = new URLSearchParams({ client_id: config.appId, redirect_uri: config.redirectUri, response_type: 'code', scope: 'instagram_business_basic,instagram_business_content_publish', state });
   return `https://www.instagram.com/oauth/authorize?${query}`;
 }
 
@@ -124,7 +124,7 @@ export async function exchangeInstagramCode(code, config = socialConfig()) {
   const long = await metaJson(await fetch(longUrl), 'oauth_long_token');
   const token = long.access_token || short.access_token;
   const profile = await metaRequest(`/${short.user_id || 'me'}?fields=id,username,name,profile_picture_url,account_type`, token, {}, config);
-  return { token, refreshToken: '', expiresIn: Number(long.expires_in || 0), profile, scopes: ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_insights'] };
+  return { token, refreshToken: '', expiresIn: Number(long.expires_in || 0), profile, scopes: ['instagram_business_basic', 'instagram_business_content_publish'] };
 }
 
 export async function metaRequest(path, token, options = {}, config = socialConfig()) {
