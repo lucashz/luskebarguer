@@ -1475,20 +1475,28 @@ async function uploadSocialAsset(event) {
 async function approveAndScheduleSocialContent(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  const publishNow = event.submitter?.value === 'now';
   const data = Object.fromEntries(new FormData(form));
-  data.scheduled_at = new Date(data.scheduled_at).toISOString();
-  const button = form.querySelector('button[type="submit"]'); button.disabled = true;
+  if (!data.content_id || !data.social_account_id) return toast('Selecione o conteúdo e a conta do Instagram.');
+  data.scheduled_at = publishNow ? new Date(Date.now() + 5000).toISOString() : new Date(data.scheduled_at).toISOString();
+  const buttons = [...form.querySelectorAll('button[type="submit"]')]; buttons.forEach((button) => { button.disabled = true; });
   try {
     const latest = (state.social?.content || []).find((item) => item.id === data.content_id);
     if (latest && ['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(latest.status)) {
       await refreshSocial();
       return toast(latest.status === 'published' ? 'Este post já foi publicado.' : 'Este post já está agendado.');
     }
+    let confirmation = {};
+    if (publishNow) {
+      confirmation = await requestDangerConfirmation('Postar agora', 'Digite CONFIRMAR e sua senha. O post será enviado imediatamente ao Instagram.');
+      if (confirmation === null) return;
+    }
     if (!latest || latest.status === 'review') await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
-    await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'scheduled', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id }) });
-    form.reset(); await refreshSocial(); toast('Conteúdo aprovado e agendado.');
+    if (publishNow) await request(`/api/platform/social/content/${data.content_id}/publish-now`, { method: 'POST', body: JSON.stringify(confirmation) });
+    else await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'scheduled', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id }) });
+    form.reset(); await refreshSocial(); await loadMarketing({ silent: true }); toast(publishNow ? 'Post enviado para publicação imediata.' : 'Conteúdo aprovado e agendado.');
   } catch (error) { toast(error.message || 'Não foi possível aprovar e agendar.'); }
-  finally { button.disabled = false; }
+  finally { buttons.forEach((button) => { button.disabled = false; }); }
 }
 
 function renderMarketingWeeklyReport(reports) {
