@@ -11,10 +11,11 @@ const chrome = findChrome(); if (!chrome) throw new Error('Chrome ou Edge não e
 const port = 4950 + Math.floor(Math.random() * 100); const debugPort = port + 150;
 const baseUrl = `http://127.0.0.1:${port}`; const profile = mkdtempSync(join(tmpdir(), 'tapronto-autopilot-ui-'));
 const email = `autopilot-ui-${Date.now()}@tapronto.local`; const password = randomBytes(24).toString('base64url');
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); let server; let browser; let adminId = ''; let cdp; let previousReadyIds = []; let previousSettings = null;
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); let server; let browser; let adminId = ''; let socialTestId = ''; let cdp; let previousReadyIds = []; let previousSettings = null;
 
 try {
   adminId = (await pool.query(`insert into admin_users(name,email,password_hash,role,is_active) values('Autopilot UI Smoke',$1,$2,'superadmin',true) returning id`, [email, hashPassword(password)])).rows[0].id;
+  socialTestId = (await pool.query(`insert into social_accounts(mode,provider_account_id,username,display_name,status,publishing_paused,connected_by) values('simulation',$1,'smoke_conta','Conta de teste','connected',false,$2) returning id`, [`ui-${Date.now()}`, adminId])).rows[0].id;
   previousSettings = (await pool.query(`select image_style,image_aspect_ratio,monthly_image_limit,topic_cooldown_days from marketing_autopilot_settings where id=1`)).rows[0];
   previousReadyIds = (await pool.query(`select id from marketing_autopilot_runs where run_date=(now() at time zone 'America/Sao_Paulo')::date and status='ready'`)).rows.map((row) => row.id);
   server = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl, COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', OPENAI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -58,6 +59,10 @@ try {
   assert(settingsSaved, 'Formulário de configurações não foi encontrado.'); await delay(700);
   const updatedSettings = (await pool.query(`select image_style,image_aspect_ratio,monthly_image_limit,topic_cooldown_days from marketing_autopilot_settings where id=1`)).rows[0];
   assert(updatedSettings.image_style === 'before_after' && updatedSettings.image_aspect_ratio === '4:5' && updatedSettings.monthly_image_limit === 37 && updatedSettings.topic_cooldown_days === 9, 'Configurações do estúdio não foram persistidas.');
+  const disconnected = await evaluate(`(() => { window.confirm=()=>true; const b=document.querySelector('[data-social-action="disconnect"]'); if(!b) return false; b.click(); return true; })()`);
+  assert(disconnected, 'Botão Desconectar não foi encontrado.');
+  for (let attempt = 0; attempt < 20; attempt += 1) { const row = (await pool.query('select status from social_accounts where id=$1', [socialTestId])).rows[0]; if (row?.status === 'disconnected') break; await delay(200); }
+  assert((await pool.query('select status from social_accounts where id=$1', [socialTestId])).rows[0]?.status === 'disconnected', 'A conta não foi desconectada pela interface.');
   await evaluate(`document.querySelector('[data-marketing-tab="contents"]').click()`); await delay(400);
   const repurposed = await evaluate(`(() => { const b=document.querySelector('[data-marketing-repurpose]'); if(!b) return {status:0}; return fetch('/api/platform/marketing/content/'+b.dataset.marketingRepurpose+'/repurpose',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(async r=>({status:r.status,body:await r.text()})); })()`);
   assert(repurposed.status === 201, `Ação Reaproveitar falhou: ${JSON.stringify(repurposed)}`);
@@ -73,6 +78,7 @@ try {
     if (previousReadyIds.length) await pool.query(`update marketing_autopilot_runs set status='ready',updated_at=now() where id=any($1::uuid[]) and status='discarded'`, [previousReadyIds]).catch(() => {});
     if (previousSettings) await pool.query(`update marketing_autopilot_settings set image_style=$1,image_aspect_ratio=$2,monthly_image_limit=$3,topic_cooldown_days=$4,updated_at=now() where id=1`, [previousSettings.image_style, previousSettings.image_aspect_ratio, previousSettings.monthly_image_limit, previousSettings.topic_cooldown_days]).catch(() => {});
     if (ids.length) await pool.query('delete from marketing_content_items where id=any($1::uuid[])', [ids]).catch(() => {});
+    if (socialTestId) await pool.query('delete from social_accounts where id=$1', [socialTestId]).catch(() => {});
     await pool.query('delete from admin_users where id=$1', [adminId]).catch(() => {});
   }
   await pool.end(); rmSync(profile, { recursive: true, force: true });

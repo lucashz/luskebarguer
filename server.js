@@ -11868,7 +11868,6 @@ async function platformSocialAccountAction(req, admin, id, action, data = {}) {
   if (!account) throw httpError(404, 'Conta social não encontrada.');
   let payload = {};
   if (action === 'disconnect') {
-    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
     payload = { status: 'disconnected', publishing_paused: true, access_token_encrypted: '', refresh_token_encrypted: '', updated_at: new Date().toISOString() };
   } else if (action === 'pause') payload = { publishing_paused: true, updated_at: new Date().toISOString() };
   else if (action === 'resume') {
