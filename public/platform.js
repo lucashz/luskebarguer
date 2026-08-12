@@ -1458,24 +1458,26 @@ async function handleSocialAction(button) {
 
 async function uploadSocialAsset(event) {
   event.preventDefault();
-  const file = event.currentTarget.elements.file.files?.[0];
+  const form = event.currentTarget;
+  const file = form.elements.file.files?.[0];
   if (!file) return;
-  const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
+  const button = form.querySelector('button[type="submit"]'); button.disabled = true;
   try {
     const dataBase64 = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
     const uploaded = await request('/api/platform/social/assets', { method: 'POST', body: JSON.stringify({ file_name: file.name, content_type: file.type, data_base64: dataBase64 }) });
     const contentId = els.marketingContentPublishingTools?.dataset.contentId;
     if (contentId && uploaded.asset?.id) await request(`/api/platform/social/content/${contentId}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: uploaded.asset.id, role: 'media', replace: true }) });
-    event.currentTarget.reset(); await refreshSocial(); await loadMarketing({ silent: true }); toast(contentId ? 'Imagem substituída. Revise e aprove novamente.' : 'Mídia validada e adicionada.');
+    form.reset(); await refreshSocial(); await loadMarketing({ silent: true }); toast(contentId ? 'Imagem substituída. Revise e aprove novamente.' : 'Mídia validada e adicionada.');
   } catch (error) { toast(error.message || 'Falha no envio da mídia.'); }
   finally { button.disabled = false; }
 }
 
 async function approveAndScheduleSocialContent(event) {
   event.preventDefault();
-  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
   data.scheduled_at = new Date(data.scheduled_at).toISOString();
-  const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
+  const button = form.querySelector('button[type="submit"]'); button.disabled = true;
   try {
     const latest = (state.social?.content || []).find((item) => item.id === data.content_id);
     if (latest && ['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(latest.status)) {
@@ -1484,7 +1486,7 @@ async function approveAndScheduleSocialContent(event) {
     }
     if (!latest || latest.status === 'review') await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
     await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'scheduled', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id }) });
-    event.currentTarget.reset(); await refreshSocial(); toast('Conteúdo aprovado e agendado.');
+    form.reset(); await refreshSocial(); toast('Conteúdo aprovado e agendado.');
   } catch (error) { toast(error.message || 'Não foi possível aprovar e agendar.'); }
   finally { button.disabled = false; }
 }
