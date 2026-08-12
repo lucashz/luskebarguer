@@ -47,10 +47,10 @@ const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH |
 const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
 const ADMIN_2FA_REQUIRED = parseBoolean(process.env.ADMIN_2FA_REQUIRED, true);
 const EXPOSE_ERROR_DETAIL = parseBoolean(process.env.EXPOSE_ERROR_DETAIL, false);
-const PLATFORM_BILLING_PROVIDER = cleanText(process.env.PLATFORM_BILLING_PROVIDER || 'abacatepay').toLowerCase();
-const PLATFORM_BILLING_API_KEY = process.env.PLATFORM_BILLING_API_KEY || process.env.ABACATEPAY_API_KEY || '';
-const PLATFORM_BILLING_WEBHOOK_SECRET = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.ABACATEPAY_WEBHOOK_SECRET || '';
-const ABACATEPAY_API_BASE = 'https://api.abacatepay.com/v2';
+const PLATFORM_BILLING_PROVIDER = cleanText(process.env.PLATFORM_BILLING_PROVIDER || 'mercadopago').toLowerCase();
+const PLATFORM_BILLING_API_KEY = process.env.PLATFORM_BILLING_API_KEY || process.env.MERCADOPAGO_ACCESS_TOKEN || '';
+const PLATFORM_BILLING_WEBHOOK_SECRET = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.MERCADOPAGO_WEBHOOK_SECRET || '';
+const MERCADOPAGO_API_BASE = 'https://api.mercadopago.com';
 const BILLING_GRACE_DAYS = clampNumber(Number(process.env.BILLING_GRACE_DAYS || 7), 1, 30);
 const PUBLIC_BOOTSTRAP_CACHE_MS = 1000 * 20;
 const STORE_SETTINGS_CACHE_MS = 1000 * 10;
@@ -311,7 +311,8 @@ async function handleApi(req, res, url) {
     const payload = await readJson(req);
     json(res, 200, await receivePaymentWebhook(payload, {
       provider: url.searchParams.get('provider') || '',
-      webhookSecret: req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || ''
+      webhookSecret: req.headers['x-webhook-secret'] || '',
+      signature: req.headers['x-signature'] || '', requestId: req.headers['x-request-id'] || '', dataId: url.searchParams.get('data.id') || payload?.data?.id || ''
     }));
     return;
   }
@@ -621,9 +622,9 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/billing/webhook') {
     const payload = await readJson(req);
     const provider = url.searchParams.get('provider') || '';
-    const webhookSecret = req.headers['x-webhook-secret'] || req.headers['x-abacatepay-secret'] || '';
+    const webhookSecret = req.headers['x-webhook-secret'] || '';
     try {
-      json(res, 200, await receiveBillingWebhook(payload, { provider, webhookSecret }));
+      json(res, 200, await receiveBillingWebhook(payload, { provider, webhookSecret, signature: req.headers['x-signature'] || '', requestId: req.headers['x-request-id'] || '', dataId: url.searchParams.get('data.id') || payload?.data?.id || '' }));
     } catch (error) {
       await recordBillingWebhookFailure(payload, { provider, error }).catch((logError) => {
         console.error('Falha ao registrar erro de webhook de assinatura:', logError.message || logError);
@@ -4336,7 +4337,7 @@ function platformBillingAlerts(rows = []) {
     return days >= 0 && days <= 3;
   });
   if (graceExpired.length) alerts.push({ type: 'grace_period', severity: 'critical', title: `${graceExpired.length} cliente(s) passaram do grace period`, action: 'Bloquear recursos pagos ou reativar após pagamento.' });
-  if (pastDue.length) alerts.push({ type: 'past_due', severity: 'warning', title: `${pastDue.length} cobrança(s) pendente(s)`, action: 'Conferir Abacate Pay e reenviar cobrança.' });
+  if (pastDue.length) alerts.push({ type: 'past_due', severity: 'warning', title: `${pastDue.length} cobrança(s) pendente(s)`, action: 'Conferir Mercado Pago e reenviar cobrança.' });
   if (trialsEnding.length) alerts.push({ type: 'trial', severity: 'attention', title: `${trialsEnding.length} trial(s) perto do fim`, action: 'Acionar comercial para conversão.' });
   return alerts;
 }
@@ -7055,7 +7056,7 @@ async function createBillingCheckout(req, admin, data = {}) {
     };
   }
   if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
-    throw httpError(503, 'Checkout indisponível: configure ABACATEPAY_API_KEY ou PLATFORM_BILLING_API_KEY no servidor.');
+    throw httpError(503, 'Checkout indisponível: configure MERCADOPAGO_ACCESS_TOKEN ou PLATFORM_BILLING_API_KEY no servidor.');
   }
   if (amount <= 0) {
     const activated = await activateCompanyPlan(req, admin, company, plan, {
@@ -7079,7 +7080,7 @@ async function createBillingCheckout(req, admin, data = {}) {
   }
   const checkout = await createProviderSubscriptionCheckout({ company, plan, admin, amount, billingCycle, billingConfig });
   if (!checkout.checkoutUrl) {
-    throw httpError(502, 'O provedor de pagamento não retornou a URL do checkout. Confira a configuração da Abacate Pay.');
+    throw httpError(502, 'O provedor de pagamento não retornou a URL do checkout. Confira a configuração do Mercado Pago.');
   }
   const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
     company_id: companyId,
@@ -7177,7 +7178,7 @@ async function createAddonCheckout(req, admin, data = {}) {
   const amount = Number(addon.monthly_price_cents || 0);
   const billingConfig = await privatePlatformBillingSettings();
   if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
-    throw httpError(503, 'Checkout indisponível: configure Abacate Pay na Central antes de vender adicionais.');
+    throw httpError(503, 'Checkout indisponível: configure Mercado Pago na Central antes de vender adicionais.');
   }
   const [company] = await dbRequest('GET', 'companies', {
     select: '*',
@@ -7295,7 +7296,7 @@ async function getIntegrationSetupOverview(admin) {
     const status = configured ? 'configured' : inProgress ? 'in_progress' : 'pending';
     integrations.push({
       code,
-      name: 'Pix com Abacate Pay',
+      name: 'Pix com Mercado Pago',
       status,
       status_label: status === 'configured' ? 'Configurada' : status === 'in_progress' ? 'Em configuração' : 'Pendente',
       checkout_pending: paymentPending,
@@ -7337,7 +7338,7 @@ async function createIntegrationSetupCheckout(req, admin, data = {}) {
   const amount = addons.reduce((total, addon) => total + Number(addon.monthly_price_cents || 0), 0);
   const billingConfig = await privatePlatformBillingSettings();
   if (amount > 0 && billingConfig.provider !== 'mock' && !billingConfig.api_key) {
-    throw httpError(503, 'Checkout indisponível: configure Abacate Pay na Central antes de vender configurações.');
+    throw httpError(503, 'Checkout indisponível: configure Mercado Pago na Central antes de vender configurações.');
   }
   const currentSubscription = pickCurrentCompanySubscription(await listCompanySubscriptions(companyId, 100));
   const activatedIncluded = [];
@@ -7393,22 +7394,12 @@ async function createIntegrationSetupCheckout(req, admin, data = {}) {
 async function createProviderIntegrationSetupCheckout({ company, admin, addons, amount, billingConfig }) {
   const config = billingConfig || await privatePlatformBillingSettings();
   const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-  const items = [];
-  for (const addon of addons) {
-    items.push({ id: await ensureAbacateAddonProduct({ addon, amount: Number(addon.monthly_price_cents || 0), token: config.api_key }), quantity: 1 });
-  }
-  const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
   const externalId = cleanExternalId(`tapronto-setup-${company.id}-${Date.now()}`);
-  const body = {
-    items, methods: ['PIX', 'CARD'], returnUrl: `${origin}/?billing=addon-cancelled`, completionUrl: `${origin}/?billing=addon-success`, externalId,
-    metadata: { companyId: company.id, storeId: admin.store_id, addonCodes: addons.map((addon) => addon.code).join(','), kind: 'platform_addon_bundle_charge' }
-  };
-  if (customerId) body.customerId = customerId;
-  const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'configurações');
-  const payload = data.data || data;
-  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
-  if (!checkoutUrl) throw httpError(502, 'A Abacate Pay criou a cobrança, mas não retornou a URL de checkout.');
-  return { subscriptionId: String(payload.id || payload.checkoutId || payload.billingId || ''), transactionId: externalId, checkoutUrl, amount };
+  return createMercadoPagoPlatformCheckout({ config, company, admin, externalId, origin,
+    items: addons.map((addon) => ({ id: addon.code, title: addon.name, description: addon.description, quantity: 1, amountCents: Number(addon.monthly_price_cents || 0) })),
+    metadata: { company_id: company.id, store_id: admin.store_id, addon_codes: addons.map((addon) => addon.code).join(','), kind: 'platform_addon_bundle_charge' },
+    returnQuery: 'billing=addon-success', amount
+  });
 }
 
 async function listAdminBillingAddons(admin) {
@@ -7588,35 +7579,14 @@ async function createProviderAddonCheckout({ company, admin, addon, amount, bill
       checkoutUrl: absolutePanelUrl(`/?billing=mock&addon=${encodeURIComponent(addon.code)}`)
     };
   }
-  if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de adicional não suportado.');
+  if (config.provider !== 'mercadopago') throw httpError(422, 'Provedor de adicional não suportado.');
   const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-  const productId = await ensureAbacateAddonProduct({ addon, amount, token: config.api_key });
-  const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
   const externalId = cleanExternalId(`tapronto-addon-${company.id}-${addon.code}-${Date.now()}`);
-  const body = {
-    items: [{ id: productId, quantity: 1 }],
-    methods: ['PIX', 'CARD'],
-    returnUrl: `${origin}/?billing=addon-cancelled`,
-    completionUrl: `${origin}/?billing=addon-success`,
-    externalId,
-    metadata: {
-      companyId: company.id,
-      storeId: admin.store_id,
-      addonCode: addon.code,
-      addonId: addon.id,
-      kind: 'platform_addon_charge'
-    }
-  };
-  if (customerId) body.customerId = customerId;
-  const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'adicional');
-  const payload = data.data || data;
-  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
-  if (!checkoutUrl) throw httpError(502, 'A Abacate Pay criou a cobrança do adicional, mas não retornou a URL de checkout.');
-  return {
-    subscriptionId: String(payload.id || payload.checkoutId || payload.billingId || ''),
-    transactionId: externalId,
-    checkoutUrl
-  };
+  return createMercadoPagoPlatformCheckout({ config, company, admin, externalId, origin,
+    items: [{ id: addon.code, title: addon.name, description: addon.description, quantity: 1, amountCents: amount }],
+    metadata: { company_id: company.id, store_id: admin.store_id, addon_code: addon.code, addon_id: addon.id, kind: 'platform_addon_charge' },
+    returnQuery: 'billing=addon-success', amount
+  });
 }
 
 async function ensureAbacateAddonProduct({ addon, amount, token }) {
@@ -7961,31 +7931,34 @@ async function createProviderSubscriptionCheckout({ company, plan, admin, amount
       checkoutUrl: absolutePanelUrl(`/?billing=mock&plan=${encodeURIComponent(plan.code)}&cycle=${encodeURIComponent(cycle)}`)
     };
   }
-  if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de assinatura não suportado.');
+  if (config.provider !== 'mercadopago') throw httpError(422, 'Provedor de assinatura não suportado.');
   const origin = cleanText(config.public_url || panelBaseUrl() || process.env.APP_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-  const productId = await ensureAbacateSubscriptionProduct({ plan, amount, billingCycle: cycle, token: config.api_key });
-  const customerId = await createAbacateSubscriptionCustomer({ company, admin, token: config.api_key }).catch(() => '');
   const externalId = cleanExternalId(`tapronto-sub-${company.id}-${plan.code}-${cycle}-${Date.now()}`);
-  const body = {
-    items: [{ id: productId, quantity: 1 }],
-    methods: ['PIX', 'CARD'],
-    returnUrl: `${origin}/?billing=cancelled`,
-    completionUrl: `${origin}/?billing=success`,
-    externalId,
-    metadata: { companyId: company.id, planCode: plan.code, billingCycle: cycle, kind: 'platform_subscription_charge' }
-  };
-  if (customerId) body.customerId = customerId;
-  const data = await createAbacateCheckoutWithPixAutomaticFallback(body, config.api_key, 'mensalidade');
-  const payload = data.data || data;
-  const checkoutUrl = payload.url || payload.checkoutUrl || payload.paymentUrl || payload.subscription?.url || '';
-  if (!checkoutUrl) {
-    throw httpError(502, 'A Abacate Pay criou a cobrança mensal, mas não retornou a URL de checkout.');
-  }
-  return {
-    subscriptionId: String(payload.id || payload.checkoutId || payload.billingId || ''),
-    transactionId: externalId,
-    checkoutUrl
-  };
+  return createMercadoPagoPlatformCheckout({ config, company, admin, externalId, origin,
+    items: [{ id: plan.code, title: `Plano ${plan.name}`, description: `${cycle === 'annual' ? 'Anual' : 'Mensal'} - TáPronto`, quantity: 1, amountCents: amount }],
+    metadata: { company_id: company.id, plan_code: plan.code, billing_cycle: cycle, kind: 'platform_subscription_charge' },
+    returnQuery: 'billing=success', amount
+  });
+}
+
+async function createMercadoPagoPlatformCheckout({ config, company, admin, externalId, origin, items, metadata, returnQuery, amount }) {
+  if (config.provider !== 'mercadopago') throw httpError(422, 'Provedor de cobrança não suportado.');
+  if (!config.api_key || isMaskedSecretValue(config.api_key)) throw httpError(503, 'Configure o Access Token do Mercado Pago na Central.');
+  const returnUrl = `${origin}/?${returnQuery}`;
+  const data = await providerFetch(`${MERCADOPAGO_API_BASE}/checkout/preferences`, {
+    method: 'POST', token: config.api_key, idempotencyKey: externalId,
+    body: {
+      items: items.map((item) => ({ id: item.id, title: item.title, description: item.description || undefined, quantity: item.quantity || 1, currency_id: 'BRL', unit_price: Number(item.amountCents || 0) / 100 })),
+      payer: { email: cleanEmail(admin.email || company.billing_email || '') || undefined, name: cleanText(admin.name || company.name || '') || undefined },
+      external_reference: externalId,
+      notification_url: `${origin}/api/billing/webhook?provider=mercadopago`,
+      back_urls: { success: returnUrl, pending: returnUrl, failure: `${origin}/?billing=cancelled` },
+      auto_return: 'approved', metadata
+    }
+  });
+  const checkoutUrl = data.init_point || data.sandbox_init_point || '';
+  if (!data.id || !checkoutUrl) throw httpError(502, 'O Mercado Pago criou a cobrança sem retornar uma URL válida.');
+  return { subscriptionId: externalId, transactionId: externalId, preferenceId: String(data.id), checkoutUrl, amount };
 }
 
 async function createAbacateCheckoutWithPixAutomaticFallback(body, token, contextLabel = 'cobrança') {
@@ -8234,8 +8207,21 @@ function planBillingAmountCents(plan = {}, billingCycle = 'monthly') {
 async function receiveBillingWebhook(data, options = {}) {
   const config = await privatePlatformBillingSettings();
   const provider = cleanSlug(options.provider || inferPaymentProvider(data) || config.provider || PLATFORM_BILLING_PROVIDER);
-  if (config.webhook_secret && options.webhookSecret !== config.webhook_secret) {
-    throw httpError(401, 'Webhook de assinatura inválido.');
+  if (!['mercadopago', 'mock'].includes(provider)) throw httpError(422, 'Provedor de billing não suportado.');
+  if (provider === 'mock') {
+    if (config.webhook_secret && options.webhookSecret !== config.webhook_secret) throw httpError(401, 'Webhook de assinatura inválido.');
+  } else {
+    if (!config.webhook_secret || !verifyMercadoPagoSignature({ signature: options.signature, requestId: options.requestId, dataId: options.dataId, secret: config.webhook_secret })) {
+      throw httpError(401, 'Assinatura do webhook do Mercado Pago inválida.');
+    }
+    const paymentId = cleanExternalId(options.dataId || data?.data?.id || '');
+    if (!paymentId) throw httpError(422, 'Webhook sem identificador de pagamento.');
+    const payment = await providerFetch(`${MERCADOPAGO_API_BASE}/v1/payments/${encodeURIComponent(paymentId)}`, { token: config.api_key });
+    data = {
+      id: cleanExternalId(`${data.action || data.type || 'payment.updated'}_${paymentId}_${data.date_created || webhookPayloadHash(data)}`),
+      event: payment.status,
+      data: { ...payment, id: paymentId, externalId: payment.external_reference, amount: payment.transaction_amount, metadata: payment.metadata || {} }
+    };
   }
   const payload = data.data || data.billing || data.subscription || data;
   const rawEventId = data.id || data.eventId || data.event_id || (
@@ -9709,9 +9695,9 @@ async function billingHealthStatus() {
   const configured = Boolean(billing?.is_active && billing?.has_api_key);
   return platformStatus(
     'billing',
-    'Billing/Abacate Pay',
+    'Billing/Mercado Pago',
     configured ? 'healthy' : 'attention',
-    configured ? `Provider e API key configurados (${billing.source}).` : 'API key de billing não configurada; configure Billing > Configuração Abacate Pay.',
+    configured ? `Provedor e Access Token configurados (${billing.source}).` : 'Access Token não configurado; configure Billing > Mercado Pago.',
     null
   );
 }
@@ -9784,7 +9770,7 @@ async function getPlatformBillingSettings() {
   const row = rows[0] || null;
   if (!row) {
     return publicPlatformBillingSettings({
-      provider: PLATFORM_BILLING_PROVIDER || 'abacatepay',
+      provider: PLATFORM_BILLING_PROVIDER || 'mercadopago',
       api_key: PLATFORM_BILLING_API_KEY,
       webhook_secret: PLATFORM_BILLING_WEBHOOK_SECRET,
       is_active: Boolean(PLATFORM_BILLING_API_KEY),
@@ -9804,7 +9790,7 @@ async function privatePlatformBillingSettings() {
   const row = rows[0] || null;
   if (!row) {
     return {
-      provider: PLATFORM_BILLING_PROVIDER || 'abacatepay',
+      provider: PLATFORM_BILLING_PROVIDER || 'mercadopago',
       api_key: PLATFORM_BILLING_API_KEY,
       webhook_secret: PLATFORM_BILLING_WEBHOOK_SECRET,
       is_active: Boolean(PLATFORM_BILLING_API_KEY),
@@ -9812,7 +9798,7 @@ async function privatePlatformBillingSettings() {
       public_url: cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '')
     };
   }
-  const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'abacatepay');
+  const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'mercadopago');
   return {
     id: row.id || null,
     provider,
@@ -9831,11 +9817,11 @@ async function updatePlatformBillingSettings(req, admin, data = {}) {
     order: 'created_at.desc',
     limit: '1'
   }).catch((error) => {
-    throw httpError(500, 'Tabela de billing não encontrada. Execute as migrations antes de configurar Abacate Pay.', { cause: error.message });
+    throw httpError(500, 'Tabela de billing não encontrada. Execute as migrations antes de configurar Mercado Pago.', { cause: error.message });
   });
   const current = currentRows[0] || null;
-  const provider = cleanSlug(data.provider || 'abacatepay');
-  if (!['abacatepay', 'mock'].includes(provider)) throw httpError(422, 'Provedor de billing não suportado.');
+  const provider = cleanSlug(data.provider || 'mercadopago');
+  if (!['mercadopago', 'mock'].includes(provider)) throw httpError(422, 'Provedor de billing não suportado.');
   const apiKey = String(data.api_key || data.apiKey || '').trim();
   const webhookSecret = String(data.webhook_secret || data.webhookSecret || '').trim();
   const publicUrl = cleanText(data.public_url || data.publicUrl || process.env.PUBLIC_APP_URL || process.env.APP_URL || '').slice(0, 500) || null;
@@ -9848,8 +9834,8 @@ async function updatePlatformBillingSettings(req, admin, data = {}) {
     metadata: { updated_by: admin.id },
     updated_at: new Date().toISOString()
   };
-  if (payload.is_active && provider === 'abacatepay' && !apiKey && !current?.api_key && !PLATFORM_BILLING_API_KEY) {
-    throw httpError(422, 'Informe a API key da Abacate Pay para ativar o checkout.');
+  if (payload.is_active && provider === 'mercadopago' && !apiKey && !current?.api_key && !PLATFORM_BILLING_API_KEY) {
+    throw httpError(422, 'Informe o Access Token do Mercado Pago para ativar o checkout.');
   }
   const [saved] = current
     ? await dbRequest('PATCH', 'platform_billing_settings', { id: `eq.${current.id}` }, payload, ['Prefer: return=representation'])
@@ -9868,7 +9854,7 @@ async function updatePlatformBillingSettings(req, admin, data = {}) {
 
 function publicPlatformBillingSettings(row = {}) {
   const origin = cleanText(row.public_url || process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
-  const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'abacatepay') || 'abacatepay';
+  const provider = cleanSlug(row.provider || PLATFORM_BILLING_PROVIDER || 'mercadopago') || 'mercadopago';
   const apiKey = row.api_key || PLATFORM_BILLING_API_KEY || '';
   const webhookSecret = row.webhook_secret || PLATFORM_BILLING_WEBHOOK_SECRET || '';
   return {
@@ -9879,7 +9865,7 @@ function publicPlatformBillingSettings(row = {}) {
     api_key_masked: apiKey ? maskEmailOrToken(apiKey) : '',
     has_webhook_secret: Boolean(webhookSecret),
     webhook_secret_masked: webhookSecret ? maskEmailOrToken(webhookSecret) : '',
-    webhook_url: origin ? `${origin}/api/billing/webhook?provider=${encodeURIComponent(provider)}` : '/api/billing/webhook?provider=abacatepay',
+    webhook_url: origin ? `${origin}/api/billing/webhook?provider=${encodeURIComponent(provider)}` : '/api/billing/webhook?provider=mercadopago',
     public_url: origin || '',
     source: row.source || 'database',
     last_test_status: row.last_test_status || null,
@@ -9891,18 +9877,18 @@ function publicPlatformBillingSettings(row = {}) {
 
 async function testPlatformBillingSettings(req, admin) {
   const config = await privatePlatformBillingSettings();
-  if (!config.is_active || !config.api_key) throw httpError(422, 'Abacate Pay não está ativo ou não possui API key configurada.');
+  if (!config.is_active || !config.api_key) throw httpError(422, 'Mercado Pago não está ativo ou não possui Access Token configurado.');
   if (config.provider === 'mock') {
     await markPlatformBillingTest('success', 'Provider mock ativo.');
     return { ok: true, message: 'Provider mock ativo para testes internos.' };
   }
-  if (config.provider !== 'abacatepay') throw httpError(422, 'Provedor de billing não suportado.');
+  if (config.provider !== 'mercadopago') throw httpError(422, 'Provedor de billing não suportado.');
   try {
-    await providerFetch(`${ABACATEPAY_API_BASE}/store/get`, {
+    await providerFetch(`${MERCADOPAGO_API_BASE}/users/me`, {
       method: 'GET',
       token: config.api_key
     });
-    await markPlatformBillingTest('success', 'Conexão com Abacate Pay validada.');
+    await markPlatformBillingTest('success', 'Conexão com Mercado Pago validada.');
     await audit('platform.billing.config.test', {
       req,
       actor_admin_id: admin.id,
@@ -9910,9 +9896,9 @@ async function testPlatformBillingSettings(req, admin) {
       severity: 'info',
       after_data: { status: 'success', provider: config.provider }
     });
-    return { ok: true, message: 'Conexão com Abacate Pay validada com sucesso.' };
+    return { ok: true, message: 'Conexão com Mercado Pago validada com sucesso.' };
   } catch (error) {
-    const message = error.message || 'Falha ao testar Abacate Pay.';
+    const message = error.message || 'Falha ao testar Mercado Pago.';
     await markPlatformBillingTest('failed', message).catch(() => {});
     await audit('platform.billing.config.test', {
       req,
@@ -9921,7 +9907,7 @@ async function testPlatformBillingSettings(req, admin) {
       severity: 'warning',
       after_data: { status: 'failed', provider: config.provider, message: safeCommandOutput(message) }
     });
-    throw httpError(502, 'Não foi possível conectar na Abacate Pay. Verifique a API key e o ambiente.');
+    throw httpError(502, 'Não foi possível conectar ao Mercado Pago. Verifique o Access Token e o ambiente.');
   }
 }
 
@@ -12615,7 +12601,7 @@ async function requestPaymentSetupSupport(req, admin) {
   const message = [
     `Contato: ${admin.name || company?.name || 'Administrador'}`,
     '',
-    'Quero ajuda da equipe TáPronto para configurar pagamento online com Abacate Pay.',
+    'Quero ajuda da equipe TáPronto para configurar pagamento online com Mercado Pago.',
     '',
     `Empresa: ${company?.name || 'Não identificada'}`,
     `Loja: ${store?.name || admin.active_store?.name || 'Loja atual'}`,
@@ -12635,7 +12621,7 @@ async function requestPaymentSetupSupport(req, admin) {
     store_id: storeId,
     admin_user_id: admin.id,
     created_by_admin_id: admin.id,
-    subject: 'Configurar pagamento online com Abacate Pay',
+    subject: 'Configurar pagamento online com Mercado Pago',
     category: 'Pagamento online',
     priority: planCodeIsPremium(plan) ? 'high' : 'medium',
     status: 'open',
@@ -12663,7 +12649,7 @@ async function requestPaymentSetupSupport(req, admin) {
     }
   });
   await notifyPlatformSupportActivity(ticket, 'internal_support_ticket_opened', {
-    messagePreview: 'Solicitação de configuração assistida do pagamento online com Abacate Pay.',
+    messagePreview: 'Solicitação de configuração assistida do pagamento online com Mercado Pago.',
     company,
     store,
     req
@@ -13078,8 +13064,8 @@ async function platformConfigChecklist() {
     configItem('instagram_mode', 'Instagram em modo seguro', social.simulation || social.liveReady, social.simulation ? 'Simulação ativa; nenhum post real será enviado' : social.liveReady ? 'Publicação real habilitada' : 'Credenciais ou liberação ausentes'),
     configItem('instagram_oauth', 'OAuth oficial do Instagram', social.oauthReady, social.oauthReady ? 'Credenciais Meta presentes' : 'Opcional enquanto o modo simulado estiver ativo', social.simulation),
     configItem('cookie_secure', 'COOKIE_SECURE correto para produção', !production || COOKIE_SECURE === true, String(COOKIE_SECURE)),
-    configItem('abacate_api', 'Abacate Pay configurado', Boolean(billing?.is_active && billing?.has_api_key), billing?.has_api_key ? `Configurado (${billing.source})` : 'Ausente'),
-    configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(billing?.has_webhook_secret), billing?.has_webhook_secret ? `Configurado (${billing.source})` : 'Ausente'),
+    configItem('mercadopago_api', 'Mercado Pago configurado', Boolean(billing?.is_active && billing?.has_api_key), billing?.has_api_key ? `Configurado (${billing.source})` : 'Ausente'),
+    configItem('mercadopago_webhook', 'Webhook Mercado Pago configurado', Boolean(billing?.has_webhook_secret), billing?.has_webhook_secret ? `Configurado (${billing.source})` : 'Ausente'),
     configItem('uploads', 'Upload/storage gravável', uploads, maskConfigValue(UPLOAD_DIR, 'path')),
     configItem('smtp', 'SMTP/e-mail configurado', smtp.status === 'healthy', smtp.status === 'healthy' ? `Configurado (${smtp.source})` : smtp.message, true),
     configItem('proxy', 'Proxy/Nginx compatível', Boolean(process.env.TRUST_PROXY || process.env.PUBLIC_APP_URL || process.env.APP_URL), 'Verifique headers X-Forwarded-* no Nginx'),
@@ -13182,7 +13168,7 @@ async function platformHealthAlerts({ statuses, metrics, config, backup, operati
   }
   const billing = await getPlatformBillingSettings().catch(() => null);
   if (!billing?.is_active || !billing?.has_api_key) {
-    add('abacatepay_missing', 'warning', 'Abacate Pay desconfigurado', 'API key de billing não encontrada.', 'Configure Billing > Configuração Abacate Pay na Central.');
+    add('mercadopago_missing', 'warning', 'Mercado Pago desconfigurado', 'Access Token de billing não encontrado.', 'Configure Billing > Mercado Pago na Central.');
   }
   if (statuses.some((status) => status.key === 'smtp' && status.status !== 'healthy')) {
     add('smtp_missing', 'attention', 'SMTP exige atenção', 'Envio de e-mails operacionais não está totalmente disponível.', 'Revise Comunicação > SMTP no Platform ou as variáveis SMTP do servidor.');
@@ -15087,6 +15073,9 @@ async function testIntegrations(data = {}, storeId, options = {}) {
     ok: false,
     message: error.message || 'Não foi possível testar o WhatsApp.'
   }));
+  const pixCheck = settings.pix.enabled
+    ? await testMercadoPagoStoreIntegration(settings.pix).catch((error) => ({ ok: false, message: error.message || 'Não foi possível validar o Mercado Pago.' }))
+    : { ok: true, message: 'Pix online desativado.' };
   return {
     whatsapp: {
       enabled: settings.whatsapp.enabled,
@@ -15097,12 +15086,17 @@ async function testIntegrations(data = {}, storeId, options = {}) {
     pix: {
       enabled: settings.pix.enabled,
       provider: settings.pix.provider,
-      ok: settings.pix.enabled ? Boolean(settings.pix.apiKey) : true,
-      message: settings.pix.enabled
-        ? (settings.pix.apiKey ? 'Abacate Pay pronta para gerar Pix online.' : 'Informe a API key da Abacate Pay.')
-        : 'Pix online desativado.'
+      ok: pixCheck.ok,
+      message: pixCheck.message
     }
   };
+}
+
+async function testMercadoPagoStoreIntegration(settings = {}) {
+  if (!settings.apiKey) return { ok: false, message: 'Informe o Access Token do Mercado Pago.' };
+  if (!settings.webhookSecret) return { ok: false, message: 'Informe a assinatura secreta do webhook do Mercado Pago.' };
+  const account = await providerFetch(`${MERCADOPAGO_API_BASE}/users/me`, { token: settings.apiKey });
+  return { ok: true, message: `Mercado Pago conectado${account.nickname ? ` à conta ${cleanText(account.nickname)}` : ''}.` };
 }
 
 async function testWhatsappIntegration(settings) {
@@ -16041,7 +16035,7 @@ async function reconcileRecentOnlinePaymentsForStore(storeId, options = {}) {
   const orders = await db('GET', 'orders', {
     select: '*',
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
-    payment_provider: 'eq.abacatepay',
+    payment_provider: 'eq.mercadopago',
     payment_transaction_id: 'not.is.null',
     financial_status: 'in.(pending,failed,expired)',
     archived_at: 'is.null',
@@ -16453,7 +16447,7 @@ async function createPixPayment(order, options = {}) {
     throw error;
   }
   const transactionId = cleanExternalId(providerPayment.transactionId || '');
-  if (!transactionId) throw httpError(502, 'A Abacate Pay não retornou o identificador do pagamento.');
+  if (!transactionId) throw httpError(502, 'O Mercado Pago não retornou o identificador do pagamento.');
   const pixCode = providerPayment.pixCode || (providerPayment.checkoutUrl ? '' : buildMockPixCode(store, order, transactionId));
   const pixQrUrl = providerPayment.pixQrUrl || (pixCode
     ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(pixCode)}`
@@ -16486,7 +16480,7 @@ async function createPaymentAttempt(order, expiresAt, db = dbRequest) {
   const [attempt] = await db('POST', 'payment_attempts', {}, {
     store_id: order.store_id || null,
     order_id: order.id,
-    provider: 'abacatepay',
+    provider: 'mercadopago',
     idempotency_key: idempotencyKey,
     status: 'created',
     amount_cents: moneyCents(order.total),
@@ -16501,7 +16495,7 @@ async function findRetryablePaymentAttempt(order, db = dbRequest) {
   const attempts = await db('GET', 'payment_attempts', {
     select: '*',
     order_id: `eq.${cleanUuid(order.id)}`,
-    provider: 'eq.abacatepay',
+    provider: 'eq.mercadopago',
     status: 'eq.failed',
     transaction_id: 'is.null',
     created_at: `gte.${new Date(Date.now() - 5 * 60000).toISOString()}`,
@@ -16604,8 +16598,8 @@ async function getCentralStoreRef(storeId) {
 
 async function createProviderPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken }) {
   const provider = type === 'card' ? integrations.card.provider : integrations.pix.provider;
-  if (provider !== 'abacatepay') throw httpError(422, 'Gateway de pagamento não suportado. Configure a Abacate Pay.');
-  return createAbacatePayPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken });
+  if (provider !== 'mercadopago') throw httpError(422, 'Gateway de pagamento não suportado. Configure o Mercado Pago.');
+  return createMercadoPagoPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken });
 }
 
 async function createAbacatePayPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken }) {
@@ -16708,19 +16702,30 @@ async function createAbacateOrderCustomer({ customer, order, token }) {
   return String(payload.id || payload.customer?.id || '');
 }
 
-async function createMercadoPagoPayment({ order, type, integrations }) {
+async function createMercadoPagoPayment({ store, order, type, integrations, idempotencyKey, paymentAccessToken }) {
   const token = type === 'card' ? integrations.card.apiKey || integrations.pix.apiKey : integrations.pix.apiKey;
   if (!token) throw httpError(422, 'Configure a chave do Mercado Pago.');
+  if (isMaskedSecretValue(token)) throw httpError(422, 'O Access Token do Mercado Pago está salvo apenas como máscara. Reconfigure a credencial real em Integrações.');
+  const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
+  const storeSlug = cleanSlug(store?.slug || '');
+  const query = new URLSearchParams({ pedido: order.public_code }); if (paymentAccessToken) query.set('token', paymentAccessToken);
+  const returnUrl = origin ? `${origin}${storeSlug ? `/${storeSlug}` : ''}/pagamento?${query}` : '';
+  const notificationUrl = origin ? `${origin}/api/payments/webhook?provider=mercadopago` : undefined;
   if (type === 'pix') {
-    const data = await providerFetch('https://api.mercadopago.com/v1/payments', {
+    const payer = mercadoPagoPayer(order);
+    const data = await providerFetch(`${MERCADOPAGO_API_BASE}/v1/payments`, {
       method: 'POST',
       token,
+      idempotencyKey,
       body: {
         transaction_amount: moneyNumber(order.total),
         description: `Pedido #${order.public_code}`,
         payment_method_id: 'pix',
         external_reference: order.public_code,
-        payer: { email: order.customer_snapshot?.email || `pedido-${order.public_code}@local.test` },
+        notification_url: notificationUrl,
+        date_of_expiration: new Date(Date.now() + integrations.pix.expirationMinutes * 60000).toISOString(),
+        payer,
+        metadata: { order_id: order.id, order_code: order.public_code, store_id: order.store_id },
         ...(providerSplitPayload(integrations, 'mercadopago'))
       }
     });
@@ -16732,17 +16737,32 @@ async function createMercadoPagoPayment({ order, type, integrations }) {
         : null
     };
   }
-  const data = await providerFetch('https://api.mercadopago.com/checkout/preferences', {
+  const data = await providerFetch(`${MERCADOPAGO_API_BASE}/checkout/preferences`, {
     method: 'POST',
     token,
+    idempotencyKey,
     body: {
       external_reference: order.public_code,
       items: [{ title: `Pedido #${order.public_code}`, quantity: 1, unit_price: moneyNumber(order.total), currency_id: 'BRL' }],
-      back_urls: { success: integrations.card.returnUrl || '', pending: integrations.card.returnUrl || '', failure: integrations.card.returnUrl || '' },
+      back_urls: { success: returnUrl || integrations.card.returnUrl || origin, pending: returnUrl || integrations.card.returnUrl || origin, failure: returnUrl || integrations.card.returnUrl || origin },
+      auto_return: 'approved', notification_url: notificationUrl,
+      payer: { email: mercadoPagoPayer(order).email },
+      metadata: { order_id: order.id, order_code: order.public_code, store_id: order.store_id },
       ...(providerSplitPayload(integrations, 'mercadopago'))
     }
   });
   return { transactionId: String(data.id || ''), checkoutUrl: data.init_point || data.sandbox_init_point || '' };
+}
+
+function mercadoPagoPayer(order = {}) {
+  const customer = order.customer_snapshot || {};
+  const name = cleanText(customer.name || 'Cliente').split(/\s+/);
+  const cpf = onlyDigits(customer.cpf || customer.document || '');
+  return {
+    email: cleanEmail(customer.email || '') || `pedido-${cleanPublicCode(order.public_code || 'cliente').toLowerCase()}@taprontomenu.com.br`,
+    first_name: name.shift() || 'Cliente', last_name: name.join(' ') || undefined,
+    ...(cpf.length === 11 ? { identification: { type: 'CPF', number: cpf } } : {})
+  };
 }
 
 async function createAsaasPayment({ order, type, integrations }) {
@@ -16791,8 +16811,8 @@ async function providerFetch(url, { method = 'GET', token, body, idempotencyKey,
     signal: controller.signal
     });
   } catch (error) {
-    if (error?.name === 'AbortError') throw httpError(504, 'A Abacate Pay demorou para responder. Tente novamente.');
-    throw httpError(502, 'Não foi possível conectar à Abacate Pay. Tente novamente.');
+    if (error?.name === 'AbortError') throw httpError(504, 'O provedor de pagamento demorou para responder. Tente novamente.');
+    throw httpError(502, 'Não foi possível conectar ao provedor de pagamento. Tente novamente.');
   } finally {
     clearTimeout(timer);
   }
@@ -16837,14 +16857,14 @@ async function publicPaymentStatus(code, options = {}) {
   const reconciliationKey = `order:${order.id}`;
   const lastProviderCheck = paymentReconciliationCache.get(reconciliationKey) || 0;
   if (
-    order.payment_provider === 'abacatepay'
+    order.payment_provider === 'mercadopago'
     && order.payment_transaction_id
     && ['pending', 'failed', 'expired'].includes(sanitizeFinancialStatus(order.financial_status))
     && Date.now() - lastProviderCheck >= 8000
   ) {
     paymentReconciliationCache.set(reconciliationKey, Date.now());
     order = await reconcileOrderPaymentWithProvider(order, options).catch((error) => {
-      console.warn('Falha ao consultar pagamento na Abacate Pay:', error.message || error);
+      console.warn('Falha ao consultar pagamento no Mercado Pago:', error.message || error);
       return order;
     });
   }
@@ -16967,7 +16987,8 @@ async function receivePaymentWebhook(data, options = {}) {
   const eventId = normalized.eventId;
   if (!eventId) throw httpError(422, 'Evento sem identificador.');
   const webhookContext = await resolvePaymentWebhookContext(normalized);
-  await assertPaymentWebhookSecret(provider, options.webhookSecret, webhookContext);
+  await assertPaymentWebhookSecret(provider, options, webhookContext);
+  if (provider === 'mercadopago') Object.assign(normalized, await hydrateMercadoPagoWebhook(normalized, webhookContext));
   const db = webhookContext.db || dbRequest;
   const existing = await db('GET', 'order_payment_events', {
     select: 'id',
@@ -17015,7 +17036,7 @@ async function receivePaymentWebhook(data, options = {}) {
     }, ['Prefer: return=minimal']);
     if (transactionId) {
       await db('PATCH', 'payment_attempts', {
-        provider: 'eq.abacatepay', transaction_id: `eq.${transactionId}`
+        provider: `eq.${provider}`, transaction_id: `eq.${transactionId}`
       }, {
         status: 'review_required',
         failure_code: lateCancelledPayment ? 'late_cancelled_payment' : 'amount_mismatch',
@@ -17041,7 +17062,7 @@ async function receivePaymentWebhook(data, options = {}) {
   if (status === 'cancelled') await updatePromotionRedemptionStatus(updated || order, 'released', db);
   if (transactionId) {
     await db('PATCH', 'payment_attempts', {
-      provider: 'eq.abacatepay', transaction_id: `eq.${transactionId}`
+      provider: `eq.${provider}`, transaction_id: `eq.${transactionId}`
     }, { status }, ['Prefer: return=minimal']).catch(() => null);
   }
   await updatePaymentTransactionIndexStatus(webhookContext.index, status, amount);
@@ -17099,15 +17120,13 @@ async function resolvePaymentWebhookContext(normalized) {
   };
 }
 
-async function assertPaymentWebhookSecret(provider, incomingSecret, context = {}) {
-  if (provider !== 'abacatepay') throw httpError(422, 'Gateway de webhook não suportado.');
+async function assertPaymentWebhookSecret(provider, options = {}, context = {}) {
+  if (provider !== 'mercadopago') throw httpError(422, 'Gateway de webhook não suportado.');
   const store = await getStoreSettings(context.storeId, context);
   const settings = sanitizeIntegrationSettings(store.integration_settings || {});
   const expected = settings.pix.webhookSecret;
-  if (!expected) throw httpError(503, 'Configure o segredo do webhook da Abacate Pay antes de receber pagamentos.');
-  if (!incomingSecret || !safeSecretEquals(incomingSecret, expected)) {
-    throw httpError(401, 'Webhook da Abacate Pay não autorizado.');
-  }
+  if (!expected) throw httpError(503, 'Configure a assinatura secreta do webhook do Mercado Pago antes de receber pagamentos.');
+  if (!verifyMercadoPagoSignature({ signature: options.signature, requestId: options.requestId, dataId: options.dataId, secret: expected })) throw httpError(401, 'Webhook do Mercado Pago não autorizado.');
 }
 
 async function normalizeProviderWebhook(data) {
@@ -17126,7 +17145,28 @@ async function normalizeProviderWebhook(data) {
       amount: centsToMoney(payload.amount || payload.value || data.amount || data.value)
     };
   }
+  if (provider === 'mercadopago') {
+    const paymentId = cleanExternalId(data.data?.id || data.id || data.payment_id || '');
+    return { provider, eventId: cleanExternalId(`${data.action || data.type || 'payment.updated'}_${paymentId}_${data.date_created || webhookPayloadHash(data)}`), transactionId: paymentId, orderCode: '', status: 'pending', amount: 0 };
+  }
   throw httpError(422, 'Webhook de gateway não suportado.');
+}
+
+async function hydrateMercadoPagoWebhook(normalized, context = {}) {
+  const store = await getStoreSettings(context.storeId, context);
+  const settings = sanitizeIntegrationSettings(store.integration_settings || {});
+  const token = settings.pix.apiKey || settings.card.apiKey;
+  if (!token) throw httpError(503, 'Access Token do Mercado Pago não configurado.');
+  const payment = await providerFetch(`${MERCADOPAGO_API_BASE}/v1/payments/${encodeURIComponent(normalized.transactionId)}`, { token });
+  return { orderCode: cleanPublicCode(payment.external_reference || payment.metadata?.order_code || ''), status: mercadoPagoStatusToFinancial(payment.status), amount: Number(payment.transaction_amount || 0) };
+}
+
+function verifyMercadoPagoSignature({ signature, requestId, dataId, secret }) {
+  const parts = Object.fromEntries(String(signature || '').split(',').map((entry) => entry.trim().split('=', 2)));
+  if (!parts.ts || !parts.v1 || !requestId || !dataId || !secret) return false;
+  const manifest = `id:${String(dataId).toLowerCase()};request-id:${requestId};ts:${parts.ts};`;
+  const expected = createHmac('sha256', secret).update(manifest).digest('hex');
+  return safeSecretEquals(parts.v1, expected);
 }
 
 function webhookPayloadHash(data) {
@@ -17240,7 +17280,7 @@ async function refundOrderPayment(orderId, data = {}, options = {}) {
   const [refund] = await db('POST', 'payment_refunds', {}, {
     store_id: order.store_id || null,
     order_id: order.id,
-    provider: 'abacatepay',
+    provider: order.payment_provider || 'mercadopago',
     idempotency_key: idempotencyKey,
     status: 'requested',
     amount_cents: moneyCents(amount),
@@ -17280,21 +17320,14 @@ async function refundOrderPayment(orderId, data = {}, options = {}) {
 }
 
 async function refundProviderPayment(order, amount, integrations, idempotencyKey) {
-  if (order.payment_provider !== 'abacatepay') throw httpError(422, 'Este pagamento não pertence à Abacate Pay e não pode ser estornado automaticamente.');
-  if (order.payment_provider === 'abacatepay') {
-    const token = integrations.pix.apiKey || integrations.card.apiKey;
-    if (!token) throw httpError(422, 'Chave da Abacate Pay não configurada.');
-    const endpoint = isOnlinePixPayment(order.payment_method) ? 'pixQrCode/refund' : 'billing/refund';
-    return providerFetch(`https://api.abacatepay.com/v1/${endpoint}`, {
-      method: 'POST',
-      token,
-      body: { id: order.payment_transaction_id, amount: moneyCents(amount) },
-      idempotencyKey
-    }).catch((error) => {
-      throw httpError(error.status || 422, 'Estorno automático não disponível para este pagamento na Abacate Pay. Faça o estorno no painel do provedor e depois concilie o pedido.', error.detail);
-    });
-  }
-  throw httpError(422, 'Estorno não suportado para este pagamento.');
+  if (order.payment_provider !== 'mercadopago') throw httpError(422, 'Este pagamento não pertence ao Mercado Pago e não pode ser estornado automaticamente.');
+  const token = integrations.pix.apiKey || integrations.card.apiKey;
+  if (!token) throw httpError(422, 'Access Token do Mercado Pago não configurado.');
+  return providerFetch(`${MERCADOPAGO_API_BASE}/v1/payments/${encodeURIComponent(order.payment_transaction_id)}/refunds`, {
+    method: 'POST', token, body: { amount: moneyNumber(amount) }, idempotencyKey
+  }).catch((error) => {
+    throw httpError(error.status || 422, 'O Mercado Pago não concluiu o estorno. Confira o pagamento no painel do provedor e tente novamente.', error.detail);
+  });
 }
 
 async function reconcileOnlinePayments(data = {}, options = {}) {
@@ -17361,8 +17394,8 @@ async function fetchProviderPaymentStatus(order, integrations) {
   }
   if (order.payment_provider === 'mercadopago') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;
-    const data = await providerFetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(order.payment_transaction_id)}`, { token });
-    return { status: mercadoPagoStatusToFinancial(data.status), amount: data.transaction_amount };
+    const data = await providerFetch(`${MERCADOPAGO_API_BASE}/v1/payments/${encodeURIComponent(order.payment_transaction_id)}`, { token });
+    return { status: mercadoPagoStatusToFinancial(data.status), amount: data.transaction_amount, provider_event_id: cleanExternalId(`mercadopago_${data.id}_${data.status || 'status'}`), raw: data };
   }
   if (order.payment_provider === 'asaas') {
     const token = integrations.pix.apiKey || integrations.card.apiKey;
@@ -18479,7 +18512,7 @@ function defaultIntegrationSettings() {
     },
     pix: {
       enabled: false,
-      provider: 'abacatepay',
+      provider: 'mercadopago',
       apiKey: '',
       webhookSecret: '',
       expirationMinutes: 15
@@ -18536,7 +18569,7 @@ function sanitizeIntegrationSettings(value) {
     },
     pix: {
       enabled: Boolean(pix.enabled),
-      provider: pix.enabled === false ? defaults.pix.provider : 'abacatepay',
+      provider: 'mercadopago',
       apiKey: cleanText(revealPaymentSecret(pix.apiKey || '')).slice(0, 500),
       webhookSecret: cleanText(revealPaymentSecret(pix.webhookSecret || '')).slice(0, 500),
       expirationMinutes: clampInteger(pix.expirationMinutes || defaults.pix.expirationMinutes, 5, 120)
@@ -18565,7 +18598,7 @@ function protectIntegrationSettings(settings) {
     throw httpError(503, 'Configure PAYMENT_SECRETS_KEY no servidor antes de salvar credenciais de pagamento.');
   }
   if (next.pix?.enabled && (!next.pix.apiKey || !next.pix.webhookSecret)) {
-    throw httpError(422, 'Para ativar o Pix online, informe a API key e o segredo do webhook da Abacate Pay.');
+    throw httpError(422, 'Para ativar o Pix online, informe o Access Token e a assinatura secreta do webhook do Mercado Pago.');
   }
   if (next.pix) {
     next.pix.apiKey = protectPaymentSecret(next.pix.apiKey || '');
@@ -19765,8 +19798,8 @@ function isOnlineOrderAwaitingRelease(order) {
 function validateOnlinePaymentAmount(paymentMethod, integrations, total) {
   if (!isOnlinePaymentMethod(paymentMethod)) return;
   const provider = onlinePaymentProviderFor(paymentMethod, integrations);
-  if (provider === 'abacatepay' && moneyCents(total) < 100) {
-    throw httpError(422, 'Pagamento online via Abacate Pay exige valor mínimo de R$ 1,00.');
+  if (provider === 'mercadopago' && moneyCents(total) < 1) {
+    throw httpError(422, 'O valor do pagamento online precisa ser maior que zero.');
   }
 }
 
@@ -20150,7 +20183,7 @@ function cleanPublicCode(value) {
 
 function cleanProvider(value) {
   const provider = cleanText(value).toLowerCase().replace(/[^a-z0-9_-]/g, '');
-  return ['abacatepay', 'mercadopago', 'asaas', 'efi', 'mock'].includes(provider) ? provider : 'mock';
+  return ['mercadopago', 'mock'].includes(provider) ? provider : 'mock';
 }
 
 function cleanPlanCode(value) {

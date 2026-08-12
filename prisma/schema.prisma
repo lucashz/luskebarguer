@@ -783,7 +783,7 @@ model PaymentAttempt {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   storeId        String?   @map("store_id") @db.Uuid
   orderId        String    @map("order_id") @db.Uuid
-  provider       String    @default("abacatepay")
+  provider       String    @default("mercadopago")
   idempotencyKey String    @unique @map("idempotency_key")
   transactionId  String?   @map("transaction_id")
   status         String    @default("created")
@@ -810,7 +810,7 @@ model PaymentRefund {
   id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   storeId          String?   @map("store_id") @db.Uuid
   orderId          String    @map("order_id") @db.Uuid
-  provider         String    @default("abacatepay")
+  provider         String    @default("mercadopago")
   providerRefundId String?   @map("provider_refund_id")
   idempotencyKey   String    @unique @map("idempotency_key")
   status           String    @default("requested")

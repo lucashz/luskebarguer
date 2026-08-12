@@ -34,7 +34,7 @@
     "test:security": "node scripts/sql-injection-tests.mjs",
     "test:flows": "node scripts/core-flow-smoke.mjs",
     "test:platform-health": "node scripts/platform-health-smoke.mjs",
-    "test:payments": "node scripts/payment-hardening-smoke.mjs",
+    "test:payments": "node scripts/payment-hardening-smoke.mjs && node scripts/mercadopago-gateway-smoke.mjs",
     "test:seo": "node scripts/seo-smoke.mjs",
     "test:marketing": "node scripts/marketing-growth-smoke.mjs",
     "test:marketing-ui": "node scripts/marketing-autopilot-ui-smoke.mjs",

@@ -1955,7 +1955,7 @@ function renderAdminReadinessChecklist() {
   const pixEnabled = state.store?.integration_pix_enabled === true
     || state.store?.integration_settings?.pix?.enabled === true
     || state.store?.payment_settings?.pix_online_enabled === true
-    || state.store?.payment_settings?.abacatepay?.enabled === true;
+    || state.store?.payment_settings?.mercadopago?.enabled === true;
   const paymentMethods = Array.isArray(state.store?.payment_methods) ? state.store.payment_methods : [];
   const hasAnyPayment = paymentMethods.length > 0 || pixEnabled;
   const items = [
@@ -3568,7 +3568,7 @@ function orderCard(order) {
     ${order.reconciliation_status === 'divergent' ? `
       <div class="order-payment-review-alert">
         <strong>Pagamento precisa de revisão</strong>
-        <span>Confira o valor e a transação na Abacate Pay antes de liberar ou reembolsar o pedido.</span>
+        <span>Confira o valor e a transação no Mercado Pago antes de liberar ou reembolsar o pedido.</span>
       </div>
     ` : ''}
     <details class="order-details" ${state.openOrderDetailIds.has(String(order.id)) ? 'open' : ''}>
@@ -5085,7 +5085,7 @@ function openSupportTicketWithContext(context = '') {
     payment: {
       category: 'Pagamento online',
       priority: 'high',
-      subject: 'Preciso de ajuda com Abacate Pay',
+      subject: 'Preciso de ajuda com Mercado Pago',
       message: 'Olá, preciso de ajuda para configurar Pix online e confirmação automática de pagamento.'
     },
     checklist: {
@@ -6108,7 +6108,7 @@ function renderAddonCheckoutWaiting(checkoutUrl, addon = {}) {
       </div>
       <div class="plan-checkout-note">
         <strong>Verificação automática ativa</strong>
-        <p>Conclua o pagamento na Abacate Pay. Esta tela verifica o status a cada 10 segundos.</p>
+        <p>Conclua o pagamento no Mercado Pago. Esta tela verifica o status a cada 10 segundos.</p>
       </div>
       <div class="row-actions plan-checkout-footer">
         <button class="ghost-button compact" type="button" data-close-plan-checkout>Fechar</button>
@@ -6402,7 +6402,7 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
       <div class="plan-checkout-head">
         <p class="eyebrow">Pagamento seguro</p>
         <h2 id="planCheckoutWaitingTitle">Finalize o pagamento na aba aberta</h2>
-        <p>Escolha Pix ou cartão na Abacate Pay. Quando o pagamento for confirmado, o plano será liberado automaticamente no painel.</p>
+        <p>Escolha Pix ou cartão no Mercado Pago. Quando o pagamento for confirmado, o plano será liberado automaticamente no painel.</p>
       </div>
       <div class="plan-checkout-status">
         <span aria-hidden="true"></span>
@@ -8088,7 +8088,7 @@ function integrationSettingsFromForm(form) {
     },
     pix: {
       enabled: target?.elements.integration_pix_enabled?.checked || false,
-      provider: 'abacatepay',
+      provider: 'mercadopago',
       apiKey: target?.elements.integration_pix_apiKey?.value || currentPix.apiKey || '',
       webhookSecret: target?.elements.integration_pix_webhookSecret?.value || currentPix.webhookSecret || '',
       expirationMinutes: target?.elements.integration_pix_expirationMinutes?.value || 15
@@ -8124,7 +8124,7 @@ function fillIntegrationSettings(settings = {}) {
   if (form.elements.integration_pix_enabled) form.elements.integration_pix_enabled.checked = Boolean(pix.enabled);
   const pixAdvancedConfig = document.getElementById('pixAdvancedConfig');
   if (pixAdvancedConfig) pixAdvancedConfig.open = Boolean(pix.enabled || pix.apiKey || pix.webhookSecret);
-  setValue(form.elements.integration_pix_provider, 'abacatepay');
+  setValue(form.elements.integration_pix_provider, 'mercadopago');
   setValue(form.elements.integration_pix_apiKey, pix.apiKey || '');
   setValue(form.elements.integration_pix_webhookSecret, pix.webhookSecret || '');
   setValue(form.elements.integration_pix_expirationMinutes, pix.expirationMinutes || 15);
@@ -8169,7 +8169,7 @@ async function testIntegrations() {
       button.textContent = 'Testando...';
     }
     if (els.integrationStatusText) {
-      els.integrationStatusText.textContent = 'Testando WhatsApp e Abacate Pay...';
+      els.integrationStatusText.textContent = 'Testando WhatsApp e Mercado Pago...';
     }
     const result = await request('/api/admin/integrations/test', {
       method: 'POST',
@@ -8182,7 +8182,7 @@ async function testIntegrations() {
     if (els.integrationStatusText) {
       els.integrationStatusText.textContent = [
         integrationTestMessage('WhatsApp', whatsapp),
-        integrationTestMessage('Abacate Pay', pix)
+        integrationTestMessage('Mercado Pago', pix)
       ].join(' ');
     }
     toast(hasFailure ? 'Teste concluído com pendências.' : 'Integrações testadas com sucesso.');
@@ -8578,7 +8578,7 @@ function renderPaymentSetupAssistance(data = {}) {
     } else if (active) {
       els.paymentSetupMessage.textContent = included
         ? 'Seu plano inclui configuração assistida. Solicite ajuda para a equipe TáPronto revisar API key, webhook e teste de pagamento.'
-        : 'Configuração assistida contratada. Solicite ajuda para a equipe TáPronto concluir Abacate Pay, webhook e teste de pagamento.';
+        : 'Configuração assistida contratada. Solicite ajuda para a equipe TáPronto concluir Mercado Pago, webhook e teste de pagamento.';
     } else if (canBuy) {
       els.paymentSetupMessage.textContent = `${addon.message || 'Contrate a configuração assistida para a equipe TáPronto configurar com você.'} Você também pode configurar sozinho pelos campos abaixo.`;
     } else {
@@ -8661,7 +8661,7 @@ async function requestPaymentSetupSupport() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     });
-    toast(result.message || 'Solicitação enviada. Abrimos um chamado com o contexto da Abacate Pay.');
+    toast(result.message || 'Solicitação enviada. Abrimos um chamado com o contexto do Mercado Pago.');
     await loadPaymentSetupAssistance().catch(() => {});
     state.loadedAdminTabs.delete('support');
     state.selectedSupportTicketId = result.ticket?.id || state.selectedSupportTicketId;
@@ -8707,12 +8707,12 @@ async function runWhatsappAction(button, loadingText, action) {
 function renderAbacateWebhookUrl() {
   if (!els.abacateWebhookUrl) return;
   const origin = window.location.origin || '';
-  els.abacateWebhookUrl.textContent = `${origin}/api/payments/webhook?provider=abacatepay`;
+  els.abacateWebhookUrl.textContent = `${origin}/api/payments/webhook?provider=mercadopago`;
 }
 
 function openIntegrationHelp(type) {
   const origin = window.location.origin || 'https://sua-loja.com';
-  const webhookUrl = `${origin}/api/payments/webhook?provider=abacatepay`;
+  const webhookUrl = `${origin}/api/payments/webhook?provider=mercadopago`;
   const content = {
     'whatsapp-auto': {
       eyebrow: 'WhatsApp automático',
@@ -8727,25 +8727,25 @@ function openIntegrationHelp(type) {
         <p>Cada loja usa o próprio número. Se o celular ficar sem internet ou a sessão expirar, volte aqui e reconecte com um novo QR Code.</p>
       `
     },
-    'abacate-key': {
-      eyebrow: 'Abacate Pay',
+    'mercadopago-token': {
+      eyebrow: 'Mercado Pago',
       title: 'Onde pegar a API key',
       body: `
         <ol>
-          <li>Entre no painel da Abacate Pay.</li>
+          <li>Entre em Suas integrações no painel de desenvolvedores do Mercado Pago.</li>
           <li>Acesse <strong>Integrar</strong> e depois <strong>API Keys</strong>.</li>
           <li>Copie a chave de produção quando a loja já estiver pronta para vender.</li>
-          <li>Cole no campo <strong>API key da Abacate Pay</strong> e salve.</li>
+          <li>Copie a credencial de produção <strong>Access Token</strong>, cole no campo e salve.</li>
         </ol>
         <p>Por segurança, depois de salva a chave fica protegida no servidor e aparece como campo de senha.</p>
       `
     },
-    'abacate-webhook': {
+    'mercadopago-webhook': {
       eyebrow: 'Webhook',
       title: 'Como receber confirmação do Pix',
       body: `
         <ol>
-          <li>No painel da Abacate Pay, abra a área de webhooks.</li>
+          <li>No painel do Mercado Pago, abra Webhooks da sua aplicação.</li>
           <li>Cadastre a URL abaixo como endpoint HTTPS:</li>
         </ol>
         <code>${escapeHtml(webhookUrl)}</code>
@@ -9808,8 +9808,8 @@ function humanRequestMessage(url, response, data = {}, detail = '') {
   if (normalized.includes('evolution') || normalized.includes('qr code') || normalized.includes('instance')) {
     return 'Não foi possível conectar o WhatsApp agora. Tente atualizar o QR Code ou peça ajuda ao suporte.';
   }
-  if (normalized.includes('abacate') || normalized.includes('pix automático') || normalized.includes('pix automatico')) {
-    return 'Não foi possível validar o Pix online. Confira a chave da Abacate Pay ou solicite ajuda da equipe TáPronto.';
+  if (normalized.includes('mercado pago') || normalized.includes('pix automático') || normalized.includes('pix automatico')) {
+    return 'Não foi possível validar o Pix online. Confira o Access Token do Mercado Pago ou solicite ajuda da equipe TáPronto.';
   }
   if (normalized.includes('api key') || normalized.includes('secret') || normalized.includes('token')) {
     return 'A configuração precisa de uma chave válida. Revise os campos salvos ou peça ajuda ao suporte.';

@@ -1454,7 +1454,7 @@ function paymentCheckoutCopy(status) {
   }
   return {
     title: 'Pagamento online aguardando.',
-    text: 'Conclua o Pix na Abacate Pay e mantenha esta página aberta. O pedido só é enviado para a loja depois da confirmação.'
+    text: 'Conclua o Pix no Mercado Pago e mantenha esta página aberta. O pedido só é enviado para a loja depois da confirmação.'
   };
 }
 
@@ -1466,7 +1466,7 @@ function openPaymentPopup(options = {}) {
   const top = Math.max(0, Math.round((window.screen.height - height) / 2));
   const features = `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
   if (options.blank) {
-    state.paymentPopup = window.open('about:blank', 'abacatepay_checkout', features);
+    state.paymentPopup = window.open('about:blank', 'mercadopago_checkout', features);
     if (state.paymentPopup) {
       try {
         state.paymentPopup.document.write('<p style="font-family:Arial,sans-serif;padding:24px">Preparando pagamento seguro...</p>');
@@ -1486,7 +1486,7 @@ function openPaymentPopup(options = {}) {
   } catch (_) {
     // Se o navegador bloquear acesso ao popup, abre uma nova janela segura.
   }
-  state.paymentPopup = window.open(checkout.checkoutUrl, 'abacatepay_checkout', features);
+  state.paymentPopup = window.open(checkout.checkoutUrl, 'mercadopago_checkout', features);
   if (!state.paymentPopup) {
     setStatus('O navegador bloqueou o popup de pagamento. Clique em "Abrir Pagamento".');
   }

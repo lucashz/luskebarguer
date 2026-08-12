@@ -75,13 +75,13 @@ npm run billing:check
 Variáveis principais:
 
 ```env
-ABACATEPAY_API_KEY=sua_chave
-ABACATEPAY_WEBHOOK_SECRET=segredo_do_webhook
+MERCADOPAGO_ACCESS_TOKEN=seu_access_token
+MERCADOPAGO_WEBHOOK_SECRET=assinatura_secreta_do_webhook
 APP_URL=https://seu-dominio
 PUBLIC_APP_URL=https://seu-dominio
 ```
 
-Sem `ABACATEPAY_API_KEY` ou `PLATFORM_BILLING_API_KEY`, o checkout pago fica
+Sem `MERCADOPAGO_ACCESS_TOKEN` ou `PLATFORM_BILLING_API_KEY`, o checkout pago fica
 indisponível de propósito para evitar ativação manual acidental de plano pago.
 
 Rotina mensal de vencimento:

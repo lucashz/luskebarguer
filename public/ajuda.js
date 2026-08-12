@@ -118,16 +118,16 @@ const HELP_ARTICLES = [
     'Mantenha o celular com internet.',
     'Use Testar mensagem para confirmar a conexão.'
   ], 'WhatsApp automático depende do plano e da configuração do provedor feita pela TáPronto.'),
-  article('configurar-pix-online', 'Como configurar Pix online', 'Pagamento online', 'Conecte Abacate Pay para receber pagamento antes de enviar o pedido.', [
+  article('configurar-pix-online', 'Como configurar Pix online', 'Pagamento online', 'Conecte Mercado Pago para receber pagamento antes de enviar o pedido.', [
     'Acesse Integrações.',
     'Ative Pix online.',
-    'Cole a API key da Abacate Pay.',
-    'Cadastre a URL de webhook exibida no painel da Abacate Pay.',
+    'Cole o Access Token de produção do Mercado Pago.',
+    'Cadastre a URL de webhook exibida no painel do Mercado Pago e copie a assinatura secreta.',
     'Salve e teste um pedido de baixo valor.'
   ], 'Se preferir, solicite configuração assistida pela equipe TáPronto.'),
   article('como-funciona-pagamento-online', 'Como funciona o pagamento online', 'Pagamento online', 'Entenda quando o pedido é enviado para a loja.', [
     'O cliente monta a sacola e escolhe pagamento online.',
-    'Ao confirmar, abre uma janela de pagamento da Abacate Pay.',
+    'Ao confirmar, abre uma janela de pagamento do Mercado Pago.',
     'O pedido fica aguardando confirmação.',
     'Quando o pagamento é confirmado, o pedido é liberado para a loja.',
     'Depois disso, o sistema pode enviar a notificação no WhatsApp.'

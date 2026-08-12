@@ -77,7 +77,7 @@ function renderPayment(data) {
   const qrUrl = safeImageUrl(payment.pix_qr_url);
   const checkoutUrl = safeHttpUrl(payment.checkout_url);
   const hasCheckout = Boolean(checkoutUrl);
-  const isHostedCheckout = payment.provider === 'abacatepay' && hasCheckout;
+  const isHostedCheckout = payment.provider === 'mercadopago' && hasCheckout;
   const pixCode = String(payment.pix_code || '');
   const hasRealPix = Boolean(
     (pixCode && !pixCode.startsWith('PIXONLINE|'))

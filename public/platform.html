@@ -236,7 +236,7 @@
                 <p class="eyebrow">Visão Rápida</p>
                 <h3>Serviços Essenciais</h3>
               </div>
-              <span>API, banco, backup, SMTP, Abacate Pay, webhooks e recursos.</span>
+              <span>API, banco, backup, SMTP, Mercado Pago, webhooks e recursos.</span>
             </div>
             <section class="platform-status-grid" id="platformStatusGrid"></section>
           </section>
@@ -279,9 +279,9 @@
               </article>
               <article class="platform-service-card">
                 <p class="eyebrow">Billing</p>
-                <h3>Abacate Pay</h3>
+                <h3>Mercado Pago</h3>
                 <p>Teste a conexão de cobrança dos planos mensais.</p>
-                <button class="ghost-button compact" id="testBillingConfigButtonHealth" type="button">Testar Abacate Pay</button>
+                <button class="ghost-button compact" id="testBillingConfigButtonHealth" type="button">Testar Mercado Pago</button>
               </article>
               <article class="platform-service-card">
                 <p class="eyebrow">SMTP</p>
@@ -578,7 +578,7 @@
           <section class="platform-chart-card platform-billing-config-card">
             <div class="section-actions compact-section-actions">
               <div>
-                <p class="eyebrow">Configuração Abacate Pay</p>
+                <p class="eyebrow">Configuração Mercado Pago</p>
                 <h3>Checkout dos planos mensais</h3>
                 <p class="muted">Conecte a cobrança das assinaturas da TáPronto. Chaves ficam mascaradas e só superadmin pode alterar.</p>
               </div>
@@ -589,7 +589,7 @@
               <div class="two-cols">
                 <label>Provedor
                   <select name="provider">
-                    <option value="abacatepay">Abacate Pay</option>
+                    <option value="mercadopago">Mercado Pago</option>
                     <option value="mock">Mock interno</option>
                   </select>
                 </label>
@@ -607,7 +607,7 @@
               </div>
               <label>Webhook/callback dos planos
                 <div class="readonly-code-line">
-                  <code id="billingWebhookUrl">/api/billing/webhook?provider=abacatepay</code>
+                  <code id="billingWebhookUrl">/api/billing/webhook?provider=mercadopago</code>
                 </div>
               </label>
               <div class="two-cols">
@@ -615,7 +615,7 @@
                   <input name="password" type="password" autocomplete="current-password" placeholder="Obrigatória para salvar">
                 </label>
                 <label class="payment-option billing-active-option">
-                  <input name="is_active" type="checkbox"> Abacate Pay ativo para planos
+                  <input name="is_active" type="checkbox"> Mercado Pago ativo para planos
                 </label>
               </div>
               <div class="row-actions">

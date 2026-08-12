@@ -1091,7 +1091,7 @@
                   <div class="integration-card-head">
                     <span class="integration-brand-icon pix" aria-hidden="true">PIX</span>
                     <div class="integration-card-title">
-                      <strong>Pix com Abacate Pay</strong>
+                      <strong>Pix com Mercado Pago</strong>
                       <p>Receba pagamentos online antes de aceitar o pedido.</p>
                     </div>
                     <span class="status-pill integration-local-status" id="pixIntegrationStatus">Carregando...</span>
@@ -1102,8 +1102,8 @@
                       <summary>Configurar por conta própria <span aria-hidden="true">+</span></summary>
                       <div class="integration-self-config-content">
                         <label class="check"><input name="integration_pix_enabled" type="checkbox"> Ativar Pix online</label>
-                        <input name="integration_pix_provider" type="hidden" value="abacatepay">
-                        <label>API key da Abacate Pay
+                        <input name="integration_pix_provider" type="hidden" value="mercadopago">
+                        <label>Access Token do Mercado Pago
                           <input name="integration_pix_apiKey" type="password" autocomplete="new-password" placeholder="Cole a API key">
                         </label>
                         <label>Segredo do webhook
@@ -1114,11 +1114,11 @@
                         </label>
                         <div class="integration-webhook-url">
                           <span>URL para cadastrar no webhook</span>
-                          <code id="abacateWebhookUrl">/api/payments/webhook?provider=abacatepay</code>
+                          <code id="abacateWebhookUrl">/api/payments/webhook?provider=mercadopago</code>
                         </div>
                         <div class="integration-help-actions">
-                          <button class="ghost-button compact" type="button" data-integration-help="abacate-key">Onde pego a API key?</button>
-                          <button class="ghost-button compact" type="button" data-integration-help="abacate-webhook">Como configurar o webhook?</button>
+                          <button class="ghost-button compact" type="button" data-integration-help="mercadopago-token">Onde pego o Access Token?</button>
+                          <button class="ghost-button compact" type="button" data-integration-help="mercadopago-webhook">Como configurar o webhook?</button>
                         </div>
                       </div>
                     </details>

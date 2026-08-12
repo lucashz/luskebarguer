@@ -2917,7 +2917,7 @@ function renderPlatformStatuses(statuses) {
     },
     {
       key: 'billing',
-      label: 'Abacate Pay',
+      label: 'Mercado Pago',
       fallback: { status: 'unknown', message: 'Billing ainda não verificado.' }
     },
     {
@@ -3196,15 +3196,15 @@ function renderBillingConfig() {
   const form = els.platformBillingConfigForm;
   const config = state.billingConfig || {};
   if (!state.billingLoaded && !state.billingLoading && !state.billingError) {
-    if (els.billingConfigStatusText) els.billingConfigStatusText.textContent = 'Abra Billing para carregar a configuração da Abacate Pay.';
+    if (els.billingConfigStatusText) els.billingConfigStatusText.textContent = 'Abra Billing para carregar a configuração do Mercado Pago.';
     return;
   }
-  form.elements.provider.value = config.provider || 'abacatepay';
+  form.elements.provider.value = config.provider || 'mercadopago';
   form.elements.public_url.value = config.public_url || window.location.origin;
   form.elements.api_key.value = '';
   form.elements.api_key.placeholder = config.has_api_key
     ? `API key já salva (${config.api_key_masked || 'mascarada'}). Preencha apenas para trocar.`
-    : 'Cole a API key da Abacate Pay';
+    : 'Cole o Access Token do Mercado Pago';
   form.elements.webhook_secret.value = '';
   form.elements.webhook_secret.placeholder = config.has_webhook_secret
     ? `Segredo já salvo (${config.webhook_secret_masked || 'mascarado'}). Preencha apenas para trocar.`
@@ -3212,7 +3212,7 @@ function renderBillingConfig() {
   form.elements.password.value = '';
   form.elements.is_active.checked = config.is_active === true;
   if (els.billingWebhookUrl) {
-    els.billingWebhookUrl.textContent = config.webhook_url || `${window.location.origin}/api/billing/webhook?provider=abacatepay`;
+    els.billingWebhookUrl.textContent = config.webhook_url || `${window.location.origin}/api/billing/webhook?provider=mercadopago`;
   }
   if (els.billingConfigStatusText) {
     const status = config.is_active && config.has_api_key ? 'Configurado' : 'Não configurado';
@@ -4976,10 +4976,10 @@ async function submitBillingConfig(event) {
     });
     state.billingConfig = response.billing;
     renderBillingConfig();
-    toast('Configuração da Abacate Pay salva.');
+    toast('Configuração do Mercado Pago salva.');
     await loadHealth({ silent: true });
   } catch (error) {
-    toast(error.message || 'Não foi possível salvar Abacate Pay.');
+    toast(error.message || 'Não foi possível salvar Mercado Pago.');
   } finally {
     if (els.saveBillingConfigButton) {
       els.saveBillingConfigButton.disabled = false;
@@ -5005,7 +5005,7 @@ async function testBillingConfig() {
     await loadBilling({ silent: true, renderBefore: false });
     await loadHealth({ silent: true });
   } catch (error) {
-    toast(error.message || 'Não foi possível testar Abacate Pay.');
+    toast(error.message || 'Não foi possível testar Mercado Pago.');
     await loadBilling({ silent: true, renderBefore: false });
   } finally {
     buttons.forEach((button) => {

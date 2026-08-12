@@ -2,27 +2,27 @@ import { existsSync, readFileSync } from 'node:fs';
 
 loadEnv(new URL('../.env', import.meta.url));
 
-const provider = String(process.env.PLATFORM_BILLING_PROVIDER || 'abacatepay').trim().toLowerCase();
-const apiKey = process.env.PLATFORM_BILLING_API_KEY || process.env.ABACATEPAY_API_KEY || '';
-const webhookSecret = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.ABACATEPAY_WEBHOOK_SECRET || '';
+const provider = String(process.env.PLATFORM_BILLING_PROVIDER || 'mercadopago').trim().toLowerCase();
+const apiKey = process.env.PLATFORM_BILLING_API_KEY || process.env.MERCADOPAGO_ACCESS_TOKEN || '';
+const webhookSecret = process.env.PLATFORM_BILLING_WEBHOOK_SECRET || process.env.MERCADOPAGO_WEBHOOK_SECRET || '';
 const appUrl = process.env.PUBLIC_APP_URL || process.env.APP_URL || '';
 const issues = [];
 
-if (!['abacatepay', 'mock'].includes(provider)) {
+if (!['mercadopago', 'mock'].includes(provider)) {
   issues.push(`Provedor de billing não suportado: ${provider}`);
 }
 
-if (provider === 'abacatepay' && !apiKey) {
-  issues.push('ABACATEPAY_API_KEY ou PLATFORM_BILLING_API_KEY não configurada.');
+if (provider === 'mercadopago' && !apiKey) {
+  issues.push('MERCADOPAGO_ACCESS_TOKEN ou PLATFORM_BILLING_API_KEY não configurado.');
 }
 
-if (provider === 'abacatepay' && !webhookSecret) {
-  issues.push('ABACATEPAY_WEBHOOK_SECRET ou PLATFORM_BILLING_WEBHOOK_SECRET não configurado. Recomendado para produção.');
+if (provider === 'mercadopago' && !webhookSecret) {
+  issues.push('MERCADOPAGO_WEBHOOK_SECRET ou PLATFORM_BILLING_WEBHOOK_SECRET não configurado. Obrigatório em produção.');
 }
 
 if (!appUrl) {
   issues.push('APP_URL ou PUBLIC_APP_URL não configurada.');
-} else if (provider === 'abacatepay' && !/^https:\/\//i.test(appUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(appUrl)) {
+} else if (provider === 'mercadopago' && !/^https:\/\//i.test(appUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(appUrl)) {
   issues.push('APP_URL/PUBLIC_APP_URL deve usar HTTPS em produção.');
 }
 
