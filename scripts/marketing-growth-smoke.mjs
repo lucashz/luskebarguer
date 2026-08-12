@@ -16,7 +16,8 @@ let child;
 try {
   const platformHtml = readFileSync(new URL('../public/platform.html', import.meta.url), 'utf8');
   const platformJs = readFileSync(new URL('../public/platform.js', import.meta.url), 'utf8');
-  for (const label of ['Hoje', 'Publicações', 'Agenda', 'Resultados', 'Configurações']) assert(platformHtml.includes(`>${label}</button>`), `Navegação de marketing não inclui ${label}.`);
+  for (const label of ['Hoje', 'Histórico', 'Configurações']) assert(platformHtml.includes(`>${label}</button>`), `Navegação de marketing não inclui ${label}.`);
+  assert(platformHtml.includes('id="autopilotTodayCard"') && platformJs.includes('renderAutopilot'), 'Post diário automático não foi implementado.');
   assert((platformHtml.match(/id="marketingContentList"/g) || []).length === 1, 'Existe mais de uma biblioteca editorial visível.');
   assert(platformHtml.includes('id="marketingNextAction"') && platformJs.includes('renderMarketingOverview'), 'Próxima ação do marketing não foi implementada.');
   assert(platformJs.includes('marketingStatusLabel') && platformJs.includes("Aguardando aprovação"), 'Estados editoriais não estão traduzidos.');
@@ -24,9 +25,11 @@ try {
     select
       to_regclass('public.marketing_experiment_assignments') assignments,
       to_regclass('public.marketing_pilot_stores') pilots,
-      to_regclass('public.marketing_weekly_reports') reports
+      to_regclass('public.marketing_weekly_reports') reports,
+      to_regclass('public.marketing_autopilot_settings') autopilot_settings,
+      to_regclass('public.marketing_autopilot_runs') autopilot_runs
   `);
-  assert(schema.rows[0].assignments && schema.rows[0].pilots && schema.rows[0].reports, 'Tabelas da operação de crescimento ausentes.');
+  assert(schema.rows[0].assignments && schema.rows[0].pilots && schema.rows[0].reports && schema.rows[0].autopilot_settings && schema.rows[0].autopilot_runs, 'Tabelas da operação de crescimento ausentes.');
 
   const content = await pool.query(`
     select

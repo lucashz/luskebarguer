@@ -24,6 +24,7 @@
   emailTemplates: [],
   marketing: null,
   social: null,
+  autopilot: null,
   marketingLoaded: false,
   marketingActiveTab: new URLSearchParams(window.location.search).get('marketing_tab') || 'overview',
   marketingCalendarAnchor: new Date(),
@@ -200,6 +201,11 @@ const els = {
   openCommunicationFromHealth: document.querySelector('#openCommunicationFromHealth'),
   refreshCommunicationButton: document.querySelector('#refreshCommunicationButton'),
   refreshMarketingButton: document.querySelector('#refreshMarketingButton'),
+  generateDailyPostButton: document.querySelector('#generateDailyPostButton'),
+  autopilotStatusStrip: document.querySelector('#autopilotStatusStrip'),
+  autopilotTodayCard: document.querySelector('#autopilotTodayCard'),
+  autopilotUpcomingList: document.querySelector('#autopilotUpcomingList'),
+  autopilotSettingsForm: document.querySelector('#autopilotSettingsForm'),
   exportMarketingLeadsButton: document.querySelector('#exportMarketingLeadsButton'),
   platformMarketingSummary: document.querySelector('#platformMarketingSummary'),
   marketingAttributedFunnel: document.querySelector('#marketingAttributedFunnel'),
@@ -304,6 +310,8 @@ els.previewLogCleanupButton?.addEventListener('click', previewLogCleanup);
 els.refreshBillingButton?.addEventListener('click', loadBilling);
 els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshMarketingButton?.addEventListener('click', loadMarketing);
+els.generateDailyPostButton?.addEventListener('click', () => generateAutopilotPost(false));
+els.autopilotSettingsForm?.addEventListener('submit', saveAutopilotSettings);
 els.exportMarketingLeadsButton?.addEventListener('click', exportMarketingLeadsCsv);
 els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
 els.marketingLeadForm?.addEventListener('submit', submitMarketingLead);
@@ -330,6 +338,8 @@ els.marketingTabs.forEach((button) => button.addEventListener('click', () => act
 document.addEventListener('click', (event) => {
   const button = event.target.closest?.('[data-marketing-update]');
   if (button) updateMarketingStatus(button);
+  const autopilotAction = event.target.closest?.('[data-autopilot-action]');
+  if (autopilotAction) handleAutopilotAction(autopilotAction);
   const pilotButton = event.target.closest?.('[data-marketing-pilot-next]');
   if (pilotButton) advanceMarketingPilot(pilotButton);
   const socialButton = event.target.closest?.('[data-social-action]');
@@ -808,12 +818,14 @@ async function loadCommunication(options = {}) {
 async function loadMarketing(options = {}) {
   if (els.refreshMarketingButton) els.refreshMarketingButton.disabled = true;
   try {
-    const [marketing, social] = await Promise.all([request('/api/platform/marketing'), request('/api/platform/social')]);
+    const [marketing, social, autopilot] = await Promise.all([request('/api/platform/marketing'), request('/api/platform/social'), request('/api/platform/marketing/autopilot')]);
     state.marketing = marketing;
     state.social = social;
+    state.autopilot = autopilot;
     state.marketingLoaded = true;
     renderMarketing();
     renderSocialPublishing();
+    renderAutopilot();
     if (!options.silent) toast('Marketing atualizado.');
   } catch (error) {
     state.marketingLoaded = false;
@@ -821,6 +833,91 @@ async function loadMarketing(options = {}) {
   } finally {
     if (els.refreshMarketingButton) els.refreshMarketingButton.disabled = false;
   }
+}
+
+async function generateAutopilotPost(regenerate = false) {
+  const buttons = [els.generateDailyPostButton, ...document.querySelectorAll('[data-autopilot-action="regenerate"]')].filter(Boolean);
+  buttons.forEach((button) => { button.disabled = true; });
+  if (els.autopilotStatusStrip) els.autopilotStatusStrip.textContent = regenerate ? 'Criando uma nova opção…' : 'Criando o post de hoje…';
+  try {
+    await request('/api/platform/marketing/autopilot/generate', { method: 'POST', body: JSON.stringify({ regenerate }) });
+    await loadMarketing({ silent: true });
+    toast(regenerate ? 'Nova opção preparada.' : 'Post de hoje preparado.');
+  } catch (error) { toast(error.message || 'Não foi possível preparar o post.'); renderAutopilot(); }
+  finally { buttons.forEach((button) => { button.disabled = false; }); }
+}
+
+async function handleAutopilotAction(button) {
+  const action = button.dataset.autopilotAction;
+  if (action === 'generate') return generateAutopilotPost(false);
+  if (action === 'regenerate') return generateAutopilotPost(true);
+  if (action === 'configure') return openMarketingAdvancedSection('social');
+  if (action !== 'approve') return;
+  const run = state.autopilot?.today;
+  const account = (state.autopilot?.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused) || (state.autopilot?.accounts || []).find((item) => item.status === 'connected');
+  if (!run || !account) { toast('Conecte o Instagram antes de aprovar.'); return openMarketingAdvancedSection('social'); }
+  button.disabled = true;
+  button.textContent = 'Agendando…';
+  try {
+    await request('/api/platform/marketing/autopilot/approve', { method: 'POST', body: JSON.stringify({ run_id: run.id, social_account_id: account.id, scheduled_at: run.content?.scheduled_at }) });
+    await loadMarketing({ silent: true });
+    toast('Post aprovado e agendado.');
+  } catch (error) { toast(error.message || 'Não foi possível aprovar o post.'); }
+  finally { button.disabled = false; }
+}
+
+async function saveAutopilotSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.enabled = form.elements.enabled.checked;
+    await request('/api/platform/marketing/autopilot/settings', { method: 'PATCH', body: JSON.stringify(data) });
+    await loadMarketing({ silent: true });
+    toast('Configurações salvas.');
+  } catch (error) { toast(error.message || 'Não foi possível salvar.'); }
+  finally { button.disabled = false; }
+}
+
+function renderAutopilot() {
+  if (!els.autopilotTodayCard) return;
+  const data = state.autopilot || {};
+  const run = data.today;
+  const settings = data.settings || {};
+  const account = (data.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused);
+  if (els.autopilotStatusStrip) {
+    const mode = data.image_generation_ready ? 'Imagem criada com IA' : 'Modo de simulação';
+    els.autopilotStatusStrip.innerHTML = `<span class="status-pill ${settings.enabled ? 'success' : ''}">${settings.enabled ? 'Ativo' : 'Pausado'}</span><strong>${escapeHtml(mode)}</strong><small>${account ? `Instagram: @${escapeHtml(account.username || account.display_name || 'conectado')}` : 'Instagram precisa ser conectado ou reativado'}</small>`;
+  }
+  if (els.autopilotSettingsForm && settings.id) {
+    els.autopilotSettingsForm.elements.enabled.checked = settings.enabled !== false;
+    els.autopilotSettingsForm.elements.generation_time.value = String(settings.generation_time || '08:00').slice(0, 5);
+    els.autopilotSettingsForm.elements.publication_time.value = String(settings.publication_time || '10:00').slice(0, 5);
+  }
+  if (!run?.content) {
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-empty"><span>Post de hoje</span><h3>Vamos preparar sua publicação?</h3><p>O TáPronto escolhe o tema, cria a arte, escreve a legenda e deixa tudo pronto para sua aprovação.</p><button class="primary-button" data-autopilot-action="generate" type="button">Preparar post de hoje</button></div>`;
+  } else {
+    const content = run.content;
+    const asset = run.asset || {};
+    const ready = run.status === 'ready';
+    const previewUrl = localPlatformMediaUrl(asset.public_url);
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="Prévia do post ${escapeHtml(content.title)}">` : '<span>Imagem sendo preparada…</span>'}</div><div class="autopilot-copy"><span class="eyebrow">Post de hoje</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Programado para ${content.scheduled_at ? formatDateTime(content.scheduled_at) : '10:00'}</small>${data.mode === 'simulation' ? '<div class="autopilot-notice">A imagem de IA será ativada quando a chave da OpenAI for configurada.</div>' : ''}<div class="row-actions">${ready ? `<button class="primary-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar e publicar' : 'Conectar Instagram'}</button><button class="ghost-button" data-autopilot-action="regenerate" type="button">Gerar outra opção</button>` : '<span class="status-pill success">Aprovado e agendado</span>'}</div></div></div>`;
+    const primary = els.autopilotTodayCard.querySelector('[data-autopilot-action="approve"]');
+    if (primary && !account) primary.dataset.autopilotAction = 'configure';
+  }
+  const upcoming = (state.marketing?.content || []).filter((item) => ['approved','scheduled','publishing','processing'].includes(item.status) && item.scheduled_at && new Date(item.scheduled_at) >= new Date()).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)).slice(0, 5);
+  if (els.autopilotUpcomingList) els.autopilotUpcomingList.innerHTML = upcoming.length ? upcoming.map(marketingCompactContentRow).join('') : '<div class="marketing-empty-state compact"><strong>Nenhum post agendado</strong><p>Quando você aprovar o post de hoje, ele aparecerá aqui.</p></div>';
+}
+
+function localPlatformMediaUrl(value = '') {
+  if (!value) return '';
+  try {
+    const url = new URL(value, window.location.origin);
+    if (['localhost', '127.0.0.1'].includes(window.location.hostname) && url.pathname.startsWith('/uploads/')) return `${window.location.origin}${url.pathname}`;
+    return url.href;
+  } catch { return value; }
 }
 
 function activateMarketingTab(tab = 'overview') {

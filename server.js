@@ -17,6 +17,7 @@ import pg from 'pg';
 import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval } from './src/lib/social-publishing.js';
+import { autopilotDashboard, generateDailyAutopilotPost, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -1061,6 +1062,52 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await platformMarketingWorkspace());
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/marketing/autopilot') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await autopilotDashboard());
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/autopilot/generate') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const data = await readJson(req);
+    const run = await generateDailyAutopilotPost({ force: data.regenerate === true, createdBy: admin.id });
+    await audit('platform.marketing.autopilot.generate', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_run', entity_id: run?.id, after_data: { provider: run?.provider, status: run?.status } });
+    json(res, 201, { run });
+    return;
+  }
+
+  if (method === 'PATCH' && url.pathname === '/api/platform/marketing/autopilot/settings') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const settings = await updateAutopilotSettings(await readJson(req), admin.id);
+    await audit('platform.marketing.autopilot.settings', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_settings', entity_id: '1', after_data: { enabled: settings.enabled, generation_time: settings.generation_time, publication_time: settings.publication_time } });
+    json(res, 200, { settings });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/autopilot/approve') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const data = await readJson(req);
+    const runRows = await dbRequest('GET', 'marketing_autopilot_runs', { select: '*', id: `eq.${cleanUuid(data.run_id)}`, status: 'eq.ready', limit: '1' });
+    const run = runRows[0];
+    if (!run?.content_id) throw httpError(404, 'Post do dia não encontrado ou já aprovado.');
+    const accountId = cleanUuid(data.social_account_id);
+    const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at).toISOString() : new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    let context = await socialContentContext(run.content_id);
+    if (context.content.status === 'draft') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'review', note: 'Enviado pelo piloto automático.' });
+    context = await socialContentContext(run.content_id);
+    if (context.content.status === 'review') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'approved', social_account_id: accountId, scheduled_at: scheduledAt, note: 'Aprovado pelo administrador no post do dia.' });
+    context = await socialContentContext(run.content_id);
+    if (context.content.status === 'approved') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'scheduled', social_account_id: accountId, scheduled_at: scheduledAt });
+    await dbRequest('PATCH', 'marketing_autopilot_runs', { id: `eq.${run.id}` }, { status: 'approved', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+    json(res, 200, { ok: true, content: (await socialContentContext(run.content_id)).content });
     return;
   }
 

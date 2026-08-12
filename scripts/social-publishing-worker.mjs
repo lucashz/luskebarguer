@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { claimNextPublication, processClaimedPublication, socialConfig, syncPublicationMetrics } from '../src/lib/social-publishing.js';
+import { generateDailyAutopilotPost } from '../src/lib/marketing-autopilot.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL não configurada.');
@@ -25,6 +26,7 @@ async function runCycle() {
   let failed = 0;
   await pool.query(`insert into social_worker_state(worker_key,status,last_started_at,next_run_at,updated_at) values('instagram-publisher','running',now(),now()+($1||' seconds')::interval,now()) on conflict(worker_key) do update set status='running',last_started_at=now(),next_run_at=excluded.next_run_at,updated_at=now()`, [String(config.workerIntervalSeconds)]);
   try {
+    await generateDailyAutopilotPost().catch((error) => console.error(JSON.stringify({ scope: 'marketing-autopilot', message: error.message })));
     while (processed < 10 && !stopping) {
       const client = await pool.connect();
       try {

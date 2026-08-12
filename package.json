@@ -24,7 +24,7 @@
     "social:worker": "node scripts/social-publishing-worker.mjs",
     "social:worker:once": "node scripts/social-publishing-worker.mjs --once",
     "admin:create": "node scripts/create-admin.mjs",
-    "test:syntax": "node --check server.js && node --check src/lib/social-publishing.js && node --check scripts/social-publishing-worker.mjs && node --check src/data/seo-pages.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/experiments.js && node --check public/ajuda.js && node --check public/seo-landing.js",
+    "test:syntax": "node --check server.js && node --check src/lib/social-publishing.js && node --check src/lib/marketing-autopilot.js && node --check scripts/social-publishing-worker.mjs && node --check src/data/seo-pages.js && node --check public/admin.js && node --check public/app.js && node --check public/account.js && node --check public/orders.js && node --check public/payment.js && node --check public/platform.js && node --check public/portal.js && node --check public/home.js && node --check public/experiments.js && node --check public/ajuda.js && node --check public/seo-landing.js",
     "test:local": "node scripts/local-db-smoke.mjs",
     "test:plans": "node scripts/plan-matrix-smoke.mjs",
     "test:trial": "node scripts/trial-expired-smoke.mjs",
