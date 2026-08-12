@@ -142,7 +142,7 @@ async function metaJson(response, operation) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.error) {
     const error = new Error(data.error?.message || `Meta respondeu ${response.status}.`);
-    error.status = response.status; error.providerCode = String(data.error?.code || ''); error.operation = operation; error.transient = response.status >= 500 || response.status === 429 || data.error?.is_transient === true;
+    error.status = response.status; error.providerCode = String(data.error?.code || ''); error.operation = operation; error.transient = response.status >= 500 || response.status === 429 || data.error?.is_transient === true || ['9004', '9007'].includes(String(data.error?.code || ''));
     throw error;
   }
   return data;
@@ -166,13 +166,11 @@ export async function processClaimedPublication(client, publication, env = proce
       await client.query(`update marketing_content_items set status='processing',updated_at=now() where id=$1`, [content.id]);
       return;
     }
-    if (['reel', 'story'].includes(String(content.format).toLowerCase()) || assets.some((a) => a.kind === 'video')) {
-      const status = await metaRequest(`/${publication.container_id}?fields=status_code,status`, token, {}, config);
-      await logAttempt(client, publication, 'container_status', status._meta, 'success', { status_code: status.status_code });
-      if (!['FINISHED', 'PUBLISHED'].includes(status.status_code)) {
-        if (['ERROR', 'EXPIRED'].includes(status.status_code)) throw Object.assign(new Error(status.status || 'Container inválido.'), { transient: false });
-        await client.query(`update social_publications set status='processing',next_attempt_at=now()+interval '1 minute',lock_expires_at=null,updated_at=now() where id=$1`, [publication.id]); return;
-      }
+    const status = await metaRequest(`/${publication.container_id}?fields=status_code,status`, token, {}, config);
+    await logAttempt(client, publication, 'container_status', status._meta, 'success', { status_code: status.status_code });
+    if (!['FINISHED', 'PUBLISHED'].includes(status.status_code)) {
+      if (['ERROR', 'EXPIRED'].includes(status.status_code)) throw Object.assign(new Error(status.status || 'Container inválido.'), { transient: false });
+      await client.query(`update social_publications set status='processing',next_attempt_at=now()+interval '30 seconds',lock_expires_at=null,updated_at=now() where id=$1`, [publication.id]); return;
     }
     const published = await metaRequest(`/${account.provider_account_id}/media_publish`, token, { method: 'POST', body: { creation_id: publication.container_id } }, config);
     const media = await metaRequest(`/${published.id}?fields=id,permalink,timestamp,media_type`, token, {}, config).catch(() => ({ id: published.id, permalink: '' }));
@@ -196,6 +194,7 @@ async function createMetaContainer(content, assets, account, token, config) {
     return metaRequest(`/${account.provider_account_id}/media`, token, { method: 'POST', body: { media_type: 'CAROUSEL', children: children.join(','), caption } }, config);
   }
   const asset = assets.find((a) => a.role === 'media') || assets[0];
+  if (!asset || !['image', 'video'].includes(asset.kind) || asset.processing_status !== 'ready') throw Object.assign(new Error('A publicação precisa de uma imagem ou vídeo válido.'), { transient: false });
   const mediaUrl = assertSafeMediaUrl(asset.public_url, config);
   const body = asset.kind === 'image' ? { image_url: mediaUrl, caption } : { media_type: format === 'story' ? 'STORIES' : 'REELS', video_url: mediaUrl, caption };
   return metaRequest(`/${account.provider_account_id}/media`, token, { method: 'POST', body }, config);
