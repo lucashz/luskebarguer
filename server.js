@@ -38,6 +38,7 @@ const REFERRAL_MONTHLY_LIMIT_CENTS = 3000;
 const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
 const MARKETING_ATTRIBUTION_COOKIE = 'tapronto_attribution';
+const INSTAGRAM_PROFILE_DESTINATION = 'https://taprontomenu.com.br/?utm_source=instagram&utm_medium=organic&utm_campaign=bio&utm_content=profile_link';
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 30), 1, 90);
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
@@ -124,6 +125,16 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || HOST}`);
     pathname = url.pathname;
+
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/instagram\/?$/.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: INSTAGRAM_PROFILE_DESTINATION,
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, follow'
+      });
+      res.end();
+      return;
+    }
 
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);
