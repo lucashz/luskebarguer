@@ -313,6 +313,7 @@ els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshMarketingButton?.addEventListener('click', loadMarketing);
 els.generateDailyPostButton?.addEventListener('click', () => generateAutopilotPost(Boolean(state.autopilot?.today)));
 els.autopilotSettingsForm?.addEventListener('submit', saveAutopilotSettings);
+els.autopilotSettingsForm?.addEventListener('input', () => { const status = document.querySelector('#marketingSettingsSavedState'); if (status) { status.textContent = 'Alterações ainda não salvas'; status.classList.add('pending'); } });
 els.exportMarketingLeadsButton?.addEventListener('click', exportMarketingLeadsCsv);
 els.marketingCampaignForm?.addEventListener('submit', submitMarketingCampaign);
 els.marketingLeadForm?.addEventListener('submit', submitMarketingLead);
@@ -893,7 +894,8 @@ async function saveAutopilotSettings(event) {
     const data = Object.fromEntries(new FormData(form).entries());
     data.enabled = form.elements.enabled.checked;
     data.days_of_week = [...form.querySelectorAll('[name="days_of_week"]:checked')].map((input) => Number(input.value));
-    for (const name of ['notify_ready','notify_published','notify_failed','notify_disconnected']) data[name] = form.elements[name].checked;
+    for (const name of ['notify_ready','notify_published','notify_failed','notify_disconnected','image_generation_enabled','logo_enabled','seasonal_dates_enabled']) data[name] = form.elements[name].checked;
+    data.content_mix = { product: data.mix_product, education: data.mix_education, pain: data.mix_pain, conversion: data.mix_conversion };
     await request('/api/platform/marketing/autopilot/settings', { method: 'PATCH', body: JSON.stringify(data) });
     await loadMarketing({ silent: true });
     toast('Configurações salvas.');
@@ -906,7 +908,7 @@ function renderAutopilot() {
   const data = state.autopilot || {};
   const run = data.today;
   const settings = data.settings || {};
-  const account = (data.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused);
+  const account = (data.accounts || []).find((item) => item.status === 'connected');
   renderAutopilotStatus();
   if (els.autopilotSettingsForm && settings.id) {
     els.autopilotSettingsForm.elements.enabled.checked = settings.enabled !== false;
@@ -917,8 +919,20 @@ function renderAutopilot() {
     for (const name of ['audience','communication_tone','avoided_topics']) els.autopilotSettingsForm.elements[name].value = settings[name] || '';
     for (const name of ['priority_niches','preferred_ctas','enabled_formats']) els.autopilotSettingsForm.elements[name].value = (settings[name] || []).join(', ');
     for (const name of ['notify_ready','notify_published','notify_failed','notify_disconnected']) els.autopilotSettingsForm.elements[name].checked = settings[name] !== false;
+    for (const name of ['image_style','image_aspect_ratio','image_quality','image_options','logo_position','brand_intensity','max_overlay_words','monthly_image_limit','topic_cooldown_days']) if (els.autopilotSettingsForm.elements[name]) els.autopilotSettingsForm.elements[name].value = settings[name] ?? '';
+    for (const name of ['image_generation_enabled','logo_enabled','seasonal_dates_enabled']) els.autopilotSettingsForm.elements[name].checked = settings[name] !== false;
+    els.autopilotSettingsForm.elements.pause_dates.value = (settings.pause_dates || []).map((value) => String(value).slice(0, 10)).join(', ');
+    const mix = settings.content_mix || { product: 35, education: 25, pain: 25, conversion: 15 };
+    for (const name of ['product','education','pain','conversion']) els.autopilotSettingsForm.elements[`mix_${name}`].value = mix[name] ?? 0;
     const instagramSettings = document.querySelector('#autopilotInstagramSettings');
-    if (instagramSettings) instagramSettings.innerHTML = account ? `<span class="status-pill success">Conectado</span><strong>@${escapeHtml(account.username || account.display_name || 'instagram')}</strong>` : '<span class="status-pill">Não conectado</span><span>Conecte sua conta para agendar e publicar.</span>';
+    if (instagramSettings) instagramSettings.innerHTML = account ? `${account.profile_picture_url ? `<img class="settings-account-avatar" src="${escapeHtml(account.profile_picture_url)}" alt="">` : '<span class="settings-account-avatar fallback">IG</span>'}<span><strong>@${escapeHtml(account.username || account.display_name || 'instagram')}</strong><small>${account.publishing_paused ? 'Conectado · publicações pausadas' : `Conectado · ${account.mode === 'live' ? 'publicação real' : 'modo de teste'}`}${account.last_tested_at ? ` · testado ${formatDateTime(account.last_tested_at)}` : ''}</small></span>` : '<span class="settings-account-avatar fallback">IG</span><span><strong>Instagram não conectado</strong><small>Conecte uma conta profissional para agendar e publicar.</small></span>';
+    const instagramActions = document.querySelector('#autopilotInstagramActions');
+    if (instagramActions) instagramActions.innerHTML = account ? `<button class="ghost-button compact" data-social-action="test" data-account-id="${account.id}" type="button">Testar conexão</button><button class="ghost-button compact" data-social-action="connect" type="button">Trocar conta</button><button class="ghost-button compact danger" data-social-action="disconnect" data-account-id="${account.id}" type="button">Desconectar</button>` : '<button class="primary-button compact" data-social-action="connect" type="button">Conectar Instagram</button>';
+    const instagramBadge = document.querySelector('#instagramConfigBadge'); if (instagramBadge) { instagramBadge.textContent = account ? (account.publishing_paused ? 'Pausado' : 'Conectado') : 'Pendente'; instagramBadge.className = account && !account.publishing_paused ? 'success' : 'attention'; }
+    const imageBadge = document.querySelector('#imageConfigBadge'); if (imageBadge) imageBadge.textContent = settings.image_generation_enabled !== false ? (data.image_generation_ready ? 'IA ativa' : 'Aguardando chave') : 'Desativada';
+    const providerStatus = document.querySelector('#imageProviderStatus'); if (providerStatus) providerStatus.textContent = data.image_generation_ready ? 'Gerador de imagens com IA disponível.' : 'Enquanto a chave da OpenAI não estiver configurada, serão usadas capturas reais do TáPronto.';
+    const progress = document.querySelector('#marketingSetupProgress'); if (progress) { const complete = [Boolean(account), data.image_generation_ready, settings.enabled !== false, Boolean(settings.audience)].filter(Boolean).length; progress.innerHTML = `<span><b>${complete}/4</b> etapas prontas</span><div><i style="width:${complete * 25}%"></i></div><small>${complete === 4 ? 'Tudo pronto para operar.' : 'Você pode usar o modo seguro enquanto conclui as conexões.'}</small>`; }
+    const savedState = document.querySelector('#marketingSettingsSavedState'); if (savedState) { savedState.textContent = 'Todas as alterações foram salvas'; savedState.classList.remove('pending'); }
   }
   if (els.generateDailyPostButton) els.generateDailyPostButton.textContent = run?.content ? 'Gerar outra opção' : 'Preparar post de hoje';
   if (run?.status === 'generating') {
@@ -1389,9 +1403,10 @@ async function handleSocialAction(button) {
     if (action === 'connect') {
       const result = await request('/api/platform/social/connect', { method: 'POST', body: '{}' });
       if (result.authorization_url) window.location.assign(result.authorization_url);
-    } else if (['test', 'pause', 'resume'].includes(action)) {
+    } else if (['test', 'pause', 'resume', 'disconnect'].includes(action)) {
       let payload = {};
       if (action === 'resume') payload = await requestDangerConfirmation('Liberar publicações', 'Digite CONFIRMAR e sua senha. A fila poderá enviar posts aprovados.');
+      if (action === 'disconnect') payload = await requestDangerConfirmation('Desconectar Instagram', 'Digite CONFIRMAR e sua senha. Posts agendados não serão publicados até uma nova conexão.');
       if (payload !== null) await request(`/api/platform/social/accounts/${button.dataset.accountId}/${action}`, { method: 'POST', body: JSON.stringify(payload) });
     } else if (action === 'transition') {
       await request(`/api/platform/social/content/${button.dataset.contentId}/transition`, { method: 'POST', body: JSON.stringify({ status: button.dataset.status }) });
@@ -1404,6 +1419,7 @@ async function handleSocialAction(button) {
       if (payload !== null) await request(`/api/platform/social/content/${button.dataset.contentId}/publish-now`, { method: 'POST', body: JSON.stringify(payload) });
     } else if (action === 'retry') await request(`/api/platform/social/publications/${button.dataset.publicationId}/retry`, { method: 'POST', body: '{}' });
     await refreshSocial();
+    await loadMarketing({ silent: true });
     toast('Operação social atualizada.');
   } catch (error) { toast(error.message || 'Não foi possível concluir a ação.'); }
   finally { button.disabled = false; }

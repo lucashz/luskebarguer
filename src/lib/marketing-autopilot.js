@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
+import sharp from 'sharp';
 
 const TOPICS = [
   { key: 'pedido-organizado', title: 'Pedido completo, sem adivinhação', pillar: 'pedido organizado', niche: 'restaurantes', hook: 'O cliente pediu. Sua equipe recebeu tudo certo?', overlay: 'Pedido completo. Sem adivinhação.', caption: 'Pedido espalhado em conversa dá margem para erro. No TáPronto, produtos, adicionais, endereço e observações chegam organizados para sua equipe.\n\nQuer ver funcionando? Acesse o link do perfil.', cta: 'Ver demonstração', reference: 'sistema-admin-pedidos-original.png' },
@@ -57,8 +58,14 @@ export async function updateAutopilotSettings(data = {}, adminId = null, env = p
   const ctas = arrayValues(data.preferred_ctas).map((value) => cleanText(value, 80)).filter(Boolean).slice(0, 8);
   const formats = arrayValues(data.enabled_formats).filter((value) => ['post','carrossel','story','reel'].includes(value));
   const avoided = cleanText(data.avoided_topics, 600, '');
+  const imageStyle = ['product_device','real_screenshot','before_after','food','illustration','mixed'].includes(data.image_style) ? data.image_style : 'product_device';
+  const aspect = ['1:1','4:5','9:16'].includes(data.image_aspect_ratio) ? data.image_aspect_ratio : '1:1';
+  const logoPosition = ['top_left','top_right','bottom_left','bottom_right'].includes(data.logo_position) ? data.logo_position : 'bottom_right';
+  const brandIntensity = ['subtle','balanced','strong'].includes(data.brand_intensity) ? data.brand_intensity : 'balanced';
+  const pauseDates = arrayValues(data.pause_dates).filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)).slice(0, 60);
+  const contentMix = normalizeContentMix(data.content_mix);
   const db = databasePool(env);
-  const result = await db.query(`update marketing_autopilot_settings set enabled=$1,generation_time=$2,publication_time=$3,image_quality=$4,approval_required=true,updated_by=$5,days_of_week=$6,posts_per_day=$7,audience=$8,priority_niches=$9,communication_tone=$10,preferred_ctas=$11,enabled_formats=$12,avoided_topics=$13,notify_ready=$14,notify_published=$15,notify_failed=$16,notify_disconnected=$17,updated_at=now() where id=1 returning *`, [enabled, generationTime, publicationTime, quality, adminId, days.length ? days : [1,2,3,4,5,6,7], postsPerDay, audience, niches, tone, ctas, formats.length ? formats : ['post'], avoided, data.notify_ready !== false, data.notify_published !== false, data.notify_failed !== false, data.notify_disconnected !== false]);
+  const result = await db.query(`update marketing_autopilot_settings set enabled=$1,generation_time=$2,publication_time=$3,image_quality=$4,approval_required=true,updated_by=$5,days_of_week=$6,posts_per_day=$7,audience=$8,priority_niches=$9,communication_tone=$10,preferred_ctas=$11,enabled_formats=$12,avoided_topics=$13,notify_ready=$14,notify_published=$15,notify_failed=$16,notify_disconnected=$17,image_generation_enabled=$18,image_style=$19,image_aspect_ratio=$20,image_options=$21,logo_enabled=$22,logo_position=$23,brand_intensity=$24,max_overlay_words=$25,monthly_image_limit=$26,topic_cooldown_days=$27,pause_dates=$28,seasonal_dates_enabled=$29,content_mix=$30,updated_at=now() where id=1 returning *`, [enabled, generationTime, publicationTime, quality, adminId, days.length ? days : [1,2,3,4,5,6,7], postsPerDay, audience, niches, tone, ctas, formats.length ? formats : ['post'], avoided, data.notify_ready !== false, data.notify_published !== false, data.notify_failed !== false, data.notify_disconnected !== false, data.image_generation_enabled !== false, imageStyle, aspect, clamp(data.image_options,1,4,1), data.logo_enabled !== false, logoPosition, brandIntensity, clamp(data.max_overlay_words,3,16,8), clamp(data.monthly_image_limit,1,500,60), clamp(data.topic_cooldown_days,1,30,7), pauseDates, data.seasonal_dates_enabled !== false, contentMix]);
   return result.rows[0];
 }
 
@@ -89,20 +96,24 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     if (!force && Array.isArray(settings?.days_of_week) && !settings.days_of_week.includes(weekday)) { await client.query('rollback'); return null; }
     if (!force && localTimeKey(new Date()) < String(settings?.generation_time || '08:00').slice(0, 5)) { await client.query('rollback'); return null; }
     const runDate = localDateKey(new Date());
+    if (!force && (settings?.pause_dates || []).some((value) => databaseDateKey(value) === runDate)) { await client.query('rollback'); return null; }
+    const monthUsage = Number((await client.query(`select count(*)::int total from marketing_autopilot_runs where provider='openai' and status not in ('failed') and run_date>=date_trunc('month',$1::date)`, [runDate])).rows[0]?.total || 0);
+    if (config.apiKey && monthUsage >= Number(settings?.monthly_image_limit || 60)) throw new Error('Limite mensal de imagens atingido. Ajuste o limite nas Configurações.');
     const previous = await client.query('select * from marketing_autopilot_runs where run_date=$1 order by variant desc', [runDate]);
     if (!force && previous.rows.find((item) => ['generating','ready','approved'].includes(item.status))) { await client.query('rollback'); return previous.rows.find((item) => ['generating','ready','approved'].includes(item.status)); }
     const variant = (previous.rows[0]?.variant || 0) + 1;
     if (variant > 20) throw new Error('Limite diário de novas opções atingido.');
     const topic = chooseTopic(runDate, variant);
-    const prompt = imagePrompt(topic, variant);
+    const prompt = imagePrompt(topic, variant, settings);
     const inserted = await client.query(`insert into marketing_autopilot_runs(run_date,variant,status,provider,topic_key,prompt,created_by) values($1,$2,'generating',$3,$4,$5,$6) returning *`, [runDate, variant, config.apiKey ? 'openai' : 'simulation', topic.key, prompt, createdBy]);
     run = inserted.rows[0];
     await client.query('commit');
 
-    const asset = await createAutopilotAsset(topic, run, config, settings?.image_quality || config.quality, createdBy, db);
+    const asset = await createAutopilotAsset(topic, run, config, settings, createdBy, db);
     const account = (await db.query(`select id from social_accounts where status='connected' order by mode='live' desc,created_at desc limit 1`)).rows[0];
     const scheduledAt = futurePublicationTime(runDate, String(settings?.publication_time || '10:00'));
-    const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram','post',$2,'consideration',$3,'Gerar interesse qualificado',$4,$5,$6,$7,'1:1',$8,'America/Sao_Paulo',$9,'draft',$10,$11,$12::jsonb,$13,$14,now()) returning *`, [topic.title, topic.pillar, topic.niche, topic.hook, topic.caption, topic.cta, topic.overlay, topic.overlay, account?.id || null, scheduledAt, ['tapronto','cardapiodigital','pedidosonline','restaurante','delivery'], JSON.stringify([topic.reference]), `${config.baseUrl}/?utm_source=instagram&utm_medium=organic&utm_campaign=post-diario-${topic.key}`, createdBy]);
+    const contentFormat = settings?.image_aspect_ratio === '9:16' ? 'story' : 'post';
+    const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram',$2,$3,'consideration',$4,'Gerar interesse qualificado',$5,$6,$7,$8,$9,$10,'America/Sao_Paulo',$11,'draft',$12,$13,$14::jsonb,$15,$16,now()) returning *`, [topic.title, contentFormat, topic.pillar, topic.niche, topic.hook, topic.caption, topic.cta, topic.overlay, settings?.image_aspect_ratio || '1:1', topic.overlay, account?.id || null, scheduledAt, ['tapronto','cardapiodigital','pedidosonline','restaurante','delivery'], JSON.stringify([topic.reference]), `${config.baseUrl}/?utm_source=instagram&utm_medium=organic&utm_campaign=post-diario-${topic.key}`, createdBy]);
     const content = contentResult.rows[0];
     await db.query(`insert into social_content_assets(content_id,asset_id,sort_order,role) values($1,$2,0,'media')`, [content.id, asset.id]);
     await db.query(`update marketing_autopilot_runs set status='ready',content_id=$1,asset_id=$2,updated_at=now() where id=$3`, [content.id, asset.id, run.id]);
@@ -115,16 +126,19 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
   } finally { client.release(); }
 }
 
-async function createAutopilotAsset(topic, run, config, quality, createdBy, db) {
+async function createAutopilotAsset(topic, run, config, settings, createdBy, db) {
   const referencePath = path.join(config.rootDir, 'public', 'assets', topic.reference);
   if (!existsSync(referencePath)) throw new Error(`Imagem de referência não encontrada: ${topic.reference}`);
   let buffer;
   let provider = 'simulation';
-  if (config.apiKey) {
-    buffer = await requestOpenAiImage(await readFile(referencePath), topic.reference, run.prompt, config, quality);
+  if (config.apiKey && settings?.image_generation_enabled !== false) {
+    buffer = await requestOpenAiImage(await readFile(referencePath), topic.reference, run.prompt, config, settings?.image_quality || config.quality, settings?.image_aspect_ratio || '1:1');
     provider = 'openai';
   } else buffer = await readFile(referencePath);
-  const extension = buffer.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? '.png' : '.jpg';
+  const aspect = settings?.image_aspect_ratio || '1:1';
+  const dimensions = aspect === '9:16' ? [1080, 1920] : aspect === '4:5' ? [1080, 1350] : [1080, 1080];
+  buffer = await sharp(buffer).rotate().resize(dimensions[0], dimensions[1], { fit: 'contain', background: '#f5f6f8' }).png({ compressionLevel: 9 }).toBuffer();
+  const extension = '.png';
   const contentType = extension === '.png' ? 'image/png' : 'image/jpeg';
   const checksum = createHash('sha256').update(buffer).digest('hex');
   const duplicate = await db.query(`select * from social_media_assets where checksum_sha256=$1 and processing_status<>'deleted' limit 1`, [checksum]);
@@ -134,15 +148,15 @@ async function createAutopilotAsset(topic, run, config, quality, createdBy, db) 
   await mkdir(path.dirname(fullPath), { recursive: true });
   await writeFile(fullPath, buffer, { flag: 'wx' });
   const publicUrl = `${config.baseUrl}/uploads/${objectPath.replaceAll(path.sep, '/')}`;
-  const inserted = await db.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,aspect_ratio,checksum_sha256,processing_status,validation_details,created_by) values('instagram','image',$1,$2,$3,$4,$5,1024,1024,'1:1',$6,'ready',$7,$8) returning *`, [`post-${run.run_date}-v${run.variant}${extension}`, objectPath, publicUrl, contentType, buffer.length, checksum, { generated_by: provider, topic: topic.key }, createdBy]);
+  const inserted = await db.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,aspect_ratio,checksum_sha256,processing_status,validation_details,created_by) values('instagram','image',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$11) returning *`, [`post-${run.run_date}-v${run.variant}${extension}`, objectPath, publicUrl, contentType, buffer.length, dimensions[0], dimensions[1], aspect, checksum, { generated_by: provider, topic: topic.key, style: settings?.image_style || 'product_device' }, createdBy]);
   return inserted.rows[0];
 }
 
-async function requestOpenAiImage(reference, fileName, prompt, config, quality) {
+async function requestOpenAiImage(reference, fileName, prompt, config, quality, aspect = '1:1') {
   const form = new FormData();
   form.append('model', config.model);
   form.append('prompt', prompt);
-  form.append('size', '1024x1024');
+  form.append('size', aspect === '9:16' || aspect === '4:5' ? '1024x1536' : '1024x1024');
   form.append('quality', quality);
   form.append('output_format', 'png');
   form.append('image[]', new Blob([reference], { type: fileName.endsWith('.png') ? 'image/png' : 'image/jpeg' }), fileName);
@@ -154,8 +168,9 @@ async function requestOpenAiImage(reference, fileName, prompt, config, quality) 
   return buffer;
 }
 
-function imagePrompt(topic, variant) {
-  return `Use case: ads-marketing\nAsset type: post quadrado do Instagram do TáPronto\nPrimary request: crie uma arte brasileira, simples e profissional sobre ${topic.title}. Use a captura fornecida como referência visual real do produto, mantendo a tela legível e sem deformá-la.\nComposition: captura do sistema em destaque dentro de um celular ou notebook realista; bastante respiro; hierarquia clara para celular.\nColor palette: vermelho #ed1c24, branco e azul-marinho #12213d.\nText (verbatim): "${topic.overlay}"\nConstraints: escreva o texto exatamente em português; no máximo uma frase; preserve a aparência da interface; formato 1:1; variação criativa ${variant}.\nAvoid: letras deformadas, telas retorcidas, texto minúsculo, excesso de elementos, promessas exageradas, marcas de terceiros, watermark.`;
+function imagePrompt(topic, variant, settings = {}) {
+  const styles = { product_device: 'captura do sistema em destaque dentro de um celular ou notebook realista', real_screenshot: 'captura real grande, nítida e sem mockup decorativo', before_after: 'comparação visual limpa entre pedido desorganizado e pedido organizado', food: 'fotografia brasileira de comida combinada com uma captura discreta do produto', illustration: 'ilustração editorial simples combinada com a interface real', mixed: 'escolha a composição mais clara entre produto, comparação e situação real' };
+  return `Use case: ads-marketing\nAsset type: post do Instagram do TáPronto em formato ${settings.image_aspect_ratio || '1:1'}\nPrimary request: crie uma arte brasileira, simples e profissional sobre ${topic.title}. Use a captura fornecida como referência visual real do produto, mantendo a tela legível e sem deformá-la.\nComposition: ${styles[settings.image_style] || styles.product_device}; bastante respiro; hierarquia clara para celular.\nColor palette: vermelho #ed1c24, branco e azul-marinho #12213d; presença da marca ${settings.brand_intensity || 'balanced'}.\nText (verbatim): "${topic.overlay}"\nLogo: ${settings.logo_enabled === false ? 'não inserir logotipo' : `usar o logotipo TáPronto de forma discreta em ${settings.logo_position || 'bottom_right'}`}\nConstraints: escreva o texto exatamente em português; até ${Number(settings.max_overlay_words || 8)} palavras; preserve a aparência da interface; variação criativa ${variant}.\nAvoid: letras deformadas, telas retorcidas, texto minúsculo, excesso de elementos, promessas exageradas, marcas de terceiros, watermark.`;
 }
 
 function chooseTopic(date, variant) {
@@ -165,6 +180,8 @@ function chooseTopic(date, variant) {
 function validTime(value, fallback) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value || '')) ? String(value) : fallback; }
 function arrayValues(value) { return Array.isArray(value) ? value : String(value || '').split(',').map((item) => item.trim()).filter(Boolean); }
 function cleanText(value, max, fallback = '') { const result = String(value ?? fallback).replace(/[\u0000-\u001f]/g, ' ').trim(); return (result || fallback).slice(0, max); }
+function clamp(value, min, max, fallback) { const parsed = Number(value); return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback; }
+function normalizeContentMix(value) { const source = typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return {}; } })() : (value || {}); const result = {}; for (const key of ['product','education','pain','conversion']) result[key] = clamp(source[key], 0, 100, { product:35,education:25,pain:25,conversion:15 }[key]); return result; }
 function localDateKey(date) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); }
 function databaseDateKey(value) { return value instanceof Date ? value.toISOString().slice(0, 10) : String(value || '').slice(0, 10); }
 function localTimeKey(date) { return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).format(date); }

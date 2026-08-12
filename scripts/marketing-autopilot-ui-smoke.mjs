@@ -11,10 +11,11 @@ const chrome = findChrome(); if (!chrome) throw new Error('Chrome ou Edge não e
 const port = 4950 + Math.floor(Math.random() * 100); const debugPort = port + 150;
 const baseUrl = `http://127.0.0.1:${port}`; const profile = mkdtempSync(join(tmpdir(), 'tapronto-autopilot-ui-'));
 const email = `autopilot-ui-${Date.now()}@tapronto.local`; const password = randomBytes(24).toString('base64url');
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); let server; let browser; let adminId = ''; let cdp; let previousReadyIds = [];
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); let server; let browser; let adminId = ''; let cdp; let previousReadyIds = []; let previousSettings = null;
 
 try {
   adminId = (await pool.query(`insert into admin_users(name,email,password_hash,role,is_active) values('Autopilot UI Smoke',$1,$2,'superadmin',true) returning id`, [email, hashPassword(password)])).rows[0].id;
+  previousSettings = (await pool.query(`select image_style,image_aspect_ratio,monthly_image_limit,topic_cooldown_days from marketing_autopilot_settings where id=1`)).rows[0];
   previousReadyIds = (await pool.query(`select id from marketing_autopilot_runs where run_date=(now() at time zone 'America/Sao_Paulo')::date and status='ready'`)).rows.map((row) => row.id);
   server = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl, COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', OPENAI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   await waitFor(`${baseUrl}/api/health`);
@@ -52,6 +53,11 @@ try {
   await delay(600);
   const restoreButton = await evaluate(`Boolean(document.querySelector('[data-autopilot-action="select"]'))`);
   assert(restoreButton, 'O controle para voltar à versão anterior não apareceu.');
+  await evaluate(`document.querySelector('[data-marketing-tab="more"]').click()`); await delay(400);
+  const settingsSaved = await evaluate(`(() => { const f=document.querySelector('#autopilotSettingsForm'); f.elements.image_style.value='before_after'; f.elements.image_aspect_ratio.value='4:5'; f.elements.monthly_image_limit.value='37'; f.elements.topic_cooldown_days.value='9'; f.requestSubmit(); return true; })()`);
+  assert(settingsSaved, 'Formulário de configurações não foi encontrado.'); await delay(700);
+  const updatedSettings = (await pool.query(`select image_style,image_aspect_ratio,monthly_image_limit,topic_cooldown_days from marketing_autopilot_settings where id=1`)).rows[0];
+  assert(updatedSettings.image_style === 'before_after' && updatedSettings.image_aspect_ratio === '4:5' && updatedSettings.monthly_image_limit === 37 && updatedSettings.topic_cooldown_days === 9, 'Configurações do estúdio não foram persistidas.');
   console.log('Marketing autopilot UI smoke: OK');
 } finally {
   cdp?.close(); browser?.kill(); server?.kill();
@@ -59,6 +65,7 @@ try {
     const ids = (await pool.query('select content_id from marketing_autopilot_runs where created_by=$1', [adminId]).catch(() => ({ rows: [] }))).rows.map((row) => row.content_id).filter(Boolean);
     await pool.query('delete from marketing_autopilot_runs where created_by=$1', [adminId]).catch(() => {});
     if (previousReadyIds.length) await pool.query(`update marketing_autopilot_runs set status='ready',updated_at=now() where id=any($1::uuid[]) and status='discarded'`, [previousReadyIds]).catch(() => {});
+    if (previousSettings) await pool.query(`update marketing_autopilot_settings set image_style=$1,image_aspect_ratio=$2,monthly_image_limit=$3,topic_cooldown_days=$4,updated_at=now() where id=1`, [previousSettings.image_style, previousSettings.image_aspect_ratio, previousSettings.monthly_image_limit, previousSettings.topic_cooldown_days]).catch(() => {});
     if (ids.length) await pool.query('delete from marketing_content_items where id=any($1::uuid[])', [ids]).catch(() => {});
     await pool.query('delete from admin_users where id=$1', [adminId]).catch(() => {});
   }
