@@ -16,6 +16,7 @@ import dns from 'node:dns/promises';
 import pg from 'pg';
 import { localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
+import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, validateContentForApproval } from './src/lib/social-publishing.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -71,6 +72,7 @@ const rateLimitBuckets = new Map();
 const requestMetrics = [];
 const MAX_REQUEST_METRICS = 5000;
 const allowedUploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const allowedSocialUploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4']);
 const gunzipAsync = promisify(gunzip);
 
 const orderStatuses = new Set([
@@ -1124,6 +1126,71 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, { pilot: await updatePlatformMarketingPilot(req, admin, platformPilotMatch[1], await readJson(req)) });
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/social') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    json(res, 200, await platformSocialWorkspace());
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/social/connect') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await beginPlatformSocialConnection(req, admin));
+    return;
+  }
+
+  if (method === 'GET' && url.pathname === '/api/platform/social/oauth/callback') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    await completePlatformSocialConnection(req, admin, url.searchParams);
+    res.writeHead(302, { Location: `${platformBaseUrl()}/?view=marketing&social=connected`, 'Cache-Control': 'no-store' }); res.end();
+    return;
+  }
+
+  const socialAccountAction = url.pathname.match(/^\/api\/platform\/social\/accounts\/([a-f0-9-]+)\/(test|pause|resume|disconnect)$/i);
+  if (socialAccountAction && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await platformSocialAccountAction(req, admin, socialAccountAction[1], socialAccountAction[2], await readJson(req)));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/social/assets') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 201, { asset: await uploadPlatformSocialAsset(req, admin, await readJson(req)) });
+    return;
+  }
+
+  const socialContentAssetMatch = url.pathname.match(/^\/api\/platform\/social\/content\/([a-f0-9-]+)\/assets$/i);
+  if (socialContentAssetMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await attachPlatformSocialAsset(req, admin, socialContentAssetMatch[1], await readJson(req)));
+    return;
+  }
+
+  const socialContentActionMatch = url.pathname.match(/^\/api\/platform\/social\/content\/([a-f0-9-]+)\/(transition|publish-now)$/i);
+  if (socialContentActionMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const data = await readJson(req);
+    const result = socialContentActionMatch[2] === 'publish-now'
+      ? await publishPlatformSocialContentNow(req, admin, socialContentActionMatch[1], data)
+      : await transitionPlatformSocialContent(req, admin, socialContentActionMatch[1], data);
+    json(res, 200, result);
+    return;
+  }
+
+  const socialPublicationActionMatch = url.pathname.match(/^\/api\/platform\/social\/publications\/([a-f0-9-]+)\/(retry|cancel)$/i);
+  if (socialPublicationActionMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    json(res, 200, await platformSocialPublicationAction(req, admin, socialPublicationActionMatch[1], socialPublicationActionMatch[2]));
     return;
   }
 
@@ -11371,8 +11438,8 @@ const MARKETING_ITEM_CONFIG = {
   },
   content: {
     table: 'marketing_content_items',
-    statuses: ['idea', 'draft', 'review', 'approved', 'scheduled', 'published'],
-    fields: ['title', 'channel', 'format', 'pillar', 'funnel_stage', 'niche', 'hook', 'script', 'caption', 'cta', 'status', 'scheduled_at', 'published_at', 'published_url', 'campaign_id', 'performance', 'scenes', 'hashtags', 'assets', 'utm_url', 'is_pinned', 'reach', 'views', 'retention_rate', 'saves', 'shares', 'clicks', 'signups', 'attributed_orders', 'attributed_revenue_cents']
+    statuses: SOCIAL_CONTENT_STATUSES,
+    fields: ['title', 'channel', 'format', 'pillar', 'funnel_stage', 'niche', 'objective', 'hook', 'script', 'caption', 'cta', 'overlay_text', 'voiceover', 'aspect_ratio', 'alt_text', 'location_name', 'timezone', 'social_account_id', 'assigned_to', 'status', 'scheduled_at', 'published_at', 'published_url', 'campaign_id', 'performance', 'scenes', 'hashtags', 'assets', 'utm_url', 'is_pinned', 'reach', 'views', 'retention_rate', 'saves', 'shares', 'clicks', 'signups', 'attributed_orders', 'attributed_revenue_cents']
   },
   experiments: {
     table: 'marketing_experiments',
@@ -11453,7 +11520,7 @@ function marketingPayload(kind, data = {}, partial = false) {
     else if (field === 'retention_rate') payload[field] = Math.min(100, Math.max(0, Number(data[field]) || 0));
     else if (['performance', 'scenes', 'assets', 'contact_history'].includes(field)) payload[field] = data[field] && (typeof data[field] === 'object') ? data[field] : (field === 'performance' ? {} : []);
     else if (field === 'hashtags') payload[field] = Array.isArray(data[field]) ? data[field].map((item) => cleanText(item).slice(0, 80)).filter(Boolean).slice(0, 20) : cleanText(data[field]).split(/[ ,]+/).filter(Boolean).slice(0, 20);
-    else if (['starts_at', 'ends_at', 'next_contact_at', 'last_contact_at', 'cadence_started_at', 'closed_at', 'scheduled_at', 'published_at', 'campaign_id'].includes(field)) payload[field] = data[field] || null;
+    else if (['starts_at', 'ends_at', 'next_contact_at', 'last_contact_at', 'cadence_started_at', 'closed_at', 'scheduled_at', 'published_at', 'campaign_id', 'social_account_id', 'assigned_to'].includes(field)) payload[field] = data[field] || null;
     else payload[field] = cleanText(data[field] || '').slice(0, ['script', 'caption', 'notes'].includes(field) ? 8000 : 500);
   }
   const statusField = kind === 'leads' ? 'stage' : 'status';
@@ -11503,6 +11570,12 @@ async function createPlatformMarketingExperiment(req, admin, data) {
 async function updatePlatformMarketingItem(req, admin, kind, id, data) {
   const config = MARKETING_ITEM_CONFIG[kind];
   const payload = marketingPayload(kind, data, true);
+  const currentContent = kind === 'content' ? (await dbRequest('GET', config.table, { select: '*', id: `eq.${id}`, limit: '1' }))[0] : null;
+  if (kind === 'content' && !currentContent) throw httpError(404, 'Item de marketing não encontrado.');
+  if (kind === 'content' && currentContent.channel === 'instagram' && 'status' in payload) {
+    delete payload.status;
+    throw httpError(409, 'Use o fluxo editorial de Canais sociais para alterar o status e preservar a aprovação.');
+  }
   if (kind === 'leads' && payload.stage === 'contacted') {
     const [current] = await dbRequest('GET', 'marketing_leads', { select: '*', id: `eq.${id}`, limit: '1' });
     if (current && current.consent && !current.do_not_contact) {
@@ -11527,7 +11600,13 @@ async function updatePlatformMarketingItem(req, admin, kind, id, data) {
     }
   }
   if (kind === 'experiments') payload.updated_by = admin.id;
-  if (kind === 'content' && ['approved', 'scheduled', 'published'].includes(payload.status)) payload.approved_by = admin.id;
+  if (kind === 'content' && currentContent.channel === 'instagram') {
+    const protectedFields = ['caption', 'cta', 'scheduled_at', 'social_account_id', 'format', 'alt_text', 'location_name'];
+    if (protectedFields.some((field) => field in payload && JSON.stringify(payload[field]) !== JSON.stringify(currentContent[field]))) {
+      Object.assign(payload, invalidateSocialApprovalPatch(currentContent, admin.id));
+    }
+  }
+  if (kind === 'content' && currentContent.channel !== 'instagram' && ['approved', 'scheduled', 'published'].includes(payload.status)) payload.approved_by = admin.id;
   const [row] = await dbRequest('PATCH', config.table, { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
   if (!row) throw httpError(404, 'Item de marketing não encontrado.');
   await audit(`platform.marketing.${kind}.update`, { req, actor_admin_id: admin.id, entity_type: `marketing_${kind}`, entity_id: id, after_data: { status: row.status || row.stage } });
@@ -11647,6 +11726,235 @@ async function runMarketingWeeklyReportAutomation() {
   } catch (error) {
     console.error(JSON.stringify({ scope: 'marketing-weekly-report', message: error.message }));
   }
+}
+
+async function platformSocialWorkspace() {
+  const config = socialConfig();
+  const [accounts, content, assets, links, publications, attempts, metricSnapshots, alerts, workers] = await Promise.all([
+    dbRequest('GET', 'social_accounts', { select: 'id,provider,mode,provider_account_id,username,display_name,profile_picture_url,account_type,scopes,token_expires_at,status,publishing_paused,last_tested_at,last_sync_at,last_error,created_at,updated_at', order: 'created_at.desc', limit: '20' }),
+    dbRequest('GET', 'marketing_content_items', { select: '*', channel: 'eq.instagram', order: 'scheduled_at.asc.nullslast,created_at.desc', limit: '250' }),
+    dbRequest('GET', 'social_media_assets', { select: '*', processing_status: 'neq.deleted', order: 'created_at.desc', limit: '500' }),
+    dbRequest('GET', 'social_content_assets', { select: '*', order: 'sort_order.asc', limit: '2000' }),
+    dbRequest('GET', 'social_publications', { select: '*', order: 'created_at.desc', limit: '250' }),
+    dbRequest('GET', 'social_publication_attempts', { select: '*', order: 'created_at.desc', limit: '250' }),
+    dbRequest('GET', 'social_metric_snapshots', { select: '*', order: 'captured_at.desc', limit: '500' }),
+    dbRequest('GET', 'social_alerts', { select: '*', status: 'eq.open', order: 'created_at.desc', limit: '100' }),
+    dbRequest('GET', 'social_worker_state', { select: '*', limit: '10' })
+  ]);
+  const assetsById = new Map(assets.map((item) => [item.id, item]));
+  const contentAssets = Object.fromEntries(content.map((item) => [item.id, links.filter((link) => link.content_id === item.id).map((link) => ({ ...assetsById.get(link.asset_id), sort_order: link.sort_order, role: link.role })).filter((asset) => asset.id)]));
+  const publicationMetrics = Object.fromEntries(publications.map((item) => [item.id, metricSnapshots.filter((metric) => metric.publication_id === item.id)]));
+  return {
+    config: { ...socialConfigStatus(config), graph_version: config.graphVersion, worker_interval_seconds: config.workerIntervalSeconds, metrics_interval_hours: config.metricsIntervalHours, token_alert_days: config.tokenAlertDays, max_retries: config.maxRetries },
+    accounts, content, assets, content_assets: contentAssets, publications,
+    attempts, metrics: publicationMetrics, alerts, worker: workers.find((item) => item.worker_key === 'instagram-publisher') || null,
+    summary: {
+      awaiting_approval: content.filter((item) => item.status === 'review').length,
+      scheduled: content.filter((item) => item.status === 'scheduled').length,
+      processing: publications.filter((item) => ['claimed', 'container_created', 'processing', 'retry'].includes(item.status)).length,
+      failed: publications.filter((item) => item.status === 'failed').length,
+      published_24h: publications.filter((item) => ['published', 'simulated'].includes(item.status) && item.published_at && new Date(item.published_at) > new Date(Date.now() - 864e5)).length
+    }
+  };
+}
+
+async function beginPlatformSocialConnection(req, admin) {
+  const config = socialConfig();
+  if (config.simulation) {
+    const existing = await dbRequest('GET', 'social_accounts', { select: '*', provider_account_id: 'eq.simulation-tapronto', limit: '1' });
+    const payload = { provider: 'instagram', mode: 'simulation', provider_account_id: 'simulation-tapronto', username: 'tapronto_simulacao', display_name: 'TáPronto · Simulação', account_type: 'BUSINESS', scopes: ['simulation'], status: 'connected', publishing_paused: false, connected_by: admin.id, updated_at: new Date().toISOString() };
+    const rows = existing[0] ? await dbRequest('PATCH', 'social_accounts', { id: `eq.${existing[0].id}` }, payload, ['Prefer: return=representation']) : await dbRequest('POST', 'social_accounts', {}, payload, ['Prefer: return=representation']);
+    await audit('platform.social.account.connect_simulation', { req, actor_admin_id: admin.id, entity_type: 'social_account', entity_id: rows[0].id });
+    return { mode: 'simulation', connected: true, account: sanitizeSocialAccount(rows[0]) };
+  }
+  const status = socialConfigStatus(config);
+  if (!status.oauthReady) throw httpError(503, 'Configure META_APP_ID, META_APP_SECRET, META_REDIRECT_URI e SOCIAL_TOKEN_ENCRYPTION_KEY.');
+  const state = createOAuthState();
+  await dbRequest('POST', 'social_oauth_states', {}, { state_hash: state.hash, provider: 'instagram', admin_id: admin.id, redirect_uri: config.redirectUri, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }, ['Prefer: return=minimal']);
+  await audit('platform.social.oauth.begin', { req, actor_admin_id: admin.id, entity_type: 'social_oauth_state' });
+  return { mode: 'live', authorization_url: instagramAuthorizationUrl(state.state, config) };
+}
+
+async function completePlatformSocialConnection(req, admin, params) {
+  const state = cleanText(params.get('state') || '');
+  const code = cleanText(params.get('code') || '');
+  if (!state || !code) throw httpError(422, 'Callback OAuth incompleto.');
+  const stateHash = hashText(state);
+  const rows = await dbRequest('GET', 'social_oauth_states', { select: '*', state_hash: `eq.${stateHash}`, admin_id: `eq.${admin.id}`, used_at: 'is.null', limit: '1' });
+  const saved = rows[0];
+  if (!saved || new Date(saved.expires_at) <= new Date()) throw httpError(401, 'Estado OAuth inválido ou expirado.');
+  await dbRequest('PATCH', 'social_oauth_states', { id: `eq.${saved.id}`, used_at: 'is.null' }, { used_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  const config = socialConfig();
+  const connected = await exchangeInstagramCode(code, config);
+  const expiresAt = connected.expiresIn ? new Date(Date.now() + connected.expiresIn * 1000).toISOString() : null;
+  const payload = { provider: 'instagram', mode: 'live', provider_account_id: String(connected.profile.id), username: cleanText(connected.profile.username || ''), display_name: cleanText(connected.profile.name || ''), profile_picture_url: cleanText(connected.profile.profile_picture_url || ''), account_type: cleanText(connected.profile.account_type || 'BUSINESS'), access_token_encrypted: encryptSocialSecret(connected.token, config), refresh_token_encrypted: encryptSocialSecret(connected.refreshToken || '', config), scopes: connected.scopes, token_expires_at: expiresAt, status: 'connected', publishing_paused: true, connected_by: admin.id, updated_at: new Date().toISOString() };
+  const existing = await dbRequest('GET', 'social_accounts', { select: 'id', provider_account_id: `eq.${payload.provider_account_id}`, provider: 'eq.instagram', limit: '1' });
+  const account = existing[0] ? (await dbRequest('PATCH', 'social_accounts', { id: `eq.${existing[0].id}` }, payload, ['Prefer: return=representation']))[0] : (await dbRequest('POST', 'social_accounts', {}, payload, ['Prefer: return=representation']))[0];
+  await audit('platform.social.oauth.complete', { req, actor_admin_id: admin.id, entity_type: 'social_account', entity_id: account.id, after_data: { username: account.username, mode: account.mode, scopes: account.scopes } });
+  return sanitizeSocialAccount(account);
+}
+
+async function platformSocialAccountAction(req, admin, id, action, data = {}) {
+  const rows = await dbRequest('GET', 'social_accounts', { select: '*', id: `eq.${id}`, limit: '1' });
+  const account = rows[0];
+  if (!account) throw httpError(404, 'Conta social não encontrada.');
+  let payload = {};
+  if (action === 'disconnect') {
+    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+    payload = { status: 'disconnected', publishing_paused: true, access_token_encrypted: '', refresh_token_encrypted: '', updated_at: new Date().toISOString() };
+  } else if (action === 'pause') payload = { publishing_paused: true, updated_at: new Date().toISOString() };
+  else if (action === 'resume') {
+    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+    if (account.mode === 'live' && !socialConfigStatus().liveReady) throw httpError(503, 'Ambiente ainda não está liberado para publicação real.');
+    payload = { publishing_paused: false, updated_at: new Date().toISOString() };
+  } else if (action === 'test') {
+    if (account.mode === 'live') {
+      const result = await metaRequest(`/${account.provider_account_id}?fields=id,username,account_type`, decryptSocialSecret(account.access_token_encrypted), {}, socialConfig());
+      payload = { status: 'connected', username: cleanText(result.username || account.username), account_type: cleanText(result.account_type || account.account_type), last_tested_at: new Date().toISOString(), last_error: '', updated_at: new Date().toISOString() };
+    } else payload = { status: 'connected', last_tested_at: new Date().toISOString(), last_error: '', updated_at: new Date().toISOString() };
+  }
+  const updated = (await dbRequest('PATCH', 'social_accounts', { id: `eq.${id}` }, payload, ['Prefer: return=representation']))[0];
+  await audit(`platform.social.account.${action}`, { req, actor_admin_id: admin.id, entity_type: 'social_account', entity_id: id, after_data: { status: updated.status, publishing_paused: updated.publishing_paused } });
+  return { account: sanitizeSocialAccount(updated) };
+}
+
+function sanitizeSocialAccount(account = {}) {
+  const { access_token_encrypted, refresh_token_encrypted, ...safe } = account;
+  return { ...safe, has_token: Boolean(access_token_encrypted), has_refresh_token: Boolean(refresh_token_encrypted) };
+}
+
+async function uploadPlatformSocialAsset(req, admin, data = {}) {
+  const fileName = cleanFileName(data.file_name || data.fileName || 'social-media');
+  const contentType = cleanText(data.content_type || data.contentType || '').split(';')[0].toLowerCase();
+  const base64 = String(data.data_base64 || data.dataBase64 || '').replace(/^data:[^;]+;base64,/, '');
+  if (!allowedSocialUploadTypes.has(contentType) || !base64) throw httpError(422, 'Envie JPG, PNG, WebP ou MP4.');
+  const buffer = Buffer.from(base64, 'base64');
+  const isVideo = contentType === 'video/mp4';
+  const maxBytes = isVideo ? 7 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (!buffer.length || buffer.length > maxBytes) throw httpError(422, `Arquivo excede o limite de ${Math.floor(maxBytes / 1024 / 1024)} MB desta interface.`);
+  if (isVideo ? !isMp4Buffer(buffer) : detectImageContentType(buffer) !== contentType) throw httpError(422, 'O conteúdo real não corresponde ao tipo informado.');
+  const checksum = createHash('sha256').update(buffer).digest('hex');
+  const duplicate = await dbRequest('GET', 'social_media_assets', { select: '*', checksum_sha256: `eq.${checksum}`, processing_status: 'neq.deleted', limit: '1' });
+  if (duplicate[0]) return duplicate[0];
+  const extension = isVideo ? '.mp4' : path.extname(fileName).toLowerCase() || ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' })[contentType];
+  const objectPath = `social/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${randomBytes(8).toString('hex')}${extension}`;
+  const fullPath = path.resolve(UPLOAD_DIR, objectPath);
+  if (!fullPath.startsWith(`${UPLOAD_DIR}${path.sep}`)) throw httpError(400, 'Caminho de mídia inválido.');
+  await mkdir(path.dirname(fullPath), { recursive: true }); await writeFile(fullPath, buffer, { flag: 'wx' });
+  const dimensions = isVideo ? { width: Number(data.width) || null, height: Number(data.height) || null } : imageDimensions(buffer, contentType);
+  const relativeUrl = `/uploads/${objectPath.replaceAll(path.sep, '/')}`;
+  const publicUrl = absolutePublicUrl(relativeUrl);
+  assertSafeMediaUrl(publicUrl, socialConfig());
+  const [asset] = await dbRequest('POST', 'social_media_assets', {}, { provider: 'instagram', kind: isVideo ? 'video' : 'image', file_name: fileName, storage_path: objectPath, public_url: publicUrl, content_type: contentType, size_bytes: buffer.length, width: dimensions.width, height: dimensions.height, duration_seconds: isVideo ? Number(data.duration_seconds || 0) || null : null, aspect_ratio: dimensions.width && dimensions.height ? `${dimensions.width}:${dimensions.height}` : '', checksum_sha256: checksum, processing_status: 'ready', validation_details: { signature_valid: true, uploaded_via: 'platform' }, created_by: admin.id }, ['Prefer: return=representation']);
+  await audit('platform.social.asset.upload', { req, actor_admin_id: admin.id, entity_type: 'social_media_asset', entity_id: asset.id, after_data: { kind: asset.kind, size_bytes: asset.size_bytes, checksum: checksum.slice(0, 12) } });
+  return asset;
+}
+
+async function attachPlatformSocialAsset(req, admin, contentId, data = {}) {
+  const assetId = cleanUuid(data.asset_id);
+  const [contentRows, assetRows] = await Promise.all([dbRequest('GET', 'marketing_content_items', { select: '*', id: `eq.${contentId}`, channel: 'eq.instagram', limit: '1' }), dbRequest('GET', 'social_media_assets', { select: '*', id: `eq.${assetId}`, processing_status: 'eq.ready', limit: '1' })]);
+  if (!contentRows[0] || !assetRows[0]) throw httpError(404, 'Conteúdo ou asset não encontrado.');
+  await dbRequest('POST', 'social_content_assets', { on_conflict: 'content_id,asset_id' }, { content_id: contentId, asset_id: assetId, sort_order: clampInteger(data.sort_order, 0, 20), role: ['media', 'cover', 'thumbnail'].includes(data.role) ? data.role : 'media' }, ['Prefer: resolution=merge-duplicates,return=minimal']);
+  if (['approved', 'scheduled'].includes(contentRows[0].status)) await invalidateSocialContentApproval(contentRows[0], admin.id, 'Asset alterado depois da aprovação.');
+  await audit('platform.social.asset.attach', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, after_data: { asset_id: assetId } });
+  return { ok: true };
+}
+
+async function socialContentContext(contentId) {
+  const rows = await dbRequest('GET', 'marketing_content_items', { select: '*', id: `eq.${contentId}`, channel: 'eq.instagram', limit: '1' });
+  const content = rows[0]; if (!content) throw httpError(404, 'Conteúdo social não encontrado.');
+  const links = await dbRequest('GET', 'social_content_assets', { select: '*', content_id: `eq.${contentId}`, order: 'sort_order.asc' });
+  const assetIds = links.map((item) => item.asset_id).filter(Boolean);
+  const assets = assetIds.length ? await dbRequest('GET', 'social_media_assets', { select: '*', id: `in.(${assetIds.join(',')})` }) : [];
+  const byId = new Map(assets.map((item) => [item.id, item]));
+  const ordered = links.map((link) => ({ ...byId.get(link.asset_id), sort_order: link.sort_order, role: link.role })).filter((item) => item.id);
+  const account = content.social_account_id ? (await dbRequest('GET', 'social_accounts', { select: '*', id: `eq.${content.social_account_id}`, limit: '1' }))[0] : null;
+  return { content, assets: ordered, account };
+}
+
+async function transitionPlatformSocialContent(req, admin, contentId, data = {}) {
+  const target = cleanText(data.status || '').toLowerCase();
+  if (!SOCIAL_CONTENT_STATUSES.includes(target)) throw httpError(422, 'Status editorial inválido.');
+  const context = await socialContentContext(contentId);
+  assertTransition(context.content.status, target);
+  const patch = { status: target, updated_at: new Date().toISOString(), revision_history: [...(Array.isArray(context.content.revision_history) ? context.content.revision_history : []), { at: new Date().toISOString(), from: context.content.status, to: target, admin_id: admin.id, note: cleanText(data.note || '').slice(0, 500) }].slice(-100) };
+  if (data.scheduled_at) patch.scheduled_at = new Date(data.scheduled_at).toISOString();
+  if (data.social_account_id) patch.social_account_id = cleanUuid(data.social_account_id);
+  if (target === 'approved') {
+    const refreshed = await socialContentContext(contentId);
+    const account = patch.social_account_id ? (await dbRequest('GET', 'social_accounts', { select: '*', id: `eq.${patch.social_account_id}`, limit: '1' }))[0] : refreshed.account;
+    const candidate = { ...refreshed.content, ...patch };
+    const errors = validateContentForApproval(candidate, refreshed.assets, account);
+    if (errors.length) throw httpError(422, 'Conteúdo ainda não pode ser aprovado.', { code: 'SOCIAL_APPROVAL_FAILED', errors });
+    patch.approved_at = new Date().toISOString(); patch.approved_by = admin.id; patch.approved_caption = candidate.caption;
+    patch.approved_assets_hash = assetsApprovalHash(refreshed.assets); patch.approved_version_hash = contentApprovalHash(candidate, refreshed.assets); patch.publication_error = '';
+  }
+  if (target === 'scheduled') {
+    const candidate = { ...context.content, ...patch };
+    if (!candidate.scheduled_at || new Date(candidate.scheduled_at) <= new Date()) throw httpError(422, 'Escolha uma data futura para agendar.');
+    if (!candidate.social_account_id || !candidate.approved_version_hash) throw httpError(422, 'Aprove o conteúdo com conta e horário definidos antes de agendar.');
+  }
+  const [updated] = await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${contentId}` }, patch, ['Prefer: return=representation']);
+  let publication = null;
+  if (target === 'scheduled') publication = await queueSocialPublication(updated, admin.id);
+  await audit('platform.social.content.transition', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, before_data: { status: context.content.status }, after_data: { status: target, publication_id: publication?.id || null } });
+  return { content: updated, publication };
+}
+
+async function queueSocialPublication(content, adminId) {
+  const account = (await dbRequest('GET', 'social_accounts', { select: '*', id: `eq.${content.social_account_id}`, limit: '1' }))[0];
+  if (!account) throw httpError(422, 'Conta social não encontrada.');
+  const key = publicationIdempotencyKey(content, account);
+  const existing = await dbRequest('GET', 'social_publications', { select: '*', idempotency_key: `eq.${key}`, limit: '1' });
+  if (existing[0]) return existing[0];
+  const [row] = await dbRequest('POST', 'social_publications', {}, { content_id: content.id, account_id: account.id, content_version: content.content_version, idempotency_key: key, approved_hash: content.approved_version_hash, mode: account.mode, status: 'queued', scheduled_at: content.scheduled_at, created_by: adminId }, ['Prefer: return=representation']);
+  return row;
+}
+
+async function publishPlatformSocialContentNow(req, admin, contentId, data = {}) {
+  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+  const context = await socialContentContext(contentId);
+  if (!['approved', 'failed', 'simulated'].includes(context.content.status)) throw httpError(422, 'Somente conteúdo aprovado pode ser publicado agora.');
+  const scheduledAt = new Date(Date.now() + 5000).toISOString();
+  const next = { ...context.content, status: 'scheduled', scheduled_at: scheduledAt, content_version: Number(context.content.content_version || 1) + (context.content.status === 'simulated' ? 1 : 0), publication_error: '', updated_at: new Date().toISOString() };
+  if (context.content.status === 'simulated') next.approved_version_hash = contentApprovalHash(next, context.assets);
+  const [updated] = await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${contentId}` }, next, ['Prefer: return=representation']);
+  const publication = await queueSocialPublication(updated, admin.id);
+  await audit('platform.social.content.publish_now', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, after_data: { publication_id: publication.id, mode: publication.mode } });
+  return { content: updated, publication };
+}
+
+async function platformSocialPublicationAction(req, admin, id, action) {
+  const publication = (await dbRequest('GET', 'social_publications', { select: '*', id: `eq.${id}`, limit: '1' }))[0];
+  if (!publication) throw httpError(404, 'Publicação não encontrada.');
+  if (action === 'cancel' && !['queued', 'retry', 'claimed'].includes(publication.status)) throw httpError(422, 'Esta publicação não pode mais ser cancelada com segurança.');
+  if (action === 'retry' && publication.status !== 'failed') throw httpError(422, 'Somente falhas podem voltar para a fila.');
+  const status = action === 'retry' ? 'retry' : 'cancelled';
+  const [updated] = await dbRequest('PATCH', 'social_publications', { id: `eq.${id}` }, { status, next_attempt_at: action === 'retry' ? new Date().toISOString() : null, last_error: action === 'retry' ? '' : publication.last_error, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${publication.content_id}` }, { status: action === 'retry' ? 'scheduled' : 'cancelled', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await audit(`platform.social.publication.${action}`, { req, actor_admin_id: admin.id, entity_type: 'social_publication', entity_id: id });
+  return { publication: updated };
+}
+
+async function invalidateSocialContentApproval(content, adminId, reason) {
+  return dbRequest('PATCH', 'marketing_content_items', { id: `eq.${content.id}` }, invalidateSocialApprovalPatch(content, adminId, reason), ['Prefer: return=minimal']);
+}
+
+function invalidateSocialApprovalPatch(content, adminId = null, reason = 'Conteúdo alterado depois da aprovação.') {
+  if (!['approved', 'scheduled'].includes(content.status)) return { content_version: Number(content.content_version || 1) + 1 };
+  return { status: 'review', approved_at: null, approved_by: null, approved_version_hash: '', approved_caption: '', approved_assets_hash: '', content_version: Number(content.content_version || 1) + 1, revision_history: [...(Array.isArray(content.revision_history) ? content.revision_history : []), { at: new Date().toISOString(), from: content.status, to: 'review', admin_id: adminId, note: reason }].slice(-100), updated_at: new Date().toISOString() };
+}
+
+function isMp4Buffer(buffer) { return buffer.length > 12 && buffer.subarray(4, 12).toString('ascii').includes('ftyp'); }
+function imageDimensions(buffer, contentType) {
+  try {
+    if (contentType === 'image/png' && buffer.length >= 24) return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+    if (contentType === 'image/jpeg') {
+      let offset = 2;
+      while (offset + 9 < buffer.length) { if (buffer[offset] !== 0xff) break; const marker = buffer[offset + 1]; const length = buffer.readUInt16BE(offset + 2); if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) }; offset += 2 + length; }
+    }
+  } catch {}
+  return { width: null, height: null };
 }
 
 async function assignPublicMarketingExperiment(req, rawSurface = '') {
@@ -12489,6 +12797,7 @@ async function platformConfigChecklist() {
   const production = process.env.NODE_ENV === 'production';
   const appUrl = process.env.APP_URL || process.env.PUBLIC_APP_URL || '';
   const apiUrl = process.env.API_URL || appUrl || '';
+  const social = socialConfigStatus();
   const items = [
     configItem('database_url', 'DATABASE_URL configurada', Boolean(DATABASE_URL), maskConfigValue(DATABASE_URL, 'url')),
     configItem('app_url', 'APP_URL/PUBLIC_APP_URL configurada', Boolean(appUrl), maskConfigValue(appUrl, 'url')),
@@ -12497,6 +12806,9 @@ async function platformConfigChecklist() {
     configItem('jwt_secret', 'Secrets de sessão não padrão', hasStrongSessionSecret(), hasStrongSessionSecret() ? 'Configurado' : 'Configure SESSION_SECRET/COOKIE_SECRET'),
     configItem('cookie_secret', 'COOKIE_SECRET/SESSION_SECRET configurado', Boolean(process.env.COOKIE_SECRET || process.env.SESSION_SECRET), 'Não exibe segredo'),
     configItem('payment_secrets_key', 'Criptografia das credenciais de pagamento', Boolean(process.env.PAYMENT_SECRETS_KEY), 'Configure PAYMENT_SECRETS_KEY e não altere depois de salvar credenciais'),
+    configItem('social_encryption', 'Criptografia dos tokens sociais', social.encryptionReady, 'Configure SOCIAL_TOKEN_ENCRYPTION_KEY e guarde-a fora do servidor'),
+    configItem('instagram_mode', 'Instagram em modo seguro', social.simulation || social.liveReady, social.simulation ? 'Simulação ativa; nenhum post real será enviado' : social.liveReady ? 'Publicação real habilitada' : 'Credenciais ou liberação ausentes'),
+    configItem('instagram_oauth', 'OAuth oficial do Instagram', social.oauthReady, social.oauthReady ? 'Credenciais Meta presentes' : 'Opcional enquanto o modo simulado estiver ativo', social.simulation),
     configItem('cookie_secure', 'COOKIE_SECURE correto para produção', !production || COOKIE_SECURE === true, String(COOKIE_SECURE)),
     configItem('abacate_api', 'Abacate Pay configurado', Boolean(billing?.is_active && billing?.has_api_key), billing?.has_api_key ? `Configurado (${billing.source})` : 'Ausente'),
     configItem('abacate_webhook', 'Webhook Abacate Pay configurado', Boolean(billing?.has_webhook_secret), billing?.has_webhook_secret ? `Configurado (${billing.source})` : 'Ausente'),

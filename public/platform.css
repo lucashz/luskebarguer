@@ -3023,3 +3023,11 @@ body.platform-redesign [hidden] {
 .platform-funnel-step strong { font-size: 1.45rem; }
 @media (max-width: 900px) { .platform-marketing-grid { grid-template-columns: 1fr; } .platform-marketing-row { align-items: flex-start; flex-wrap: wrap; } }
 @media (max-width: 900px) { .platform-marketing-funnel { grid-template-columns: repeat(2, 1fr); } }
+.social-control-card { border-left: 4px solid var(--primary, #e31b23); margin-bottom: 1rem; }
+.social-kpis { margin-top: 1rem; }
+.social-workspace { grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); margin-bottom: 1rem; }
+.social-side-column { display: grid; gap: 1rem; align-content: start; }
+.social-content-row { align-items: flex-start; }
+.social-content-row p { max-width: 62ch; white-space: pre-line; }
+.social-alert { display: grid; gap: .2rem; margin-top: .75rem; padding: .75rem; border-radius: 10px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
+@media (max-width: 900px) { .social-workspace { grid-template-columns: 1fr; } }

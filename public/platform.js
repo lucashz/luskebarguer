@@ -23,6 +23,7 @@
   whatsappSettings: null,
   emailTemplates: [],
   marketing: null,
+  social: null,
   marketingLoaded: false,
   marketingActiveTab: 'campaigns',
   supportTickets: [],
@@ -218,6 +219,19 @@ const els = {
   marketingContentList: document.querySelector('#marketingContentList'),
   marketingExperimentList: document.querySelector('#marketingExperimentList'),
   marketingAutomationList: document.querySelector('#marketingAutomationList'),
+  socialConfigMessage: document.querySelector('#socialConfigMessage'),
+  socialAccountActions: document.querySelector('#socialAccountActions'),
+  socialSummary: document.querySelector('#socialSummary'),
+  socialStatusFilter: document.querySelector('#socialStatusFilter'),
+  socialContentList: document.querySelector('#socialContentList'),
+  socialAssetForm: document.querySelector('#socialAssetForm'),
+  socialAssetList: document.querySelector('#socialAssetList'),
+  socialScheduleForm: document.querySelector('#socialScheduleForm'),
+  socialContentSelect: document.querySelector('#socialContentSelect'),
+  socialAccountSelect: document.querySelector('#socialAccountSelect'),
+  socialWorkerStatus: document.querySelector('#socialWorkerStatus'),
+  socialPublicationList: document.querySelector('#socialPublicationList'),
+  socialAlertList: document.querySelector('#socialAlertList'),
   marketingTabs: [...document.querySelectorAll('[data-marketing-tab]')],
   marketingPanels: [...document.querySelectorAll('[data-marketing-panel]')],
   platformSmtpForm: document.querySelector('#platformSmtpForm'),
@@ -276,12 +290,18 @@ els.marketingContentMetricsForm?.addEventListener('submit', submitMarketingConte
 els.marketingLeadCsvInput?.addEventListener('change', importMarketingLeadsCsv);
 els.generateMarketingReportButton?.addEventListener('click', generateMarketingWeeklyReport);
 els.marketingPilotForm?.addEventListener('submit', submitMarketingPilot);
+els.socialAssetForm?.addEventListener('submit', uploadSocialAsset);
+els.socialScheduleForm?.addEventListener('submit', approveAndScheduleSocialContent);
+els.socialStatusFilter?.addEventListener('change', renderSocialPublishing);
 els.marketingTabs.forEach((button) => button.addEventListener('click', () => activateMarketingTab(button.dataset.marketingTab)));
 document.addEventListener('click', (event) => {
   const button = event.target.closest?.('[data-marketing-update]');
   if (button) updateMarketingStatus(button);
   const pilotButton = event.target.closest?.('[data-marketing-pilot-next]');
   if (pilotButton) advanceMarketingPilot(pilotButton);
+  const socialButton = event.target.closest?.('[data-social-action]');
+  if (socialButton) handleSocialAction(socialButton);
+  if (event.target.closest?.('[data-marketing-open-social]')) activateMarketingTab('social');
 });
 document.addEventListener('change', (event) => {
   const select = event.target.closest?.('[data-marketing-lead-stage]');
@@ -737,9 +757,12 @@ async function loadCommunication(options = {}) {
 async function loadMarketing(options = {}) {
   if (els.refreshMarketingButton) els.refreshMarketingButton.disabled = true;
   try {
-    state.marketing = await request('/api/platform/marketing');
+    const [marketing, social] = await Promise.all([request('/api/platform/marketing'), request('/api/platform/social')]);
+    state.marketing = marketing;
+    state.social = social;
     state.marketingLoaded = true;
     renderMarketing();
+    renderSocialPublishing();
     if (!options.silent) toast('Marketing atualizado.');
   } catch (error) {
     state.marketingLoaded = false;
@@ -913,7 +936,7 @@ function renderMarketing() {
     return `<div class="platform-marketing-row"><div><strong>${escapeHtml(item.business_name)}</strong><small>${escapeHtml(item.contact_name || item.phone || item.email || '')} · ${escapeHtml(item.stage)} ${item.consent ? '· contato autorizado' : '· sem consentimento'}${item.do_not_contact ? ' · não contatar' : ''}</small><small class="${overdue ? 'text-danger' : ''}">${escapeHtml(item.next_action || 'Definir próxima ação')} · ${item.next_contact_at ? formatDateTime(item.next_contact_at) : 'sem data'} · etapa D${[0, 2, 5, 9, 14][Number(item.cadence_step || 0)] || 0}</small></div><select data-marketing-lead-stage="${item.id}"><option value="contacted">Contatado</option><option value="qualified">Qualificado</option><option value="trial">Teste</option><option value="customer">Cliente</option><option value="lost">Perdido</option></select><button class="ghost-button compact" data-marketing-update="leads:${item.id}:stage:contacted" type="button">Salvar</button></div>`;
   }).join('') : '<p class="muted">Nenhum lead cadastrado.</p>';
   const content = data.content || [];
-  els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${item.is_pinned ? '📌 ' : ''}${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)} · ${Number(item.reach || 0)} alcance · ${Number(item.clicks || 0)} cliques · ${Number(item.signups || 0)} cadastros</small><p>${escapeHtml(item.hook || '')}</p><small>${item.script ? 'roteiro ✓' : 'roteiro pendente'} · ${item.caption ? 'legenda ✓' : 'legenda pendente'} · ${(item.assets || []).length ? 'assets ✓' : 'assets pendentes'} · ${item.utm_url ? 'UTM ✓' : 'UTM pendente'}</small></div>${item.status === 'draft' ? `<button class="ghost-button compact" data-marketing-update="content:${item.id}:status:review" type="button">Enviar para revisão</button>` : item.status === 'review' ? `<button class="primary-button compact" data-marketing-update="content:${item.id}:status:approved" type="button">Aprovar</button>` : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
+  els.marketingContentList.innerHTML = content.length ? content.map((item) => `<div class="platform-marketing-row"><div><strong>${item.is_pinned ? '📌 ' : ''}${escapeHtml(item.title)}</strong><small>${escapeHtml(item.channel)} · ${escapeHtml(item.format)} · ${escapeHtml(item.status)} · ${Number(item.reach || 0)} alcance · ${Number(item.clicks || 0)} cliques · ${Number(item.signups || 0)} cadastros</small><p>${escapeHtml(item.hook || '')}</p><small>${item.script ? 'roteiro ✓' : 'roteiro pendente'} · ${item.caption ? 'legenda ✓' : 'legenda pendente'} · ${item.utm_url ? 'UTM ✓' : 'UTM pendente'}</small></div>${item.channel === 'instagram' ? '<button class="ghost-button compact" data-marketing-open-social type="button">Abrir fluxo social</button>' : ''}</div>`).join('') : '<p class="muted">Nenhum conteúdo na fila.</p>';
   if (els.marketingContentMetricSelect) els.marketingContentMetricSelect.innerHTML = content.map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join('');
   const automationRuns = data.automation_runs || [];
   if (els.marketingAutomationList) els.marketingAutomationList.innerHTML = automationRuns.length ? automationRuns.slice(0, 12).map((run) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(marketingAutomationLabel(run.automation_key))}</strong><small>${escapeHtml(run.status)} · ${formatDateTime(run.executed_at || run.created_at)}</small></div><span class="status-pill ${run.status === 'sent' ? 'success' : run.status === 'failed' ? 'danger' : ''}">${escapeHtml(run.status)}</span></div>`).join('') : '<p class="muted">Nenhum disparo registrado ainda. A rotina verifica os gatilhos a cada seis horas.</p>';
@@ -926,6 +949,99 @@ function renderMarketing() {
   renderMarketingAttributionJourneys(data.attribution_journeys || []);
   renderMarketingPilots(data.pilots || []);
   activateMarketingTab(state.marketingActiveTab);
+}
+
+function socialStatusLabel(value = '') {
+  return ({ idea: 'Ideia', draft: 'Rascunho', production: 'Em produção', review: 'Em revisão', changes_requested: 'Ajustes pedidos', approved: 'Aprovado', scheduled: 'Agendado', publishing: 'Publicando', processing: 'Processando', published: 'Publicado', simulated: 'Simulado', failed: 'Falhou', cancelled: 'Cancelado', queued: 'Na fila', retry: 'Nova tentativa' })[value] || value;
+}
+
+function renderSocialPublishing() {
+  if (!els.socialSummary) return;
+  const data = state.social || {};
+  const config = data.config || {};
+  const accounts = data.accounts || [];
+  const account = accounts.find((item) => item.status === 'connected') || accounts[0];
+  const mode = config.simulation ? 'Modo simulado: nada será enviado ao Instagram.' : config.liveReady ? 'Publicação real liberada pela configuração do servidor.' : 'Publicação real bloqueada até concluir as credenciais Meta.';
+  els.socialConfigMessage.textContent = mode;
+  els.socialAccountActions.innerHTML = account
+    ? `<span class="status-pill ${account.status === 'connected' ? 'success' : 'danger'}">@${escapeHtml(account.username || account.display_name || 'instagram')} · ${escapeHtml(account.mode)}</span><button class="ghost-button compact" data-social-action="test" data-account-id="${account.id}" type="button">Testar conexão</button><button class="ghost-button compact" data-social-action="${account.publishing_paused ? 'resume' : 'pause'}" data-account-id="${account.id}" type="button">${account.publishing_paused ? 'Liberar fila' : 'Pausar fila'}</button>`
+    : `<button class="primary-button compact" data-social-action="connect" type="button">${config.simulation ? 'Ativar simulação' : 'Conectar Instagram'}</button>`;
+  const summary = data.summary || {};
+  els.socialSummary.innerHTML = [['Em revisão', summary.awaiting_approval || 0], ['Agendados', summary.scheduled || 0], ['Processando', summary.processing || 0], ['Falhas', summary.failed || 0], ['Publicados 24h', summary.published_24h || 0]].map(([label, value]) => `<article class="platform-kpi-card"><span>${label}</span><strong>${value}</strong></article>`).join('');
+  const filter = els.socialStatusFilter?.value || '';
+  const contents = (data.content || []).filter((item) => !filter || item.status === filter);
+  els.socialContentList.innerHTML = contents.map((item) => {
+    const assets = data.content_assets?.[item.id] || [];
+    const next = ['idea', 'cancelled'].includes(item.status) ? 'draft' : ['draft', 'production', 'changes_requested'].includes(item.status) ? 'review' : item.status === 'review' ? 'changes_requested' : '';
+    return `<div class="platform-marketing-row social-content-row"><div><strong>${escapeHtml(item.title)}</strong><small><span class="status-pill">${escapeHtml(socialStatusLabel(item.status))}</span> ${escapeHtml(item.format)} · versão ${Number(item.content_version || 1)} · ${assets.length} mídia(s)</small><p>${escapeHtml(item.caption || item.hook || 'Legenda ainda não preenchida.')}</p>${item.publication_error ? `<small class="text-danger">${escapeHtml(item.publication_error)}</small>` : ''}</div><div class="row-actions">${next ? `<button class="ghost-button compact" data-social-action="transition" data-content-id="${item.id}" data-status="${next}" type="button">${next === 'review' ? 'Enviar à revisão' : next === 'draft' ? 'Criar rascunho' : 'Pedir ajustes'}</button>` : ''}${['approved', 'failed', 'simulated'].includes(item.status) ? `<button class="primary-button compact" data-social-action="publish-now" data-content-id="${item.id}" type="button">Publicar agora</button>` : ''}</div></div>`;
+  }).join('') || '<p class="muted">Nenhum conteúdo neste estado.</p>';
+  const assets = data.assets || [];
+  els.socialAssetList.innerHTML = assets.slice(0, 12).map((asset) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(asset.file_name)}</strong><small>${escapeHtml(asset.kind)} · ${Math.round(Number(asset.size_bytes || 0) / 1024)} KB</small></div><button class="ghost-button compact" data-social-action="attach" data-asset-id="${asset.id}" type="button">Vincular</button></div>`).join('') || '<p class="muted">Nenhuma mídia enviada.</p>';
+  const reviewable = (data.content || []).filter((item) => item.status === 'review');
+  els.socialContentSelect.innerHTML = reviewable.map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join('');
+  els.socialAccountSelect.innerHTML = accounts.filter((item) => item.status === 'connected').map((item) => `<option value="${item.id}">@${escapeHtml(item.username || item.display_name)}</option>`).join('');
+  const worker = data.worker;
+  els.socialWorkerStatus.textContent = worker ? `Worker: ${socialStatusLabel(worker.status)} · último sinal ${formatDateTime(worker.heartbeat_at || worker.updated_at)}` : 'Worker ainda não registrou atividade.';
+  els.socialPublicationList.innerHTML = (data.publications || []).slice(0, 20).map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(socialStatusLabel(item.status))}</strong><small>${formatDateTime(item.scheduled_at)} · tentativa ${Number(item.attempt_count || 0)}</small>${item.last_error ? `<small class="text-danger">${escapeHtml(item.last_error)}</small>` : ''}</div>${item.status === 'failed' ? `<button class="ghost-button compact" data-social-action="retry" data-publication-id="${item.id}" type="button">Tentar novamente</button>` : ''}</div>`).join('') || '<p class="muted">Nenhuma publicação enfileirada.</p>';
+  els.socialAlertList.innerHTML = (data.alerts || []).map((item) => `<div class="social-alert"><strong>${escapeHtml(socialStatusLabel(item.kind || 'Alerta'))}</strong><span>${escapeHtml(item.message || '')}</span></div>`).join('');
+}
+
+async function refreshSocial() {
+  state.social = await request('/api/platform/social');
+  renderSocialPublishing();
+}
+
+async function handleSocialAction(button) {
+  button.disabled = true;
+  try {
+    const action = button.dataset.socialAction;
+    if (action === 'connect') {
+      const result = await request('/api/platform/social/connect', { method: 'POST', body: '{}' });
+      if (result.authorization_url) window.location.assign(result.authorization_url);
+    } else if (['test', 'pause', 'resume'].includes(action)) {
+      let payload = {};
+      if (action === 'resume') payload = await requestDangerConfirmation('Liberar publicações', 'Digite CONFIRMAR e sua senha. A fila poderá enviar posts aprovados.');
+      if (payload !== null) await request(`/api/platform/social/accounts/${button.dataset.accountId}/${action}`, { method: 'POST', body: JSON.stringify(payload) });
+    } else if (action === 'transition') {
+      await request(`/api/platform/social/content/${button.dataset.contentId}/transition`, { method: 'POST', body: JSON.stringify({ status: button.dataset.status }) });
+    } else if (action === 'attach') {
+      const contentId = els.socialContentSelect?.value;
+      if (!contentId) throw new Error('Selecione um conteúdo em revisão antes de vincular a mídia.');
+      await request(`/api/platform/social/content/${contentId}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: button.dataset.assetId, role: 'media' }) });
+    } else if (action === 'publish-now') {
+      const payload = await requestDangerConfirmation('Publicar agora', 'Digite CONFIRMAR e sua senha. O conteúdo aprovado entrará imediatamente na fila.');
+      if (payload !== null) await request(`/api/platform/social/content/${button.dataset.contentId}/publish-now`, { method: 'POST', body: JSON.stringify(payload) });
+    } else if (action === 'retry') await request(`/api/platform/social/publications/${button.dataset.publicationId}/retry`, { method: 'POST', body: '{}' });
+    await refreshSocial();
+    toast('Operação social atualizada.');
+  } catch (error) { toast(error.message || 'Não foi possível concluir a ação.'); }
+  finally { button.disabled = false; }
+}
+
+async function uploadSocialAsset(event) {
+  event.preventDefault();
+  const file = event.currentTarget.elements.file.files?.[0];
+  if (!file) return;
+  const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
+  try {
+    const dataBase64 = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
+    await request('/api/platform/social/assets', { method: 'POST', body: JSON.stringify({ file_name: file.name, content_type: file.type, data_base64: dataBase64 }) });
+    event.currentTarget.reset(); await refreshSocial(); toast('Mídia validada e adicionada.');
+  } catch (error) { toast(error.message || 'Falha no envio da mídia.'); }
+  finally { button.disabled = false; }
+}
+
+async function approveAndScheduleSocialContent(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  data.scheduled_at = new Date(data.scheduled_at).toISOString();
+  const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
+  try {
+    await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
+    await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'scheduled', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id }) });
+    event.currentTarget.reset(); await refreshSocial(); toast('Conteúdo aprovado e agendado.');
+  } catch (error) { toast(error.message || 'Não foi possível aprovar e agendar.'); }
+  finally { button.disabled = false; }
 }
 
 function renderMarketingWeeklyReport(reports) {

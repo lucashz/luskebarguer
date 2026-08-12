@@ -1,0 +1,27 @@
+[Unit]
+Description=TáPronto Instagram Publishing Worker
+After=network-online.target postgresql.service cardapio.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lucas
+Group=lucas
+WorkingDirectory=/var/www
+EnvironmentFile=/var/www/.env
+ExecStart=/usr/bin/node /var/www/scripts/social-publishing-worker.mjs
+Restart=always
+RestartSec=8
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/uploads /var/www/logs
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
