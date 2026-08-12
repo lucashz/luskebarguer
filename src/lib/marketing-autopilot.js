@@ -22,8 +22,10 @@ function databasePool(env = process.env) {
 }
 
 export function autopilotConfig(env = process.env) {
+  const requestedProvider = String(env.MARKETING_IMAGE_PROVIDER || 'local').toLowerCase();
   return {
     apiKey: env.OPENAI_API_KEY || '',
+    imageProvider: requestedProvider === 'openai' ? 'openai' : 'local',
     model: env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
     quality: ['low', 'medium', 'high', 'auto'].includes(env.OPENAI_IMAGE_QUALITY) ? env.OPENAI_IMAGE_QUALITY : 'medium',
     baseUrl: String(env.PUBLIC_BASE_URL || env.APP_BASE_URL || 'https://taprontomenu.com.br').replace(/\/$/, ''),
@@ -42,7 +44,8 @@ export async function autopilotDashboard(env = process.env) {
   const today = localDateKey(new Date());
   const todayRuns = runs.rows.filter((item) => databaseDateKey(item.run_date) === today && item.status !== 'discarded');
   const todayRun = todayRuns.find((item) => ['ready', 'approved'].includes(item.status)) || todayRuns.find((item) => item.status === 'generating') || todayRuns.find((item) => item.status === 'failed') || null;
-  return { settings: settings.rows[0], today: todayRun, history: runs.rows, accounts: accounts.rows, image_generation_ready: Boolean(autopilotConfig(env).apiKey), mode: autopilotConfig(env).apiKey ? 'openai' : 'simulation' };
+  const config = autopilotConfig(env);
+  return { settings: settings.rows[0], today: todayRun, history: runs.rows, accounts: accounts.rows, image_generation_ready: true, mode: config.imageProvider, image_provider: config.imageProvider };
 }
 
 export async function updateAutopilotSettings(data = {}, adminId = null, env = process.env) {
@@ -98,14 +101,14 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     const runDate = localDateKey(new Date());
     if (!force && (settings?.pause_dates || []).some((value) => databaseDateKey(value) === runDate)) { await client.query('rollback'); return null; }
     const monthUsage = Number((await client.query(`select count(*)::int total from marketing_autopilot_runs where provider='openai' and status not in ('failed') and run_date>=date_trunc('month',$1::date)`, [runDate])).rows[0]?.total || 0);
-    if (config.apiKey && monthUsage >= Number(settings?.monthly_image_limit || 60)) throw new Error('Limite mensal de imagens atingido. Ajuste o limite nas Configurações.');
+    if (config.imageProvider === 'openai' && config.apiKey && monthUsage >= Number(settings?.monthly_image_limit || 60)) throw new Error('Limite mensal de imagens atingido. Ajuste o limite nas Configurações.');
     const previous = await client.query('select * from marketing_autopilot_runs where run_date=$1 order by variant desc', [runDate]);
     if (!force && previous.rows.find((item) => ['generating','ready','approved'].includes(item.status))) { await client.query('rollback'); return previous.rows.find((item) => ['generating','ready','approved'].includes(item.status)); }
     const variant = (previous.rows[0]?.variant || 0) + 1;
     if (variant > 20) throw new Error('Limite diário de novas opções atingido.');
     const topic = chooseTopic(runDate, variant);
     const prompt = imagePrompt(topic, variant, settings);
-    const inserted = await client.query(`insert into marketing_autopilot_runs(run_date,variant,status,provider,topic_key,prompt,created_by) values($1,$2,'generating',$3,$4,$5,$6) returning *`, [runDate, variant, config.apiKey ? 'openai' : 'simulation', topic.key, prompt, createdBy]);
+    const inserted = await client.query(`insert into marketing_autopilot_runs(run_date,variant,status,provider,topic_key,prompt,created_by) values($1,$2,'generating',$3,$4,$5,$6) returning *`, [runDate, variant, config.imageProvider, topic.key, prompt, createdBy]);
     run = inserted.rows[0];
     await client.query('commit');
 
@@ -130,11 +133,11 @@ async function createAutopilotAsset(topic, run, config, settings, createdBy, db)
   const referencePath = path.join(config.rootDir, 'public', 'assets', topic.reference);
   if (!existsSync(referencePath)) throw new Error(`Imagem de referência não encontrada: ${topic.reference}`);
   let buffer;
-  let provider = 'simulation';
-  if (config.apiKey && settings?.image_generation_enabled !== false) {
+  let provider = 'local';
+  if (config.imageProvider === 'openai' && config.apiKey && settings?.image_generation_enabled !== false) {
     buffer = await requestOpenAiImage(await readFile(referencePath), topic.reference, run.prompt, config, settings?.image_quality || config.quality, settings?.image_aspect_ratio || '1:1');
     provider = 'openai';
-  } else buffer = await readFile(referencePath);
+  } else buffer = await renderLocalMarketingImage(topic, referencePath, config, settings, run.variant);
   const aspect = settings?.image_aspect_ratio || '1:1';
   const dimensions = aspect === '9:16' ? [1080, 1920] : aspect === '4:5' ? [1080, 1350] : [1080, 1080];
   buffer = await sharp(buffer).rotate().resize(dimensions[0], dimensions[1], { fit: 'contain', background: '#f5f6f8' }).png({ compressionLevel: 9 }).toBuffer();
@@ -166,6 +169,57 @@ async function requestOpenAiImage(reference, fileName, prompt, config, quality, 
   const buffer = Buffer.from(payload.data[0].b64_json, 'base64');
   if (buffer.length < 10_000 || buffer.length > 12 * 1024 * 1024) throw new Error('A imagem gerada possui tamanho inválido.');
   return buffer;
+}
+
+async function renderLocalMarketingImage(topic, referencePath, config, settings = {}, variant = 1) {
+  const aspect = settings?.image_aspect_ratio || '1:1';
+  const [width, height] = aspect === '9:16' ? [1080, 1920] : aspect === '4:5' ? [1080, 1350] : [1080, 1080];
+  const padding = Math.round(width * 0.065);
+  const headerHeight = aspect === '9:16' ? 430 : Math.round(height * 0.34);
+  const screenshotTop = headerHeight;
+  const screenshotHeight = height - screenshotTop - padding;
+  const screenshotWidth = width - padding * 2;
+  const accent = variant % 3 === 0 ? '#12213d' : '#ed1c24';
+  const lines = wrapOverlay(topic.overlay, aspect === '9:16' ? 22 : 28);
+  const fontSize = aspect === '9:16' ? 78 : 66;
+  const lineHeight = Math.round(fontSize * 1.08);
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f3f5f8"/></linearGradient></defs>
+    <rect width="${width}" height="${height}" fill="url(#bg)"/>
+    <circle cx="${width - 20}" cy="20" r="190" fill="${accent}" opacity=".06"/>
+    <rect x="${padding}" y="${Math.round(padding * .7)}" width="78" height="8" rx="4" fill="${accent}"/>
+    <text x="${padding}" y="${Math.round(padding * 1.7)}" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="700" fill="${accent}" letter-spacing="1">TÁPRONTO • CARDÁPIO E PEDIDOS</text>
+    ${lines.map((line, index) => `<text x="${padding}" y="${Math.round(padding * 2.55) + index * lineHeight}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="#12213d">${escapeSvg(line)}</text>`).join('')}
+    <rect x="${padding}" y="${screenshotTop}" width="${screenshotWidth}" height="${screenshotHeight}" rx="32" fill="#ffffff" stroke="#dfe3e8" stroke-width="2"/>
+    <rect x="${padding}" y="${height - 20}" width="${screenshotWidth}" height="20" rx="10" fill="${accent}"/>
+  </svg>`;
+  const innerWidth = screenshotWidth - 28;
+  const innerHeight = screenshotHeight - 28;
+  const screenshot = await sharp(referencePath).rotate().resize(innerWidth, innerHeight, { fit: 'contain', background: '#ffffff' }).png().toBuffer();
+  const mask = Buffer.from(`<svg width="${innerWidth}" height="${innerHeight}"><rect width="100%" height="100%" rx="22" fill="white"/></svg>`);
+  const roundedScreenshot = await sharp(screenshot).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+  const composites = [{ input: roundedScreenshot, left: padding + 14, top: screenshotTop + 14 }];
+  const iconPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-favicon.svg');
+  if (existsSync(iconPath) && settings?.logo_enabled !== false) {
+    const icon = await sharp(iconPath).resize(66, 66).png().toBuffer();
+    composites.push({ input: icon, left: width - padding - 66, top: Math.round(padding * .56) });
+  }
+  return sharp(Buffer.from(svg)).composite(composites).png({ compressionLevel: 9 }).toBuffer();
+}
+
+function wrapOverlay(value, maxChars) {
+  const words = String(value || '').trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  for (const word of words) {
+    const current = lines.at(-1) || '';
+    if (!current || `${current} ${word}`.length > maxChars) lines.push(word);
+    else lines[lines.length - 1] = `${current} ${word}`;
+  }
+  return lines.slice(0, 3);
+}
+
+function escapeSvg(value) {
+  return String(value || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
 }
 
 function imagePrompt(topic, variant, settings = {}) {
