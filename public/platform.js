@@ -292,6 +292,8 @@ const els = {
   platformConfirmTitle: document.querySelector('#platformConfirmTitle'),
   platformConfirmMessage: document.querySelector('#platformConfirmMessage'),
   platformConfirmCancel: document.querySelector('#platformConfirmCancel'),
+  marketingConfirmBackdrop: document.querySelector('#marketingConfirmBackdrop'),
+  marketingConfirmTitle: document.querySelector('#marketingConfirmTitle'), marketingConfirmMessage: document.querySelector('#marketingConfirmMessage'), marketingConfirmYes: document.querySelector('#marketingConfirmYes'), marketingConfirmNo: document.querySelector('#marketingConfirmNo'),
   platformConfirmSubmit: document.querySelector('#platformConfirmSubmit'),
   toast: document.querySelector('#toast')
 };
@@ -422,6 +424,8 @@ document.querySelectorAll('[data-critical-action]').forEach((button) => {
   button.addEventListener('click', () => openCriticalAction(button.dataset.criticalAction));
 });
 els.platformConfirmCancel?.addEventListener('click', closeCriticalDialog);
+els.marketingConfirmNo?.addEventListener('click', () => closeMarketingConfirmation(false));
+els.marketingConfirmYes?.addEventListener('click', () => closeMarketingConfirmation(true));
 els.platformConfirmBackdrop?.addEventListener('click', (event) => {
   if (event.target === els.platformConfirmBackdrop) closeCriticalDialog();
 });
@@ -896,9 +900,7 @@ async function handleAutopilotAction(button) {
     let payload = { run_id: run.id, social_account_id: account.id, scheduled_at: run.content?.scheduled_at };
     let endpoint = '/api/platform/marketing/autopilot/approve';
     if (action === 'publish-now') {
-      const confirmation = await requestDangerConfirmation('Postar agora', 'Digite CONFIRMAR e sua senha. O post aprovado será enviado imediatamente ao Instagram.');
-      if (confirmation === null) return;
-      payload = { ...payload, ...confirmation };
+      if (!await requestMarketingConfirmation('Postar agora?', 'O post aprovado será enviado imediatamente ao Instagram.')) return;
       endpoint = '/api/platform/marketing/autopilot/publish-now';
     }
     await request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
@@ -1443,7 +1445,7 @@ async function handleSocialAction(button) {
       if (result.authorization_url) window.location.assign(result.authorization_url);
     } else if (['test', 'pause', 'resume', 'disconnect'].includes(action)) {
       let payload = {};
-      if (action === 'resume') payload = await requestDangerConfirmation('Liberar publicações', 'Digite CONFIRMAR e sua senha. A fila poderá enviar posts aprovados.');
+      if (action === 'resume') payload = await requestMarketingConfirmation('Ativar publicações?', 'A fila poderá enviar os posts que você aprovar.') ? {} : null;
       if (action === 'disconnect') payload = window.confirm('Desconectar esta conta? Posts agendados ficarão pausados até uma nova conexão.') ? {} : null;
       if (payload !== null) await request(`/api/platform/social/accounts/${button.dataset.accountId}/${action}`, { method: 'POST', body: JSON.stringify(payload) });
     } else if (action === 'transition') {
@@ -1453,13 +1455,11 @@ async function handleSocialAction(button) {
       if (!contentId) throw new Error('Selecione um conteúdo em revisão antes de vincular a mídia.');
       await request(`/api/platform/social/content/${contentId}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: button.dataset.assetId, role: 'media', replace: true }) });
     } else if (action === 'delete-content') {
-      const payload = await requestDangerConfirmation('Excluir publicação', 'Digite CONFIRMAR e sua senha. O rascunho e seu agendamento serão removidos da Central.');
-      if (payload !== null) await request(`/api/platform/marketing/content/${button.dataset.contentId}`, { method: 'DELETE', body: JSON.stringify(payload) });
+      if (await requestMarketingConfirmation('Excluir publicação?', 'O rascunho e seu agendamento serão removidos da Central.')) await request(`/api/platform/marketing/content/${button.dataset.contentId}`, { method: 'DELETE', body: '{}' });
     } else if (action === 'remove-image') {
       if (window.confirm('Remover esta imagem do post? Ele precisará de outra imagem antes da aprovação.')) await request(`/api/platform/social/content/${button.dataset.contentId}/assets/${button.dataset.assetId}`, { method: 'DELETE', body: '{}' });
     } else if (action === 'publish-now') {
-      const payload = await requestDangerConfirmation('Publicar agora', 'Digite CONFIRMAR e sua senha. O conteúdo aprovado entrará imediatamente na fila.');
-      if (payload !== null) await request(`/api/platform/social/content/${button.dataset.contentId}/publish-now`, { method: 'POST', body: JSON.stringify(payload) });
+      if (await requestMarketingConfirmation('Postar agora?', 'O conteúdo aprovado entrará imediatamente na fila do Instagram.')) await request(`/api/platform/social/content/${button.dataset.contentId}/publish-now`, { method: 'POST', body: '{}' });
     } else if (action === 'retry') await request(`/api/platform/social/publications/${button.dataset.publicationId}/retry`, { method: 'POST', body: '{}' });
     await refreshSocial();
     await loadMarketing({ silent: true });
@@ -1500,8 +1500,7 @@ async function approveAndScheduleSocialContent(event) {
     }
     let confirmation = {};
     if (publishNow) {
-      confirmation = await requestDangerConfirmation('Postar agora', 'Digite CONFIRMAR e sua senha. O post será enviado imediatamente ao Instagram.');
-      if (confirmation === null) return;
+      if (!await requestMarketingConfirmation('Postar agora?', 'O post será enviado imediatamente ao Instagram.')) return;
     }
     if (!latest || latest.status === 'review') await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
     if (publishNow) await request(`/api/platform/social/content/${data.content_id}/publish-now`, { method: 'POST', body: JSON.stringify(confirmation) });
@@ -4589,6 +4588,17 @@ function requestDangerConfirmation(title, message) {
   return new Promise((resolve) => {
     pendingDangerResolve = resolve;
   });
+}
+
+let pendingMarketingConfirmation = null;
+function requestMarketingConfirmation(title, message) {
+  if (!els.marketingConfirmBackdrop) return Promise.resolve(false);
+  els.marketingConfirmTitle.textContent = title; els.marketingConfirmMessage.textContent = message; els.marketingConfirmBackdrop.hidden = false; els.marketingConfirmYes?.focus();
+  return new Promise((resolve) => { pendingMarketingConfirmation = resolve; });
+}
+function closeMarketingConfirmation(confirmed) {
+  if (els.marketingConfirmBackdrop) els.marketingConfirmBackdrop.hidden = true;
+  const resolve = pendingMarketingConfirmation; pendingMarketingConfirmation = null; resolve?.(confirmed === true);
 }
 
 async function submitAuditRefreshSilently() {

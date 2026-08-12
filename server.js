@@ -1128,7 +1128,6 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     const data = await readJson(req);
-    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
     const result = await approveAutopilotRun(req, admin, data, new Date(Date.now() + 5000).toISOString());
     await audit('platform.marketing.autopilot.publish_now', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: result.content?.id, after_data: { scheduled_at: result.content?.scheduled_at } });
     json(res, 200, result);
@@ -11715,7 +11714,6 @@ async function updatePlatformMarketingItem(req, admin, kind, id, data) {
 }
 
 async function deletePlatformMarketingContent(req, admin, id, data = {}) {
-  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
   const current = (await dbRequest('GET', 'marketing_content_items', { select: '*', id: `eq.${id}`, limit: '1' }))[0];
   if (!current) return { ok: true, already_deleted: true };
   if (['publishing', 'processing', 'published'].includes(current.status)) throw httpError(409, 'Um post já enviado ao Instagram deve ser excluído pelo aplicativo do Instagram.', { published_url: current.published_url || '' });
@@ -11939,7 +11937,6 @@ async function platformSocialAccountAction(req, admin, id, action, data = {}) {
     payload = { status: 'disconnected', publishing_paused: true, access_token_encrypted: '', refresh_token_encrypted: '', updated_at: new Date().toISOString() };
   } else if (action === 'pause') payload = { publishing_paused: true, updated_at: new Date().toISOString() };
   else if (action === 'resume') {
-    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
     if (account.mode === 'live' && !socialConfigStatus().liveReady) throw httpError(503, 'Ambiente ainda não está liberado para publicação real.');
     payload = { publishing_paused: false, updated_at: new Date().toISOString() };
   } else if (action === 'test') {
@@ -12088,7 +12085,6 @@ async function queueSocialPublication(content, adminId) {
 }
 
 async function publishPlatformSocialContentNow(req, admin, contentId, data = {}) {
-  await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
   const context = await socialContentContext(contentId);
   if (!['approved', 'failed', 'simulated'].includes(context.content.status)) throw httpError(422, 'Somente conteúdo aprovado pode ser publicado agora.');
   const scheduledAt = new Date(Date.now() + 5000).toISOString();
