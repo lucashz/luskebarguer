@@ -44,6 +44,8 @@ try {
   const guidesHub = await page('/guias', 'taprontomenu.com.br');
   assert(guidesHub.status === 200, 'Hub de guias nao respondeu 200.');
   assert(guidesHub.body.includes('/guias/como-criar-cardapio-digital'), 'Hub nao aponta para os guias publicados.');
+  for (const label of ['Recursos', 'Guias', 'Planos', 'Comparativo', 'FAQ', 'Ajuda']) assert(guidesHub.body.includes(`>${label}</a>`), `Menu global dos guias nao inclui ${label}.`);
+  assert(guidesHub.body.includes('Criar meu Cardápio'), 'CTA global dos guias diverge da Home.');
   assert((guidesHub.body.match(/class="guide-card"/g) || []).length >= 24, 'Hub ainda nao exibe os 24 guias planejados.');
 
   const guideArticle = await page('/guias/como-criar-cardapio-digital', 'taprontomenu.com.br');
