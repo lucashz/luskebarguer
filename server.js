@@ -1111,19 +1111,19 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     const data = await readJson(req);
-    const runRows = await dbRequest('GET', 'marketing_autopilot_runs', { select: '*', id: `eq.${cleanUuid(data.run_id)}`, status: 'eq.ready', limit: '1' });
-    const run = runRows[0];
-    if (!run?.content_id) throw httpError(404, 'Post do dia não encontrado ou já aprovado.');
-    const accountId = cleanUuid(data.social_account_id);
     const scheduledAt = data.scheduled_at ? new Date(data.scheduled_at).toISOString() : new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    let context = await socialContentContext(run.content_id);
-    if (context.content.status === 'draft') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'review', note: 'Enviado pelo piloto automático.' });
-    context = await socialContentContext(run.content_id);
-    if (context.content.status === 'review') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'approved', social_account_id: accountId, scheduled_at: scheduledAt, note: 'Aprovado pelo administrador no post do dia.' });
-    context = await socialContentContext(run.content_id);
-    if (context.content.status === 'approved') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'scheduled', social_account_id: accountId, scheduled_at: scheduledAt });
-    await dbRequest('PATCH', 'marketing_autopilot_runs', { id: `eq.${run.id}` }, { status: 'approved', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
-    json(res, 200, { ok: true, content: (await socialContentContext(run.content_id)).content });
+    json(res, 200, await approveAutopilotRun(req, admin, data, scheduledAt));
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/marketing/autopilot/publish-now') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
+    if (!admin) return;
+    const data = await readJson(req);
+    await assertPlatformDangerConfirmation(req, admin, data, 'CONFIRMAR');
+    const result = await approveAutopilotRun(req, admin, data, new Date(Date.now() + 5000).toISOString());
+    await audit('platform.marketing.autopilot.publish_now', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: result.content?.id, after_data: { scheduled_at: result.content?.scheduled_at } });
+    json(res, 200, result);
     return;
   }
 
@@ -12007,6 +12007,22 @@ async function transitionPlatformSocialContent(req, admin, contentId, data = {})
   if (target === 'scheduled') publication = await queueSocialPublication(updated, admin.id);
   await audit('platform.social.content.transition', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, before_data: { status: context.content.status }, after_data: { status: target, publication_id: publication?.id || null } });
   return { content: updated, publication };
+}
+
+async function approveAutopilotRun(req, admin, data, scheduledAt) {
+  const runRows = await dbRequest('GET', 'marketing_autopilot_runs', { select: '*', id: `eq.${cleanUuid(data.run_id)}`, limit: '1' });
+  const run = runRows[0];
+  if (!run?.content_id) throw httpError(404, 'Post do dia não encontrado.');
+  const accountId = cleanUuid(data.social_account_id);
+  let context = await socialContentContext(run.content_id);
+  if (['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(context.content.status)) return { ok: true, content: context.content, already_applied: true };
+  if (context.content.status === 'draft') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'review', note: 'Enviado pelo piloto automático.' });
+  context = await socialContentContext(run.content_id);
+  if (context.content.status === 'review') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'approved', social_account_id: accountId, scheduled_at: scheduledAt, note: 'Aprovado pelo administrador no post do dia.' });
+  context = await socialContentContext(run.content_id);
+  if (context.content.status === 'approved') await transitionPlatformSocialContent(req, admin, run.content_id, { status: 'scheduled', social_account_id: accountId, scheduled_at: scheduledAt });
+  await dbRequest('PATCH', 'marketing_autopilot_runs', { id: `eq.${run.id}` }, { status: 'approved', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  return { ok: true, content: (await socialContentContext(run.content_id)).content };
 }
 
 async function queueSocialPublication(content, adminId) {

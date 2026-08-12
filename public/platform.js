@@ -873,18 +873,27 @@ async function handleAutopilotAction(button) {
     finally { button.disabled = false; }
     return;
   }
-  if (action !== 'approve') return;
+  if (!['approve', 'publish-now'].includes(action)) return;
   const run = state.autopilot?.today;
   const account = (state.autopilot?.accounts || []).find((item) => item.status === 'connected' && !item.publishing_paused) || (state.autopilot?.accounts || []).find((item) => item.status === 'connected');
   if (!run || !account) { toast('Conecte o Instagram antes de aprovar.'); return openMarketingAdvancedSection('social'); }
+  const originalLabel = button.textContent;
   button.disabled = true;
-  button.textContent = 'Agendando…';
+  button.textContent = action === 'publish-now' ? 'Publicando…' : 'Agendando…';
   try {
-    await request('/api/platform/marketing/autopilot/approve', { method: 'POST', body: JSON.stringify({ run_id: run.id, social_account_id: account.id, scheduled_at: run.content?.scheduled_at }) });
+    let payload = { run_id: run.id, social_account_id: account.id, scheduled_at: run.content?.scheduled_at };
+    let endpoint = '/api/platform/marketing/autopilot/approve';
+    if (action === 'publish-now') {
+      const confirmation = await requestDangerConfirmation('Postar agora', 'Digite CONFIRMAR e sua senha. O post aprovado será enviado imediatamente ao Instagram.');
+      if (confirmation === null) return;
+      payload = { ...payload, ...confirmation };
+      endpoint = '/api/platform/marketing/autopilot/publish-now';
+    }
+    await request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
     await loadMarketing({ silent: true });
-    toast('Post aprovado e agendado.');
+    toast(action === 'publish-now' ? 'Post aprovado e enviado para publicação.' : 'Post aprovado e agendado.');
   } catch (error) { toast(error.message || 'Não foi possível aprovar o post.'); }
-  finally { button.disabled = false; }
+  finally { button.disabled = false; button.textContent = originalLabel; }
 }
 
 async function saveAutopilotSettings(event) {
@@ -948,7 +957,7 @@ function renderAutopilot() {
     const asset = run.asset || {};
     const ready = run.status === 'ready';
     const previewUrl = localPlatformMediaUrl(asset.public_url);
-    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="Prévia do post ${escapeHtml(content.title)}">` : '<span>Imagem sendo preparada…</span>'}</div><div class="autopilot-copy"><span class="eyebrow">Post de hoje</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Publicação automática em ${content.scheduled_at ? formatDateTime(content.scheduled_at) : 'horário otimizado'} depois da aprovação.</small>${data.mode === 'local' ? '<div class="autopilot-notice">Imagem, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}<div class="row-actions">${ready ? `<button class="primary-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar post' : 'Conectar Instagram'}</button>` : '<span class="status-pill success">Aprovado e agendado</span>'}</div></div></div>`;
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="Prévia do post ${escapeHtml(content.title)}">` : '<span>Imagem sendo preparada…</span>'}</div><div class="autopilot-copy"><span class="eyebrow">Post de hoje</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Publicação automática em ${content.scheduled_at ? formatDateTime(content.scheduled_at) : 'horário otimizado'} depois da aprovação.</small>${data.mode === 'local' ? '<div class="autopilot-notice">Imagem, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}<div class="row-actions">${ready ? `<button class="primary-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar post' : 'Conectar Instagram'}</button>${account ? '<button class="ghost-button" data-autopilot-action="publish-now" type="button">Postar agora</button>' : ''}` : '<span class="status-pill success">Aprovado e agendado</span>'}</div></div></div>`;
     const primary = els.autopilotTodayCard.querySelector('[data-autopilot-action="approve"]');
     if (primary && !account) primary.dataset.autopilotAction = 'configure';
   }
