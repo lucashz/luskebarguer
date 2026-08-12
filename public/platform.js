@@ -1225,6 +1225,12 @@ function marketingChannelLabel(value = '') {
   return ({ instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube Shorts', blog: 'Artigo' })[value] || value || 'Canal não definido';
 }
 
+function marketingAssetPreview(asset, fallback = 'P') {
+  if (!asset?.public_url) return `<b>${escapeHtml(String(fallback || 'P').slice(0, 1).toUpperCase())}</b>`;
+  if (asset.kind === 'video') return `<video src="${escapeHtml(asset.public_url)}" muted playsinline preload="metadata" aria-label="Prévia do Reel"></video>`;
+  return `<img src="${escapeHtml(asset.public_url)}" alt="">`;
+}
+
 function renderMarketingOverview() {
   if (!els.marketingNextAction) return;
   const data = state.marketing || {};
@@ -1274,6 +1280,23 @@ function renderMarketingContentLibrary() {
     const editable = !['publishing', 'processing', 'published'].includes(item.status);
     return `<article class="marketing-content-card status-${escapeHtml(item.status)}"><button class="marketing-content-main" data-marketing-content-id="${item.id}" type="button"><span class="marketing-content-thumb">${socialAssets[0]?.public_url ? `<img src="${escapeHtml(socialAssets[0].public_url)}" alt="">` : `<b>${escapeHtml((item.format || 'P').slice(0, 1).toUpperCase())}</b>`}</span><span class="marketing-content-copy"><span><span class="status-pill">${escapeHtml(marketingStatusLabel(item.status))}</span><span class="content-quality-pill ${audit.status}">${audit.score}% qualidade</span></span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(marketingChannelLabel(item.channel))} · ${escapeHtml(item.format || 'formato não definido')}${item.scheduled_at ? ` · ${formatDateTime(item.scheduled_at)}` : ''}</small>${audit.blockers?.[0] ? `<small class="content-quality-hint">Sugestão: ${escapeHtml(audit.blockers[0])}</small>` : ''}${item.campaign_id ? `<small>Campanha: ${escapeHtml(campaigns.get(item.campaign_id) || 'Campanha')}</small>` : ''}${issue}</span></button><div class="marketing-content-actions">${editable ? `<button class="ghost-button compact" data-marketing-content-id="${item.id}" type="button">Editar</button><button class="ghost-button compact danger" data-social-action="delete-content" data-content-id="${item.id}" type="button">Excluir</button>` : item.published_url ? `<a class="ghost-button compact" href="${escapeHtml(item.published_url)}" target="_blank" rel="noopener">Abrir no Instagram</a>` : ''}${['draft', 'production', 'changes_requested'].includes(item.status) && item.channel === 'instagram' ? `<button class="ghost-button compact" data-social-action="transition" data-content-id="${item.id}" data-status="review" type="button">Enviar para aprovação</button>` : ''}${item.status === 'review' && item.channel === 'instagram' ? `<button class="primary-button compact" data-review-marketing-content="${item.id}" type="button">Revisar e agendar</button>` : ''}${['approved', 'failed', 'simulated'].includes(item.status) && item.channel === 'instagram' ? `<button class="primary-button compact" data-social-action="publish-now" data-content-id="${item.id}" type="button">Publicar agora</button>` : ''}</div></article>`;
   }).join('') || `<div class="marketing-empty-state"><strong>${filter ? 'Nenhum conteúdo neste status' : 'Sua biblioteca ainda está vazia'}</strong><p>${filter ? 'Escolha outro filtro ou crie um conteúdo.' : 'Crie uma ideia e avance no seu ritmo até a publicação.'}</p><button class="primary-button compact" data-new-marketing-content type="button">Criar conteúdo</button></div>`;
+  els.marketingContentList.querySelectorAll('.marketing-content-card').forEach((card, index) => {
+    const item = content[index];
+    const media = state.social?.content_assets?.[item?.id]?.[0];
+    if (media?.kind === 'video') {
+      const image = card.querySelector('.marketing-content-thumb img');
+      const video = document.createElement('video'); video.src = media.public_url; video.muted = true; video.playsInline = true; video.preload = 'metadata';
+      image?.replaceWith(video);
+    }
+    if (!item || ['publishing', 'processing', 'published'].includes(item.status)) return;
+    const actions = card.querySelector('.marketing-content-actions');
+    if (!actions) return;
+    const button = document.createElement('button');
+    button.className = 'ghost-button compact'; button.type = 'button'; button.dataset.socialAction = 'generate-reel'; button.dataset.contentId = item.id;
+    button.textContent = ['pending','preparing_assets','rendering','validating'].includes(item.render_status) ? `Gerando Reel ${Number(item.render_progress || 0)}%` : item.render_status === 'ready' ? 'Gerar novo Reel' : 'Gerar Reel';
+    button.disabled = ['pending','preparing_assets','rendering','validating'].includes(item.render_status);
+    actions.prepend(button);
+  });
 }
 
 async function repurposeMarketingContent(button) {
@@ -1304,7 +1327,7 @@ function openMarketingContentDetails(id) {
   if (form.elements.hashtags) form.elements.hashtags.value = (item.hashtags || []).join(' ');
   if (form.elements.assets_text) form.elements.assets_text.value = (item.assets || []).join('\n');
   const title = document.querySelector('#marketingContentEditorTitle'); if (title) title.textContent = `Editar: ${item.title}`;
-  if (item.channel === 'instagram' && item.status === 'review') mountSocialPublishingTools(item.id);
+  if (item.channel === 'instagram' && !['publishing','processing','published'].includes(item.status)) mountSocialPublishingTools(item.id);
   else restoreSocialPublishingTools();
   renderMarketingEditorPreview(); form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1317,7 +1340,7 @@ function mountSocialPublishingTools(contentId) {
   target.querySelector('.marketing-current-media')?.remove();
   const linkedAssets = state.social?.content_assets?.[contentId] || [];
   const media = document.createElement('div'); media.className = 'marketing-current-media';
-  media.innerHTML = linkedAssets.length ? `<p class="field-label">Imagem atual</p>${linkedAssets.map((asset) => `<div class="platform-marketing-row"><div>${asset.public_url ? `<img src="${escapeHtml(asset.public_url)}" alt="Imagem atual do post" style="width:96px;height:96px;object-fit:cover;border-radius:12px">` : ''}<small>${escapeHtml(asset.file_name || 'Mídia')}</small></div><button class="ghost-button compact danger" data-social-action="remove-image" data-content-id="${contentId}" data-asset-id="${asset.id}" type="button">Remover imagem</button></div>`).join('')}` : '<p class="muted">Este post ainda não possui imagem.</p>';
+  media.innerHTML = linkedAssets.length ? `<p class="field-label">Mídia atual</p>${linkedAssets.map((asset) => `<div class="platform-marketing-row"><div>${asset.public_url ? asset.kind === 'video' ? `<video src="${escapeHtml(asset.public_url)}" controls playsinline preload="metadata" style="width:180px;aspect-ratio:9/16;object-fit:cover;border-radius:12px"></video>` : `<img src="${escapeHtml(asset.public_url)}" alt="Imagem atual do post" style="width:96px;height:96px;object-fit:cover;border-radius:12px">` : ''}<small>${escapeHtml(asset.file_name || 'Mídia')}</small></div><button class="ghost-button compact danger" data-social-action="remove-image" data-content-id="${contentId}" data-asset-id="${asset.id}" type="button">Remover mídia</button></div>`).join('')}` : '<p class="muted">Este post ainda não possui mídia.</p>';
   target.prepend(media);
   if (els.socialAssetForm) target.append(els.socialAssetForm);
   if (els.socialScheduleForm) target.append(els.socialScheduleForm);
@@ -1457,6 +1480,10 @@ async function handleSocialAction(button) {
       await request(`/api/platform/social/content/${contentId}/assets`, { method: 'POST', body: JSON.stringify({ asset_id: button.dataset.assetId, role: 'media', replace: true }) });
     } else if (action === 'delete-content') {
       if (await requestMarketingConfirmation('Excluir publicação?', 'O rascunho e seu agendamento serão removidos da Central.')) await request(`/api/platform/marketing/content/${button.dataset.contentId}`, { method: 'DELETE', body: '{}' });
+    } else if (action === 'generate-reel') {
+      await request(`/api/platform/marketing/content/${button.dataset.contentId}/reel`, { method: 'POST', body: JSON.stringify({ template: 'problem_solution', duration_seconds: 15 }) });
+      toast('Reel entrou na fila. A prévia será atualizada automaticamente.');
+      setTimeout(() => pollReelRender(button.dataset.contentId), 3000);
     } else if (action === 'remove-image') {
       if (window.confirm('Remover esta imagem do post? Ele precisará de outra imagem antes da aprovação.')) await request(`/api/platform/social/content/${button.dataset.contentId}/assets/${button.dataset.assetId}`, { method: 'DELETE', body: '{}' });
     } else if (action === 'publish-now') {
@@ -1467,6 +1494,15 @@ async function handleSocialAction(button) {
     toast('Operação social atualizada.');
   } catch (error) { toast(error.message || 'Não foi possível concluir a ação.'); }
   finally { button.disabled = false; }
+}
+
+async function pollReelRender(contentId, attempt = 0) {
+  if (attempt >= 60) return;
+  await loadMarketing({ silent: true }).catch(() => {});
+  const item = (state.marketing?.content || []).find((entry) => entry.id === contentId);
+  if (item?.render_status === 'ready') return toast('Reel pronto para assistir e aprovar.');
+  if (item?.render_status === 'failed') return toast(item.render_error || 'Não foi possível gerar o Reel.');
+  setTimeout(() => pollReelRender(contentId, attempt + 1), 3000);
 }
 
 async function uploadSocialAsset(event) {

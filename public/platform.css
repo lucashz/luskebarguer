@@ -3072,7 +3072,7 @@ body.platform-redesign [hidden] {
 .marketing-content-library { padding-top: .4rem; }
 .marketing-content-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .95rem 0; border-bottom: 1px solid #edf0f3; }
 .marketing-content-main { flex: 1; display: flex; align-items: center; gap: .85rem; min-width: 0; padding: 0; text-align: left; color: inherit; border: 0; background: transparent; cursor: pointer; }
-.marketing-content-thumb { flex: 0 0 66px; display: grid; place-items: center; width: 66px; height: 66px; overflow: hidden; border-radius: 13px; color: #b51219; background: #fff1f1; }.marketing-content-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.marketing-content-thumb { flex: 0 0 66px; display: grid; place-items: center; width: 66px; height: 66px; overflow: hidden; border-radius: 13px; color: #b51219; background: #fff1f1; }.marketing-content-thumb img,.marketing-content-thumb video { width: 100%; height: 100%; object-fit: cover; }
 .marketing-content-copy { display: grid; gap: .2rem; min-width: 0; }.marketing-content-copy > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.marketing-content-copy small { color: var(--marketing-muted); }
 .marketing-content-actions { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
 .marketing-calendar { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); border: 1px solid var(--marketing-border); border-radius: 14px; overflow: auto; }

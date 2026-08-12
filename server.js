@@ -97,6 +97,7 @@ const mimeTypes = new Map([
   ['.jpg', 'image/jpeg'],
   ['.jpeg', 'image/jpeg'],
   ['.svg', 'image/svg+xml'],
+  ['.mp4', 'video/mp4'],
   ['.ico', 'image/x-icon']
 ]);
 const staticFileCache = new Map();
@@ -1093,6 +1094,13 @@ async function handleApi(req, res, url) {
     json(res, 201, { content: created }); return;
   }
 
+  const marketingReelMatch = url.pathname.match(/^\/api\/platform\/marketing\/content\/([a-f0-9-]+)\/reel$/i);
+  if (method === 'POST' && marketingReelMatch) {
+    const admin = await requirePlatformAdmin(req, res, 'platform.services.manage'); if (!admin) return;
+    json(res, 202, await queuePlatformMarketingReel(req, admin, marketingReelMatch[1], await readJson(req)));
+    return;
+  }
+
   if (method === 'GET' && url.pathname === '/api/platform/marketing/autopilot') {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
@@ -1114,6 +1122,10 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     const data = await readJson(req); const posts = await generateAutopilotSchedule({ days: Math.min(30, Math.max(1, Number(data.days) || 7)), createdBy: admin.id });
+    for (const post of posts) {
+      const weekday = new Date(`${String(post.run_date).slice(0, 10)}T12:00:00-03:00`).getDay();
+      if ([2, 5].includes(weekday) && post.content_id) await queuePlatformMarketingReel(req, admin, post.content_id, { template: weekday === 2 ? 'product_demo' : 'problem_solution', duration_seconds: 15 });
+    }
     await audit('platform.marketing.autopilot.schedule', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_run', after_data: { posts: posts.length } });
     json(res, 201, { posts }); return;
   }
@@ -11737,6 +11749,20 @@ async function deletePlatformMarketingContent(req, admin, id, data = {}) {
   await dbRequest('DELETE', 'marketing_content_items', { id: `eq.${id}` }, undefined, ['Prefer: return=minimal']);
   await audit('platform.marketing.content.delete', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: id, before_data: { title: current.title, status: current.status } });
   return { ok: true };
+}
+
+async function queuePlatformMarketingReel(req, admin, contentId, data = {}) {
+  const context = await socialContentContext(contentId);
+  if (['publishing', 'processing', 'published'].includes(context.content.status)) throw httpError(409, 'Um conteúdo já enviado ao Instagram não pode ser convertido em Reel.');
+  const template = ['problem_solution','product_demo','quick_steps'].includes(data.template) ? data.template : 'problem_solution';
+  const duration = [15,20,30,45].includes(Number(data.duration_seconds)) ? Number(data.duration_seconds) : 15;
+  const active = (await dbRequest('GET', 'social_reel_render_jobs', { select: '*', content_id: `eq.${contentId}`, status: 'in.(pending,claimed,rendering)', limit: '1' }))[0];
+  if (active) return { ok: true, job: active, already_queued: true };
+  await cancelQueuedSocialPublication(contentId);
+  const [job] = await dbRequest('POST', 'social_reel_render_jobs', {}, { content_id: contentId, status: 'pending', template, duration_seconds: duration, created_by: admin.id }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${contentId}` }, { render_status: 'pending', render_progress: 0, render_error: '', video_template: template, duration_seconds: duration, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await audit('platform.marketing.reel.queue', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: contentId, after_data: { job_id: job.id, template, duration_seconds: duration } });
+  return { ok: true, job };
 }
 
 async function importPlatformMarketingLeads(req, admin, data = {}) {
