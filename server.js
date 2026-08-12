@@ -11978,7 +11978,8 @@ async function transitionPlatformSocialContent(req, admin, contentId, data = {})
   if (!SOCIAL_CONTENT_STATUSES.includes(target)) throw httpError(422, 'Status editorial inválido.');
   const context = await socialContentContext(contentId);
   assertTransition(context.content.status, target);
-  const patch = { status: target, updated_at: new Date().toISOString(), revision_history: [...(Array.isArray(context.content.revision_history) ? context.content.revision_history : []), { at: new Date().toISOString(), from: context.content.status, to: target, admin_id: admin.id, note: cleanText(data.note || '').slice(0, 500) }].slice(-100) };
+  const revisionHistory = [...(Array.isArray(context.content.revision_history) ? context.content.revision_history : []), { at: new Date().toISOString(), from: context.content.status, to: target, admin_id: admin.id, note: cleanText(data.note || '').slice(0, 500) }].slice(-100);
+  const patch = { status: target, updated_at: new Date().toISOString(), revision_history: JSON.stringify(revisionHistory) };
   if (data.scheduled_at) patch.scheduled_at = new Date(data.scheduled_at).toISOString();
   if (data.social_account_id) patch.social_account_id = cleanUuid(data.social_account_id);
   if (target === 'approved') {
@@ -12043,7 +12044,8 @@ async function invalidateSocialContentApproval(content, adminId, reason) {
 
 function invalidateSocialApprovalPatch(content, adminId = null, reason = 'Conteúdo alterado depois da aprovação.') {
   if (!['approved', 'scheduled'].includes(content.status)) return { content_version: Number(content.content_version || 1) + 1 };
-  return { status: 'review', approved_at: null, approved_by: null, approved_version_hash: '', approved_caption: '', approved_assets_hash: '', content_version: Number(content.content_version || 1) + 1, revision_history: [...(Array.isArray(content.revision_history) ? content.revision_history : []), { at: new Date().toISOString(), from: content.status, to: 'review', admin_id: adminId, note: reason }].slice(-100), updated_at: new Date().toISOString() };
+  const revisionHistory = [...(Array.isArray(content.revision_history) ? content.revision_history : []), { at: new Date().toISOString(), from: content.status, to: 'review', admin_id: adminId, note: reason }].slice(-100);
+  return { status: 'review', approved_at: null, approved_by: null, approved_version_hash: '', approved_caption: '', approved_assets_hash: '', content_version: Number(content.content_version || 1) + 1, revision_history: JSON.stringify(revisionHistory), updated_at: new Date().toISOString() };
 }
 
 function isMp4Buffer(buffer) { return buffer.length > 12 && buffer.subarray(4, 12).toString('ascii').includes('ftyp'); }
