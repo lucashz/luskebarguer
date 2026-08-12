@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import sharp from 'sharp';
+import { auditMarketingContent } from './marketing-content-intelligence.js';
 
 const TOPICS = [
   { key: 'pedido-organizado', title: 'Pedido completo, sem adivinhação', pillar: 'pedido organizado', niche: 'restaurantes', hook: 'O cliente pediu. Sua equipe recebeu tudo certo?', overlay: 'Pedido completo. Sem adivinhação.', caption: 'Pedido espalhado em conversa dá margem para erro. No TáPronto, produtos, adicionais, endereço e observações chegam organizados para sua equipe.\n\nQuer ver funcionando? Acesse o link do perfil.', cta: 'Ver demonstração', reference: 'sistema-admin-pedidos-original.png' },
@@ -127,7 +128,8 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     const account = (await db.query(`select id from social_accounts where status='connected' order by mode='live' desc,created_at desc limit 1`)).rows[0];
     const scheduledAt = futurePublicationTime(runDate, String(settings?.publication_time || '10:00'));
     const contentFormat = settings?.image_aspect_ratio === '9:16' ? 'story' : 'post';
-    const postPackage = buildPostPackage(topic, settings, config);
+    const recentContent = (await db.query(`select id,title,hook,pillar,niche from marketing_content_items where channel='instagram' order by created_at desc limit 12`)).rows;
+    const postPackage = buildPostPackage(topic, settings, config, recentContent);
     const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram',$2,$3,'consideration',$4,'Gerar interesse qualificado',$5,$6,$7,$8,$9,$10,'America/Sao_Paulo',$11,'draft',$12,$13,$14::jsonb,$15,$16,now()) returning *`, [topic.title, contentFormat, topic.pillar, topic.niche, topic.hook, postPackage.caption, postPackage.cta, topic.overlay, settings?.image_aspect_ratio || '1:1', postPackage.altText, account?.id || null, scheduledAt, postPackage.hashtags, JSON.stringify([topic.reference]), postPackage.utmUrl, createdBy]);
     const content = contentResult.rows[0];
     await db.query(`insert into social_content_assets(content_id,asset_id,sort_order,role) values($1,$2,0,'media')`, [content.id, asset.id]);
@@ -141,19 +143,22 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
   } finally { client.release(); }
 }
 
-function buildPostPackage(topic, settings, config) {
+function buildPostPackage(topic, settings, config, recentContent = []) {
   const preferredCta = arrayValues(settings?.preferred_ctas).map((value) => cleanText(value, 80)).find(Boolean);
   const cta = preferredCta || topic.cta;
   const hashtags = [...new Set([...BASE_HASHTAGS, ...(NICHE_HASHTAGS[topic.niche] || ['Restaurante', 'Delivery'])])].slice(0, 7);
-  const caption = cleanText(topic.caption, 1850);
-  if (!caption || caption.length > 1850 || hashtags.length < 3) throw new Error('O pacote do post não passou pela validação automática.');
-  return {
+  const explanation = cleanText(String(topic.caption || '').split(/\n\n/)[0], 1200);
+  const caption = `${topic.hook}\n\n${explanation}\n\n✅ Menos confusão para sua equipe e uma experiência mais clara para o cliente.\n\n👉 ${cta} pelo link da bio.`;
+  const postPackage = {
     caption,
     cta,
     hashtags: hashtags.map((tag) => `#${tag}`),
     altText: `Tela do TáPronto mostrando ${topic.pillar}, com a mensagem: ${topic.overlay}`,
     utmUrl: `${config.baseUrl}/?utm_source=instagram&utm_medium=organic&utm_campaign=post-diario-${topic.key}`
   };
+  const audit = auditMarketingContent({ title: topic.title, hook: topic.hook, caption: postPackage.caption, cta: postPackage.cta, overlay_text: topic.overlay, utm_url: postPackage.utmUrl, hashtags: postPackage.hashtags }, recentContent);
+  if (audit.score < 80) throw new Error(`A copy não atingiu o padrão mínimo de qualidade (${audit.score}%).`);
+  return postPackage;
 }
 
 async function createAutopilotAsset(topic, run, config, settings, createdBy, db) {
