@@ -1495,7 +1495,7 @@ async function approveAndScheduleSocialContent(event) {
   const buttons = [...form.querySelectorAll('button[type="submit"]')]; buttons.forEach((button) => { button.disabled = true; });
   try {
     const latest = (state.social?.content || []).find((item) => item.id === data.content_id);
-    if (latest && ['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(latest.status)) {
+    if (latest && ['publishing', 'processing', 'published', 'simulated'].includes(latest.status)) {
       await refreshSocial();
       return toast(latest.status === 'published' ? 'Este post já foi publicado.' : 'Este post já está agendado.');
     }

@@ -1140,7 +1140,10 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     const data = await readJson(req);
-    const result = await approveAutopilotRun(req, admin, data, new Date(Date.now() + 5000).toISOString());
+    const run = (await dbRequest('GET', 'marketing_autopilot_runs', { select: '*', id: `eq.${cleanUuid(data.run_id)}`, limit: '1' }))[0];
+    if (!run?.content_id) throw httpError(404, 'Post do dia não encontrado.');
+    const result = await publishPlatformSocialContentNow(req, admin, run.content_id, data);
+    await dbRequest('PATCH', 'marketing_autopilot_runs', { id: `eq.${run.id}` }, { status: 'approved', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
     await audit('platform.marketing.autopilot.publish_now', { req, actor_admin_id: admin.id, entity_type: 'marketing_content', entity_id: result.content?.id, after_data: { scheduled_at: result.content?.scheduled_at } });
     json(res, 200, result);
     return;
@@ -12121,10 +12124,40 @@ async function queueSocialPublication(content, adminId) {
 }
 
 async function publishPlatformSocialContentNow(req, admin, contentId, data = {}) {
-  const context = await socialContentContext(contentId);
-  if (!['approved', 'failed', 'simulated'].includes(context.content.status)) throw httpError(422, 'Somente conteúdo aprovado pode ser publicado agora.');
-  const scheduledAt = new Date(Date.now() + 5000).toISOString();
-  const next = { ...context.content, status: 'scheduled', scheduled_at: scheduledAt, content_version: Number(context.content.content_version || 1) + (context.content.status === 'simulated' ? 1 : 0), publication_error: '', updated_at: new Date().toISOString() };
+  const scheduledAt = new Date(Date.now() + 30_000).toISOString();
+  let context = await socialContentContext(contentId);
+  if (['publishing', 'processing', 'published'].includes(context.content.status)) return { content: context.content, publication: null, already_applied: true };
+
+  const requestedAccountId = cleanUuid(data.social_account_id || context.content.social_account_id);
+  const account = requestedAccountId
+    ? (await dbRequest('GET', 'social_accounts', { select: '*', id: `eq.${requestedAccountId}`, status: 'eq.connected', limit: '1' }))[0]
+    : (await dbRequest('GET', 'social_accounts', { select: '*', status: 'eq.connected', publishing_paused: 'eq.false', order: 'mode.desc,created_at.desc', limit: '1' }))[0];
+  if (!account) throw httpError(422, 'Conecte e ative uma conta do Instagram antes de publicar.');
+
+  if (context.content.status === 'scheduled') {
+    const existing = (await dbRequest('GET', 'social_publications', { select: '*', content_id: `eq.${contentId}`, status: 'in.(queued,retry)', order: 'created_at.desc', limit: '1' }))[0];
+    const [updated] = await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${contentId}` }, { scheduled_at: scheduledAt, social_account_id: account.id, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+    if (existing) {
+      const [publication] = await dbRequest('PATCH', 'social_publications', { id: `eq.${existing.id}` }, { status: 'queued', scheduled_at: scheduledAt, next_attempt_at: null, lock_expires_at: null, last_error: '', last_error_code: '', updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+      return { content: updated, publication, accelerated: true };
+    }
+    return { content: updated, publication: await queueSocialPublication(updated, admin.id), accelerated: true };
+  }
+
+  if (context.content.status === 'cancelled' && context.content.publication_error === 'Removido diretamente no Instagram.') {
+    await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${contentId}` }, { status: 'draft', published_at: null, published_url: '', publication_error: '', content_version: Number(context.content.content_version || 1) + 1, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+    context = await socialContentContext(contentId);
+  }
+  if (context.content.status === 'idea') await transitionPlatformSocialContent(req, admin, contentId, { status: 'draft' });
+  context = await socialContentContext(contentId);
+  if (['production', 'changes_requested'].includes(context.content.status)) await transitionPlatformSocialContent(req, admin, contentId, { status: 'review', note: 'Enviado pela ação Postar agora.' });
+  context = await socialContentContext(contentId);
+  if (context.content.status === 'draft') await transitionPlatformSocialContent(req, admin, contentId, { status: 'review', note: 'Enviado pela ação Postar agora.' });
+  context = await socialContentContext(contentId);
+  if (context.content.status === 'review') await transitionPlatformSocialContent(req, admin, contentId, { status: 'approved', social_account_id: account.id, scheduled_at: scheduledAt, note: 'Aprovado pela ação Postar agora.' });
+  context = await socialContentContext(contentId);
+  if (!['approved', 'failed', 'simulated'].includes(context.content.status)) throw httpError(422, `Não foi possível publicar um conteúdo no estado ${context.content.status}.`);
+  const next = { ...context.content, status: 'scheduled', social_account_id: account.id, scheduled_at: scheduledAt, content_version: Number(context.content.content_version || 1) + (context.content.status === 'simulated' ? 1 : 0), publication_error: '', updated_at: new Date().toISOString() };
   if (context.content.status === 'simulated') next.approved_version_hash = contentApprovalHash(next, context.assets);
   const [updated] = await dbRequest('PATCH', 'marketing_content_items', { id: `eq.${contentId}` }, next, ['Prefer: return=representation']);
   const publication = await queueSocialPublication(updated, admin.id);
