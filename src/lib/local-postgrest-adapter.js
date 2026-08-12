@@ -3,6 +3,7 @@ import pg from 'pg';
 const { Pool } = pg;
 
 let pool = null;
+const jsonColumnsByTable = new Map();
 
 export function getLocalPool() {
   if (!process.env.DATABASE_URL) {
@@ -87,7 +88,7 @@ async function executeLocalRequest(client, method, table, query, payload, extraH
     if (!rows.length) return [];
     const inserted = [];
     for (const row of rows) {
-      const clean = cleanPayload(row);
+      const clean = await cleanPayloadForTable(client, tableName, row);
       const columns = Object.keys(clean).map(identifier);
       if (!columns.length) continue;
       const values = Object.values(clean);
@@ -100,7 +101,7 @@ async function executeLocalRequest(client, method, table, query, payload, extraH
   }
 
   if (method === 'PATCH') {
-    const clean = cleanPayload(payload || {});
+    const clean = await cleanPayloadForTable(client, tableName, payload || {});
     const columns = Object.keys(clean).map(identifier);
     if (!columns.length) return [];
     const values = Object.values(clean);
@@ -236,6 +237,20 @@ function shiftWhere(where, shift) {
 
 function cleanPayload(row) {
   return Object.fromEntries(Object.entries(row || {}).filter(([, value]) => value !== undefined));
+}
+
+async function cleanPayloadForTable(client, tableName, row) {
+  const clean = cleanPayload(row);
+  let jsonColumns = jsonColumnsByTable.get(tableName);
+  if (!jsonColumns) {
+    const result = await client.query(`select column_name from information_schema.columns where table_schema=current_schema() and table_name=$1 and data_type in ('json','jsonb')`, [tableName]);
+    jsonColumns = new Set(result.rows.map((item) => item.column_name));
+    jsonColumnsByTable.set(tableName, jsonColumns);
+  }
+  for (const [column, value] of Object.entries(clean)) {
+    if (jsonColumns.has(column) && value !== null && typeof value === 'object') clean[column] = JSON.stringify(value);
+  }
+  return clean;
 }
 
 function parseOperand(value) {
