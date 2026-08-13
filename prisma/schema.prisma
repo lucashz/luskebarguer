@@ -125,6 +125,8 @@ model Company {
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  @@unique([document])
+
   stores               Store[]
   adminUsers           AdminUser[]
   adminAccess          AdminUserStoreAccess[]
@@ -376,6 +378,7 @@ model Customer {
   orders    Order[]
 
   @@index([storeId, phone])
+  @@unique([storeId, document])
   @@map("customers")
 }
 

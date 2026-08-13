@@ -144,6 +144,14 @@ async function login(event) {
 async function register(event) {
   event.preventDefault();
   const form = new FormData(els.registerForm);
+  const cpf = onlyDigits(form.get('document'));
+  if (!isValidCpf(cpf)) {
+    const field = els.registerForm.elements.document;
+    field.setCustomValidity('Informe um CPF válido.');
+    field.reportValidity();
+    window.setTimeout(() => field.setCustomValidity(''), 1000);
+    return;
+  }
   const result = await request('/api/customer/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -160,6 +168,18 @@ async function register(event) {
   showShell();
   await loadOrders();
   saveAccountCache();
+}
+
+function isValidCpf(value) {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digit = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(cpf[index]) * (length + 1 - index);
+    const remainder = (sum * 10) % 11;
+    return remainder === 10 ? 0 : remainder;
+  };
+  return digit(9) === Number(cpf[9]) && digit(10) === Number(cpf[10]);
 }
 
 async function resetPassword(event) {

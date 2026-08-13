@@ -43,6 +43,7 @@
             <label>Nome completo<input name="owner_name" required autocomplete="name"></label>
             <label>WhatsApp<input name="owner_phone" required inputmode="tel" placeholder="(55) 99999-9999"></label>
           </div>
+          <label>CPF do responsável<input name="owner_document" required inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00"></label>
           <div class="two-cols">
             <label>E-mail<input name="owner_email" required type="email" autocomplete="email"></label>
             <label>Senha<input name="password" required type="password" minlength="8" autocomplete="new-password"></label>
@@ -76,7 +77,6 @@
           </div>
           <label>Endereço<input name="address" placeholder="Rua, número, bairro"></label>
           <div class="two-cols">
-            <label>CNPJ ou CPF<input name="document" placeholder="Opcional"></label>
             <label>Telefone comercial<input name="business_phone" inputmode="tel" placeholder="Opcional"></label>
           </div>
         </section>

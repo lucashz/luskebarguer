@@ -89,6 +89,8 @@ function initSignup() {
     slugInput.value = slugify(slugInput.value);
     validateSlugSoon();
   });
+  const cpfInput = signupForm.elements.owner_document;
+  cpfInput?.addEventListener('input', () => { cpfInput.value = formatCpf(cpfInput.value); });
   signupForm.addEventListener('submit', submitSignup);
 }
 
@@ -117,7 +119,7 @@ function markVisibleSignupStep() {
 function updateSignupProgressState() {
   if (!signupProgress) return;
   const completed = {
-    owner: ['owner_name', 'owner_phone', 'owner_email', 'password', 'confirm_password']
+    owner: ['owner_name', 'owner_phone', 'owner_document', 'owner_email', 'password', 'confirm_password']
       .every((name) => String(signupForm.elements[name]?.value || '').trim()),
     business: ['business_name', 'business_type']
       .every((name) => String(signupForm.elements[name]?.value || '').trim()),
@@ -221,6 +223,12 @@ async function submitSignup(event) {
   event.preventDefault();
   await validateSlug();
   const form = new FormData(signupForm);
+  const cpf = onlyDigits(form.get('owner_document'));
+  if (!isValidCpf(cpf)) {
+    signupForm.elements.owner_document?.focus();
+    signupMessage.textContent = 'Informe um CPF válido para continuar.';
+    return;
+  }
   const payload = {
     plan_code: 'trial',
     referral_code: new URLSearchParams(location.search).get('ref') || '',
@@ -231,6 +239,7 @@ async function submitSignup(event) {
       name: form.get('owner_name'),
       email: form.get('owner_email'),
       phone: form.get('owner_phone'),
+      document: cpf,
       password: form.get('password'),
       confirm_password: form.get('confirm_password')
     },
@@ -241,7 +250,7 @@ async function submitSignup(event) {
       city: form.get('city'),
       state: form.get('state'),
       address: form.get('address'),
-      document: form.get('document'),
+      document: cpf,
       phone: form.get('business_phone') || form.get('owner_phone'),
       slug: form.get('slug')
     }
@@ -317,6 +326,30 @@ async function resendSignupActivationEmail(button) {
       button.textContent = originalText;
     }
   }
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatCpf(value) {
+  const digits = onlyDigits(value).slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, '$1.$2')
+    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1-$2');
+}
+
+function isValidCpf(value) {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digit = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(cpf[index]) * (length + 1 - index);
+    const remainder = (sum * 10) % 11;
+    return remainder === 10 ? 0 : remainder;
+  };
+  return digit(9) === Number(cpf[9]) && digit(10) === Number(cpf[10]);
 }
 
 function signupMarketingAttribution() {

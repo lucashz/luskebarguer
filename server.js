@@ -5199,6 +5199,8 @@ async function createPortalSignup(req, data = {}) {
     limit: '1'
   });
   if (existingAdmin[0]) throw httpError(409, 'Este e-mail já possui uma conta. Use a tela de entrar.');
+  const existingDocument = await dbRequest('GET', 'companies', { select: 'id', document: `eq.${parsed.company.document}`, limit: '1' });
+  if (existingDocument[0]) throw httpError(409, 'Este CPF já possui uma conta no TáPronto. Use a tela de entrar ou recupere seu acesso.');
 
   const created = { company: null, admin: null, store: null };
   try {
@@ -5520,12 +5522,14 @@ function sanitizePortalSignup(data = {}, req = null) {
   const ownerName = cleanText(owner.name || data.name || '');
   const ownerEmail = cleanEmail(owner.email || data.email || '');
   const ownerPhone = onlyDigits(owner.phone || data.phone || '');
+  const ownerDocument = onlyDigits(owner.document || business.document || data.document || '');
   const password = validatePassword(owner.password || data.password);
   const confirmPassword = String(owner.confirm_password || owner.confirmPassword || data.confirm_password || data.confirmPassword || '');
   if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmação de senha não confere.');
   if (!ownerName) throw httpError(422, 'Informe seu nome completo.');
   if (!ownerEmail) throw httpError(422, 'Informe um e-mail válido.');
   if (ownerPhone.length < 10) throw httpError(422, 'Informe um WhatsApp válido.');
+  if (!isValidCpf(ownerDocument)) throw httpError(422, 'Informe um CPF válido para o responsável pela conta.');
   if (data.accept_terms !== true && data.acceptTerms !== true) throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Política de Privacidade para continuar.');
 
   const displayName = cleanText(business.display_name || business.displayName || business.name || '');
@@ -5544,11 +5548,12 @@ function sanitizePortalSignup(data = {}, req = null) {
       name: ownerName,
       email: ownerEmail,
       phone: ownerPhone,
+      document: ownerDocument,
       password
     },
     company: {
       name: companyName,
-      document: cleanText(business.document || '')
+      document: ownerDocument
     },
     store: {
       name: displayName,
@@ -5560,7 +5565,7 @@ function sanitizePortalSignup(data = {}, req = null) {
       state: cleanText(business.state || '').slice(0, 2).toUpperCase(),
       address: cleanText(business.address || ''),
       phone: onlyDigits(business.phone || ownerPhone),
-      document: cleanText(business.document || '')
+      document: ownerDocument
     }
   };
 }
@@ -14247,9 +14252,18 @@ async function registerCustomer(data, storeId, options = {}) {
   if (data.accept_terms !== true && data.acceptTerms !== true) {
     throw httpError(422, 'Aceite o EULA, os Termos de Uso e a Política de Privacidade para continuar.');
   }
-  const customer = sanitizeCustomer(data.customer || data);
+  const customer = sanitizeCustomer(data.customer || data, { requireCpf: true });
   const password = validatePassword(data.password);
   const address = data.address && data.address.street ? sanitizeAddress(data.address) : null;
+  const documentOwner = await db('GET', 'customers', {
+    select: 'id,phone',
+    ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {}),
+    document: `eq.${customer.document}`,
+    limit: '1'
+  });
+  if (documentOwner[0] && documentOwner[0].phone !== customer.phone) {
+    throw httpError(409, 'Este CPF já possui cadastro nesta loja. Entre com o telefone da conta existente.');
+  }
 
   const existing = await db('GET', 'customers', {
     select: '*',
@@ -19643,19 +19657,32 @@ function sanitizePromotion(data, creating) {
   return promotion;
 }
 
-function sanitizeCustomer(data) {
+function sanitizeCustomer(data, options = {}) {
   const customer = sanitize(data, {
     name: 'string',
     phone: 'phone',
     email: 'nullable_email',
-    document: 'nullable_string',
+    document: options.requireCpf ? 'string' : 'nullable_string',
     birth_date: 'nullable_date',
     notes: 'nullable_string'
-  }, ['name', 'phone']);
+  }, options.requireCpf ? ['name', 'phone', 'document'] : ['name', 'phone']);
 
   if (customer.phone.length < 10) throw httpError(422, 'Informe um telefone válido.');
-  if (customer.document) customer.document = onlyDigits(customer.document).slice(0, 14);
+  if (customer.document) customer.document = onlyDigits(customer.document).slice(0, 11);
+  if (options.requireCpf && !isValidCpf(customer.document)) throw httpError(422, 'Informe um CPF válido.');
   return customer;
+}
+
+function isValidCpf(value) {
+  const cpf = onlyDigits(value || '');
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digit = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(cpf[index]) * (length + 1 - index);
+    const remainder = (sum * 10) % 11;
+    return remainder === 10 ? 0 : remainder;
+  };
+  return digit(9) === Number(cpf[9]) && digit(10) === Number(cpf[10]);
 }
 
 function sanitizeOrderCustomer(data, fulfillmentMethod) {

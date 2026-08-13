@@ -17,6 +17,7 @@ const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const email = `smoke-${suffix}@cardapio.local`;
 const slug = `smoke-${suffix}`;
 const companyName = `Smoke Restaurante ${suffix}`;
+const signupCpf = cpfFromSeed(onlyDigits(suffix).slice(-9).padStart(9, '1'));
 const client = new pg.Client({
   connectionString: process.env.DATABASE_URL,
   ssl: shouldUseSsl(process.env.DATABASE_URL) ? { rejectUnauthorized: false } : false
@@ -55,6 +56,7 @@ try {
         name: 'Smoke Admin',
         email,
         phone: '5511999999999',
+        document: signupCpf,
         password,
         confirm_password: password
       },
@@ -73,6 +75,15 @@ try {
   companyId = signup.data.admin?.company_id || signup.data.company?.id || null;
   storeId = signup.data.admin?.store_id || signup.data.store?.id || null;
   assert(signup.data.needs_activation === true, 'Cadastro deveria exigir ativacao por e-mail.');
+  const duplicateCpf = await request('/api/portal/signup', {
+    method: 'POST', allowFailure: true,
+    body: {
+      accept_terms: true,
+      owner: { name: 'CPF Duplicado', email: `duplicate-${email}`, phone: '5511977777777', document: signupCpf, password, confirm_password: password },
+      business: { name: `Duplicado ${companyName}`, display_name: `Duplicado ${companyName}`, type: 'restaurante', slug: `duplicate-${slug}` }
+    }
+  });
+  assert(duplicateCpf.status === 409, 'CPF duplicado deveria ser rejeitado no cadastro da plataforma.');
   assert(companyId && storeId, 'Cadastro nao retornou empresa/loja.');
   const attribution = await client.query('select marketing_attribution from public.companies where id = $1', [companyId]);
   assert(attribution.rows[0]?.marketing_attribution?.utm_source === 'smoke', 'Origem de marketing nao foi persistida na empresa.');
@@ -255,6 +266,23 @@ try {
     serverProcess.kill();
     await new Promise((resolve) => serverProcess.once('exit', resolve));
   }
+}
+
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function cpfFromSeed(value) {
+  let cpf = onlyDigits(value).slice(0, 9).padStart(9, '1');
+  const digit = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(cpf[index]) * (length + 1 - index);
+    const remainder = (sum * 10) % 11;
+    return String(remainder === 10 ? 0 : remainder);
+  };
+  cpf += digit(9);
+  cpf += digit(10);
+  return cpf;
 }
 
 async function assertDiningTableIsolation() {
