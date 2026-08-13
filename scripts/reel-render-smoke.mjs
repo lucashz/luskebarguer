@@ -7,7 +7,7 @@ const outputDir = path.resolve('artifacts', 'reel-smoke'); await mkdir(outputDir
 const content = { id:'smoke-test', title:'Pedido completo. Sem adivinhação.', hook:'O cliente pediu adicional. A cozinha recebeu?', cta:'Crie seu cardápio' };
 const script = buildReelScript(content, 15);
 assert(script.scenes.reduce((sum, scene) => sum + scene.duration, 0) === 15, 'Duração das cenas inválida.');
-const result = await renderReel({ content, sourceImagePath:path.resolve('public','assets','tapronto-logo.png'), outputDir, duration:15 });
+const result = await renderReel({ content, sourceImagePath:path.resolve('public','assets','tapronto-logo-horizontal.png'), outputDir, duration:15 });
 const cover = await sharp(result.coverPath).metadata(); const video = await readFile(result.outputPath);
 assert(cover.width === 1080 && cover.height === 1920, 'Capa fora de 1080x1920.');
 assert(video.subarray(4,8).toString() === 'ftyp', 'MP4 inválido.');
