@@ -252,7 +252,7 @@ async function renderLocalMarketingImage(topic, referencePath, config, settings 
   const composites = [{ input: roundedScreenshot, left: padding + screenInset, top: deviceTop + screenInset }];
   const logoPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-logo.png');
   if (existsSync(logoPath) && settings?.logo_enabled !== false) {
-    const logoWidth = Math.round(width * .09);
+    const logoWidth = Math.round(width * .18);
     const logo = await sharp(logoPath).resize({ width: logoWidth }).png().toBuffer();
     composites.push({ input: logo, left: width - padding - logoWidth, top: Math.round(padding * .55) });
   }

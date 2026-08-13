@@ -121,9 +121,9 @@ h3 {
 
 .home-brand img {
   display: block;
-  width: auto;
+  width: 210px;
   max-height: none;
-  height: 46px;
+  height: auto;
   object-fit: contain;
 }
 

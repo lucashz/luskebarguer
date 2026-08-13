@@ -2328,7 +2328,7 @@ small,
 }
 
 .platform-login-brand img {
-  width: 82px;
+  width: 190px;
   height: auto;
   display: block;
 }
@@ -3445,10 +3445,10 @@ textarea {
 
 .brand-mark img {
   display: block;
-  width: auto;
+  width: 200px;
   max-width: 100%;
   max-height: none;
-  height: 46px;
+  height: auto;
   object-fit: contain;
 }
 
@@ -3472,9 +3472,9 @@ textarea {
 }
 
 .public-brand-mark img {
-  width: auto;
-  height: 46px;
-  max-width: 306px;
+  width: 200px;
+  height: auto;
+  max-width: 40vw;
   max-height: none;
   object-fit: contain;
 }
@@ -14999,10 +14999,10 @@ body.admin-tour-active {
 
 .portal-brand img {
   display: block;
-  width: auto;
+  width: 210px;
   max-width: 42vw;
   max-height: none;
-  height: 50px;
+  height: auto;
   object-fit: contain;
 }
 
@@ -16476,9 +16476,9 @@ body.admin-tour-active {
 }
 
 .menu-page .public-topbar .public-brand-mark img {
-  width: auto;
-  height: 46px;
-  max-width: min(36vw, 92px);
+  width: 200px;
+  height: auto;
+  max-width: min(40vw, 200px);
   max-height: none;
 }
 
@@ -16553,13 +16553,13 @@ body.admin-tour-active {
 
   .public-brand-mark {
     flex: 0 0 auto;
-    max-width: 76px;
+    max-width: 165px;
   }
 
   .public-brand-mark img {
-    width: auto;
-    height: 40px;
-    max-width: min(28vw, 76px);
+    width: 165px;
+    height: auto;
+    max-width: min(42vw, 165px);
     max-height: none;
   }
 
@@ -19292,7 +19292,7 @@ body.admin-tour-active {
 }
 
 .store-not-found-logo {
-  width: min(92px, 30vw);
+  width: min(200px, 70vw);
   height: auto;
   max-height: 70px;
   object-fit: contain;
