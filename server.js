@@ -18615,6 +18615,9 @@ function protectIntegrationSettings(settings) {
   if (next.pix?.enabled && (!next.pix.apiKey || !next.pix.webhookSecret)) {
     throw httpError(422, 'Para ativar o Pix online, informe o Access Token e a assinatura secreta do webhook do Mercado Pago.');
   }
+  if (next.pix?.enabled && (isMaskedSecretValue(next.pix.apiKey) || isMaskedSecretValue(next.pix.webhookSecret))) {
+    throw httpError(422, 'A configuração contém apenas uma máscara de segurança. Digite novamente o Access Token e a assinatura secreta reais do Mercado Pago.');
+  }
   if (next.pix) {
     next.pix.apiKey = protectPaymentSecret(next.pix.apiKey || '');
     next.pix.webhookSecret = protectPaymentSecret(next.pix.webhookSecret || '');

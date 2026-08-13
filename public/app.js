@@ -120,6 +120,7 @@ const els = {
   demoOrderDialog: document.querySelector('#demoOrderDialog'),
   demoOrderCode: document.querySelector('#demoOrderCode'),
   paymentCheckoutDialog: document.querySelector('#paymentCheckoutDialog'),
+  checkoutSubmitError: document.querySelector('#checkoutSubmitError'),
   paymentCheckoutStatus: document.querySelector('#paymentCheckoutStatus'),
   paymentCheckoutCode: document.querySelector('#paymentCheckoutCode'),
   paymentCheckoutTotal: document.querySelector('#paymentCheckoutTotal'),
@@ -1297,6 +1298,7 @@ function renderCheckoutReview() {
 async function submitOrder(event) {
   event.preventDefault();
   if (state.orderSubmitting) return;
+  showCheckoutSubmitError('');
   if (!els.checkoutForm) {
     setStatus('Checkout indisponível no momento. Atualize a página e tente novamente.');
     return;
@@ -1377,10 +1379,19 @@ async function submitOrder(event) {
     finishCreatedOrder(result);
   } catch (error) {
     popup?.close?.();
-    setStatus(error.message || 'Não foi possível enviar o pedido agora.');
+    const message = error.message || 'Não foi possível enviar o pedido agora.';
+    showCheckoutSubmitError(message);
+    setStatus(message);
   } finally {
     setOrderSubmitting(false);
   }
+}
+
+function showCheckoutSubmitError(message = '') {
+  if (!els.checkoutSubmitError) return;
+  els.checkoutSubmitError.hidden = !message;
+  els.checkoutSubmitError.textContent = message;
+  if (message) els.checkoutSubmitError.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function finishCreatedOrder(result = {}) {
