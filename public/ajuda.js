@@ -118,6 +118,33 @@ const HELP_ARTICLES = [
     'Mantenha o celular com internet.',
     'Use Testar mensagem para confirmar a conexão.'
   ], 'WhatsApp automático depende do plano e da configuração do provedor feita pela TáPronto.'),
+  article('criar-conta-mercado-pago', 'Como criar uma conta no Mercado Pago para receber pagamentos online', 'Pagamento online', 'Crie e prepare sua conta do Mercado Pago, gere as credenciais corretas e conecte o Pix online ao TáPronto com segurança.', [
+    { title: 'Separe os dados do responsável e da empresa', detail: 'Tenha acesso ao celular e ao e-mail que ficarão vinculados à conta. Se a loja possui CNPJ ou MEI, deixe também os dados da empresa e do responsável legal em mãos.' },
+    { title: 'Crie a conta oficial do Mercado Pago', detail: 'Acesse mercadopago.com.br, clique em Criar conta e escolha conta pessoal ou conta de empresa conforme a realidade da loja. Para um negócio com CNPJ ou MEI, prefira a conta empresarial.' },
+    { title: 'Confirme telefone, e-mail e identidade', detail: 'Digite somente dados verdadeiros e conclua as confirmações solicitadas pelo Mercado Pago. A análise e a liberação de recursos dependem da validação da identidade do titular.' },
+    { title: 'Proteja a conta antes de receber vendas', detail: 'Crie uma senha exclusiva, ative a verificação em duas etapas e nunca compartilhe códigos recebidos por SMS, WhatsApp ou e-mail.' },
+    { title: 'Entre no painel de desenvolvedores', detail: 'Com a conta aprovada e conectada, abra mercadopago.com.br/developers/panel/app. Essa é a área chamada Suas integrações.' },
+    { title: 'Crie uma aplicação para o TáPronto', detail: 'Clique em Criar aplicação, use um nome fácil de reconhecer, como “TáPronto - nome da loja”, e escolha pagamentos online. A aplicação é o vínculo seguro entre sua conta e os pedidos da loja.' },
+    { title: 'Ative as credenciais de produção', detail: 'Abra Produção > Credenciais de produção. Informe o ramo do negócio, aceite os termos e use o endereço público do seu cardápio TáPronto no campo Website.' },
+    { title: 'Copie somente o Access Token', detail: 'Entre Public Key, Access Token, Client ID e Client Secret, o TáPronto usa o Access Token de produção, normalmente iniciado por APP_USR-. Nunca envie essa chave por mensagem nem publique capturas mostrando seu valor.' },
+    { title: 'Cadastre a URL de notificações', detail: 'Na aplicação, abra Webhooks > Configurar notificações. Em Modo de produção, informe https://app.taprontomenu.com.br/api/payments/webhook?provider=mercadopago.' },
+    { title: 'Selecione o evento correto', detail: 'Marque Pagamentos (legacy). Não marque Planos e assinaturas nem Order (Mercado Pago) para o Pix online usado atualmente pelo TáPronto.' },
+    { title: 'Salve e copie a assinatura secreta', detail: 'Ao salvar o webhook, o Mercado Pago gera uma assinatura secreta. Ela permite confirmar que a notificação é verdadeira. Não renove a assinatura depois de cadastrá-la, salvo se também substituir a chave no TáPronto.' },
+    { title: 'Conecte a conta no TáPronto', detail: 'No painel da loja, acesse Integrações > Pagamento online. Ative o Pix online, cole o Access Token e a assinatura secreta nos campos correspondentes e salve.' },
+    { title: 'Use o teste de conexão', detail: 'Clique em Testar integrações. Se aparecer não autorizado, confira se copiou o Access Token de produção completo, sem espaços.' },
+    { title: 'Faça um pedido real de baixo valor', detail: 'Abra o cardápio como cliente, monte um pedido barato, escolha pagamento online e conclua o Pix. O pedido só deve ser liberado para a loja depois da aprovação.' },
+    { title: 'Confira o recebimento e a conciliação', detail: 'Abra o painel do Mercado Pago, confira o valor recebido e compare o número do pedido com o TáPronto. Antes de divulgar o Pix online, teste também cancelamento e estorno.' }
+  ], 'O TáPronto nunca precisa da senha da sua conta Mercado Pago. Informe somente o Access Token e a assinatura secreta nos campos protegidos do painel.', {
+    updatedAt: '13/08/2026', readTime: 10,
+    before: ['Celular com acesso ao e-mail do responsável.', 'CPF do titular ou CNPJ/MEI e dados do responsável legal.', 'Link público do cardápio TáPronto.', 'Conta bancária vinculada ao responsável correto pelo negócio.'],
+    outcome: 'O teste mostrará o Mercado Pago conectado e um pedido pago por Pix será liberado automaticamente no painel da loja.',
+    troubleshooting: ['Access Token inválido: confirme que usou a credencial de produção normalmente iniciada por APP_USR-, e não a Public Key.', 'Webhook não confirmado: confira a URL de produção, marque Pagamentos (legacy) e copie novamente a assinatura secreta.', 'Conta em análise: conclua a validação de identidade e aguarde a liberação informada pelo Mercado Pago.', 'Pagamento aprovado não chegou: confira o webhook e abra um chamado com o número do pedido, sem enviar suas chaves.'],
+    sources: [
+      { label: 'Criar ou acessar sua integração no Mercado Pago', url: 'https://www.mercadopago.com.br/developers/panel/app' },
+      { label: 'Documentação oficial de credenciais', url: 'https://www.mercadopago.com.br/developers/pt/docs/your-integrations/credentials' },
+      { label: 'Documentação oficial de webhooks', url: 'https://www.mercadopago.com.br/developers/pt/docs/your-integrations/notifications/webhooks' }
+    ]
+  }),
   article('configurar-pix-online', 'Como configurar Pix online', 'Pagamento online', 'Conecte Mercado Pago para receber pagamento antes de enviar o pedido.', [
     'Acesse Integrações.',
     'Ative Pix online.',
@@ -328,15 +355,16 @@ const els = {
 
 initHelp();
 
-function article(slug, title, category, summary, steps, tip = '') {
+function article(slug, title, category, summary, steps, tip = '', options = {}) {
   const guidance = categoryGuidance(category);
   return {
     slug, title, category, summary, steps, tip,
-    updatedAt: '11/08/2026',
-    readTime: Math.max(3, Math.ceil((steps.length + 3) / 2)),
-    before: guidance.before,
-    outcome: guidance.outcome,
-    troubleshooting: guidance.troubleshooting
+    updatedAt: options.updatedAt || '11/08/2026',
+    readTime: options.readTime || Math.max(3, Math.ceil((steps.length + 3) / 2)),
+    before: options.before || guidance.before,
+    outcome: options.outcome || guidance.outcome,
+    troubleshooting: options.troubleshooting || guidance.troubleshooting,
+    sources: options.sources || []
   };
 }
 
@@ -492,7 +520,7 @@ function renderArticles() {
 function getFilteredArticles() {
   return HELP_ARTICLES.filter((articleItem) => {
     const matchesCategory = state.category === 'Todos' || articleItem.category === state.category;
-    const haystack = normalizeText(`${articleItem.title} ${articleItem.category} ${articleItem.summary} ${articleItem.steps.join(' ')} ${articleItem.before.join(' ')} ${articleItem.troubleshooting.join(' ')}`);
+    const haystack = normalizeText(`${articleItem.title} ${articleItem.category} ${articleItem.summary} ${articleItem.steps.map(stepSearchText).join(' ')} ${articleItem.before.join(' ')} ${articleItem.troubleshooting.join(' ')}`);
     const matchesQuery = !state.query || haystack.includes(state.query);
     return matchesCategory && matchesQuery;
   });
@@ -518,10 +546,11 @@ function openArticle(slug, updateHash = true) {
     <p class="help-article-lead">${escapeHtml(articleItem.summary)}</p>
     <section class="help-before"><h2>Antes de começar</h2><ul>${articleItem.before.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul></section>
     <h2>Passo a passo</h2>
-    <ol class="help-step-list">${articleItem.steps.map((step, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(step)}</strong><p>${escapeHtml(stepDetail(articleItem.category, index))}</p></div></li>`).join('')}</ol>
+    <ol class="help-step-list">${articleItem.steps.map((step, index) => `<li><span>${index + 1}</span><div><strong>${escapeHtml(stepTitle(step))}</strong><p>${escapeHtml(stepDescription(step, articleItem.category, index))}</p></div></li>`).join('')}</ol>
     <section class="help-outcome"><h2>Resultado esperado</h2><p>${escapeHtml(articleItem.outcome)}</p></section>
     ${articleItem.tip ? `<strong class="help-tip">Dica: ${escapeHtml(articleItem.tip)}</strong>` : ''}
     <section class="help-troubleshooting"><h2>Se algo não funcionar</h2><ul>${articleItem.troubleshooting.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul><a href="https://app.taprontomenu.com.br/?tab=support">Abrir um chamado no painel</a></section>
+    ${articleItem.sources.length ? `<section class="help-sources"><h2>Links oficiais</h2><ul>${articleItem.sources.map((source) => `<li><a href="${escapeAttribute(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.label)}</a></li>`).join('')}</ul></section>` : ''}
     ${related.length ? `
       <h2>Artigos relacionados</h2>
       <div class="help-related">
@@ -536,6 +565,18 @@ function openArticle(slug, updateHash = true) {
   els.panel.querySelectorAll('[data-help-open]').forEach((button) => {
     button.addEventListener('click', () => openArticle(button.dataset.helpOpen || ''));
   });
+}
+
+function stepTitle(step) {
+  return typeof step === 'string' ? step : String(step?.title || '');
+}
+
+function stepDescription(step, category, index) {
+  return typeof step === 'object' && step?.detail ? String(step.detail) : stepDetail(category, index);
+}
+
+function stepSearchText(step) {
+  return typeof step === 'string' ? step : `${step?.title || ''} ${step?.detail || ''}`;
 }
 
 function stepDetail(category, index) {
