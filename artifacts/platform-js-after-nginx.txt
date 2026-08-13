@@ -1,0 +1,18 @@
+HTTP/1.1 200 OK
+Server: nginx/1.20.1
+Date: Fri, 07 Aug 2026 08:34:43 GMT
+Content-Type: text/javascript; charset=utf-8
+Content-Length: 42529
+Connection: keep-alive
+Server-Timing: app;dur=0.6
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: camera=(), microphone=(), geolocation=()
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'
+Cache-Control: public, max-age=300, stale-while-revalidate=60
+ETag: "zDPwIgtTwNNt5rAp1mIqeEoS"
+Vary: Accept-Encoding
+Content-Encoding: gzip
+

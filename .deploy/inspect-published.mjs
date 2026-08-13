@@ -1,0 +1,3 @@
+﻿import fs from 'node:fs'; import pg from 'pg';
+for (const line of fs.readFileSync('.env','utf8').split(/\r?\n/)) { const i=line.indexOf('='); if(i>0&&!line.startsWith('#')) process.env[line.slice(0,i).trim()] ??=line.slice(i+1).trim().replace(/^["']|["']$/g,''); }
+const p=new pg.Pool({connectionString:process.env.DATABASE_URL}); const q=await p.query(`select p.status,p.permalink,p.provider_media_id,c.title,a.storage_path,a.public_url,a.checksum_sha256 from social_publications p join marketing_content_items c on c.id=p.content_id left join social_content_assets ca on ca.content_id=c.id left join social_media_assets a on a.id=ca.asset_id where c.id=$1`,['e3b492e6-9fe9-4c38-9723-4660ded0f19b']); console.log(JSON.stringify(q.rows)); await p.end();

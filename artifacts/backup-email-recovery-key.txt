@@ -1,0 +1,7 @@
+TáPronto - chave de recuperação dos backups por e-mail
+
+Destinatário: sup.tapronto@gmail.com
+Algoritmo: AES-256-GCM / scrypt
+Chave: BV-tpyDGRkiIvBi8hJJ0s2QrE59dakZ-3X7pLfKmjBSiaQj7RCn0ThZvRZGWTbx9
+
+Guarde este arquivo fora do servidor. Sem esta chave os anexos .tapronto.enc não podem ser restaurados.
