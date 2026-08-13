@@ -1447,24 +1447,24 @@ function renderPaymentCheckoutDialog(status = state.paymentCheckout?.status || '
 function paymentCheckoutCopy(status) {
   if (status === 'paid') {
     return {
-      title: 'Pagamento confirmado.',
+      title: 'Pagamento Confirmado.',
       text: 'Seu pedido foi enviado para a loja. Você já pode acompanhar o preparo.'
     };
   }
   if (status === 'expired') {
     return {
-      title: 'Pagamento expirado.',
+      title: 'Pagamento Expirado.',
       text: 'Gere um novo pedido para abrir outro checkout seguro.'
     };
   }
   if (status === 'failed' || status === 'cancelled') {
     return {
-      title: 'Pagamento não concluído.',
+      title: 'Pagamento Não Concluído.',
       text: 'O pedido ainda não foi enviado para a loja. Tente novamente ou escolha outra forma de pagamento.'
     };
   }
   return {
-    title: 'Pagamento online aguardando.',
+    title: 'Pagamento Online Aguardando.',
     text: 'Conclua o Pix no Mercado Pago e mantenha esta página aberta. O pedido só é enviado para a loja depois da confirmação.'
   };
 }
@@ -2459,7 +2459,7 @@ function persistFavorites() {
 
 function renderEmptyState() {
   els.featured.replaceChildren();
-  els.menu.innerHTML = '<section class="empty-state"><h2>Configure o banco local</h2><p>Confira o DATABASE_URL, rode as migrations do Prisma e reinicie o servidor.</p></section>';
+  els.menu.innerHTML = '<section class="empty-state"><h2>Configure o Banco Local</h2><p>Confira o DATABASE_URL, rode as migrations do Prisma e reinicie o servidor.</p></section>';
 }
 
 function isStoreNotFoundError(error) {

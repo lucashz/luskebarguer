@@ -158,7 +158,7 @@ function renderLoading() {
       <span class="loading-dot"></span>
       <div>
         <p class="eyebrow">Carregando</p>
-        <h2>Buscando seus pedidos</h2>
+        <h2>Buscando Seus Pedidos</h2>
       </div>
     </article>
   `;

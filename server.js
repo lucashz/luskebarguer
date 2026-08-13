@@ -3758,7 +3758,7 @@ async function getPlatformCompanyTimelineAdvanced(companyId) {
   if (firstProduct?.created_at) {
     events.push({
       type: 'menu',
-      title: 'Primeiro produto',
+      title: 'Primeiro Produto',
       description: firstProduct.name || 'Produto cadastrado',
       created_at: firstProduct.created_at
     });
@@ -3767,7 +3767,7 @@ async function getPlatformCompanyTimelineAdvanced(companyId) {
     if (store.settings?.onboarding_completed) {
       events.push({
         type: 'onboarding',
-        title: 'Onboarding concluído',
+        title: 'Onboarding Concluído',
         description: store.name,
         created_at: store.settings.updated_at || store.created_at || new Date().toISOString()
       });
@@ -4845,9 +4845,9 @@ function platformCommercialAlerts(companies, stores, context, options = {}) {
   const backup = options.backup || {};
   const operationalLogs = options.operationalLogs || [];
   if (backup.latest?.created_at && (now - new Date(backup.latest.created_at).getTime()) > 86400000) {
-    alerts.push({ type: 'backup', severity: 'critical', title: 'Backup atrasado', action: 'Executar backup manual e conferir agendamento.' });
+    alerts.push({ type: 'backup', severity: 'critical', title: 'Backup Atrasado', action: 'Executar backup manual e conferir agendamento.' });
   } else if (!backup.latest?.created_at) {
-    alerts.push({ type: 'backup', severity: 'warning', title: 'Backup sem registro recente', action: 'Validar diretório e rotina de backup.' });
+    alerts.push({ type: 'backup', severity: 'warning', title: 'Backup sem Registro Recente', action: 'Validar diretório e rotina de backup.' });
   }
   const webhookFailures = operationalLogs.filter((log) => log.type === 'webhook' && ['failed', 'attention'].includes(log.status));
   if (webhookFailures.length) {
@@ -4855,7 +4855,7 @@ function platformCommercialAlerts(companies, stores, context, options = {}) {
   }
   const apiMetric = platformMetricsSnapshot(platformHealthPeriod('24h')).api;
   if (Number(apiMetric?.p95_ms || 0) > 1200) {
-    alerts.push({ type: 'performance', severity: 'warning', title: 'API com latência alta', action: 'Verificar banco, logs e tráfego recente.' });
+    alerts.push({ type: 'performance', severity: 'warning', title: 'API com Latência Alta', action: 'Verificar banco, logs e tráfego recente.' });
   }
   for (const company of companies) {
     const subscription = context.subscriptionByCompany.get(company.id);
@@ -4893,13 +4893,13 @@ function platformCompanyAttention({ company, stores, settingsByStore, orders, su
     }
   }
   if (['payment_pending', 'past_due', 'grace_period', 'suspended'].includes(subscriptionStatus)) {
-    alerts.push({ type: 'billing', severity: 'critical', title: 'Pagamento pendente ou cliente suspenso', action: 'Verificar cobrança, webhook e status comercial.' });
+    alerts.push({ type: 'billing', severity: 'critical', title: 'Pagamento Pendente ou Cliente Suspenso', action: 'Verificar cobrança, webhook e status comercial.' });
   }
   if (!stores.length) {
-    alerts.push({ type: 'setup', severity: 'critical', title: 'Cliente sem loja/cardápio', action: 'Criar uma loja para o cliente.' });
+    alerts.push({ type: 'setup', severity: 'critical', title: 'Cliente sem Loja/cardápio', action: 'Criar uma loja para o cliente.' });
   }
   if (stores.some((store) => store.is_active === false)) {
-    alerts.push({ type: 'store', severity: 'attention', title: 'Existe loja inativa', action: 'Confirmar se a suspensão foi intencional.' });
+    alerts.push({ type: 'store', severity: 'attention', title: 'Existe Loja Inativa', action: 'Confirmar se a suspensão foi intencional.' });
   }
   const storesWithoutWhatsapp = stores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number);
   if (storesWithoutWhatsapp.length) {
@@ -4907,19 +4907,19 @@ function platformCompanyAttention({ company, stores, settingsByStore, orders, su
   }
   const incompleteStores = stores.filter((store) => settingsByStore.get(store.id)?.onboarding_completed === false);
   if (incompleteStores.length) {
-    alerts.push({ type: 'onboarding', severity: 'attention', title: 'Onboarding incompleto', action: 'Reabrir onboarding ou orientar o cliente.' });
+    alerts.push({ type: 'onboarding', severity: 'attention', title: 'Onboarding Incompleto', action: 'Reabrir onboarding ou orientar o cliente.' });
   }
   const closedStores = stores.filter((store) => settingsByStore.get(store.id)?.is_open === false);
   if (closedStores.length) {
     alerts.push({ type: 'operation', severity: 'attention', title: `${closedStores.length} loja(s) fechada(s)`, action: 'Validar horário/status de operação.' });
   }
   if (!products.length && stores.length) {
-    alerts.push({ type: 'menu', severity: 'critical', title: 'Cliente sem produtos cadastrados', action: 'Ajudar a criar o cardápio inicial.' });
+    alerts.push({ type: 'menu', severity: 'critical', title: 'Cliente sem Produtos Cadastrados', action: 'Ajudar a criar o cardápio inicial.' });
   }
   if (!lastOrder && stores.length) {
-    alerts.push({ type: 'sales', severity: 'attention', title: 'Nenhum pedido registrado', action: 'Acompanhar ativação comercial.' });
+    alerts.push({ type: 'sales', severity: 'attention', title: 'Nenhum Pedido Registrado', action: 'Acompanhar ativação comercial.' });
   } else if (lastOrder && Date.now() - new Date(lastOrder.created_at).getTime() > 7 * 86400000) {
-    alerts.push({ type: 'sales', severity: 'warning', title: 'Mais de 7 dias sem pedidos', action: 'Verificar divulgação, loja aberta e cardápio.' });
+    alerts.push({ type: 'sales', severity: 'warning', title: 'Mais de 7 Dias sem Pedidos', action: 'Verificar divulgação, loja aberta e cardápio.' });
   }
   return alerts;
 }
@@ -4929,7 +4929,7 @@ function buildPlatformCompanyTimeline({ company, stores, orders, billingHistory,
   if (company?.created_at) {
     events.push({
       type: 'company',
-      title: 'Conta criada',
+      title: 'Conta Criada',
       description: company.name,
       created_at: company.created_at
     });
@@ -4938,7 +4938,7 @@ function buildPlatformCompanyTimeline({ company, stores, orders, billingHistory,
     if (store.created_at) {
       events.push({
         type: 'store',
-        title: 'Loja criada',
+        title: 'Loja Criada',
         description: `${store.name} /${store.slug}`,
         created_at: store.created_at
       });
@@ -4947,7 +4947,7 @@ function buildPlatformCompanyTimeline({ company, stores, orders, billingHistory,
   if (subscription?.created_at) {
     events.push({
       type: 'billing',
-      title: 'Assinatura iniciada',
+      title: 'Assinatura Iniciada',
       description: subscription.status || 'assinatura',
       created_at: subscription.created_at
     });
@@ -4956,7 +4956,7 @@ function buildPlatformCompanyTimeline({ company, stores, orders, billingHistory,
   if (firstOrder?.created_at) {
     events.push({
       type: 'order',
-      title: 'Primeiro pedido',
+      title: 'Primeiro Pedido',
       description: `${moneyNumber(firstOrder.total).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
       created_at: firstOrder.created_at
     });
@@ -6285,7 +6285,7 @@ function computeOnboardingSteps({ store, categories, items }) {
     },
     {
       key: 'store',
-      title: 'Dados da loja',
+      title: 'Dados da Loja',
       description: 'Nome, endereço público e WhatsApp de pedidos.',
       auto_completed: Boolean(store.name && store.slug && store.whatsapp_number)
     },
@@ -6309,13 +6309,13 @@ function computeOnboardingSteps({ store, categories, items }) {
     },
     {
       key: 'category',
-      title: 'Primeira categoria',
+      title: 'Primeira Categoria',
       description: 'Crie pelo menos uma categoria do cardápio.',
       auto_completed: Array.isArray(categories) && categories.length > 0
     },
     {
       key: 'product',
-      title: 'Primeiro produto',
+      title: 'Primeiro Produto',
       description: 'Cadastre pelo menos um produto ativo.',
       auto_completed: Array.isArray(items) && items.length > 0
     },
@@ -6327,13 +6327,13 @@ function computeOnboardingSteps({ store, categories, items }) {
     },
     {
       key: 'training',
-      title: 'Treinamento rápido',
+      title: 'Treinamento Rápido',
       description: 'Conheça as áreas principais do painel administrativo.',
       auto_completed: false
     },
     {
       key: 'publish',
-      title: 'Publicar cardápio',
+      title: 'Publicar Cardápio',
       description: 'Libere a loja para receber pedidos.',
       auto_completed: store.onboarding_completed === true
     }
@@ -18030,7 +18030,7 @@ async function applyReportPlanAccess(report, companyId) {
       report_locks: [
         {
           feature: 'business_insights',
-          title: 'Insights avançados',
+          title: 'Insights Avançados',
           message: featureBlockedMessage('business_insights')
         }
       ]
@@ -18046,12 +18046,12 @@ async function applyReportPlanAccess(report, companyId) {
     report_locks: [
       {
         feature: 'advanced_reports',
-        title: 'Relatórios completos',
+        title: 'Relatórios Completos',
         message: featureBlockedMessage('advanced_reports')
       },
       {
         feature: 'business_insights',
-        title: 'Insights avançados',
+        title: 'Insights Avançados',
         message: featureBlockedMessage('business_insights')
       }
     ]
@@ -19042,11 +19042,11 @@ function sendSeoLandingPage(req, res, page) {
   <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="${guidesBaseUrl()}/">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container seo-hero"><div><p class="home-badge">TáPronto para vender</p><h1>${emailEscapeHtml(page.heading)}</h1><p>${emailEscapeHtml(page.intro)}</p><div class="home-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div><ul class="home-trust"><li>Teste grátis</li><li>Sem taxa por pedido</li><li>Cancele quando quiser</li></ul></div><img class="seo-shot" src="/assets/sistema-cardapio-preview.png" alt="Exemplo do cardápio digital TáPronto no celular" width="1440" height="980"></section>
-    <section class="seo-section" style="background:#f7f8fb"><div class="home-container"><p class="home-badge">Benefícios</p><h2>Menos atrito para o cliente. Mais controle para sua equipe.</h2><div class="seo-grid">${page.benefits.map((benefit) => `<article class="seo-card"><strong>${emailEscapeHtml(benefit)}</strong><p>Configure pelo painel e publique as mudanças sem depender de aplicativo ou material impresso.</p></article>`).join('')}</div></div></section>
-    <section class="home-container seo-section seo-copy"><p class="home-badge">Como começar</p><h2>Publique em três etapas</h2><div class="seo-grid">${page.steps.map((step, index) => `<article class="seo-card"><strong>${index + 1}. ${emailEscapeHtml(step)}</strong><p>O onboarding orienta cada configuração importante antes da publicação.</p></article>`).join('')}</div></section>
-    <section class="seo-section" style="background:#fff5f5"><div class="home-container"><h2>Experimente com a sua operação</h2><p>Cadastre produtos reais, teste o pedido no celular e escolha o plano apenas depois de validar o fluxo.</p><div class="home-actions"><a class="home-button" href="/cadastro">Começar teste grátis</a><a class="home-button ghost" href="/planos">Comparar planos</a></div></div></section>
-    <section class="home-container seo-section seo-faq"><p class="home-badge">Dúvidas frequentes</p><h2>O que você precisa saber</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</section>
-    <section class="home-container seo-section"><h2>Veja também</h2><div class="seo-related">${related.map((entry) => `<a href="/${entry.slug}">${emailEscapeHtml(entry.heading)}</a>`).join('')}</div></section>
+    <section class="seo-section" style="background:#f7f8fb"><div class="home-container"><p class="home-badge">Benefícios</p><h2>Menos Atrito para o Cliente. Mais Controle para Sua Equipe.</h2><div class="seo-grid">${page.benefits.map((benefit) => `<article class="seo-card"><strong>${emailEscapeHtml(benefit)}</strong><p>Configure pelo painel e publique as mudanças sem depender de aplicativo ou material impresso.</p></article>`).join('')}</div></div></section>
+    <section class="home-container seo-section seo-copy"><p class="home-badge">Como começar</p><h2>Publique em Três Etapas</h2><div class="seo-grid">${page.steps.map((step, index) => `<article class="seo-card"><strong>${index + 1}. ${emailEscapeHtml(step)}</strong><p>O onboarding orienta cada configuração importante antes da publicação.</p></article>`).join('')}</div></section>
+    <section class="seo-section" style="background:#fff5f5"><div class="home-container"><h2>Experimente com a Sua Operação</h2><p>Cadastre produtos reais, teste o pedido no celular e escolha o plano apenas depois de validar o fluxo.</p><div class="home-actions"><a class="home-button" href="/cadastro">Começar teste grátis</a><a class="home-button ghost" href="/planos">Comparar planos</a></div></div></section>
+    <section class="home-container seo-section seo-faq"><p class="home-badge">Dúvidas frequentes</p><h2>O que Você Precisa Saber</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</section>
+    <section class="home-container seo-section"><h2>Veja Também</h2><div class="seo-related">${related.map((entry) => `<a href="/${entry.slug}">${emailEscapeHtml(entry.heading)}</a>`).join('')}</div></section>
   </main>
   <footer class="home-container seo-section"><strong>TáPronto</strong><p>Cardápio digital e pedidos organizados para restaurantes.</p><nav><a href="/">Início</a> · <a href="/planos">Planos</a> · <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos</a></nav></footer>
   <script src="/seo-landing.js" type="module"></script>
@@ -19100,9 +19100,9 @@ function sendSeoGuideArticlePage(req, res, page) {
     <section class="home-container article-hero"><span class="article-category">${emailEscapeHtml(article.category)}</span><h1>${emailEscapeHtml(page.heading)}</h1><p class="article-lead">${emailEscapeHtml(page.intro)}</p><div class="article-meta"><span>${emailEscapeHtml(article.author)}</span><span>•</span><span>Atualizado em ${emailEscapeHtml(article.updatedAt)}</span><span>•</span><span>${emailEscapeHtml(article.readTime)} de leitura</span></div></section>
     <section class="home-container article-visual" role="img" aria-label="Principais etapas deste guia">${sections.slice(0, 3).map((section, index) => `<div class="article-visual-card"><span>${index + 1}</span><strong>${emailEscapeHtml(section.title)}</strong><small>${emailEscapeHtml((section.paragraphs?.[0] || section.bullets?.[0] || '').slice(0, 105))}</small></div>`).join('')}</section>
     <div class="home-container article-layout"><aside class="article-toc"><strong>Neste guia</strong>${sections.map((section, index) => `<a href="#${emailEscapeAttribute(cleanSlug(section.title) || `passo-${index + 1}`)}">${index + 1}. ${emailEscapeHtml(section.title)}</a>`).join('')}</aside><article><div class="article-summary"><strong>Resumo rápido</strong><p>${emailEscapeHtml(article.takeaway)}</p></div>${sections.map(renderSection).join('')}</article></div>
-    <section class="article-faq"><div class="home-container" style="max-width:760px"><span class="article-category">Dúvidas comuns</span><h2>Perguntas frequentes</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</div></section>
-    <section class="article-related"><div class="home-container"><span class="article-category">Continue aprendendo</span><h2>Guias relacionados</h2><div class="article-related-grid">${related.map((entry) => `<a href="/${entry.slug.replace(/^guias\//, '')}"><small>${emailEscapeHtml(entry.article?.category || 'Guia prático')}</small><strong>${emailEscapeHtml(entry.heading)}</strong><span>Ler guia →</span></a>`).join('')}</div></div></section>
-    <section class="home-container article-final"><div class="article-final-box"><div><h2>Monte o cardápio da sua loja</h2><p>Comece pelos produtos mais vendidos e teste o pedido antes de divulgar.</p></div><a class="home-button" href="${origin}/cadastro">Criar meu cardápio</a></div></section>
+    <section class="article-faq"><div class="home-container" style="max-width:760px"><span class="article-category">Dúvidas comuns</span><h2>Perguntas Frequentes</h2>${page.faq.map(([question, answer]) => `<details><summary>${emailEscapeHtml(question)}</summary><p>${emailEscapeHtml(answer)}</p></details>`).join('')}</div></section>
+    <section class="article-related"><div class="home-container"><span class="article-category">Continue aprendendo</span><h2>Guias Relacionados</h2><div class="article-related-grid">${related.map((entry) => `<a href="/${entry.slug.replace(/^guias\//, '')}"><small>${emailEscapeHtml(entry.article?.category || 'Guia prático')}</small><strong>${emailEscapeHtml(entry.heading)}</strong><span>Ler guia →</span></a>`).join('')}</div></div></section>
+    <section class="home-container article-final"><div class="article-final-box"><div><h2>Monte o Cardápio da Sua Loja</h2><p>Comece pelos produtos mais vendidos e teste o pedido antes de divulgar.</p></div><a class="home-button" href="${origin}/cadastro">Criar meu cardápio</a></div></section>
   </main><footer class="article-footer"><div class="home-container article-footer-row"><strong>TáPronto · Cardápio digital, pedidos organizados.</strong><nav><a href="${guideOrigin}/">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/privacidade">Privacidade</a><a href="${origin}/termos">Termos</a></nav></div></footer><script src="/seo-landing.js" type="module"></script>
 </body></html>`;
   seoTextResponse(req, res, 200, html, 'text/html; charset=utf-8', { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600' });
@@ -19160,9 +19160,9 @@ function sendSeoGuidesHubPage(req, res, page) {
   <main>
     <section class="home-container guides-hero"><span class="guides-eyebrow">Conteúdo prático para sua loja</span><h1>Menos bagunça.<br>Mais pedidos organizados.</h1><p>Guias diretos para montar seu cardápio, divulgar a loja e melhorar o atendimento sem complicação.</p></section>
     <section class="home-container guides-topics" aria-label="Navegue por assunto">${topics.map(([title, description, icon]) => `<a class="guides-topic" href="#todos"><span class="guides-topic-icon" aria-hidden="true">${icon}</span><b>${emailEscapeHtml(title)}</b><span>${emailEscapeHtml(description)}</span></a>`).join('')}</section>
-    <section class="guides-feature-wrap"><div class="home-container"><div class="guides-section-head"><div><span class="guides-eyebrow">Comece por aqui</span><h2>Guia em destaque</h2></div><p>Leitura rápida e aplicável hoje.</p></div><article class="guides-feature"><div class="guides-feature-art"><div class="guides-menu-mock" role="img" aria-label="Exemplo de cardápio digital organizado no celular"><div class="guides-menu-screen"><div class="guides-menu-top"><span class="guides-menu-brand"><i>T</i>Sabor da Casa</span><span class="guides-menu-cart">Pedido · 2</span></div><div class="guides-menu-cover"><b>Seu pedido começa aqui</b><span>Escolha, personalize e finalize pelo celular.</span></div><div class="guides-menu-chips"><span>Destaques</span><span>Lanches</span><span>Combos</span></div><div class="guides-menu-products"><div class="guides-menu-product"><div><b>Combo da Casa</b><p>Hambúrguer, fritas e bebida</p><strong>R$ 29,90</strong></div><span class="guides-food-thumb">🍔</span></div><div class="guides-menu-product"><div><b>Monte do seu jeito</b><p>Escolha adicionais sem confusão</p><strong>A partir de R$ 18,90</strong></div><span class="guides-food-thumb">🍟</span></div></div></div></div></div><div class="guides-feature-copy"><span class="guides-category">${emailEscapeHtml(featured.category)}</span><h2>${emailEscapeHtml(featured.heading)}</h2><p>${emailEscapeHtml(featured.intro)}</p><div class="guides-read"><span>${emailEscapeHtml(featured.time)} de leitura</span><span>•</span><span>Passo a passo</span></div><a class="guides-link" href="/${featured.slug}">Ler guia completo →</a></div></article></div></section>
-    <section class="home-container guides-library" id="todos"><div class="guides-section-head"><div><span class="guides-eyebrow">Biblioteca TáPronto</span><h2>Todos os guias</h2><p>Escolha uma dor da sua operação e veja como resolver.</p></div></div><div class="guides-grid">${cards.map((guide) => `<a class="guide-card" href="/${guide.slug.replace(/^guias\//, '')}"><span class="guide-card-art ${guide.color}" aria-hidden="true">${guide.icon}</span><span class="guide-card-copy"><span class="guides-category">${emailEscapeHtml(guide.category)}</span><h3>${emailEscapeHtml(guide.heading)}</h3><p>${emailEscapeHtml(guide.intro)}</p><span class="guides-read">${emailEscapeHtml(guide.time)} de leitura · Guia prático</span></span></a>`).join('')}</div></section>
-    <section class="home-container guides-cta"><div class="guides-cta-box"><div><span class="guides-eyebrow">Coloque em prática</span><h2>Seu cardápio pode ficar pronto hoje.</h2><p>Cadastre os produtos mais vendidos, teste um pedido pelo celular e publique quando estiver seguro.</p></div><div class="guides-cta-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div></div></section>
+    <section class="guides-feature-wrap"><div class="home-container"><div class="guides-section-head"><div><span class="guides-eyebrow">Comece por aqui</span><h2>Guia em Destaque</h2></div><p>Leitura rápida e aplicável hoje.</p></div><article class="guides-feature"><div class="guides-feature-art"><div class="guides-menu-mock" role="img" aria-label="Exemplo de cardápio digital organizado no celular"><div class="guides-menu-screen"><div class="guides-menu-top"><span class="guides-menu-brand"><i>T</i>Sabor da Casa</span><span class="guides-menu-cart">Pedido · 2</span></div><div class="guides-menu-cover"><b>Seu pedido começa aqui</b><span>Escolha, personalize e finalize pelo celular.</span></div><div class="guides-menu-chips"><span>Destaques</span><span>Lanches</span><span>Combos</span></div><div class="guides-menu-products"><div class="guides-menu-product"><div><b>Combo da Casa</b><p>Hambúrguer, fritas e bebida</p><strong>R$ 29,90</strong></div><span class="guides-food-thumb">🍔</span></div><div class="guides-menu-product"><div><b>Monte do seu jeito</b><p>Escolha adicionais sem confusão</p><strong>A partir de R$ 18,90</strong></div><span class="guides-food-thumb">🍟</span></div></div></div></div></div><div class="guides-feature-copy"><span class="guides-category">${emailEscapeHtml(featured.category)}</span><h2>${emailEscapeHtml(featured.heading)}</h2><p>${emailEscapeHtml(featured.intro)}</p><div class="guides-read"><span>${emailEscapeHtml(featured.time)} de leitura</span><span>•</span><span>Passo a passo</span></div><a class="guides-link" href="/${featured.slug}">Ler guia completo →</a></div></article></div></section>
+    <section class="home-container guides-library" id="todos"><div class="guides-section-head"><div><span class="guides-eyebrow">Biblioteca TáPronto</span><h2>Todos os Guias</h2><p>Escolha uma dor da sua operação e veja como resolver.</p></div></div><div class="guides-grid">${cards.map((guide) => `<a class="guide-card" href="/${guide.slug.replace(/^guias\//, '')}"><span class="guide-card-art ${guide.color}" aria-hidden="true">${guide.icon}</span><span class="guide-card-copy"><span class="guides-category">${emailEscapeHtml(guide.category)}</span><h3>${emailEscapeHtml(guide.heading)}</h3><p>${emailEscapeHtml(guide.intro)}</p><span class="guides-read">${emailEscapeHtml(guide.time)} de leitura · Guia prático</span></span></a>`).join('')}</div></section>
+    <section class="home-container guides-cta"><div class="guides-cta-box"><div><span class="guides-eyebrow">Coloque em prática</span><h2>Seu Cardápio Pode Ficar Pronto Hoje.</h2><p>Cadastre os produtos mais vendidos, teste um pedido pelo celular e publique quando estiver seguro.</p></div><div class="guides-cta-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div></div></section>
   </main>
   <footer class="guides-footer"><div class="home-container guides-footer-row"><div><strong>TáPronto</strong><p>Cardápio digital, pedidos organizados.</p></div><nav><a href="/">Início</a><a href="/planos">Planos</a><a href="/privacidade">Privacidade</a><a href="/termos">Termos</a></nav></div></footer>
   <script src="/seo-landing.js" type="module"></script>

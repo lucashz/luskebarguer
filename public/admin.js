@@ -111,7 +111,7 @@ const ADMIN_TOUR_STEPS = [
     key: 'tables',
     tab: 'tables',
     target: '[data-admin-section="tables"]',
-    title: 'Mesas e comandas',
+    title: 'Mesas e Comandas',
     text: 'Crie mesas, gere QR Codes e acompanhe comandas do salão vinculadas à loja atual.'
   },
   {
@@ -1646,7 +1646,7 @@ function renderTableManager() {
       <div class="section-actions compact-section-actions">
         <div>
           <p class="eyebrow">Comandas</p>
-          <h3>Gerenciamento da mesa</h3>
+          <h3>Gerenciamento da Mesa</h3>
         </div>
       </div>
       ${openTabs.length ? renderTableOpenTabs(openTabs, sortedTables, table.id) : `
@@ -1660,7 +1660,7 @@ function renderTableManager() {
     <section class="table-manager-section">
       <div>
         <p class="eyebrow">Itens pedidos</p>
-        <h3>Histórico desta mesa</h3>
+        <h3>Histórico desta Mesa</h3>
       </div>
       ${renderTableOrders(tableOrders)}
     </section>
@@ -3177,7 +3177,7 @@ function reportStatusCard(rows, totalOrders) {
   return `
     <div class="report-card">
       <div class="report-card-title-row">
-        <div><span class="report-kicker">Status</span><h3>Por status</h3></div>
+        <div><span class="report-kicker">Status</span><h3>Por Status</h3></div>
         <span class="report-icon">#</span>
       </div>
       <strong class="report-main-number">${totalOrders} pedido(s)</strong>
@@ -3192,7 +3192,7 @@ function reportPaymentCard(rows, topPayment) {
   return `
     <div class="report-card">
       <div class="report-card-title-row">
-        <div><span class="report-kicker">Pagamento</span><h3>Por pagamento</h3></div>
+        <div><span class="report-kicker">Pagamento</span><h3>Por Pagamento</h3></div>
         <span class="report-icon">R$</span>
       </div>
       <strong class="report-main-number">${money(totalRevenue)}</strong>
@@ -3207,7 +3207,7 @@ function reportOriginCard(rows, topOrigin) {
   return `
     <div class="report-card">
       <div class="report-card-title-row">
-        <div><span class="report-kicker">Origem</span><h3>Por origem</h3></div>
+        <div><span class="report-kicker">Origem</span><h3>Por Origem</h3></div>
         <span class="report-icon">O</span>
       </div>
       <strong class="report-main-number">${money(totalRevenue)}</strong>
@@ -3223,7 +3223,7 @@ function reportTopProductsCard(products) {
   return `
     <div class="report-card">
       <div class="report-card-title-row">
-        <div><span class="report-kicker">Produtos</span><h3>Mais vendidos</h3></div>
+        <div><span class="report-kicker">Produtos</span><h3>Mais Vendidos</h3></div>
         <span class="report-icon">5</span>
       </div>
       <strong class="report-main-number">${visibleProducts.length ? `${safeReportNumber(visibleProducts[0].quantity)} un.` : '0 un.'}</strong>
@@ -3252,7 +3252,7 @@ function reportHoursCard(rows, peakHour, revenueHour) {
   return `
     <div class="report-card">
       <div class="report-card-title-row">
-        <div><span class="report-kicker">Horários</span><h3>Horários de pico</h3></div>
+        <div><span class="report-kicker">Horários</span><h3>Horários de Pico</h3></div>
         <span class="report-icon">H</span>
       </div>
       <strong class="report-main-number">${peakHour ? escapeHtml(peakHour.key) : '--:--'}</strong>
@@ -3335,7 +3335,7 @@ function reportCashClosingCard(closing) {
   return `
     <div class="report-card report-cash-card">
       <div class="report-card-title-row">
-        <div><span class="report-kicker">Caixa</span><h3>Fechamento de caixa</h3></div>
+        <div><span class="report-kicker">Caixa</span><h3>Fechamento de Caixa</h3></div>
         <span class="report-badge ${isBalanced ? 'success' : 'danger'}">${isBalanced ? 'Correto' : 'Divergência'}</span>
       </div>
       <strong class="report-main-number">${money(closing.expected_revenue || 0)}</strong>
@@ -4006,7 +4006,7 @@ function kitchenReceiptHtml(order, options = {}) {
         <h2>Itens</h2>
         <ul>${(order.items || []).map((item) => thermalItemHtml(item, { showPrices: options.showKitchenPrices })).join('')}</ul>
       </section>
-      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p class="order-note">${escapeHtml(order.notes)}</p></section>` : ''}
+      ${order.notes ? `<section class="box"><h2>Obs. do Pedido</h2><p class="order-note">${escapeHtml(order.notes)}</p></section>` : ''}
       <p class="cut">corte aqui</p>
     </main>
   `;
@@ -4042,7 +4042,7 @@ function customerReceiptHtml(order, options = {}) {
         <h2>Itens</h2>
         <ul>${(order.items || []).map((item) => thermalItemHtml(item, { showPrices: true })).join('')}</ul>
       </section>
-      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p class="order-note">${escapeHtml(order.notes)}</p></section>` : ''}
+      ${order.notes ? `<section class="box"><h2>Obs. do Pedido</h2><p class="order-note">${escapeHtml(order.notes)}</p></section>` : ''}
       <section class="box">
         <p class="line"><span>Subtotal</span><strong>${money(order.subtotal)}</strong></p>
         ${Number(order.delivery_fee || 0) > 0 ? `<p class="line"><span>Entrega</span><strong>${money(order.delivery_fee)}</strong></p>` : ''}
@@ -4106,7 +4106,7 @@ function orderLabelDocument(order, copies = 1) {
         <h2>Itens</h2>
         <ul>${items}</ul>
       </section>
-      ${order.notes ? `<section class="box"><h2>Obs. do pedido</h2><p>${escapeHtml(order.notes)}</p></section>` : ''}
+      ${order.notes ? `<section class="box"><h2>Obs. do Pedido</h2><p>${escapeHtml(order.notes)}</p></section>` : ''}
       <section class="box totals">
         <p><span>Subtotal</span><strong>${money(order.subtotal)}</strong></p>
         <p><span>Entrega</span><strong>${money(order.delivery_fee)}</strong></p>
@@ -4782,7 +4782,7 @@ function customerEditor(customer) {
     <div class="customer-dropdown" ${state.openCustomerIds.has(customer.id) ? '' : 'hidden'}>
       <form class="customer-main-form" id="${escapeAttribute(customerFormId)}">
         <div class="section-actions">
-          <h3>Cadastro do cliente</h3>
+          <h3>Cadastro do Cliente</h3>
           <span class="pill">${completedOrders} concluído(s)</span>
         </div>
       <div class="editor-grid">
@@ -6426,7 +6426,7 @@ function renderPlanCheckoutWaiting(checkoutUrl, planCode = '') {
       <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
       <div class="plan-checkout-head">
         <p class="eyebrow">Pagamento seguro</p>
-        <h2 id="planCheckoutWaitingTitle">Finalize o pagamento na aba aberta</h2>
+        <h2 id="planCheckoutWaitingTitle">Finalize o Pagamento na Aba Aberta</h2>
         <p>Escolha Pix ou cartão no Mercado Pago. Quando o pagamento for confirmado, o plano será liberado automaticamente no painel.</p>
       </div>
       <div class="plan-checkout-status">
@@ -8429,7 +8429,7 @@ function openIntegrationSetupCheckout() {
       <button class="icon-button plan-checkout-close" type="button" data-close-plan-checkout aria-label="Fechar">×</button>
       <div class="plan-checkout-head">
         <p class="eyebrow">Configuração assistida</p>
-        <h2 id="integrationSetupCheckoutTitle">Solicitar configuração</h2>
+        <h2 id="integrationSetupCheckoutTitle">Solicitar Configuração</h2>
         <p>Selecione as integrações que a equipe TáPronto deve configurar.</p>
       </div>
       <div class="integration-setup-checkout-list">
@@ -8741,7 +8741,7 @@ function openIntegrationHelp(type) {
   const content = {
     'whatsapp-auto': {
       eyebrow: 'WhatsApp automático',
-      title: 'Como conectar o WhatsApp da loja',
+      title: 'Como Conectar o WhatsApp da Loja',
       body: `
         <ol>
           <li>Clique em <strong>Conectar WhatsApp</strong> para gerar o QR Code desta loja.</li>
@@ -8754,7 +8754,7 @@ function openIntegrationHelp(type) {
     },
     'mercadopago-token': {
       eyebrow: 'Mercado Pago',
-      title: 'Onde pegar a API key',
+      title: 'Onde Pegar a API Key',
       body: `
         <ol>
           <li>Entre em Suas integrações no painel de desenvolvedores do Mercado Pago.</li>
@@ -8767,7 +8767,7 @@ function openIntegrationHelp(type) {
     },
     'mercadopago-webhook': {
       eyebrow: 'Webhook',
-      title: 'Como receber confirmação do Pix',
+      title: 'Como Receber Confirmação do Pix',
       body: `
         <ol>
           <li>No painel do Mercado Pago, abra Webhooks da sua aplicação.</li>
@@ -9146,7 +9146,7 @@ function renderPlanBlockedSection(section) {
   section.innerHTML = `
     <section class="panel plan-blocked-panel">
       <p class="eyebrow">Plano atual</p>
-      <h2>Recurso disponível em planos superiores</h2>
+      <h2>Recurso Disponível em Planos Superiores</h2>
       <p>Este recurso não faz parte do plano atual da loja. Acesse Meu plano para comparar opções e liberar esta área.</p>
       <button class="primary-button compact" type="button" data-admin-tab-jump="plan">Ver Planos</button>
     </section>

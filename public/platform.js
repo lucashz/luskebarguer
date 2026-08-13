@@ -871,7 +871,7 @@ async function generateAutopilotPost(regenerate = false, format = state.marketin
     toast(regenerate ? 'Nova opção preparada.' : 'Post de hoje preparado.');
   } catch (error) {
     toast(error.message || 'Não foi possível preparar o post.');
-    if (els.autopilotTodayCard) els.autopilotTodayCard.innerHTML = '<div class="autopilot-empty autopilot-error"><span>Não foi possível concluir</span><h3>O post não foi preparado</h3><p>Tente novamente. Se o problema continuar, verifique a conexão nas Configurações.</p><button class="primary-button" data-autopilot-action="regenerate" type="button">Tentar novamente</button></div>';
+    if (els.autopilotTodayCard) els.autopilotTodayCard.innerHTML = '<div class="autopilot-empty autopilot-error"><span>Não foi possível concluir</span><h3>O Post Não Foi Preparado</h3><p>Tente novamente. Se o problema continuar, verifique a conexão nas Configurações.</p><button class="primary-button" data-autopilot-action="regenerate" type="button">Tentar novamente</button></div>';
     renderAutopilotStatus();
   }
   finally { buttons.forEach((button) => { button.disabled = false; }); }
@@ -974,12 +974,12 @@ function renderAutopilot() {
     const savedState = document.querySelector('#marketingSettingsSavedState'); if (savedState) { savedState.textContent = 'Todas as alterações foram salvas'; savedState.classList.remove('pending'); }
   }
   if (run?.status === 'generating') {
-    els.autopilotTodayCard.innerHTML = '<div class="autopilot-loading"><span class="autopilot-spinner" aria-hidden="true"></span><h3>Seu post está sendo preparado</h3><p>Aguarde um pouco e atualize esta página.</p><button class="ghost-button" id="refreshAutopilotView" type="button">Atualizar</button></div>';
+    els.autopilotTodayCard.innerHTML = '<div class="autopilot-loading"><span class="autopilot-spinner" aria-hidden="true"></span><h3>Seu Post Está Sendo Preparado</h3><p>Aguarde um pouco e atualize esta página.</p><button class="ghost-button" id="refreshAutopilotView" type="button">Atualizar</button></div>';
     els.autopilotTodayCard.querySelector('#refreshAutopilotView')?.addEventListener('click', () => loadMarketing({ silent: true }));
   } else if (run?.status === 'failed') {
-    els.autopilotTodayCard.innerHTML = '<div class="autopilot-empty autopilot-error"><span>Falha na preparação</span><h3>Vamos tentar novamente?</h3><p>A geração foi interrompida antes de terminar. Nenhum conteúdo foi publicado.</p><button class="primary-button" data-autopilot-action="regenerate" type="button">Tentar novamente</button></div>';
+    els.autopilotTodayCard.innerHTML = '<div class="autopilot-empty autopilot-error"><span>Falha na preparação</span><h3>Vamos Tentar Novamente?</h3><p>A geração foi interrompida antes de terminar. Nenhum conteúdo foi publicado.</p><button class="primary-button" data-autopilot-action="regenerate" type="button">Tentar novamente</button></div>';
   } else if (!run?.content) {
-    els.autopilotTodayCard.innerHTML = `<div class="autopilot-empty"><span>Post de hoje</span><h3>O worker está preparando tudo</h3><p>Tema, imagem, legenda, CTA, hashtags, link e horário são definidos automaticamente. Quando estiver pronto, você só precisará aprovar.</p></div>`;
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-empty"><span>Post de hoje</span><h3>O Worker Está Preparando Tudo</h3><p>Tema, imagem, legenda, CTA, hashtags, link e horário são definidos automaticamente. Quando estiver pronto, você só precisará aprovar.</p></div>`;
   } else {
     const content = run.content;
     state.marketingSelectedFormat = ['post', 'reel', 'carousel'].includes(content.format) ? content.format : 'post';
@@ -1265,19 +1265,19 @@ function renderMarketingOverview() {
   const reviews = content.filter((item) => item.status === 'review');
   const failures = (social.publications || []).filter((item) => item.status === 'failed');
   const scheduled = content.filter((item) => item.status === 'scheduled');
-  let next = { eyebrow: 'Comece por aqui', title: 'Crie seu primeiro conteúdo', text: 'Escolha um formato, defina o objetivo e salve a ideia para continuar depois.', action: 'Criar conteúdo', tab: 'contents', create: true };
-  if (!connected) next = { eyebrow: 'Primeiro passo', title: 'Conecte seu canal', text: 'Conecte o Instagram ou ative a simulação para testar todo o fluxo sem publicar nada.', action: 'Configurar canais', tab: 'more' };
+  let next = { eyebrow: 'Comece por aqui', title: 'Crie Seu Primeiro Conteúdo', text: 'Escolha um formato, defina o objetivo e salve a ideia para continuar depois.', action: 'Criar conteúdo', tab: 'contents', create: true };
+  if (!connected) next = { eyebrow: 'Primeiro passo', title: 'Conecte Seu Canal', text: 'Conecte o Instagram ou ative a simulação para testar todo o fluxo sem publicar nada.', action: 'Configurar canais', tab: 'more' };
   else if (reviews.length) next = { eyebrow: 'Próxima ação recomendada', title: `Revise ${reviews.length} conteúdo${reviews.length > 1 ? 's' : ''}`, text: 'Confira legenda, mídia, conta e horário antes de aprovar.', action: 'Abrir conteúdos', tab: 'contents' };
   else if (failures.length) next = { eyebrow: 'Atenção necessária', title: `${failures.length} publicação${failures.length > 1 ? 'ões falharam' : ' falhou'}`, text: 'Veja a causa e tente novamente somente depois de corrigir o problema.', action: 'Ver canais', tab: 'more' };
-  else if (content.length && !scheduled.length) next = { eyebrow: 'Sua fila está vazia', title: 'Agende o próximo conteúdo', text: 'Há conteúdos salvos, mas nada preparado para publicação.', action: 'Abrir conteúdos', tab: 'contents' };
+  else if (content.length && !scheduled.length) next = { eyebrow: 'Sua fila está vazia', title: 'Agende o Próximo Conteúdo', text: 'Há conteúdos salvos, mas nada preparado para publicação.', action: 'Abrir conteúdos', tab: 'contents' };
   else if (scheduled.length) next = { eyebrow: 'Tudo encaminhado', title: `${scheduled.length} conteúdo${scheduled.length > 1 ? 's agendados' : ' agendado'}`, text: 'Sua programação está pronta. Confira os próximos dias ou veja o que já trouxe resultado.', action: 'Ver calendário', tab: 'calendar' };
   els.marketingNextAction.innerHTML = `<div><span>${escapeHtml(next.eyebrow)}</span><h3>${escapeHtml(next.title)}</h3><p>${escapeHtml(next.text)}</p></div><button class="primary-button" ${next.create ? 'data-new-marketing-content' : `data-open-marketing-tab="${next.tab}"`} type="button">${escapeHtml(next.action)}</button>`;
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowKey = localDateKey(tomorrow);
   const attention = [];
   if (reviews.length) attention.push({ tone: 'attention', title: `${reviews.length} aguardando aprovação`, text: 'Revise antes do horário planejado.', tab: 'contents' });
-  if (!scheduled.some((item) => item.scheduled_at && localDateKey(new Date(item.scheduled_at)) === tomorrowKey)) attention.push({ tone: 'neutral', title: 'Amanhã ainda está livre', text: 'Planeje um conteúdo se fizer sentido para sua rotina.', tab: 'calendar' });
-  if (!connected) attention.push({ tone: 'danger', title: 'Instagram não conectado', text: 'A publicação automática está indisponível.', tab: 'more' });
+  if (!scheduled.some((item) => item.scheduled_at && localDateKey(new Date(item.scheduled_at)) === tomorrowKey)) attention.push({ tone: 'neutral', title: 'Amanhã Ainda Está Livre', text: 'Planeje um conteúdo se fizer sentido para sua rotina.', tab: 'calendar' });
+  if (!connected) attention.push({ tone: 'danger', title: 'Instagram Não Conectado', text: 'A publicação automática está indisponível.', tab: 'more' });
   if (failures.length) attention.push({ tone: 'danger', title: `${failures.length} publicação${failures.length > 1 ? 'ões com erro' : ' com erro'}`, text: 'Veja a causa antes de reenviar.', tab: 'more' });
   if (Number(data.summary?.overdue_contacts || 0)) attention.push({ tone: 'attention', title: `${data.summary.overdue_contacts} contatos atrasados`, text: 'Defina a próxima ação de cada contato.', tab: 'contacts' });
   els.marketingAttentionList.innerHTML = attention.slice(0, 5).map((item) => `<button class="marketing-attention-item ${item.tone}" data-open-marketing-tab="${item.tab}" type="button"><span></span><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.text)}</small></div><b>→</b></button>`).join('') || '<div class="marketing-empty-state compact"><strong>Nenhuma pendência importante</strong><p>Sua operação de marketing está em dia.</p></div>';
@@ -1429,10 +1429,10 @@ function renderMarketingResults() {
   const averageClicks = content.length ? totals.clicks / content.length : 0;
   const highClicks = content.find((item) => Number(item.clicks || 0) > averageClicks * 1.5 && Number(item.clicks || 0) > 0);
   const highSaves = [...content].sort((a, b) => Number(b.saves || 0) - Number(a.saves || 0))[0];
-  if (highClicks) recommendations.push({ title: 'Reaproveite este tema', text: `${highClicks.title} gerou mais visitas que a média dos conteúdos.` });
-  if (highSaves && Number(highSaves.saves || 0) > 0) recommendations.push({ title: 'Transforme em outro formato', text: `${highSaves.title} teve mais salvamentos; experimente uma versão em Reel.` });
-  if (fatigue) recommendations.push({ title: 'Varie o assunto', text: `${fatigue.share}% dos conteúdos recentes falam de ${fatigue.topic}. Alterne com outro pilar antes de repetir.` });
-  if (!content.some((item) => item.niche)) recommendations.push({ title: 'Teste um nicho específico', text: 'Crie uma peça para pizzarias, hamburguerias ou marmitarias e compare os cadastros.' });
+  if (highClicks) recommendations.push({ title: 'Reaproveite Este Tema', text: `${highClicks.title} gerou mais visitas que a média dos conteúdos.` });
+  if (highSaves && Number(highSaves.saves || 0) > 0) recommendations.push({ title: 'Transforme em Outro Formato', text: `${highSaves.title} teve mais salvamentos; experimente uma versão em Reel.` });
+  if (fatigue) recommendations.push({ title: 'Varie o Assunto', text: `${fatigue.share}% dos conteúdos recentes falam de ${fatigue.topic}. Alterne com outro pilar antes de repetir.` });
+  if (!content.some((item) => item.niche)) recommendations.push({ title: 'Teste um Nicho Específico', text: 'Crie uma peça para pizzarias, hamburguerias ou marmitarias e compare os cadastros.' });
   els.marketingRecommendations.innerHTML = recommendations.map((item) => `<div class="marketing-recommendation"><span>Ideia</span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.text)}</p><small>Recomendação baseada nos dados disponíveis.</small></div>`).join('') || '<div class="marketing-empty-state compact"><strong>Continue coletando dados</strong><p>As recomendações explicarão o motivo assim que houver uma amostra útil.</p></div>';
 }
 
@@ -2108,26 +2108,26 @@ function renderAccessMetrics() {
     </div>
     <div class="platform-access-columns">
       <section>
-        <h4>Por página</h4>
+        <h4>Por Página</h4>
         ${(byPage.length ? byPage : []).slice(0, 5).map((row) => `
           <p><span>${escapeHtml(pageLabel[row.page_type] || row.page_type || 'Página')}</span><strong>${Number(row.count || 0)}</strong></p>
         `).join('') || '<p class="empty-state">Sem páginas registradas.</p>'}
       </section>
       <section>
-        <h4>Por dispositivo</h4>
+        <h4>Por Dispositivo</h4>
         ${(byDevice.length ? byDevice : []).slice(0, 5).map((row) => `
           <p><span>${escapeHtml(deviceLabel[row.device_type] || row.device_type || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
         `).join('') || '<p class="empty-state">Sem dispositivos registrados.</p>'}
       </section>
       <section>
-        <h4>Por canal</h4>
+        <h4>Por Canal</h4>
         ${(byChannel.length ? byChannel : []).slice(0, 5).map((row) => `
           <p><span>${escapeHtml(row.channel || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
         `).join('') || '<p class="empty-state">Sem canais registrados.</p>'}
       </section>
     </div>
     <div class="platform-access-ranking">
-      <h4>Cardápios mais acessados</h4>
+      <h4>Cardápios Mais Acessados</h4>
       ${topStores.length ? topStores.map((row) => `
         <article>
           <div>
@@ -2170,7 +2170,7 @@ function renderMarketingFunnel() {
       <article><span>Publicação → pedido</span><strong>${Number(marketing.rates?.publish_to_first_order || 0)}%</strong></article>
       <article><span>Cadastros atribuídos</span><strong>${Number(marketing.attributed_signups || 0)}</strong></article>
     </div>
-    ${(marketing.by_source || []).length ? `<section class="platform-access-columns"><section><h4>Origem dos cadastros</h4>${marketing.by_source.map((row) => `<p><span>${escapeHtml(row.source)}</span><strong>${Number(row.count || 0)}</strong></p>`).join('')}</section></section>` : ''}
+    ${(marketing.by_source || []).length ? `<section class="platform-access-columns"><section><h4>Origem dos Cadastros</h4>${marketing.by_source.map((row) => `<p><span>${escapeHtml(row.source)}</span><strong>${Number(row.count || 0)}</strong></p>`).join('')}</section></section>` : ''}
   `;
 }
 
@@ -2399,7 +2399,7 @@ function renderAttentionPanel() {
     <div class="section-actions compact-section-actions">
       <div>
         <p class="eyebrow">Clientes com atenção</p>
-        <h3>Prioridades comerciais e de suporte</h3>
+        <h3>Prioridades Comerciais e de Suporte</h3>
       </div>
       <span class="pill ${alerts.length ? 'pill-muted' : 'pill-ok'}">${alerts.length} alerta(s)</span>
     </div>
@@ -2478,7 +2478,7 @@ function renderCompanies() {
             <div class="section-actions compact-section-actions">
               <div>
                 <p class="eyebrow">Ações rápidas</p>
-                <h3>Plano, status e lojas</h3>
+                <h3>Plano, Status e Lojas</h3>
               </div>
               <button class="ghost-button compact" data-load-company-detail="${escapeAttribute(company.id)}" type="button">Carregar detalhes</button>
             </div>
@@ -2522,7 +2522,7 @@ function renderCompanies() {
             <div class="section-actions compact-section-actions">
               <div>
                 <p class="eyebrow">Informações completas</p>
-                <h3>Cliente, cobrança, uso e timeline</h3>
+                <h3>Cliente, Cobrança, Uso e Timeline</h3>
               </div>
             </div>
             <div class="platform-client-detail-grid">
@@ -2650,14 +2650,14 @@ function clientAlertsForCompany(company, metrics = {}) {
   const stores = company.stores || [];
   const subscription = company.subscription || {};
   const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended']);
-  if (trialEndingSoon(subscription)) alerts.push({ type: 'trial', severity: 'warning', title: 'Trial perto do fim', action: 'Entrar em contato e orientar upgrade.' });
-  if (delinquent.has(metrics.subscription_status || subscription.status || company.status)) alerts.push({ type: 'billing', severity: 'critical', title: 'Cobrança pendente', action: 'Verificar pagamento e webhook.' });
-  if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem loja criada', action: 'Criar meu Cardápio ou unidade.' });
-  if (stores.some((store) => store.is_active === false)) alerts.push({ type: 'store', severity: 'attention', title: 'Loja não publicada ou suspensa', action: 'Validar status da loja.' });
+  if (trialEndingSoon(subscription)) alerts.push({ type: 'trial', severity: 'warning', title: 'Trial Perto do Fim', action: 'Entrar em contato e orientar upgrade.' });
+  if (delinquent.has(metrics.subscription_status || subscription.status || company.status)) alerts.push({ type: 'billing', severity: 'critical', title: 'Cobrança Pendente', action: 'Verificar pagamento e webhook.' });
+  if (!stores.length) alerts.push({ type: 'setup', severity: 'critical', title: 'Sem Loja Criada', action: 'Criar meu Cardápio ou unidade.' });
+  if (stores.some((store) => store.is_active === false)) alerts.push({ type: 'store', severity: 'attention', title: 'Loja Não Publicada ou Suspensa', action: 'Validar status da loja.' });
   if (Number(metrics.stores_without_whatsapp_count || 0) > 0) alerts.push({ type: 'whatsapp', severity: 'warning', title: 'Loja sem WhatsApp', action: 'Completar configuração de atendimento.' });
-  if (stores.length && Number(metrics.products_count || 0) === 0) alerts.push({ type: 'menu', severity: 'critical', title: 'Sem produto cadastrado', action: 'Ajudar o cliente a montar o cardápio.' });
-  if (Number(metrics.incomplete_onboarding_count || 0) > 0) alerts.push({ type: 'onboarding', severity: 'attention', title: 'Onboarding incompleto', action: 'Reabrir onboarding ou orientar cliente.' });
-  if (!metrics.has_orders && stores.length) alerts.push({ type: 'sales', severity: 'attention', title: 'Sem pedidos no período', action: 'Acompanhar ativação do cliente.' });
+  if (stores.length && Number(metrics.products_count || 0) === 0) alerts.push({ type: 'menu', severity: 'critical', title: 'Sem Produto Cadastrado', action: 'Ajudar o cliente a montar o cardápio.' });
+  if (Number(metrics.incomplete_onboarding_count || 0) > 0) alerts.push({ type: 'onboarding', severity: 'attention', title: 'Onboarding Incompleto', action: 'Reabrir onboarding ou orientar cliente.' });
+  if (!metrics.has_orders && stores.length) alerts.push({ type: 'sales', severity: 'attention', title: 'Sem Pedidos no Período', action: 'Acompanhar ativação do cliente.' });
   return alerts;
 }
 
@@ -2747,7 +2747,7 @@ function renderCompanyDetail(detail) {
       </div>` : ''}
       <div class="platform-detail-columns">
         <article>
-          <h4>Lojas vinculadas</h4>
+          <h4>Lojas Vinculadas</h4>
           ${stores.length ? stores.map((store) => `
             <div class="platform-detail-row">
               <div>
@@ -2759,7 +2759,7 @@ function renderCompanyDetail(detail) {
           `).join('') : '<p class="empty-state">Nenhuma loja vinculada.</p>'}
         </article>
         <article>
-          <h4>Admins vinculados</h4>
+          <h4>Admins Vinculados</h4>
           ${admins.length ? admins.map((admin) => `
             <div class="platform-detail-row">
               <div>
@@ -2773,7 +2773,7 @@ function renderCompanyDetail(detail) {
       </div>
       <div class="platform-detail-columns">
         <article>
-          <h4>Uso do plano</h4>
+          <h4>Uso do Plano</h4>
           ${usageCounters.length ? usageCounters.slice(0, 8).map((entry) => `
             <div class="platform-detail-row">
               <div>
@@ -2785,7 +2785,7 @@ function renderCompanyDetail(detail) {
           `).join('') : '<p class="empty-state">Sem contadores de uso registrados.</p>'}
         </article>
         <article>
-          <h4>Últimos pedidos</h4>
+          <h4>Últimos Pedidos</h4>
           ${recentOrders.length ? recentOrders.map((order) => `
             <div class="platform-detail-row">
               <div>
@@ -2799,7 +2799,7 @@ function renderCompanyDetail(detail) {
       </div>
       <div class="platform-detail-columns">
         <article>
-          <h4>Histórico de cobrança</h4>
+          <h4>Histórico de Cobrança</h4>
           ${billing.length ? billing.slice(0, 6).map((entry) => `
             <div class="platform-detail-row">
               <div>
@@ -2825,7 +2825,7 @@ function renderCompanyDetail(detail) {
         </article>
       </div>
       <form class="platform-note-form" data-company-id="${escapeAttribute(detail.company?.id || '')}">
-        <h4>Acompanhamento interno</h4>
+        <h4>Acompanhamento Interno</h4>
         ${internalStatus?.created_at ? `<p class="muted">Último registro: ${new Date(internalStatus.created_at).toLocaleString('pt-BR')}</p>` : ''}
         <textarea name="note" rows="3" placeholder="Registre comentário, combinado ou pendência comercial"></textarea>
         <div class="platform-note-grid">
@@ -3634,7 +3634,7 @@ function renderSupportDetail(ticket) {
             </div>
           </div>
           <section class="platform-support-context-box support-action-box">
-            <h5>Ações rápidas</h5>
+            <h5>Ações Rápidas</h5>
             <div class="support-fast-actions">
               ${context.storeSlug ? `<a class="ghost-button compact" href="/${escapeAttribute(context.storeSlug)}" target="_blank" rel="noopener">Abrir cardápio</a>` : ''}
               ${ticket.company_id ? `<button class="ghost-button compact" data-support-open-client="${escapeAttribute(ticket.company_id)}" type="button">Ver cliente</button>` : ''}
@@ -4540,7 +4540,7 @@ const criticalActions = {
     success: 'Backup manual concluído.'
   },
   'restore-backup': {
-    title: 'Restaurar backup',
+    title: 'Restaurar Backup',
     message: 'Esta ação substitui os dados atuais pelo arquivo selecionado. A Central cria um backup preventivo antes de restaurar.',
     endpoint: '/api/platform/services/backup/restore',
     success: 'Backup restaurado com sucesso.'
@@ -4558,7 +4558,7 @@ const criticalActions = {
     success: 'Limpeza de logs executada.'
   },
   'restart-app': {
-    title: 'Reiniciar aplicação',
+    title: 'Reiniciar Aplicação',
     message: 'A aplicação será reiniciada se o controle de serviço estiver habilitado no ambiente.',
     endpoint: '/api/platform/services/app/restart',
     success: 'Restart da aplicação agendado.'
@@ -4774,7 +4774,7 @@ async function submitCompanyQuickAction(event) {
     suspend: {
       endpoint: `/api/platform/companies/${companyId}/suspend`,
       method: 'POST',
-      title: 'Suspender cliente',
+      title: 'Suspender Cliente',
       message: 'O cliente perderá acesso operacional até ser liberado novamente.',
       critical: true,
       success: 'Cliente suspenso.'
@@ -4787,7 +4787,7 @@ async function submitCompanyQuickAction(event) {
     'reopen-onboarding': {
       endpoint: `/api/platform/companies/${companyId}/reopen-onboarding`,
       method: 'POST',
-      title: 'Reabrir onboarding',
+      title: 'Reabrir Onboarding',
       message: 'A configuração inicial voltará a aparecer como pendente para as lojas deste cliente.',
       critical: true,
       success: 'Onboarding reaberto.'
@@ -4800,7 +4800,7 @@ async function submitCompanyQuickAction(event) {
     impersonate: {
       endpoint: '/api/platform/support/impersonate',
       method: 'POST',
-      title: 'Entrar como suporte',
+      title: 'Entrar Como Suporte',
       message: 'Você entrará temporariamente no admin desta loja. A sessão expira automaticamente e tudo será auditado.',
       critical: true,
       success: 'Modo suporte iniciado.',
@@ -4856,7 +4856,7 @@ async function submitBillingAction(event) {
       payload: { plan_code: planCode, status: 'active' },
       success: 'Plano alterado.',
       confirm: true,
-      title: 'Alterar plano',
+      title: 'Alterar Plano',
       message: 'Alterar plano pode liberar ou limitar recursos deste cliente. Confirme a ação.'
     },
     cancel: {
@@ -4864,7 +4864,7 @@ async function submitBillingAction(event) {
       payload: {},
       success: 'Assinatura cancelada.',
       confirm: true,
-      title: 'Cancelar assinatura',
+      title: 'Cancelar Assinatura',
       message: 'O cliente será marcado como cancelado sem apagar os dados. Confirme com sua senha.'
     },
     reactivate: {
