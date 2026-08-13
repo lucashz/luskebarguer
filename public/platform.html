@@ -6,7 +6,7 @@
     <title>Central - TáPronto</title>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
-    <link rel="stylesheet" href="/platform.css?v=20260813-social-approval-preview">
+    <link rel="stylesheet" href="/platform.css?v=20260813-today-post-flow">
   </head>
   <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
@@ -418,12 +418,12 @@
             <article class="autopilot-status-strip" id="autopilotStatusStrip" aria-live="polite">Preparando o seu espaço…</article>
             <article class="marketing-format-studio" aria-labelledby="marketingFormatTitle">
               <div class="marketing-format-heading">
-                <div><span class="eyebrow">Sugestão de hoje</span><h3 id="marketingFormatTitle">O que Vamos Criar?</h3><p>Escolha apenas o formato. O TáPronto prepara o restante para você aprovar.</p></div>
-                <button class="primary-button" id="createTodaySuggestionButton" type="button">Criar sugestão de hoje</button>
+                <div><span class="eyebrow">Post de Hoje</span><h3 id="marketingFormatTitle">Reel, Post ou Carrossel?</h3><p>Escolha o formato. O TáPronto cria a mídia, escreve a legenda e mostra a prévia.</p></div>
+                <button class="primary-button" id="createTodaySuggestionButton" type="button">Gerar</button>
               </div>
               <div class="marketing-format-options" id="marketingFormatChooser" role="radiogroup" aria-label="Formato da publicação">
-                <button class="active" data-marketing-format="post" type="button" role="radio" aria-checked="true"><span aria-hidden="true">▣</span><strong>Publicação</strong><small>Uma arte direta para o feed</small></button>
                 <button data-marketing-format="reel" type="button" role="radio" aria-checked="false"><span aria-hidden="true">▶</span><strong>Reel</strong><small>Vídeo curto com telas do sistema</small></button>
+                <button class="active" data-marketing-format="post" type="button" role="radio" aria-checked="true"><span aria-hidden="true">▣</span><strong>Post</strong><small>Uma arte direta para o feed</small></button>
                 <button data-marketing-format="carousel" type="button" role="radio" aria-checked="false"><span aria-hidden="true">▦</span><strong>Carrossel</strong><small>Uma história em sete imagens</small></button>
               </div>
             </article>
@@ -920,7 +920,7 @@
       </div>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260813-social-approval-preview"></script>
+    <script src="/platform.js?v=20260813-today-post-flow"></script>
   </body>
 </html>
 

@@ -328,7 +328,7 @@ els.marketingFormatChooser?.addEventListener('click', (event) => {
     item.classList.toggle('active', active);
     item.setAttribute('aria-checked', String(active));
   });
-  if (els.createTodaySuggestionButton) els.createTodaySuggestionButton.textContent = `Criar ${marketingFormatLabel(state.marketingSelectedFormat).toLowerCase()}`;
+  if (els.createTodaySuggestionButton) els.createTodaySuggestionButton.textContent = `Gerar ${marketingFormatLabel(state.marketingSelectedFormat)}`;
 });
 els.generateWeeklyScheduleButton?.addEventListener('click', generateWeeklyAutopilotSchedule);
 els.autopilotSettingsForm?.addEventListener('submit', saveAutopilotSettings);
@@ -991,11 +991,17 @@ function renderAutopilot() {
       item.classList.toggle('active', active);
       item.setAttribute('aria-checked', String(active));
     });
+    if (els.createTodaySuggestionButton) els.createTodaySuggestionButton.textContent = `Gerar ${marketingFormatLabel(state.marketingSelectedFormat)}`;
     const asset = run.asset || {};
     const ready = run.status === 'ready' && !['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(content.status);
     const removedFromInstagram = content.status === 'cancelled' && content.publication_error === 'Removido diretamente no Instagram.';
     const previewUrl = localPlatformMediaUrl(asset.public_url);
-    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="Prévia do post ${escapeHtml(content.title)}">` : '<span>Imagem sendo preparada…</span>'}</div><div class="autopilot-copy"><span class="eyebrow">Post de hoje</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Publicação automática em ${content.scheduled_at ? formatDateTime(content.scheduled_at) : 'horário otimizado'} depois da aprovação.</small>${removedFromInstagram ? '<div class="autopilot-notice">Este post foi removido do Instagram. Você pode publicá-lo novamente.</div>' : data.mode === 'local' ? '<div class="autopilot-notice">Imagem, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}<div class="row-actions">${ready ? `<button class="primary-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar post' : 'Conectar Instagram'}</button>${account ? `<button class="ghost-button" data-autopilot-action="publish-now" type="button">${removedFromInstagram ? 'Publicar novamente' : 'Postar agora'}</button>` : ''}` : `<span class="status-pill success">${content.status === 'published' ? 'Publicado no Instagram' : 'Aprovado e agendado'}</span>`}</div></div></div>`;
+    const previewMedia = previewUrl
+      ? (asset.kind === 'video' || content.format === 'reel'
+        ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata" aria-label="Prévia do Reel ${escapeHtml(content.title)}"></video>`
+        : `<img src="${escapeHtml(previewUrl)}" alt="Prévia do ${escapeHtml(marketingFormatLabel(content.format).toLowerCase())} ${escapeHtml(content.title)}">`)
+      : '<span>Mídia sendo preparada…</span>';
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewMedia}</div><div class="autopilot-copy"><span class="eyebrow">Post de Hoje · ${escapeHtml(marketingFormatLabel(content.format))}</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Confira a prévia. Você pode publicar imediatamente ou agendar.</small>${removedFromInstagram ? '<div class="autopilot-notice">Este post foi removido do Instagram. Você pode publicá-lo novamente.</div>' : data.mode === 'local' ? '<div class="autopilot-notice">Mídia, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}<div class="row-actions">${ready ? `${account ? `<button class="primary-button" data-autopilot-action="publish-now" type="button">${removedFromInstagram ? 'Publicar novamente' : 'Postar Agora'}</button>` : ''}<button class="ghost-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar e Agendar' : 'Conectar Instagram'}</button>` : `<span class="status-pill success">${content.status === 'published' ? 'Publicado no Instagram' : 'Aprovado e agendado'}</span>`}</div></div></div>`;
     const primary = els.autopilotTodayCard.querySelector('[data-autopilot-action="approve"]');
     if (primary && !account) primary.dataset.autopilotAction = 'configure';
   }
@@ -1245,7 +1251,7 @@ function marketingStatusLabel(value = '') {
 }
 
 function marketingFormatLabel(value = '') {
-  return ({ reel: 'Reel', carousel: 'Carrossel', carrossel: 'Carrossel', story: 'Story', post: 'Publicação', image: 'Publicação' })[value] || 'Publicação';
+  return ({ reel: 'Reel', carousel: 'Carrossel', carrossel: 'Carrossel', story: 'Story', post: 'Post', image: 'Post' })[value] || 'Post';
 }
 
 function marketingChannelLabel(value = '') {
