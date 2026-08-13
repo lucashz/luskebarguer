@@ -4,32 +4,50 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Pagamento Online</title>
-    <link rel="stylesheet" href="/styles.css?v=20260805-payment-hardening">
+    <link rel="stylesheet" href="/styles.css?v=20260813-pix-redesign">
   </head>
   <body class="client-page payment-page">
     <main class="payment-shell">
       <section class="payment-card">
-        <p class="eyebrow">Pagamento Online</p>
-        <h1 id="paymentTitle">Finalizando Pagamento</h1>
-        <p class="muted" id="paymentSubtitle">Carregando dados do pagamento...</p>
+        <header class="payment-page-header">
+          <span class="payment-secure-icon" aria-hidden="true">✓</span>
+          <div>
+            <p class="eyebrow">Pagamento seguro</p>
+            <h1 id="paymentTitle">Finalizando pagamento</h1>
+            <p class="muted" id="paymentSubtitle">Carregando dados do pagamento...</p>
+          </div>
+        </header>
 
         <div class="payment-status-box" id="paymentStatusBox"></div>
 
-        <section class="payment-provider-box" id="paymentProviderBox" hidden>
-          <strong>Conclua o pagamento no checkout seguro</strong>
-          <p>Seu pedido será enviado para a loja somente depois da confirmação. Ao finalizar, você voltará para acompanhar o pedido.</p>
-          <a class="primary-button wide" id="paymentCheckoutLink" href="#">Pagar pedido</a>
+        <section class="payment-pix-panel" id="paymentPixFallback" hidden>
+          <div class="payment-pix-heading">
+            <span class="payment-pix-mark" aria-hidden="true">◆</span>
+            <div><strong>Pague com Pix</strong><p>Escaneie o QR Code ou copie o código abaixo.</p></div>
+          </div>
+          <div class="payment-qr-frame">
+            <img class="payment-qr" id="paymentQr" alt="QR Code Pix para pagar o pedido" hidden>
+          </div>
+          <button class="primary-button wide payment-copy-button" id="copyPixButton" type="button">Copiar código Pix</button>
+          <details class="payment-copy-details">
+            <summary>Ver código Pix Copia e Cola</summary>
+            <label class="payment-copy-field">
+              Código Pix
+              <textarea id="paymentPixCode" readonly></textarea>
+            </label>
+          </details>
+          <ol class="payment-pix-help">
+            <li>Abra o aplicativo do seu banco.</li>
+            <li>Escolha Pix e escaneie ou cole o código.</li>
+            <li>Confira o valor e confirme o pagamento.</li>
+          </ol>
         </section>
 
-        <details class="payment-pix-fallback" id="paymentPixFallback">
-          <summary>Usar Pix Copia E Cola Como Alternativa</summary>
-          <img class="payment-qr" id="paymentQr" alt="QR Code Pix" hidden>
-          <label class="payment-copy-field">
-            Código Pix Copia E Cola
-            <textarea id="paymentPixCode" readonly></textarea>
-          </label>
-          <button class="ghost-button compact" id="copyPixButton" type="button">Copiar Código Pix</button>
-        </details>
+        <section class="payment-provider-box" id="paymentProviderBox" hidden>
+          <strong>Prefere continuar no Mercado Pago?</strong>
+          <p>Use esta alternativa para abrir o pagamento no ambiente seguro do Mercado Pago.</p>
+          <a class="ghost-button wide" id="paymentCheckoutLink" href="#">Abrir no Mercado Pago</a>
+        </section>
 
         <div class="row-actions payment-actions">
           <button class="ghost-button compact" id="newPixButton" type="button" hidden>Gerar Novo Pix</button>
@@ -38,6 +56,6 @@
         <a class="text-button" id="paymentOrdersLink" href="/pedidos">Ver Meus Pedidos</a>
       </section>
     </main>
-    <script src="/payment.js?v=20260805-payment-hardening" type="module"></script>
+    <script src="/payment.js?v=20260813-pix-redesign" type="module"></script>
   </body>
 </html>

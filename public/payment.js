@@ -21,8 +21,13 @@ let pollAttempt = 0;
 const PAYMENT_POLL_DELAYS_MS = [2500, 4000, 6500, 10000, 15000];
 
 els.copy?.addEventListener('click', async () => {
-  await navigator.clipboard?.writeText(els.pixCode.value || '');
-  setStatus('Código Pix copiado.');
+  const copied = await copyText(els.pixCode.value || '');
+  if (!copied) return setStatus('Não foi possível copiar automaticamente. Selecione o código e copie manualmente.');
+  const original = els.copy.textContent;
+  els.copy.textContent = 'Código copiado ✓';
+  els.copy.classList.add('is-copied');
+  setStatus('Código Pix copiado. Abra o aplicativo do seu banco para pagar.');
+  window.setTimeout(() => { els.copy.textContent = original; els.copy.classList.remove('is-copied'); }, 2400);
 });
 els.newPix?.addEventListener('click', () => regeneratePix());
 
@@ -77,7 +82,6 @@ function renderPayment(data) {
   const qrUrl = safeImageUrl(payment.pix_qr_url);
   const checkoutUrl = safeHttpUrl(payment.checkout_url);
   const hasCheckout = Boolean(checkoutUrl);
-  const isHostedCheckout = payment.provider === 'mercadopago' && hasCheckout;
   const pixCode = String(payment.pix_code || '');
   const hasRealPix = Boolean(
     (pixCode && !pixCode.startsWith('PIXONLINE|'))
@@ -104,10 +108,7 @@ function renderPayment(data) {
 
   els.pixCode.value = hasRealPix ? pixCode : '';
   if (els.pixFallback) {
-    els.pixFallback.hidden = !hasRealPix || status === 'paid' || isHostedCheckout;
-    if (hasCheckout && hasRealPix && !els.pixFallback.open) {
-      els.pixFallback.removeAttribute('open');
-    }
+    els.pixFallback.hidden = !hasRealPix || status === 'paid';
   }
   if (els.copy) els.copy.hidden = !hasRealPix;
   if (els.qr) {
@@ -115,6 +116,23 @@ function renderPayment(data) {
     els.qr.src = hasRealPix ? qrUrl : '';
   }
   if (els.newPix) els.newPix.hidden = status !== 'expired' || !hasRealPix;
+}
+
+async function copyText(value) {
+  const text = String(value || '');
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      els.pixCode.focus();
+      els.pixCode.select();
+      return document.execCommand('copy');
+    } catch {
+      return false;
+    }
+  }
 }
 
 function paymentSubtitle(status, order) {
