@@ -1113,7 +1113,11 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     const data = await readJson(req);
-    const run = await generateDailyAutopilotPost({ force: data.regenerate === true, createdBy: admin.id });
+    const requestedFormat = ['post', 'reel', 'carousel'].includes(data.format) ? data.format : 'post';
+    const run = await generateDailyAutopilotPost({ force: data.regenerate === true, createdBy: admin.id, format: requestedFormat });
+    if (requestedFormat === 'reel' && run?.content_id) {
+      await queuePlatformMarketingReel(req, admin, run.content_id, { template: 'problem_solution', duration_seconds: 15 });
+    }
     await audit('platform.marketing.autopilot.generate', { req, actor_admin_id: admin.id, entity_type: 'marketing_autopilot_run', entity_id: run?.id, after_data: { provider: run?.provider, status: run?.status } });
     json(res, 201, { run });
     return;

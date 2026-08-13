@@ -121,11 +121,10 @@ h3 {
 
 .home-brand img {
   display: block;
-  width: 248px;
+  width: auto;
   max-height: none;
-  height: auto;
+  height: 58px;
   object-fit: contain;
-  padding-block: 4px;
 }
 
 .home-brand-icon {

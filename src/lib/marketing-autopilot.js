@@ -96,7 +96,7 @@ export async function selectAutopilotVersion(runId, env = process.env) {
   } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
 }
 
-export async function generateDailyAutopilotPost({ force = false, createdBy = null, targetDate = '', planning = false, env = process.env } = {}) {
+export async function generateDailyAutopilotPost({ force = false, createdBy = null, targetDate = '', planning = false, format = '', env = process.env } = {}) {
   const config = autopilotConfig(env);
   const db = databasePool(env);
   const client = await db.connect();
@@ -118,21 +118,28 @@ export async function generateDailyAutopilotPost({ force = false, createdBy = nu
     if (!force && previous.rows.find((item) => ['generating','ready','approved'].includes(item.status))) { await client.query('rollback'); return previous.rows.find((item) => ['generating','ready','approved'].includes(item.status)); }
     const variant = (previous.rows[0]?.variant || 0) + 1;
     if (variant > 20) throw new Error('Limite diário de novas opções atingido.');
+    const requestedFormat = ['post', 'reel', 'carousel'].includes(format) ? format : '';
+    const contentFormat = requestedFormat || (settings?.image_aspect_ratio === '9:16' ? 'story' : 'post');
+    const effectiveSettings = { ...settings, image_aspect_ratio: contentFormat === 'reel' ? '9:16' : contentFormat === 'carousel' ? '1:1' : (settings?.image_aspect_ratio || '1:1') };
     const topic = chooseTopic(runDate, variant);
-    const prompt = imagePrompt(topic, variant, settings);
+    const prompt = imagePrompt(topic, variant, effectiveSettings);
     const inserted = await client.query(`insert into marketing_autopilot_runs(run_date,variant,status,provider,topic_key,prompt,created_by) values($1,$2,'generating',$3,$4,$5,$6) returning *`, [runDate, variant, config.imageProvider, topic.key, prompt, createdBy]);
     run = inserted.rows[0];
     await client.query('commit');
 
-    const asset = await createAutopilotAsset(topic, run, config, settings, createdBy, db);
+    const carouselSlides = contentFormat === 'carousel' ? carouselTopics(topic) : [topic];
+    const assets = [];
+    for (const [slideIndex, slideTopic] of carouselSlides.entries()) {
+      assets.push(await createAutopilotAsset(slideTopic, { ...run, variant: (run.variant * 10) + slideIndex }, config, effectiveSettings, createdBy, db));
+    }
+    const asset = assets[0];
     const account = (await db.query(`select id from social_accounts where status='connected' order by mode='live' desc,created_at desc limit 1`)).rows[0];
     const scheduledAt = futurePublicationTime(runDate, String(settings?.publication_time || '10:00'));
-    const contentFormat = settings?.image_aspect_ratio === '9:16' ? 'story' : 'post';
     const recentContent = (await db.query(`select id,title,hook,pillar,niche from marketing_content_items where channel='instagram' order by created_at desc limit 12`)).rows;
     const postPackage = buildPostPackage(topic, settings, config, recentContent);
-    const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram',$2,$3,'consideration',$4,'Gerar interesse qualificado',$5,$6,$7,$8,$9,$10,'America/Sao_Paulo',$11,'draft',$12,$13,$14::jsonb,$15,$16,now()) returning *`, [topic.title, contentFormat, topic.pillar, topic.niche, topic.hook, postPackage.caption, postPackage.cta, topic.overlay, settings?.image_aspect_ratio || '1:1', postPackage.altText, account?.id || null, scheduledAt, postPackage.hashtags, JSON.stringify([topic.reference]), postPackage.utmUrl, createdBy]);
+    const contentResult = await db.query(`insert into marketing_content_items(title,channel,format,pillar,funnel_stage,niche,objective,hook,caption,cta,overlay_text,aspect_ratio,alt_text,timezone,social_account_id,status,scheduled_at,hashtags,assets,utm_url,created_by,updated_at) values($1,'instagram',$2,$3,'consideration',$4,'Gerar interesse qualificado',$5,$6,$7,$8,$9,$10,'America/Sao_Paulo',$11,'draft',$12,$13,$14::jsonb,$15,$16,now()) returning *`, [topic.title, contentFormat, topic.pillar, topic.niche, topic.hook, postPackage.caption, postPackage.cta, topic.overlay, effectiveSettings.image_aspect_ratio, postPackage.altText, account?.id || null, scheduledAt, postPackage.hashtags, JSON.stringify(carouselSlides.map((item) => item.reference)), postPackage.utmUrl, createdBy]);
     const content = contentResult.rows[0];
-    await db.query(`insert into social_content_assets(content_id,asset_id,sort_order,role) values($1,$2,0,'media')`, [content.id, asset.id]);
+    for (const [assetIndex, generatedAsset] of assets.entries()) await db.query(`insert into social_content_assets(content_id,asset_id,sort_order,role) values($1,$2,$3,'media')`, [content.id, generatedAsset.id, assetIndex]);
     await db.query(`update marketing_autopilot_runs set status='ready',content_id=$1,asset_id=$2,updated_at=now() where id=$3`, [content.id, asset.id, run.id]);
     if (force) await db.query(`update marketing_autopilot_runs set status='discarded',updated_at=now() where run_date=$1 and id<>$2 and status='ready'`, [runDate, run.id]);
     return { ...run, status: 'ready', content_id: content.id, asset_id: asset.id, content, asset };
@@ -245,8 +252,9 @@ async function renderLocalMarketingImage(topic, referencePath, config, settings 
   const composites = [{ input: roundedScreenshot, left: padding + screenInset, top: deviceTop + screenInset }];
   const logoPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-logo.png');
   if (existsSync(logoPath) && settings?.logo_enabled !== false) {
-    const logo = await sharp(logoPath).resize({ width: Math.round(width * .22) }).png().toBuffer();
-    composites.push({ input: logo, left: width - padding - Math.round(width * .22), top: Math.round(padding * .75) });
+    const logoWidth = Math.round(width * .13);
+    const logo = await sharp(logoPath).resize({ width: logoWidth }).png().toBuffer();
+    composites.push({ input: logo, left: width - padding - logoWidth, top: Math.round(padding * .55) });
   }
   return sharp(Buffer.from(svg)).composite(composites).png({ compressionLevel: 9 }).toBuffer();
 }
@@ -269,6 +277,24 @@ function escapeSvg(value) {
 function imagePrompt(topic, variant, settings = {}) {
   const styles = { product_device: 'captura do sistema em destaque dentro de um celular ou notebook realista', real_screenshot: 'captura real grande, nítida e sem mockup decorativo', before_after: 'comparação visual limpa entre pedido desorganizado e pedido organizado', food: 'fotografia brasileira de comida combinada com uma captura discreta do produto', illustration: 'ilustração editorial simples combinada com a interface real', mixed: 'escolha a composição mais clara entre produto, comparação e situação real' };
   return `Use case: ads-marketing\nAsset type: post do Instagram do TáPronto em formato ${settings.image_aspect_ratio || '1:1'}\nPrimary request: crie uma arte brasileira, simples e profissional sobre ${topic.title}. Use a captura fornecida como referência visual real do produto, mantendo a tela legível e sem deformá-la.\nComposition: ${styles[settings.image_style] || styles.product_device}; bastante respiro; hierarquia clara para celular.\nColor palette: vermelho #ed1c24, branco e azul-marinho #12213d; presença da marca ${settings.brand_intensity || 'balanced'}.\nText (verbatim): "${topic.overlay}"\nLogo: ${settings.logo_enabled === false ? 'não inserir logotipo' : `usar o logotipo TáPronto de forma discreta em ${settings.logo_position || 'bottom_right'}`}\nConstraints: escreva o texto exatamente em português; até ${Number(settings.max_overlay_words || 8)} palavras; preserve a aparência da interface; variação criativa ${variant}.\nAvoid: letras deformadas, telas retorcidas, texto minúsculo, excesso de elementos, promessas exageradas, marcas de terceiros, watermark.`;
+}
+
+function carouselTopics(topic) {
+  const overlays = [
+    topic.hook || topic.overlay,
+    'Pedido por mensagem parece fácil. Até chegar a hora de pico.',
+    'Um adicional esquecido vira retrabalho e cliente insatisfeito.',
+    'O pedido deveria chegar completo e pronto para produzir.',
+    'Produto, adicionais, entrega e pagamento no mesmo lugar.',
+    'Sua equipe acompanha cada pedido pelo status correto.',
+    `${topic.cta || 'Crie seu cardápio no TáPronto.'}`
+  ];
+  return overlays.map((overlay, index) => ({
+    ...topic,
+    key: `${topic.key}-slide-${index + 1}`,
+    title: index === 0 ? topic.title : `Passo ${index + 1} · ${topic.title}`,
+    overlay
+  }));
 }
 
 function chooseTopic(date, variant) {

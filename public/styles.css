@@ -2328,7 +2328,7 @@ small,
 }
 
 .platform-login-brand img {
-  width: 210px;
+  width: 104px;
   height: auto;
   display: block;
 }
@@ -3445,12 +3445,11 @@ textarea {
 
 .brand-mark img {
   display: block;
-  width: 220px;
+  width: auto;
   max-width: 100%;
   max-height: none;
-  height: auto;
+  height: 58px;
   object-fit: contain;
-  padding-block: 4px;
 }
 
 .public-topbar {
@@ -3474,11 +3473,10 @@ textarea {
 
 .public-brand-mark img {
   width: auto;
-  height: 64px;
+  height: 58px;
   max-width: 306px;
   max-height: none;
   object-fit: contain;
-  padding-block: 4px;
 }
 
 .public-actions {
@@ -15001,12 +14999,11 @@ body.admin-tour-active {
 
 .portal-brand img {
   display: block;
-  width: 248px;
+  width: auto;
   max-width: 42vw;
   max-height: none;
-  height: auto;
+  height: 64px;
   object-fit: contain;
-  padding-block: 4px;
 }
 
 .portal-topbar nav {
@@ -16479,9 +16476,9 @@ body.admin-tour-active {
 }
 
 .menu-page .public-topbar .public-brand-mark img {
-  width: 280px;
-  height: auto;
-  max-width: min(42vw, 280px);
+  width: auto;
+  height: 58px;
+  max-width: min(42vw, 120px);
   max-height: none;
 }
 
@@ -16556,13 +16553,13 @@ body.admin-tour-active {
 
   .public-brand-mark {
     flex: 0 0 auto;
-    max-width: 210px;
+    max-width: 92px;
   }
 
   .public-brand-mark img {
-    width: 210px;
-    height: auto;
-    max-width: min(48vw, 210px);
+    width: auto;
+    height: 50px;
+    max-width: min(32vw, 92px);
     max-height: none;
   }
 
@@ -19295,7 +19292,7 @@ body.admin-tour-active {
 }
 
 .store-not-found-logo {
-  width: min(220px, 70vw);
+  width: min(120px, 38vw);
   height: auto;
   max-height: 70px;
   object-fit: contain;

@@ -416,6 +416,17 @@
           </div>
           <section data-marketing-panel="overview" class="marketing-overview">
             <article class="autopilot-status-strip" id="autopilotStatusStrip" aria-live="polite">Preparando o seu espaço…</article>
+            <article class="marketing-format-studio" aria-labelledby="marketingFormatTitle">
+              <div class="marketing-format-heading">
+                <div><span class="eyebrow">Sugestão de hoje</span><h3 id="marketingFormatTitle">O que vamos criar?</h3><p>Escolha apenas o formato. O TáPronto prepara o restante para você aprovar.</p></div>
+                <button class="primary-button" id="createTodaySuggestionButton" type="button">Criar sugestão de hoje</button>
+              </div>
+              <div class="marketing-format-options" id="marketingFormatChooser" role="radiogroup" aria-label="Formato da publicação">
+                <button class="active" data-marketing-format="post" type="button" role="radio" aria-checked="true"><span aria-hidden="true">▣</span><strong>Publicação</strong><small>Uma arte direta para o feed</small></button>
+                <button data-marketing-format="reel" type="button" role="radio" aria-checked="false"><span aria-hidden="true">▶</span><strong>Reel</strong><small>Vídeo curto com telas do sistema</small></button>
+                <button data-marketing-format="carousel" type="button" role="radio" aria-checked="false"><span aria-hidden="true">▦</span><strong>Carrossel</strong><small>Uma história em sete imagens</small></button>
+              </div>
+            </article>
             <article class="autopilot-today-card" id="autopilotTodayCard" aria-live="polite"></article>
             <section id="platformMarketingSummary" hidden></section>
             <article class="platform-chart-card"><div class="section-actions"><div><h3>Próximos posts</h3><p class="muted">O que já está agendado.</p></div></div><div id="autopilotUpcomingList"></div></article>

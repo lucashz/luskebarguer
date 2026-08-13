@@ -205,6 +205,8 @@ const els = {
   generateWeeklyScheduleButton: document.querySelector('#generateWeeklyScheduleButton'),
   autopilotStatusStrip: document.querySelector('#autopilotStatusStrip'),
   autopilotTodayCard: document.querySelector('#autopilotTodayCard'),
+  marketingFormatChooser: document.querySelector('#marketingFormatChooser'),
+  createTodaySuggestionButton: document.querySelector('#createTodaySuggestionButton'),
   autopilotUpcomingList: document.querySelector('#autopilotUpcomingList'),
   autopilotSettingsForm: document.querySelector('#autopilotSettingsForm'),
   exportMarketingLeadsButton: document.querySelector('#exportMarketingLeadsButton'),
@@ -315,6 +317,18 @@ els.refreshBillingButton?.addEventListener('click', loadBilling);
 els.refreshCommunicationButton?.addEventListener('click', loadCommunication);
 els.refreshMarketingButton?.addEventListener('click', loadMarketing);
 els.generateDailyPostButton?.addEventListener('click', () => generateAutopilotPost(Boolean(state.autopilot?.today)));
+els.createTodaySuggestionButton?.addEventListener('click', () => generateAutopilotPost(Boolean(state.autopilot?.today), state.marketingSelectedFormat || 'post'));
+els.marketingFormatChooser?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-marketing-format]');
+  if (!button) return;
+  state.marketingSelectedFormat = button.dataset.marketingFormat;
+  els.marketingFormatChooser.querySelectorAll('[data-marketing-format]').forEach((item) => {
+    const active = item === button;
+    item.classList.toggle('active', active);
+    item.setAttribute('aria-checked', String(active));
+  });
+  if (els.createTodaySuggestionButton) els.createTodaySuggestionButton.textContent = `Criar ${marketingFormatLabel(state.marketingSelectedFormat).toLowerCase()}`;
+});
 els.generateWeeklyScheduleButton?.addEventListener('click', generateWeeklyAutopilotSchedule);
 els.autopilotSettingsForm?.addEventListener('submit', saveAutopilotSettings);
 els.autopilotSettingsForm?.addEventListener('input', () => { const status = document.querySelector('#marketingSettingsSavedState'); if (status) { status.textContent = 'Alterações ainda não salvas'; status.classList.add('pending'); } });
@@ -846,13 +860,13 @@ async function loadMarketing(options = {}) {
   }
 }
 
-async function generateAutopilotPost(regenerate = false) {
-  const buttons = [els.generateDailyPostButton, ...document.querySelectorAll('[data-autopilot-action="regenerate"]')].filter(Boolean);
+async function generateAutopilotPost(regenerate = false, format = state.marketingSelectedFormat || 'post') {
+  const buttons = [els.generateDailyPostButton, els.createTodaySuggestionButton, ...document.querySelectorAll('[data-autopilot-action="regenerate"]')].filter(Boolean);
   buttons.forEach((button) => { button.disabled = true; });
   if (els.autopilotTodayCard) els.autopilotTodayCard.innerHTML = `<div class="autopilot-loading"><span class="autopilot-spinner" aria-hidden="true"></span><h3>${regenerate ? 'Criando uma nova opção' : 'Preparando o post de hoje'}</h3><p>Estamos escolhendo o tema, preparando a imagem e escrevendo a legenda. Isso pode levar alguns instantes.</p></div>`;
   if (els.autopilotStatusStrip) els.autopilotStatusStrip.textContent = regenerate ? 'Criando uma nova opção…' : 'Criando o post de hoje…';
   try {
-    await request('/api/platform/marketing/autopilot/generate', { method: 'POST', body: JSON.stringify({ regenerate }) });
+    await request('/api/platform/marketing/autopilot/generate', { method: 'POST', body: JSON.stringify({ regenerate, format }) });
     await loadMarketing({ silent: true });
     toast(regenerate ? 'Nova opção preparada.' : 'Post de hoje preparado.');
   } catch (error) {
@@ -875,8 +889,8 @@ async function generateWeeklyAutopilotSchedule() {
 
 async function handleAutopilotAction(button) {
   const action = button.dataset.autopilotAction;
-  if (action === 'generate') return generateAutopilotPost(false);
-  if (action === 'regenerate') return generateAutopilotPost(true);
+  if (action === 'generate') return generateAutopilotPost(false, state.marketingSelectedFormat || 'post');
+  if (action === 'regenerate') return generateAutopilotPost(true, state.marketingSelectedFormat || 'post');
   if (action === 'configure') return openMarketingAdvancedSection('social');
   if (action === 'copy') {
     await navigator.clipboard.writeText(state.autopilot?.today?.content?.caption || '');
@@ -968,6 +982,12 @@ function renderAutopilot() {
     els.autopilotTodayCard.innerHTML = `<div class="autopilot-empty"><span>Post de hoje</span><h3>O worker está preparando tudo</h3><p>Tema, imagem, legenda, CTA, hashtags, link e horário são definidos automaticamente. Quando estiver pronto, você só precisará aprovar.</p></div>`;
   } else {
     const content = run.content;
+    state.marketingSelectedFormat = ['post', 'reel', 'carousel'].includes(content.format) ? content.format : 'post';
+    els.marketingFormatChooser?.querySelectorAll('[data-marketing-format]').forEach((item) => {
+      const active = item.dataset.marketingFormat === state.marketingSelectedFormat;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-checked', String(active));
+    });
     const asset = run.asset || {};
     const ready = run.status === 'ready' && !['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(content.status);
     const removedFromInstagram = content.status === 'cancelled' && content.publication_error === 'Removido diretamente no Instagram.';
@@ -1219,6 +1239,10 @@ function renderMarketing() {
 
 function marketingStatusLabel(value = '') {
   return ({ idea: 'Ideia', draft: 'Rascunho', production: 'Em produção', review: 'Aguardando aprovação', changes_requested: 'Ajustes solicitados', approved: 'Aprovado', scheduled: 'Agendado', publishing: 'Publicando', processing: 'Processando', published: 'Publicado', simulated: 'Simulado', failed: 'Com erro', cancelled: 'Cancelado' })[value] || value;
+}
+
+function marketingFormatLabel(value = '') {
+  return ({ reel: 'Reel', carousel: 'Carrossel', carrossel: 'Carrossel', story: 'Story', post: 'Publicação', image: 'Publicação' })[value] || 'Publicação';
 }
 
 function marketingChannelLabel(value = '') {
