@@ -7041,7 +7041,7 @@ async function createBillingCheckout(req, admin, data = {}) {
   const downgradeWarnings = await planLimitWarnings(companyId, admin.store_id, plan);
   const amount = planBillingAmountCents(plan, billingCycle);
   const billingConfig = await privatePlatformBillingSettings();
-  const reusableCheckout = await findReusablePendingBillingCheckout(companyId, plan.id, billingCycle);
+  const reusableCheckout = await findReusablePendingBillingCheckout(companyId, plan.id, billingCycle, billingConfig.provider);
   if (reusableCheckout?.checkout_url) {
     return {
       subscription: reusableCheckout.subscription,
@@ -7809,7 +7809,7 @@ async function recordAddonBillingEvent(data = {}) {
   return row || null;
 }
 
-async function findReusablePendingBillingCheckout(companyId, planId, billingCycle = 'monthly') {
+async function findReusablePendingBillingCheckout(companyId, planId, billingCycle = 'monthly', provider = 'mercadopago') {
   const resolvedCompanyId = cleanUuid(companyId);
   const resolvedPlanId = cleanUuid(planId);
   if (!resolvedCompanyId || !resolvedPlanId) return null;
@@ -7819,6 +7819,7 @@ async function findReusablePendingBillingCheckout(companyId, planId, billingCycl
     company_id: `eq.${resolvedCompanyId}`,
     plan_id: `eq.${resolvedPlanId}`,
     status: 'eq.payment_pending',
+    billing_provider: `eq.${cleanSlug(provider || 'mercadopago')}`,
     order: 'created_at.desc',
     limit: '1'
   }).catch(() => []);
@@ -7826,7 +7827,7 @@ async function findReusablePendingBillingCheckout(companyId, planId, billingCycl
   if (normalizeBillingCycle(subscription.metadata?.billing_cycle || 'monthly') !== cycle) return null;
   const dueAt = subscription.payment_due_at ? new Date(subscription.payment_due_at).getTime() : 0;
   const checkoutUrl = cleanText(subscription.metadata?.checkout_url || '');
-  if (!checkoutUrl || (dueAt && dueAt < Date.now())) return null;
+  if (!isTrustedProviderCheckoutUrl(checkoutUrl, provider) || (dueAt && dueAt < Date.now())) return null;
   const [transaction] = await dbRequest('GET', 'subscription_payment_transactions', {
     select: '*',
     subscription_id: `eq.${subscription.id}`,
@@ -7836,7 +7837,21 @@ async function findReusablePendingBillingCheckout(companyId, planId, billingCycl
   }).catch(() => []);
   const expiresAt = transaction?.expires_at ? new Date(transaction.expires_at).getTime() : dueAt;
   if (expiresAt && expiresAt < Date.now()) return null;
-  return { subscription, transaction: transaction || null, checkout_url: transaction?.checkout_url || checkoutUrl };
+  const transactionUrl = cleanText(transaction?.checkout_url || '');
+  const reusableUrl = isTrustedProviderCheckoutUrl(transactionUrl, provider) ? transactionUrl : checkoutUrl;
+  return { subscription, transaction: transaction || null, checkout_url: reusableUrl };
+}
+
+function isTrustedProviderCheckoutUrl(value, provider = 'mercadopago') {
+  try {
+    const url = new URL(cleanText(value || ''));
+    if (url.protocol !== 'https:') return false;
+    if (provider === 'mock') return ['localhost', '127.0.0.1'].includes(url.hostname) || url.hostname.endsWith('.taprontomenu.com.br');
+    if (provider === 'mercadopago') return url.hostname === 'mercadopago.com.br' || url.hostname.endsWith('.mercadopago.com.br') || url.hostname.endsWith('.mercadopago.com');
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 async function activateCompanyPlan(req, admin, company, plan, options = {}) {

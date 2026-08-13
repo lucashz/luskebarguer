@@ -5807,7 +5807,7 @@ function renderPlan() {
   const status = isTrialExpired(subscription) ? 'trial_expired' : rawStatus;
   const statusLabel = commercialStatusLabel(status);
   const nextRenewal = subscription.next_renewal_at || subscription.current_period_ends_at || subscription.trial_ends_at || '';
-  const pendingCheckoutUrl = pendingSubscription.metadata?.checkout_url || '';
+  const pendingCheckoutUrl = mercadoPagoCheckoutUrl(pendingSubscription.metadata?.checkout_url || '');
   const billingStatus = pendingSubscription.id
     ? commercialStatusLabel(pendingSubscription.status)
     : status === 'active' || status === 'trial'
@@ -5928,6 +5928,16 @@ function renderPlan() {
       </div>
       ${billingHistory.length > visibleBillingHistory.length ? `<p class="muted compact-muted">Mostrando os 5 eventos mais recentes de ${billingHistory.length} registro(s).</p>` : ''}
     ` : '<p class="empty-state">Nenhum evento de cobrança registrado.</p>';
+  }
+}
+
+function mercadoPagoCheckoutUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    const host = url.hostname.toLowerCase();
+    return url.protocol === 'https:' && (host === 'mercadopago.com.br' || host.endsWith('.mercadopago.com.br') || host.endsWith('.mercadopago.com')) ? url.href : '';
+  } catch {
+    return '';
   }
 }
 
