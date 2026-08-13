@@ -261,6 +261,7 @@ const els = {
   socialAssetList: document.querySelector('#socialAssetList'),
   socialScheduleForm: document.querySelector('#socialScheduleForm'),
   socialContentSelect: document.querySelector('#socialContentSelect'),
+  socialApprovalPreview: document.querySelector('#socialApprovalPreview'),
   socialAccountSelect: document.querySelector('#socialAccountSelect'),
   socialWorkerStatus: document.querySelector('#socialWorkerStatus'),
   socialPublicationList: document.querySelector('#socialPublicationList'),
@@ -354,6 +355,8 @@ els.marketingResultsPeriod?.addEventListener('change', renderMarketingResults);
 els.marketingContentForm?.addEventListener('input', renderMarketingEditorPreview);
 els.socialAssetForm?.addEventListener('submit', uploadSocialAsset);
 els.socialScheduleForm?.addEventListener('submit', approveAndScheduleSocialContent);
+els.socialContentSelect?.addEventListener('change', renderSocialApprovalPreview);
+els.socialAccountSelect?.addEventListener('change', renderSocialApprovalPreview);
 els.socialStatusFilter?.addEventListener('change', renderSocialPublishing);
 els.marketingTabs.forEach((button) => button.addEventListener('click', () => activateMarketingTab(button.dataset.marketingTab)));
 document.addEventListener('click', (event) => {
@@ -1369,6 +1372,7 @@ function mountSocialPublishingTools(contentId) {
   if (els.socialAssetForm) target.append(els.socialAssetForm);
   if (els.socialScheduleForm) target.append(els.socialScheduleForm);
   if (els.socialContentSelect) els.socialContentSelect.value = contentId;
+  renderSocialApprovalPreview();
 }
 
 function restoreSocialPublishingTools() {
@@ -1473,6 +1477,7 @@ function renderSocialPublishing() {
   const reviewable = (data.content || []).filter((item) => item.status === 'review');
   els.socialContentSelect.innerHTML = reviewable.map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join('');
   els.socialAccountSelect.innerHTML = accounts.filter((item) => item.status === 'connected').map((item) => `<option value="${item.id}">@${escapeHtml(item.username || item.display_name)}</option>`).join('');
+  renderSocialApprovalPreview();
   const worker = data.worker;
   els.socialWorkerStatus.textContent = worker ? `Worker: ${socialStatusLabel(worker.status)} · último sinal ${formatDateTime(worker.heartbeat_at || worker.updated_at)}` : 'Worker ainda não registrou atividade.';
   els.socialPublicationList.innerHTML = (data.publications || []).slice(0, 20).map((item) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(socialStatusLabel(item.status))}</strong><small>${formatDateTime(item.scheduled_at)} · tentativa ${Number(item.attempt_count || 0)}</small>${item.last_error ? `<small class="text-danger">${escapeHtml(item.last_error)}</small>` : ''}</div>${item.status === 'failed' ? `<button class="ghost-button compact" data-social-action="retry" data-publication-id="${item.id}" type="button">Tentar novamente</button>` : ''}</div>`).join('') || '<p class="muted">Nenhuma publicação enfileirada.</p>';
@@ -1482,6 +1487,44 @@ function renderSocialPublishing() {
 async function refreshSocial() {
   state.social = await request('/api/platform/social');
   renderSocialPublishing();
+}
+
+function renderSocialApprovalPreview() {
+  const target = els.socialApprovalPreview;
+  if (!target) return;
+  const contentId = els.socialContentSelect?.value || els.marketingContentPublishingTools?.dataset.contentId || '';
+  const item = (state.social?.content || []).find((entry) => entry.id === contentId)
+    || (state.marketing?.content || []).find((entry) => entry.id === contentId);
+  if (!item) {
+    target.innerHTML = '<p class="muted">Nenhuma publicação aguardando aprovação.</p>';
+    return;
+  }
+  const assets = state.social?.content_assets?.[contentId] || [];
+  const account = (state.social?.accounts || []).find((entry) => entry.id === els.socialAccountSelect?.value)
+    || (state.social?.accounts || []).find((entry) => entry.status === 'connected');
+  const author = account?.username || account?.display_name || 'taprontomenu';
+  const media = assets.length
+    ? assets.map((asset, index) => `<div class="social-preview-slide${index ? '' : ' active'}" data-social-preview-slide="${index}">${asset.kind === 'video'
+      ? `<video src="${escapeHtml(localPlatformMediaUrl(asset.public_url))}" controls playsinline preload="metadata" aria-label="Prévia do Reel"></video>`
+      : `<img src="${escapeHtml(localPlatformMediaUrl(asset.public_url))}" alt="Imagem ${index + 1} da publicação">`}</div>`).join('')
+    : '<div class="social-preview-missing"><strong>Mídia ainda não preparada</strong><span>Adicione uma imagem ou vídeo antes de aprovar.</span></div>';
+  const carouselControls = assets.length > 1
+    ? `<button class="social-preview-arrow previous" data-social-preview-direction="-1" type="button" aria-label="Imagem anterior">‹</button><button class="social-preview-arrow next" data-social-preview-direction="1" type="button" aria-label="Próxima imagem">›</button><span class="social-preview-counter">1/${assets.length}</span>`
+    : '';
+  const hashtags = Array.isArray(item.hashtags) ? item.hashtags.join(' ') : String(item.hashtags || '');
+  target.innerHTML = `<div class="social-preview-label"><span>Prévia no Instagram</span><b>${escapeHtml(marketingFormatLabel(item.format))}</b></div><article class="instagram-post-preview"><header><span class="instagram-preview-avatar"><img src="/assets/tapronto-favicon.svg" alt=""></span><strong>${escapeHtml(author)}</strong><span>•••</span></header><div class="instagram-preview-media">${media}${carouselControls}</div>${assets.length > 1 ? `<div class="social-preview-dots">${assets.map((_, index) => `<button class="${index ? '' : 'active'}" data-social-preview-index="${index}" type="button" aria-label="Ver imagem ${index + 1}"></button>`).join('')}</div>` : ''}<div class="instagram-preview-actions"><span>♡</span><span>○</span><span>➤</span><span>⌑</span></div><div class="instagram-preview-caption"><p><strong>${escapeHtml(author)}</strong> ${escapeHtml(item.caption || item.hook || '').replaceAll('\n', '<br>')}</p>${hashtags ? `<p class="instagram-preview-hashtags">${escapeHtml(hashtags)}</p>` : ''}${item.cta ? `<small>CTA: ${escapeHtml(item.cta)}</small>` : ''}</div></article>`;
+  target.querySelectorAll('[data-social-preview-index]').forEach((button) => button.addEventListener('click', () => showSocialPreviewSlide(target, Number(button.dataset.socialPreviewIndex), assets.length)));
+  target.querySelectorAll('[data-social-preview-direction]').forEach((button) => button.addEventListener('click', () => {
+    const current = Number(target.querySelector('.social-preview-slide.active')?.dataset.socialPreviewSlide || 0);
+    showSocialPreviewSlide(target, (current + Number(button.dataset.socialPreviewDirection) + assets.length) % assets.length, assets.length);
+  }));
+}
+
+function showSocialPreviewSlide(target, index, total) {
+  target.querySelectorAll('[data-social-preview-slide]').forEach((slide) => slide.classList.toggle('active', Number(slide.dataset.socialPreviewSlide) === index));
+  target.querySelectorAll('[data-social-preview-index]').forEach((dot) => dot.classList.toggle('active', Number(dot.dataset.socialPreviewIndex) === index));
+  const counter = target.querySelector('.social-preview-counter');
+  if (counter) counter.textContent = `${index + 1}/${total}`;
 }
 
 async function handleSocialAction(button) {
