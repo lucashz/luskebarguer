@@ -116,14 +116,16 @@ h3 {
   font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 0;
+  overflow: visible;
 }
 
 .home-brand img {
   display: block;
   width: 248px;
-  max-height: 68px;
+  max-height: none;
   height: auto;
   object-fit: contain;
+  padding-block: 4px;
 }
 
 .home-brand-icon {

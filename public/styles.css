@@ -3440,15 +3440,17 @@ textarea {
   color: var(--accent);
   font-weight: 800;
   letter-spacing: 0;
+  overflow: visible;
 }
 
 .brand-mark img {
   display: block;
   width: 220px;
   max-width: 100%;
-  max-height: 66px;
+  max-height: none;
   height: auto;
   object-fit: contain;
+  padding-block: 4px;
 }
 
 .public-topbar {
@@ -3472,9 +3474,11 @@ textarea {
 
 .public-brand-mark img {
   width: auto;
-  height: 68px;
+  height: 64px;
   max-width: 306px;
-  max-height: 68px;
+  max-height: none;
+  object-fit: contain;
+  padding-block: 4px;
 }
 
 .public-actions {
@@ -14992,15 +14996,17 @@ body.admin-tour-active {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+  overflow: visible;
 }
 
 .portal-brand img {
   display: block;
   width: 248px;
   max-width: 42vw;
-  max-height: 68px;
+  max-height: none;
   height: auto;
   object-fit: contain;
+  padding-block: 4px;
 }
 
 .portal-topbar nav {
