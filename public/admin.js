@@ -72,6 +72,8 @@
   checkoutPlanCode: '',
   checkoutAddonCode: '',
   planBillingCycle: localStorage.getItem('adminPlanBillingCycle') || 'monthly',
+  planChangeOpen: false,
+  planSelectedCode: '',
   billingCheckoutPollTimer: null
 };
 
@@ -5801,7 +5803,10 @@ function renderPlan() {
   const usage = data.usage || {};
   const features = data.features || [];
   const billingHistory = Array.isArray(data.billing_history) ? data.billing_history : [];
-  const selectedPlanCode = plan.code || availablePlans[0]?.code || '';
+  const availablePlanCodes = new Set(availablePlans.map((entry) => entry.code));
+  const selectedPlanCode = availablePlanCodes.has(state.planSelectedCode)
+    ? state.planSelectedCode
+    : (plan.code || availablePlans[0]?.code || '');
   const billingCycle = normalizePlanBillingCycle(state.planBillingCycle);
   const rawStatus = subscription.status || company.status || 'indefinido';
   const status = isTrialExpired(subscription) ? 'trial_expired' : rawStatus;
@@ -5853,7 +5858,7 @@ function renderPlan() {
           ${pendingCheckoutUrl ? `<a class="primary-button compact" href="${escapeAttribute(pendingCheckoutUrl)}" target="_blank" rel="noopener">Regularizar pagamento</a>` : `<button class="primary-button compact" id="billingPendingButton" type="button">Regularizar pagamento</button>`}
         </div>
       ` : ''}
-      <details class="plan-change-details">
+      <details class="plan-change-details"${state.planChangeOpen ? ' open' : ''}>
         <summary><span class="plan-change-cta-icon" aria-hidden="true">↑</span><span class="plan-change-cta-copy"><strong>${plan.code ? 'Alterar meu plano' : 'Ativar meu plano'}</strong><small>Compare opções e libere mais recursos</small></span><span class="plan-change-cta-toggle" aria-hidden="true">+</span></summary>
         <div class="plan-actions">
           <div class="plan-cycle-toggle" role="group" aria-label="Ciclo de cobrança">
@@ -5870,8 +5875,18 @@ function renderPlan() {
       </details>
     </div>
   `;
+  const planChangeDetails = els.planSummary.querySelector('.plan-change-details');
+  planChangeDetails?.addEventListener('toggle', () => {
+    state.planChangeOpen = planChangeDetails.open;
+  });
+  const billingPlanSelect = document.querySelector('#billingPlanSelect');
+  billingPlanSelect?.addEventListener('change', () => {
+    state.planSelectedCode = billingPlanSelect.value;
+  });
   document.querySelectorAll('[data-plan-cycle]').forEach((button) => {
     button.addEventListener('click', () => {
+      state.planChangeOpen = true;
+      state.planSelectedCode = billingPlanSelect?.value || selectedPlanCode;
       state.planBillingCycle = normalizePlanBillingCycle(button.dataset.planCycle);
       localStorage.setItem('adminPlanBillingCycle', state.planBillingCycle);
       renderPlan();
