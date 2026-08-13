@@ -16478,6 +16478,13 @@ body.admin-tour-active {
   color: var(--color-button);
 }
 
+.menu-page .public-topbar .public-brand-mark img {
+  width: 280px;
+  height: auto;
+  max-width: min(42vw, 280px);
+  max-height: none;
+}
+
 .menu-page .public-actions .link-button,
 .menu-page .public-actions .text-button {
   border: 1px solid var(--color-button) !important;
@@ -16549,14 +16556,14 @@ body.admin-tour-active {
 
   .public-brand-mark {
     flex: 0 0 auto;
-    max-width: 178px;
+    max-width: 210px;
   }
 
   .public-brand-mark img {
-    width: auto;
-    height: 42px;
-    max-width: 178px;
-    max-height: 42px;
+    width: 210px;
+    height: auto;
+    max-width: min(48vw, 210px);
+    max-height: none;
   }
 
   .public-actions {
