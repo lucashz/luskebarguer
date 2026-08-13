@@ -7977,6 +7977,22 @@ textarea {
   box-shadow: none;
 }
 
+.online-payment-customer-details {
+  display: grid;
+  gap: 10px;
+}
+
+.online-payment-customer-details p {
+  margin: -4px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.online-payment-customer-field {
+  width: 100%;
+  min-width: 0;
+}
+
 .checkout-customer-summary {
   display: grid;
   gap: 3px;
