@@ -250,7 +250,7 @@ async function renderLocalMarketingImage(topic, referencePath, config, settings 
   const mask = Buffer.from(`<svg width="${screenWidth}" height="${screenHeight}"><rect width="100%" height="100%" rx="10" fill="white"/></svg>`);
   const roundedScreenshot = await sharp(screenshot).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
   const composites = [{ input: roundedScreenshot, left: padding + screenInset, top: deviceTop + screenInset }];
-  const logoPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-logo.png');
+  const logoPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-logo-horizontal.png');
   if (existsSync(logoPath) && settings?.logo_enabled !== false) {
     const logoWidth = Math.round(width * .18);
     const logo = await sharp(logoPath).resize({ width: logoWidth }).png().toBuffer();
