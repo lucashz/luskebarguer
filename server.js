@@ -39,6 +39,9 @@ const ADMIN_COOKIE = 'admin_session';
 const CUSTOMER_COOKIE = 'customer_session';
 const MARKETING_ATTRIBUTION_COOKIE = 'tapronto_attribution';
 const INSTAGRAM_PROFILE_DESTINATION = 'https://taprontomenu.com.br/?utm_source=instagram&utm_medium=organic&utm_campaign=bio&utm_content=profile_link';
+const FIRST_CUSTOMERS_TRIAL_CAMPAIGN = 'primeiros_clientes';
+const DEFAULT_TRIAL_DAYS = 14;
+const FIRST_CUSTOMERS_TRIAL_DAYS = 21;
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 30), 1, 90);
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
@@ -4580,6 +4583,20 @@ function marketingAttributionFromRequest(req, explicit = {}) {
   return sanitizeMarketingAttribution({ ...stored, ...(isPlainObject(explicit) ? explicit : {}) });
 }
 
+function signupTrialOffer(attribution = {}) {
+  const normalized = (value) => String(value || '').trim().toLowerCase();
+  const source = normalized(attribution.utm_source);
+  const medium = normalized(attribution.utm_medium);
+  const campaign = normalized(attribution.utm_campaign);
+  const isFirstCustomersCampaign = source === 'instagram'
+    && medium === 'direct'
+    && campaign === FIRST_CUSTOMERS_TRIAL_CAMPAIGN;
+  return {
+    trialDays: isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_DAYS : DEFAULT_TRIAL_DAYS,
+    campaign: isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_CAMPAIGN : ''
+  };
+}
+
 function marketingAttributionCookie(req, attribution = {}) {
   const secure = COOKIE_SECURE ? '; Secure' : '';
   const hostname = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].split(':')[0].toLowerCase();
@@ -5251,7 +5268,8 @@ async function createPortalSignup(req, data = {}) {
       is_active: true
     }, ['Prefer: return=minimal']);
 
-    await createDefaultSubscription(company.id, parsed.planCode);
+    const trialOffer = signupTrialOffer(parsed.attribution);
+    await createDefaultSubscription(company.id, parsed.planCode, trialOffer);
     await createPortalStoreSettings(store.id, parsed);
     await createStarterMenu(store.id, parsed.businessType);
     await createOnboardingProgress(company.id, store.id, parsed);
@@ -5260,7 +5278,7 @@ async function createPortalSignup(req, data = {}) {
       storeId: store.id,
       visitorKey: parsed.attribution.visitor_key,
       attribution: parsed.attribution,
-      properties: { plan_code: parsed.planCode, business_type: parsed.businessType },
+      properties: { plan_code: parsed.planCode, business_type: parsed.businessType, trial_days: trialOffer.trialDays },
       idempotencyKey: `signup_completed:${company.id}`
     });
     await recordReferralSignup(req, parsed.referralCode, {
@@ -5284,7 +5302,9 @@ async function createPortalSignup(req, data = {}) {
         plan_code: parsed.planCode,
         business_type: parsed.businessType,
         slug: parsed.store.slug,
-        marketing_opt_in: parsed.marketingOptIn
+        marketing_opt_in: parsed.marketingOptIn,
+        trial_days: trialOffer.trialDays,
+        trial_campaign: trialOffer.campaign || null
       }
     });
 
@@ -13583,7 +13603,7 @@ function sanitizeSubscriptionStatus(status) {
   return 'active';
 }
 
-async function createDefaultSubscription(companyId, planCode) {
+async function createDefaultSubscription(companyId, planCode, options = {}) {
   const plan = (await dbRequest('GET', 'subscription_plans', {
     select: 'id',
     code: `eq.${cleanSlug(planCode || 'trial')}`,
@@ -13594,15 +13614,22 @@ async function createDefaultSubscription(companyId, planCode) {
     limit: '1'
   }))[0];
   if (!plan) return null;
+  const trialDays = clampInteger(Number(options.trialDays || DEFAULT_TRIAL_DAYS), DEFAULT_TRIAL_DAYS, FIRST_CUSTOMERS_TRIAL_DAYS);
+  const startsAt = new Date();
+  const endsAt = new Date(startsAt.getTime() + trialDays * 86400000);
   const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
     company_id: companyId,
     plan_id: plan.id,
     status: 'trial',
-    trial_ends_at: new Date(Date.now() + 14 * 86400000).toISOString(),
-    current_period_starts_at: new Date().toISOString(),
-    current_period_ends_at: new Date(Date.now() + 14 * 86400000).toISOString(),
-    next_renewal_at: new Date(Date.now() + 14 * 86400000).toISOString(),
-    metadata: { source: 'platform_api' }
+    trial_ends_at: endsAt.toISOString(),
+    current_period_starts_at: startsAt.toISOString(),
+    current_period_ends_at: endsAt.toISOString(),
+    next_renewal_at: endsAt.toISOString(),
+    metadata: {
+      source: 'platform_api',
+      trial_days: trialDays,
+      trial_campaign: cleanText(options.campaign || '').slice(0, 120) || null
+    }
   }, ['Prefer: return=representation']);
   return subscription;
 }

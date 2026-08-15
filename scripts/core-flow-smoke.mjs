@@ -46,9 +46,9 @@ try {
       plan_code: 'essential',
       accept_terms: true,
       attribution: {
-        utm_source: 'smoke',
-        utm_medium: 'test',
-        utm_campaign: 'marketing-funnel-smoke',
+        utm_source: 'instagram',
+        utm_medium: 'direct',
+        utm_campaign: 'primeiros_clientes',
         landing_path: '/cardapio-digital',
         visitor_key: `visitor-${suffix}`
       },
@@ -86,7 +86,19 @@ try {
   assert(duplicateCpf.status === 409, 'CPF duplicado deveria ser rejeitado no cadastro da plataforma.');
   assert(companyId && storeId, 'Cadastro nao retornou empresa/loja.');
   const attribution = await client.query('select marketing_attribution from public.companies where id = $1', [companyId]);
-  assert(attribution.rows[0]?.marketing_attribution?.utm_source === 'smoke', 'Origem de marketing nao foi persistida na empresa.');
+  assert(attribution.rows[0]?.marketing_attribution?.utm_source === 'instagram', 'Origem de marketing nao foi persistida na empresa.');
+  const promotionalTrial = await client.query(`
+    select trial_ends_at, current_period_starts_at, metadata
+      from public.company_subscriptions
+     where company_id = $1
+       and status = 'trial'
+     order by created_at desc
+     limit 1
+  `, [companyId]);
+  const trial = promotionalTrial.rows[0];
+  const trialDurationDays = (new Date(trial?.trial_ends_at).getTime() - new Date(trial?.current_period_starts_at).getTime()) / 86400000;
+  assert(trialDurationDays === 21, `Campanha primeiros_clientes deveria liberar 21 dias, recebeu ${trialDurationDays}.`);
+  assert(trial?.metadata?.trial_days === 21 && trial?.metadata?.trial_campaign === 'primeiros_clientes', 'Oferta promocional nao foi registrada nos metadados da assinatura.');
   const inactiveLogin = await request('/api/admin/login', {
     method: 'POST',
     allowFailure: true,

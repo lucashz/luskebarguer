@@ -78,6 +78,7 @@ async function loadPlans() {
 
 function initSignup() {
   const businessName = signupForm.elements.business_name;
+  applySignupTrialOffer();
   initSignupProgress();
   businessName?.addEventListener('input', () => {
     if (!slugInput || slugInput.dataset.touched === 'true') return;
@@ -92,6 +93,22 @@ function initSignup() {
   const cpfInput = signupForm.elements.owner_document;
   cpfInput?.addEventListener('input', () => { cpfInput.value = formatCpf(cpfInput.value); });
   signupForm.addEventListener('submit', submitSignup);
+}
+
+function applySignupTrialOffer() {
+  const params = new URLSearchParams(window.location.search);
+  const normalized = (name) => String(params.get(name) || '').trim().toLowerCase();
+  const isFirstCustomersOffer = normalized('utm_source') === 'instagram'
+    && normalized('utm_medium') === 'direct'
+    && normalized('utm_campaign') === 'primeiros_clientes';
+  if (!isFirstCustomersOffer) return;
+
+  const eyebrow = document.querySelector('#signupTrialEyebrow');
+  const description = document.querySelector('#signupTrialDescription');
+  if (eyebrow) eyebrow.textContent = '21 Dias Grátis';
+  if (description) {
+    description.textContent = 'Você recebeu 21 dias grátis para testar o TáPronto. Cadastre o responsável, os dados da loja e o endereço público do cardápio. Você poderá escolher um plano depois, dentro do painel.';
+  }
 }
 
 function initSignupProgress() {
