@@ -98,9 +98,9 @@ function initSignup() {
 function applySignupTrialOffer() {
   const params = new URLSearchParams(window.location.search);
   const normalized = (name) => String(params.get(name) || '').trim().toLowerCase();
-  const isFirstCustomersOffer = normalized('utm_source') === 'instagram'
+  const isFirstCustomersOffer = window.location.pathname === '/21dias' || (normalized('utm_source') === 'instagram'
     && normalized('utm_medium') === 'direct'
-    && normalized('utm_campaign') === 'primeiros_clientes';
+    && normalized('utm_campaign') === 'primeiros_clientes');
   if (!isFirstCustomersOffer) return;
 
   const eyebrow = document.querySelector('#signupTrialEyebrow');
@@ -371,11 +371,12 @@ function isValidCpf(value) {
 
 function signupMarketingAttribution() {
   const params = new URLSearchParams(location.search);
+  const isFirstCustomersOffer = location.pathname === '/21dias';
   let stored = {};
   try { stored = JSON.parse(localStorage.getItem('tapronto_marketing_attribution') || '{}'); } catch {}
   const direct = {
-    utm_source: params.get('utm_source') || '', utm_medium: params.get('utm_medium') || '',
-    utm_campaign: params.get('utm_campaign') || '', utm_content: params.get('utm_content') || '',
+    utm_source: params.get('utm_source') || (isFirstCustomersOffer ? 'instagram' : ''), utm_medium: params.get('utm_medium') || (isFirstCustomersOffer ? 'direct' : ''),
+    utm_campaign: params.get('utm_campaign') || (isFirstCustomersOffer ? 'primeiros_clientes' : ''), utm_content: params.get('utm_content') || '',
     utm_term: params.get('utm_term') || '', landing_path: stored.landing_path || location.pathname,
     referrer_host: stored.referrer_host || document.referrer, visitor_key: stored.visitor_key || ''
   };

@@ -6425,6 +6425,7 @@ function reservedPublicSlugs() {
     'login',
     'entrar',
     'cadastro',
+    '21dias',
     'criar-conta',
     'onboarding',
     'planos',
@@ -18971,6 +18972,7 @@ async function serveSeoResource(req, res, requestPath, hostHeader = '') {
           'Disallow: /conta',
           'Disallow: /pedidos',
           'Disallow: /cadastro',
+          'Disallow: /21dias',
           'Disallow: /confirmar-email',
           'Disallow: /ativar-conta',
           'Disallow: /redefinir-senha',
@@ -19378,7 +19380,7 @@ function guidesHostRedirectUrl(requestPath = '/', hostHeader = '', requestSearch
   if (requestPath.startsWith('/api/') || requestPath.startsWith('/assets/') || requestPath.startsWith('/uploads/') || path.extname(requestPath)) return '';
   const isGuidesHost = isGuidesHostname(hostname);
   const legacyGuidesPath = requestPath === '/guias' || requestPath.startsWith('/guias/');
-  const publicSitePaths = ['/cadastro', '/planos', '/cardapio', '/privacidade', '/termos', '/recursos', '/demonstracao'];
+  const publicSitePaths = ['/cadastro', '/21dias', '/planos', '/cardapio', '/privacidade', '/termos', '/recursos', '/demonstracao'];
   if (isGuidesHost && publicSitePaths.includes(requestPath)) return `${publicBaseUrl() || 'https://taprontomenu.com.br'}${requestPath}${requestSearch || ''}`;
   if (!isGuidesHost && !legacyGuidesPath) return '';
   if (isGuidesHost && !legacyGuidesPath) return '';
@@ -19415,7 +19417,7 @@ function routePath(requestPath, hostHeader = '') {
   if (requestPath === '/termos') return '/terms.html';
   if (requestPath === '/privacidade') return '/privacy.html';
   if (requestPath === '/entrar') return '/admin.html';
-  if (requestPath === '/criar-conta' || requestPath === '/cadastro') return '/signup.html';
+  if (requestPath === '/criar-conta' || requestPath === '/cadastro' || requestPath === '/21dias') return '/signup.html';
   if (requestPath === '/confirmar-email') return '/confirm-email.html';
   if (requestPath === '/ativar-conta') return '/activate-account.html';
   if (requestPath === '/redefinir-senha') return '/reset-password.html';
