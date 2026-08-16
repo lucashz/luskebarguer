@@ -1014,12 +1014,15 @@ function renderAutopilot() {
       item.setAttribute('aria-checked', String(active));
     });
     if (els.createTodaySuggestionButton) els.createTodaySuggestionButton.textContent = `Gerar ${marketingFormatLabel(state.marketingSelectedFormat)}`;
-    const asset = run.asset || {};
+    const linkedAssets = state.social?.content_assets?.[content.id] || [];
+    const asset = content.format === 'reel'
+      ? (linkedAssets.find((item) => item.kind === 'video' && item.processing_status === 'ready') || linkedAssets.find((item) => item.kind === 'video') || run.asset || {})
+      : (linkedAssets.find((item) => item.kind === 'image' && item.processing_status === 'ready') || run.asset || {});
     const ready = run.status === 'ready' && !['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(content.status);
     const removedFromInstagram = content.status === 'cancelled' && content.publication_error === 'Removido diretamente no Instagram.';
     const previewUrl = localPlatformMediaUrl(asset.public_url);
     const previewMedia = previewUrl
-      ? (asset.kind === 'video' || content.format === 'reel'
+      ? (asset.kind === 'video'
         ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata" aria-label="Prévia do Reel ${escapeHtml(content.title)}"></video>`
         : `<img src="${escapeHtml(previewUrl)}" alt="Prévia do ${escapeHtml(marketingFormatLabel(content.format).toLowerCase())} ${escapeHtml(content.title)}">`)
       : '<span>Mídia sendo preparada…</span>';
