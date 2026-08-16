@@ -1020,17 +1020,27 @@ function renderAutopilot() {
       : (linkedAssets.find((item) => item.kind === 'image' && item.processing_status === 'ready') || run.asset || {});
     const ready = run.status === 'ready' && !['scheduled', 'publishing', 'processing', 'published', 'simulated'].includes(content.status);
     const removedFromInstagram = content.status === 'cancelled' && content.publication_error === 'Removido diretamente no Instagram.';
+    const previewAssets = content.format === 'carousel'
+      ? linkedAssets.filter((item) => item.kind === 'image' && item.processing_status === 'ready')
+      : [asset].filter((item) => item?.public_url);
     const previewUrl = localPlatformMediaUrl(asset.public_url);
-    const previewMedia = previewUrl
-      ? (asset.kind === 'video'
-        ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata" aria-label="Prévia do Reel ${escapeHtml(content.title)}"></video>`
-        : `<img src="${escapeHtml(previewUrl)}" alt="Prévia do ${escapeHtml(marketingFormatLabel(content.format).toLowerCase())} ${escapeHtml(content.title)}">`)
-      : '<span>Mídia sendo preparada…</span>';
+    const previewMedia = content.format === 'carousel' && previewAssets.length
+      ? `<div class="autopilot-carousel">${previewAssets.map((item, index) => `<div class="social-preview-slide${index ? '' : ' active'}" data-social-preview-slide="${index}"><img src="${escapeHtml(localPlatformMediaUrl(item.public_url))}" alt="Imagem ${index + 1} de ${previewAssets.length} do carrossel"></div>`).join('')}${previewAssets.length > 1 ? `<button class="social-preview-arrow previous" data-social-preview-direction="-1" type="button" aria-label="Imagem anterior">‹</button><button class="social-preview-arrow next" data-social-preview-direction="1" type="button" aria-label="Próxima imagem">›</button><span class="social-preview-counter">1/${previewAssets.length}</span>` : ''}</div>${previewAssets.length > 1 ? `<div class="social-preview-dots">${previewAssets.map((_, index) => `<button class="${index ? '' : 'active'}" data-social-preview-index="${index}" type="button" aria-label="Ver imagem ${index + 1}"></button>`).join('')}</div>` : ''}`
+      : previewUrl
+        ? (asset.kind === 'video'
+          ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata" aria-label="Prévia do Reel ${escapeHtml(content.title)}"></video>`
+          : `<img src="${escapeHtml(previewUrl)}" alt="Prévia do ${escapeHtml(marketingFormatLabel(content.format).toLowerCase())} ${escapeHtml(content.title)}">`)
+        : '<span>Mídia sendo preparada…</span>';
     const hashtags = Array.isArray(content.hashtags) ? content.hashtags.join(' ') : String(content.hashtags || '');
     const optionalEditor = ready ? `<details class="autopilot-quick-editor"><summary>Editar Antes de Publicar <span>Opcional</span></summary><form data-autopilot-edit-form data-content-id="${escapeHtml(content.id)}"><label>Título<input name="title" value="${escapeHtml(content.title || '')}" maxlength="500"></label><label>Legenda<textarea name="caption" rows="6" maxlength="8000">${escapeHtml(content.caption || '')}</textarea></label><div class="field-grid two-columns"><label>Chamada para ação<input name="cta" value="${escapeHtml(content.cta || '')}" maxlength="500"></label><label>Hashtags<input name="hashtags" value="${escapeHtml(hashtags)}" maxlength="500"></label></div><div class="row-actions"><button class="ghost-button compact" data-autopilot-action="save-edits" type="button">Salvar Alterações</button><button class="ghost-button compact" data-autopilot-action="regenerate" type="button">Gerar Outra Opção</button></div></form></details>` : '';
     els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewMedia}</div><div class="autopilot-copy"><span class="eyebrow">Post de Hoje · ${escapeHtml(marketingFormatLabel(content.format))}</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Gostou? Publique agora. Se quiser, você também pode editar ou agendar.</small>${removedFromInstagram ? '<div class="autopilot-notice">Este post foi removido do Instagram. Você pode publicá-lo novamente.</div>' : data.mode === 'local' ? '<div class="autopilot-notice">Mídia, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}${optionalEditor}<div class="row-actions autopilot-publish-actions">${ready ? `${account ? `<button class="primary-button" data-autopilot-action="publish-now" type="button">${removedFromInstagram ? 'Publicar Novamente' : 'Postar Agora'}</button>` : ''}<button class="ghost-button" data-autopilot-action="approve" type="button">${account ? 'Agendar' : 'Conectar Instagram'}</button>` : `<span class="status-pill success">${content.status === 'published' ? 'Publicado no Instagram' : 'Aprovado e Agendado'}</span>`}</div></div></div>`;
     const primary = els.autopilotTodayCard.querySelector('[data-autopilot-action="approve"]');
     if (primary && !account) primary.dataset.autopilotAction = 'configure';
+    els.autopilotTodayCard.querySelectorAll('[data-social-preview-index]').forEach((button) => button.addEventListener('click', () => showSocialPreviewSlide(els.autopilotTodayCard, Number(button.dataset.socialPreviewIndex), previewAssets.length)));
+    els.autopilotTodayCard.querySelectorAll('[data-social-preview-direction]').forEach((button) => button.addEventListener('click', () => {
+      const current = Number(els.autopilotTodayCard.querySelector('.social-preview-slide.active')?.dataset.socialPreviewSlide || 0);
+      showSocialPreviewSlide(els.autopilotTodayCard, (current + Number(button.dataset.socialPreviewDirection) + previewAssets.length) % previewAssets.length, previewAssets.length);
+    }));
   }
   const upcoming = (state.marketing?.content || []).filter((item) => ['approved','scheduled','publishing','processing'].includes(item.status) && item.scheduled_at && new Date(item.scheduled_at) >= new Date()).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)).slice(0, 5);
   if (els.autopilotUpcomingList) els.autopilotUpcomingList.innerHTML = upcoming.length ? upcoming.map(marketingCompactContentRow).join('') : '<div class="marketing-empty-state compact"><strong>Nenhum post agendado</strong><p>Quando você aprovar o post de hoje, ele aparecerá aqui.</p></div>';

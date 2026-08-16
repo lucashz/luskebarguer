@@ -240,20 +240,25 @@ async function renderLocalMarketingImage(topic, referencePath, config, settings 
   if (topic.key === 'pedido-organizado' && aspect === '1:1' && existsSync(canonicalTemplate)) return readFile(canonicalTemplate);
   const [width, height] = aspect === '9:16' ? [1080, 1920] : aspect === '4:5' ? [1080, 1350] : [1080, 1080];
   const padding = Math.round(width * 0.065); const accent = '#ed1c24';
-  const headerHeight = aspect === '9:16' ? 500 : Math.round(height * .31);
+  const sentences = String(topic.overlay || topic.title).match(/[^.!?]+[.!?]?/g) || [topic.title];
+  const redLine = sentences.shift()?.trim() || topic.title;
+  const fontSize = aspect === '9:16' ? 68 : 54;
+  const lineHeight = Math.round(fontSize * 1.12);
+  const maxChars = aspect === '9:16' ? 20 : 23;
+  const redLines = wrapOverlay(redLine, maxChars).slice(0, 3);
+  const navySource = sentences.join(' ').trim();
+  const navyLines = navySource ? wrapOverlay(navySource, maxChars).slice(0, 2) : [];
+  const titleLines = [...redLines.map((line) => ({ line, color: accent })), ...navyLines.map((line) => ({ line, color: '#12213d' }))];
+  const textTop = Math.round(padding * 1.65);
+  const headerHeight = Math.max(aspect === '9:16' ? 500 : Math.round(height * .34), textTop + titleLines.length * lineHeight + Math.round(padding * .55));
   const deviceTop = headerHeight; const deviceWidth = width - padding * 2; const deviceHeight = height - deviceTop - Math.round(padding * .8);
   const screenInset = Math.round(deviceWidth * .025); const baseHeight = Math.max(42, Math.round(deviceHeight * .07));
   const screenWidth = deviceWidth - screenInset * 2; const screenHeight = deviceHeight - screenInset * 2 - baseHeight;
-  const sentences = String(topic.overlay || topic.title).match(/[^.!?]+[.!?]?/g) || [topic.title];
-  const redLine = sentences.shift()?.trim() || topic.title; const navyLines = wrapOverlay(sentences.join(' ').trim() || topic.title, aspect === '9:16' ? 20 : 25);
-  const fontSize = aspect === '9:16' ? 76 : 65;
-  const lineHeight = Math.round(fontSize * 1.08);
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f7f7f7"/></linearGradient></defs>
     <rect width="${width}" height="${height}" fill="url(#bg)"/>
     <path d="M0 ${height - 150} Q${width * .22} ${height - 300} ${width * .48} ${height - 100} T${width} ${height - 160} V${height} H0Z" fill="${accent}"/>
-    <text x="${padding}" y="${Math.round(padding * 1.75)}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="${accent}">${escapeSvg(redLine)}</text>
-    ${navyLines.map((line, index) => `<text x="${padding}" y="${Math.round(padding * 2.85) + index * lineHeight}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="#12213d">${escapeSvg(line)}</text>`).join('')}
+    ${titleLines.map((item, index) => `<text x="${padding}" y="${textTop + index * lineHeight}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" font-weight="800" fill="${item.color}">${escapeSvg(item.line)}</text>`).join('')}
     <rect x="${padding}" y="${deviceTop}" width="${deviceWidth}" height="${deviceHeight - baseHeight}" rx="30" fill="#101214" stroke="#313438" stroke-width="8"/>
     <circle cx="${width / 2}" cy="${deviceTop + 12}" r="4" fill="#050505"/>
     <rect x="${padding + screenInset}" y="${deviceTop + screenInset}" width="${screenWidth}" height="${screenHeight}" rx="12" fill="#ffffff"/>
@@ -266,7 +271,7 @@ async function renderLocalMarketingImage(topic, referencePath, config, settings 
   const composites = [{ input: roundedScreenshot, left: padding + screenInset, top: deviceTop + screenInset }];
   const logoPath = path.join(config.rootDir, 'public', 'assets', 'tapronto-logo-horizontal.png');
   if (existsSync(logoPath) && settings?.logo_enabled !== false) {
-    const logoWidth = Math.round(width * .18);
+    const logoWidth = Math.round(width * .15);
     const logo = await sharp(logoPath).resize({ width: logoWidth }).png().toBuffer();
     composites.push({ input: logo, left: width - padding - logoWidth, top: Math.round(padding * .55) });
   }
