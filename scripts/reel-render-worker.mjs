@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import pg from 'pg';
 import { renderReel } from '../src/lib/reel-renderer.js';
@@ -10,6 +10,8 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 })
 const once = process.argv.includes('--once');
 const rootDir = process.env.APP_ROOT ? path.resolve(process.env.APP_ROOT) : process.cwd();
 const uploadDir = path.resolve(rootDir, process.env.UPLOAD_DIR || 'uploads');
+const marketingMediaDir = path.resolve(process.env.MARKETING_MEDIA_DIR || path.join(rootDir, '..', 'tapronto-marketing'));
+const marketingMediaMaxBytes = Math.max(100 * 1024 * 1024, Number(process.env.MARKETING_MEDIA_MAX_BYTES || 2 * 1024 * 1024 * 1024));
 const publicBase = String(process.env.PUBLIC_APP_URL || process.env.APP_URL || 'https://taprontomenu.com.br').replace(/\/$/, '');
 let stopping = false;
 process.on('SIGTERM', () => { stopping = true; }); process.on('SIGINT', () => { stopping = true; });
@@ -34,20 +36,21 @@ async function cycle() {
 }
 
 async function processJob(client, job) {
-  const context = (await client.query(`select c.*,a.storage_path source_storage from marketing_content_items c left join social_content_assets ca on ca.content_id=c.id and ca.role='media' left join social_media_assets a on a.id=ca.asset_id and a.kind='image' where c.id=$1 order by ca.sort_order limit 1`, [job.content_id])).rows[0];
+  const context = (await client.query(`select c.*,a.storage_path source_storage,a.public_url source_public_url from marketing_content_items c left join social_content_assets ca on ca.content_id=c.id and ca.role='media' left join social_media_assets a on a.id=ca.asset_id and a.kind='image' where c.id=$1 order by ca.sort_order limit 1`, [job.content_id])).rows[0];
   if (!context) throw new Error('Conteúdo do Reel não encontrado.');
-  const outputDir = path.join(uploadDir, 'social', 'reels'); await mkdir(outputDir, { recursive: true });
-  const sourcePath = context.source_storage ? path.join(uploadDir, context.source_storage.replace(/^\/?uploads\//, '')) : '';
+  const outputDir = path.join(marketingMediaDir, 'reels'); await mkdir(outputDir, { recursive: true });
+  if (await directorySize(marketingMediaDir) >= marketingMediaMaxBytes) throw new Error('O armazenamento de Marketing atingiu o limite configurado. Remova mídias antigas antes de gerar um novo Reel.');
+  const sourcePath = context.source_storage ? path.join(String(context.source_public_url || '').includes('/marketing-media/') ? marketingMediaDir : uploadDir, context.source_storage.replace(/^\/?uploads\//, '')) : '';
   await client.query(`update social_reel_render_jobs set status='rendering',updated_at=now() where id=$1`, [job.id]);
   await client.query(`update marketing_content_items set render_status='rendering',render_progress=10,updated_at=now() where id=$1`, [job.content_id]);
   const result = await renderReel({ content: context, sourceImagePath: sourcePath && existsSync(sourcePath) ? sourcePath : '', outputDir, duration: job.duration_seconds, template: job.template, onProgress: (progress) => client.query(`update marketing_content_items set render_progress=$2,updated_at=now() where id=$1`, [job.content_id, progress]).catch(() => {}) });
-  const relativeVideo = path.relative(uploadDir, result.outputPath).replaceAll('\\','/');
-  const relativeCover = path.relative(uploadDir, result.coverPath).replaceAll('\\','/');
+  const relativeVideo = path.relative(marketingMediaDir, result.outputPath).replaceAll('\\','/');
+  const relativeCover = path.relative(marketingMediaDir, result.coverPath).replaceAll('\\','/');
   const coverInfo = await stat(result.coverPath); const coverChecksum = `${result.checksum}-cover`;
   await client.query('begin');
   try {
-    const video = (await client.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,duration_seconds,aspect_ratio,checksum_sha256,processing_status,validation_details) values('instagram','video',$1,$2,$3,'video/mp4',$4,1080,1920,$5,'9:16',$6,'ready',$7::jsonb) on conflict do nothing returning *`, [path.basename(result.outputPath), relativeVideo, `${publicBase}/uploads/${relativeVideo}`, result.size, result.script.duration, result.checksum, JSON.stringify({ generated_by:'local_reel_renderer', codec:'h264', template:job.template })])).rows[0] || (await client.query('select * from social_media_assets where checksum_sha256=$1', [result.checksum])).rows[0];
-    const cover = (await client.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,aspect_ratio,checksum_sha256,processing_status,validation_details) values('instagram','image',$1,$2,$3,'image/jpeg',$4,1080,1920,'9:16',$5,'ready',$6::jsonb) on conflict do nothing returning *`, [path.basename(result.coverPath), relativeCover, `${publicBase}/uploads/${relativeCover}`, coverInfo.size, coverChecksum, JSON.stringify({ generated_by:'local_reel_renderer', role:'cover' })])).rows[0] || (await client.query('select * from social_media_assets where checksum_sha256=$1', [coverChecksum])).rows[0];
+    const video = (await client.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,duration_seconds,aspect_ratio,checksum_sha256,processing_status,validation_details) values('instagram','video',$1,$2,$3,'video/mp4',$4,1080,1920,$5,'9:16',$6,'ready',$7::jsonb) on conflict do nothing returning *`, [path.basename(result.outputPath), relativeVideo, `${publicBase}/marketing-media/${relativeVideo}`, result.size, result.script.duration, result.checksum, JSON.stringify({ generated_by:'local_reel_renderer', storage_scope:'marketing', codec:'h264', template:job.template })])).rows[0] || (await client.query('select * from social_media_assets where checksum_sha256=$1', [result.checksum])).rows[0];
+    const cover = (await client.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,aspect_ratio,checksum_sha256,processing_status,validation_details) values('instagram','image',$1,$2,$3,'image/jpeg',$4,1080,1920,'9:16',$5,'ready',$6::jsonb) on conflict do nothing returning *`, [path.basename(result.coverPath), relativeCover, `${publicBase}/marketing-media/${relativeCover}`, coverInfo.size, coverChecksum, JSON.stringify({ generated_by:'local_reel_renderer', storage_scope:'marketing', role:'cover' })])).rows[0] || (await client.query('select * from social_media_assets where checksum_sha256=$1', [coverChecksum])).rows[0];
     await client.query(`delete from social_content_assets where content_id=$1 and role='media'`, [job.content_id]);
     await client.query(`insert into social_content_assets(content_id,asset_id,role,sort_order) values($1,$2,'media',0)`, [job.content_id, video.id]);
     await client.query(`update marketing_content_items set format='reel',aspect_ratio='9:16',duration_seconds=$2,video_template=$3,scenes=$4::jsonb,render_status='ready',render_progress=100,render_error='',rendered_at=now(),cover_asset_id=$5,content_version=content_version+1,updated_at=now() where id=$1`, [job.content_id, result.script.duration, job.template, JSON.stringify(result.script.scenes), cover.id]);
@@ -57,5 +60,6 @@ async function processJob(client, job) {
 }
 
 async function markFailed(client, job, error) { const message = String(error.message || '').slice(0,1000); const retry = Number(job.attempt_count || 0) < 3; await client.query(`update social_reel_render_jobs set status=$2,next_attempt_at=case when $2='pending' then now()+interval '2 minutes' else null end,lock_expires_at=null,last_error=$3,updated_at=now() where id=$1`, [job.id,retry?'pending':'failed',message]); await client.query(`update marketing_content_items set render_status=$2,render_error=$3,updated_at=now() where id=$1`, [job.content_id,retry?'pending':'failed',message]); }
+async function directorySize(directory) { if (!existsSync(directory)) return 0; let bytes = 0; for (const entry of await readdir(directory, { withFileTypes: true })) { const target = path.join(directory, entry.name); bytes += entry.isDirectory() ? await directorySize(target) : (await stat(target)).size; } return bytes; }
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function loadEnv(url) { if (!existsSync(url)) return; for (const line of readFileSync(url,'utf8').split(/\r?\n/)) { const value=line.trim(); if(!value||value.startsWith('#')||!value.includes('=')) continue; const [key,...rest]=value.split('='); process.env[key.trim()] ||= rest.join('=').trim().replace(/^["']|["']$/g,''); } }

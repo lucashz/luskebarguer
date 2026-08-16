@@ -29,6 +29,8 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const UPLOAD_DIR = path.resolve(__dirname, process.env.UPLOAD_DIR || 'uploads');
+const MARKETING_MEDIA_DIR = path.resolve(process.env.MARKETING_MEDIA_DIR || path.join(__dirname, '..', 'tapronto-marketing'));
+const MARKETING_MEDIA_MAX_BYTES = Math.max(100 * 1024 * 1024, Number(process.env.MARKETING_MEDIA_MAX_BYTES || 2 * 1024 * 1024 * 1024));
 const BACKUP_DIR = path.resolve(__dirname, process.env.BACKUP_DIR || 'backups');
 const STORE_WHATSAPP_NUMBER = onlyDigits(process.env.STORE_WHATSAPP_NUMBER || '');
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
@@ -8911,10 +8913,11 @@ function platformRetentionSettings() {
 }
 
 async function platformStorageUsage() {
-  const [database, backups, uploads, tmp, cleanupRows] = await Promise.all([
+  const [database, backups, uploads, marketing, tmp, cleanupRows] = await Promise.all([
     platformDatabaseStorageStats().catch((error) => ({ error: error.message || 'indisponível' })),
     directoryUsage(BACKUP_DIR).catch(() => ({ bytes: 0, files: 0 })),
     directoryUsage(UPLOAD_DIR).catch(() => ({ bytes: 0, files: 0 })),
+    directoryUsage(MARKETING_MEDIA_DIR).catch(() => ({ bytes: 0, files: 0 })),
     directoryUsage(path.resolve(__dirname, process.env.TMP_DIR || '.tmp')).catch(() => ({ bytes: 0, files: 0 })),
     dbRequest('GET', 'audit_logs', {
       select: 'id,after_data,created_at',
@@ -8927,6 +8930,7 @@ async function platformStorageUsage() {
     database,
     backups,
     uploads,
+    marketing: { ...marketing, max_bytes: MARKETING_MEDIA_MAX_BYTES, usage_percent: Number(((marketing.bytes / MARKETING_MEDIA_MAX_BYTES) * 100).toFixed(2)) },
     tmp,
     latest_cleanup: cleanupRows[0] ? {
       created_at: cleanupRows[0].created_at,
@@ -9442,6 +9446,7 @@ async function platformOperationalHealth(params = new URLSearchParams()) {
     backupHealthStatus(backup),
     jobsHealthStatus(),
     await storageHealthStatus(UPLOAD_DIR, 'storage', 'Storage/uploads'),
+    await marketingStorageHealthStatus(),
     sslDomainHealthStatus(),
     await smtpHealthStatus()
   ];
@@ -9580,8 +9585,9 @@ function slowMetricRoutes(rows = []) {
 
 async function platformTechnicalMetrics(period, databaseStatus = null, backup = null) {
   const metrics = platformMetricsSnapshot(period);
-  const [uploadsDisk, backupsDisk] = await Promise.all([
+  const [uploadsDisk, marketingDisk, backupsDisk] = await Promise.all([
     diskUsageForPath(UPLOAD_DIR).catch(() => null),
+    diskUsageForPath(MARKETING_MEDIA_DIR).catch(() => null),
     diskUsageForPath(BACKUP_DIR).catch(() => null)
   ]);
   metrics.database = {
@@ -9596,14 +9602,17 @@ async function platformTechnicalMetrics(period, databaseStatus = null, backup = 
     cpu: cpuSnapshot(),
     disk: {
       uploads: uploadsDisk,
+      marketing: marketingDisk,
       backups: backupsDisk,
-      lowest_free_percent: lowestFreePercent([uploadsDisk, backupsDisk])
+      lowest_free_percent: lowestFreePercent([uploadsDisk, marketingDisk, backupsDisk])
     },
     uptime_seconds: Math.floor(process.uptime()),
     node: process.version
   };
   metrics.storage = {
     uploads_dir: safeDirectoryLabel(UPLOAD_DIR),
+    marketing_media_dir: safeDirectoryLabel(MARKETING_MEDIA_DIR),
+    marketing_media_max_bytes: MARKETING_MEDIA_MAX_BYTES,
     backups_dir: safeDirectoryLabel(BACKUP_DIR),
     backup_latest_size_bytes: backup?.latest?.size_bytes || 0,
     upload_free_bytes: uploadsDisk?.free_bytes ?? null,
@@ -13088,8 +13097,33 @@ async function storageHealthStatus(directory, key, label) {
   }
 }
 
+async function marketingStorageHealthStatus() {
+  const writable = await storageHealthStatus(MARKETING_MEDIA_DIR, 'marketing_storage', 'Mídias do Marketing');
+  if (writable.status === 'error') return writable;
+  const usage = await directoryUsage(MARKETING_MEDIA_DIR).catch(() => ({ bytes: 0, files: 0 }));
+  const percent = (usage.bytes / MARKETING_MEDIA_MAX_BYTES) * 100;
+  return platformStatus(
+    'marketing_storage',
+    'Mídias do Marketing',
+    percent >= 100 ? 'error' : percent >= 80 ? 'attention' : 'healthy',
+    `${usage.files} arquivo(s), ${formatBytes(usage.bytes)} de ${formatBytes(MARKETING_MEDIA_MAX_BYTES)} (${percent.toFixed(1)}%).`,
+    { bytes: usage.bytes, files: usage.files, max_bytes: MARKETING_MEDIA_MAX_BYTES, usage_percent: Number(percent.toFixed(2)) }
+  );
+}
+
+function formatBytes(bytes = 0) {
+  const value = Math.max(0, Number(bytes) || 0);
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = value / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unit]}`;
+}
+
 async function platformConfigChecklist() {
   const uploads = await directoryWritable(UPLOAD_DIR);
+  const marketingMedia = await directoryWritable(MARKETING_MEDIA_DIR);
   const backups = await directoryWritable(BACKUP_DIR);
   const smtp = await smtpServiceStatus();
   const billing = await getPlatformBillingSettings().catch(() => null);
@@ -13112,6 +13146,7 @@ async function platformConfigChecklist() {
     configItem('mercadopago_api', 'Mercado Pago configurado', Boolean(billing?.is_active && billing?.has_api_key), billing?.has_api_key ? `Configurado (${billing.source})` : 'Ausente'),
     configItem('mercadopago_webhook', 'Webhook Mercado Pago configurado', Boolean(billing?.has_webhook_secret), billing?.has_webhook_secret ? `Configurado (${billing.source})` : 'Ausente'),
     configItem('uploads', 'Upload/storage gravável', uploads, maskConfigValue(UPLOAD_DIR, 'path')),
+    configItem('marketing_media', 'Mídias de Marketing fora da aplicação', marketingMedia && !MARKETING_MEDIA_DIR.startsWith(__dirname), maskConfigValue(MARKETING_MEDIA_DIR, 'path')),
     configItem('smtp', 'SMTP/e-mail configurado', smtp.status === 'healthy', smtp.status === 'healthy' ? `Configurado (${smtp.source})` : smtp.message, true),
     configItem('proxy', 'Proxy/Nginx compatível', Boolean(process.env.TRUST_PROXY || process.env.PUBLIC_APP_URL || process.env.APP_URL), 'Verifique headers X-Forwarded-* no Nginx'),
     configItem('rate_limit', 'Rate limit ativo', true, 'Ativo em memória por rota sensível'),
@@ -18903,6 +18938,10 @@ async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch
     await serveUpload(req, res, requestPath);
     return;
   }
+  if (requestPath.startsWith('/marketing-media/')) {
+    await serveMarketingMedia(req, res, requestPath);
+    return;
+  }
 
   const canonicalRedirectUrl = canonicalHostRedirectUrl(requestPath, hostHeader, requestSearch);
   if (canonicalRedirectUrl) {
@@ -19393,6 +19432,16 @@ async function serveUpload(req, res, requestPath) {
   const filePath = path.normalize(path.join(UPLOAD_DIR, relative));
   if (!filePath.startsWith(UPLOAD_DIR) || !existsSync(filePath)) {
     json(res, 404, { error: 'Arquivo não encontrado.' });
+    return;
+  }
+  await sendFile(req, res, filePath);
+}
+
+async function serveMarketingMedia(req, res, requestPath) {
+  const relative = decodeURIComponent(requestPath.replace(/^\/marketing-media\//, ''));
+  const filePath = path.normalize(path.join(MARKETING_MEDIA_DIR, relative));
+  if (!filePath.startsWith(`${MARKETING_MEDIA_DIR}${path.sep}`) || !existsSync(filePath)) {
+    json(res, 404, { error: 'Mídia de marketing não encontrada.' });
     return;
   }
   await sendFile(req, res, filePath);

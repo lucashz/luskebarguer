@@ -42,7 +42,8 @@ export function autopilotConfig(env = process.env) {
     quality: ['low', 'medium', 'high', 'auto'].includes(env.OPENAI_IMAGE_QUALITY) ? env.OPENAI_IMAGE_QUALITY : 'medium',
     baseUrl: String(env.PUBLIC_BASE_URL || env.APP_BASE_URL || 'https://taprontomenu.com.br').replace(/\/$/, ''),
     rootDir: env.APP_ROOT ? path.resolve(env.APP_ROOT) : path.resolve(process.cwd()),
-    uploadDir: path.resolve(env.UPLOAD_DIR || path.join(process.cwd(), 'uploads'))
+    marketingMediaDir: path.resolve(env.MARKETING_MEDIA_DIR || path.join(process.cwd(), '..', 'tapronto-marketing')),
+    marketingMediaMaxBytes: Math.max(100 * 1024 * 1024, Number(env.MARKETING_MEDIA_MAX_BYTES || 2 * 1024 * 1024 * 1024))
   };
 }
 
@@ -195,13 +196,26 @@ async function createAutopilotAsset(topic, run, config, settings, createdBy, db)
   const checksum = createHash('sha256').update(buffer).digest('hex');
   const duplicate = await db.query(`select * from social_media_assets where checksum_sha256=$1 and processing_status<>'deleted' limit 1`, [checksum]);
   if (duplicate.rows[0]) return duplicate.rows[0];
-  const objectPath = `social/autopilot/${databaseDateKey(run.run_date)}-${run.variant}-${randomBytes(5).toString('hex')}${extension}`;
-  const fullPath = path.join(config.uploadDir, objectPath);
+  const objectPath = `images/${databaseDateKey(run.run_date)}-${run.variant}-${randomBytes(5).toString('hex')}${extension}`;
+  const fullPath = path.join(config.marketingMediaDir, objectPath);
   await mkdir(path.dirname(fullPath), { recursive: true });
+  const currentSize = await directorySize(config.marketingMediaDir);
+  if (currentSize + buffer.length > config.marketingMediaMaxBytes) throw new Error('O armazenamento de Marketing atingiu o limite configurado. Remova mídias antigas antes de gerar uma nova imagem.');
   await writeFile(fullPath, buffer, { flag: 'wx' });
-  const publicUrl = `${config.baseUrl}/uploads/${objectPath.replaceAll(path.sep, '/')}`;
-  const inserted = await db.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,aspect_ratio,checksum_sha256,processing_status,validation_details,created_by) values('instagram','image',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$11) returning *`, [`post-${run.run_date}-v${run.variant}${extension}`, objectPath, publicUrl, contentType, buffer.length, dimensions[0], dimensions[1], aspect, checksum, { generated_by: provider, topic: topic.key, style: settings?.image_style || 'product_device' }, createdBy]);
+  const publicUrl = `${config.baseUrl}/marketing-media/${objectPath.replaceAll(path.sep, '/')}`;
+  const inserted = await db.query(`insert into social_media_assets(provider,kind,file_name,storage_path,public_url,content_type,size_bytes,width,height,aspect_ratio,checksum_sha256,processing_status,validation_details,created_by) values('instagram','image',$1,$2,$3,$4,$5,$6,$7,$8,$9,'ready',$10,$11) returning *`, [`post-${run.run_date}-v${run.variant}${extension}`, objectPath, publicUrl, contentType, buffer.length, dimensions[0], dimensions[1], aspect, checksum, { generated_by: provider, storage_scope: 'marketing', topic: topic.key, style: settings?.image_style || 'product_device' }, createdBy]);
   return inserted.rows[0];
+}
+
+async function directorySize(directory) {
+  const { readdir, stat } = await import('node:fs/promises');
+  if (!existsSync(directory)) return 0;
+  let bytes = 0;
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    bytes += entry.isDirectory() ? await directorySize(target) : (await stat(target)).size;
+  }
+  return bytes;
 }
 
 async function requestOpenAiImage(reference, fileName, prompt, config, quality, aspect = '1:1') {
