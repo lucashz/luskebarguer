@@ -20232,6 +20232,7 @@ function securityHeaders(options = {}) {
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
+      "media-src 'self' blob: https://taprontomenu.com.br https://*.taprontomenu.com.br",
       "font-src 'self' data:",
       "connect-src 'self'",
       "frame-src 'self'",
