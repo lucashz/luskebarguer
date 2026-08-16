@@ -19482,14 +19482,43 @@ async function sendFile(req, res, filePath, options = {}) {
     res.end();
     return;
   }
+  const supportsRanges = ['.mp4', '.webm', '.mp3', '.m4a', '.wav'].includes(ext);
+  const rangeHeader = supportsRanges ? String(req.headers.range || '') : '';
+  if (supportsRanges && rangeHeader) {
+    const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/i);
+    let start = match?.[1] ? Number(match[1]) : null;
+    let end = match?.[2] ? Number(match[2]) : null;
+    if (match && start === null && end !== null) {
+      const suffixLength = Math.min(end, entry.size);
+      start = entry.size - suffixLength;
+      end = entry.size - 1;
+    } else if (match && start !== null) {
+      end = end === null ? entry.size - 1 : Math.min(end, entry.size - 1);
+    }
+    if (!match || start === null || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= entry.size || end < start) {
+      res.writeHead(416, { ...baseHeaders, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes */${entry.size}` });
+      res.end();
+      return;
+    }
+    const body = entry.content.subarray(start, end + 1);
+    res.writeHead(206, {
+      ...baseHeaders,
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes ${start}-${end}/${entry.size}`,
+      'Content-Length': body.length
+    });
+    if (req.method === 'HEAD') res.end(); else res.end(body);
+    return;
+  }
   const acceptsGzip = /(?:^|,)\s*gzip\s*(?:,|$)/i.test(String(req.headers['accept-encoding'] || ''));
   const body = acceptsGzip && entry.gzip ? entry.gzip : entry.content;
   res.writeHead(options.status || 200, {
     ...baseHeaders,
+    ...(supportsRanges ? { 'Accept-Ranges': 'bytes' } : {}),
     ...(body === entry.gzip ? { 'Content-Encoding': 'gzip' } : {}),
     'Content-Length': body.length
   });
-  res.end(body);
+  if (req.method === 'HEAD') res.end(); else res.end(body);
 }
 
 async function readJson(req) {
