@@ -18926,6 +18926,10 @@ async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch
     res.end();
     return;
   }
+  if (requestPath.startsWith('/marketing-media/')) {
+    await serveMarketingMedia(req, res, requestPath);
+    return;
+  }
   if (await serveSeoResource(req, res, requestPath, hostHeader)) return;
 
   const seoLanding = seoLandingByPath.get(guidesLandingPath(requestPath, hostHeader));
@@ -18936,10 +18940,6 @@ async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch
 
   if (requestPath.startsWith('/uploads/')) {
     await serveUpload(req, res, requestPath);
-    return;
-  }
-  if (requestPath.startsWith('/marketing-media/')) {
-    await serveMarketingMedia(req, res, requestPath);
     return;
   }
 
