@@ -242,9 +242,9 @@ async function renderLocalMarketingImage(topic, referencePath, config, settings 
   const padding = Math.round(width * 0.065); const accent = '#ed1c24';
   const sentences = String(topic.overlay || topic.title).match(/[^.!?]+[.!?]?/g) || [topic.title];
   const redLine = sentences.shift()?.trim() || topic.title;
-  const fontSize = aspect === '9:16' ? 68 : 54;
+  const fontSize = aspect === '9:16' ? 58 : 44;
   const lineHeight = Math.round(fontSize * 1.12);
-  const maxChars = aspect === '9:16' ? 20 : 23;
+  const maxChars = aspect === '9:16' ? 18 : 19;
   const redLines = wrapOverlay(redLine, maxChars).slice(0, 3);
   const navySource = sentences.join(' ').trim();
   const navyLines = navySource ? wrapOverlay(navySource, maxChars).slice(0, 2) : [];
