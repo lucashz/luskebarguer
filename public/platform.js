@@ -1517,8 +1517,15 @@ function renderSocialPublishing() {
   }).join('') || '<p class="muted">Nenhum conteúdo neste estado.</p>';
   const assets = data.assets || [];
   els.socialAssetList.innerHTML = assets.slice(0, 12).map((asset) => `<div class="platform-marketing-row"><div><strong>${escapeHtml(asset.file_name)}</strong><small>${escapeHtml(asset.kind)} · ${Math.round(Number(asset.size_bytes || 0) / 1024)} KB</small></div><button class="ghost-button compact" data-social-action="attach" data-asset-id="${asset.id}" type="button">Usar esta imagem</button></div>`).join('') || '<p class="muted">Nenhuma mídia enviada.</p>';
-  const reviewable = (data.content || []).filter((item) => item.status === 'review');
-  els.socialContentSelect.innerHTML = reviewable.map((item) => `<option value="${item.id}">${escapeHtml(item.title)}</option>`).join('');
+  const previousContentId = els.socialContentSelect?.value || '';
+  const actionableStatuses = new Set(['idea', 'draft', 'production', 'review', 'changes_requested', 'approved', 'failed', 'simulated', 'cancelled']);
+  const reviewable = (data.content || []).filter((item) => actionableStatuses.has(item.status));
+  els.socialContentSelect.innerHTML = reviewable.length
+    ? reviewable.map((item) => `<option value="${item.id}">${escapeHtml(item.title || 'Publicação sem título')} · ${escapeHtml(socialStatusLabel(item.status))}</option>`).join('')
+    : '<option value="">Nenhuma publicação disponível</option>';
+  const todayContentId = state.autopilot?.today?.content?.id || state.autopilot?.today?.content_id || '';
+  const preferredContentId = [previousContentId, todayContentId, reviewable[0]?.id].find((id) => reviewable.some((item) => item.id === id));
+  if (preferredContentId) els.socialContentSelect.value = preferredContentId;
   els.socialAccountSelect.innerHTML = accounts.filter((item) => item.status === 'connected').map((item) => `<option value="${item.id}">@${escapeHtml(item.username || item.display_name)}</option>`).join('');
   renderSocialApprovalPreview();
   const worker = data.worker;
@@ -1649,9 +1656,17 @@ async function approveAndScheduleSocialContent(event) {
     if (publishNow) {
       if (!await requestMarketingConfirmation('Postar agora?', 'O post será enviado imediatamente ao Instagram.')) return;
     }
-    if (!latest || latest.status === 'review') await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'approved', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note }) });
+    let currentStatus = latest?.status || '';
+    const transition = async (status, extra = {}) => {
+      await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status, ...extra }) });
+      currentStatus = status;
+    };
+    if (currentStatus === 'cancelled') await transition('draft');
+    if (currentStatus === 'idea') await transition('draft');
+    if (['draft', 'production', 'changes_requested'].includes(currentStatus)) await transition('review', { note: data.note || 'Enviado para aprovação.' });
+    if (currentStatus === 'review') await transition('approved', { scheduled_at: data.scheduled_at, social_account_id: data.social_account_id, note: data.note });
     if (publishNow) await request(`/api/platform/social/content/${data.content_id}/publish-now`, { method: 'POST', body: JSON.stringify(confirmation) });
-    else await request(`/api/platform/social/content/${data.content_id}/transition`, { method: 'POST', body: JSON.stringify({ status: 'scheduled', scheduled_at: data.scheduled_at, social_account_id: data.social_account_id }) });
+    else if (['approved', 'failed', 'simulated'].includes(currentStatus)) await transition('scheduled', { scheduled_at: data.scheduled_at, social_account_id: data.social_account_id });
     form.reset(); await refreshSocial(); await loadMarketing({ silent: true }); toast(publishNow ? 'Post enviado para publicação imediata.' : 'Conteúdo aprovado e agendado.');
   } catch (error) { toast(error.message || 'Não foi possível aprovar e agendar.'); }
   finally { buttons.forEach((button) => { button.disabled = false; }); }
