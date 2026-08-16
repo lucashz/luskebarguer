@@ -894,6 +894,7 @@ async function handleAutopilotAction(button) {
   const action = button.dataset.autopilotAction;
   if (action === 'generate') return generateAutopilotPost(false, state.marketingSelectedFormat || 'post');
   if (action === 'regenerate') return generateAutopilotPost(true, state.marketingSelectedFormat || 'post');
+  if (action === 'save-edits') return saveAutopilotEdits(button);
   if (action === 'configure') return openMarketingAdvancedSection('social');
   if (action === 'copy') {
     await navigator.clipboard.writeText(state.autopilot?.today?.content?.caption || '');
@@ -925,6 +926,27 @@ async function handleAutopilotAction(button) {
     toast(action === 'publish-now' ? 'Post aprovado e enviado para publicação.' : 'Post aprovado e agendado.');
   } catch (error) { toast(error.message || 'Não foi possível aprovar o post.'); }
   finally { button.disabled = false; button.textContent = originalLabel; }
+}
+
+async function saveAutopilotEdits(button) {
+  const form = button.closest('[data-autopilot-edit-form]');
+  const contentId = form?.dataset.contentId;
+  if (!form || !contentId) return toast('Não foi possível identificar esta publicação.');
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.hashtags = String(data.hashtags || '').split(/[ ,]+/).map((item) => item.trim()).filter(Boolean);
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = 'Salvando…';
+  try {
+    await request(`/api/platform/marketing/content/${contentId}`, { method: 'PATCH', body: JSON.stringify(data) });
+    await loadMarketing({ silent: true });
+    toast('Alterações salvas. Confira a prévia antes de publicar.');
+  } catch (error) {
+    toast(error.message || 'Não foi possível salvar as alterações.');
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
 }
 
 async function saveAutopilotSettings(event) {
@@ -1001,7 +1023,9 @@ function renderAutopilot() {
         ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata" aria-label="Prévia do Reel ${escapeHtml(content.title)}"></video>`
         : `<img src="${escapeHtml(previewUrl)}" alt="Prévia do ${escapeHtml(marketingFormatLabel(content.format).toLowerCase())} ${escapeHtml(content.title)}">`)
       : '<span>Mídia sendo preparada…</span>';
-    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewMedia}</div><div class="autopilot-copy"><span class="eyebrow">Post de Hoje · ${escapeHtml(marketingFormatLabel(content.format))}</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Confira a prévia. Você pode publicar imediatamente ou agendar.</small>${removedFromInstagram ? '<div class="autopilot-notice">Este post foi removido do Instagram. Você pode publicá-lo novamente.</div>' : data.mode === 'local' ? '<div class="autopilot-notice">Mídia, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}<div class="row-actions">${ready ? `${account ? `<button class="primary-button" data-autopilot-action="publish-now" type="button">${removedFromInstagram ? 'Publicar novamente' : 'Postar Agora'}</button>` : ''}<button class="ghost-button" data-autopilot-action="approve" type="button">${account ? 'Aprovar e Agendar' : 'Conectar Instagram'}</button>` : `<span class="status-pill success">${content.status === 'published' ? 'Publicado no Instagram' : 'Aprovado e agendado'}</span>`}</div></div></div>`;
+    const hashtags = Array.isArray(content.hashtags) ? content.hashtags.join(' ') : String(content.hashtags || '');
+    const optionalEditor = ready ? `<details class="autopilot-quick-editor"><summary>Editar Antes de Publicar <span>Opcional</span></summary><form data-autopilot-edit-form data-content-id="${escapeHtml(content.id)}"><label>Título<input name="title" value="${escapeHtml(content.title || '')}" maxlength="500"></label><label>Legenda<textarea name="caption" rows="6" maxlength="8000">${escapeHtml(content.caption || '')}</textarea></label><div class="field-grid two-columns"><label>Chamada para ação<input name="cta" value="${escapeHtml(content.cta || '')}" maxlength="500"></label><label>Hashtags<input name="hashtags" value="${escapeHtml(hashtags)}" maxlength="500"></label></div><div class="row-actions"><button class="ghost-button compact" data-autopilot-action="save-edits" type="button">Salvar Alterações</button><button class="ghost-button compact" data-autopilot-action="regenerate" type="button">Gerar Outra Opção</button></div></form></details>` : '';
+    els.autopilotTodayCard.innerHTML = `<div class="autopilot-preview"><div class="autopilot-image">${previewMedia}</div><div class="autopilot-copy"><span class="eyebrow">Post de Hoje · ${escapeHtml(marketingFormatLabel(content.format))}</span><h3>${escapeHtml(content.title)}</h3><p class="autopilot-caption">${escapeHtml(content.caption || '').replaceAll('\n', '<br>')}</p><small>Gostou? Publique agora. Se quiser, você também pode editar ou agendar.</small>${removedFromInstagram ? '<div class="autopilot-notice">Este post foi removido do Instagram. Você pode publicá-lo novamente.</div>' : data.mode === 'local' ? '<div class="autopilot-notice">Mídia, texto, CTA, hashtags e rastreamento revisados automaticamente.</div>' : ''}${optionalEditor}<div class="row-actions autopilot-publish-actions">${ready ? `${account ? `<button class="primary-button" data-autopilot-action="publish-now" type="button">${removedFromInstagram ? 'Publicar Novamente' : 'Postar Agora'}</button>` : ''}<button class="ghost-button" data-autopilot-action="approve" type="button">${account ? 'Agendar' : 'Conectar Instagram'}</button>` : `<span class="status-pill success">${content.status === 'published' ? 'Publicado no Instagram' : 'Aprovado e Agendado'}</span>`}</div></div></div>`;
     const primary = els.autopilotTodayCard.querySelector('[data-autopilot-action="approve"]');
     if (primary && !account) primary.dataset.autopilotAction = 'configure';
   }
