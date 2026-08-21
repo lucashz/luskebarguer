@@ -19393,6 +19393,27 @@ body.admin-tour-active {
   margin: 0 0 20px;
 }
 
+.admin-two-factor-intro {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #dce5ef;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.admin-two-factor-intro p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+#adminTwoFactorForm input[name="code"] {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: .35em;
+  text-align: center;
+}
+
 .commercial-blocker[hidden] {
   display: none;
 }

@@ -299,6 +299,10 @@ const els = {
   storeSwitcher: document.querySelector('#storeSwitcher'),
   setupForm: document.querySelector('#setupForm'),
   loginForm: document.querySelector('#loginForm'),
+  adminTwoFactorForm: document.querySelector('#adminTwoFactorForm'),
+  adminTwoFactorHint: document.querySelector('#adminTwoFactorHint'),
+  adminTwoFactorMessage: document.querySelector('#adminTwoFactorMessage'),
+  adminTwoFactorBackButton: document.querySelector('#adminTwoFactorBackButton'),
   adminRecoverForm: document.querySelector('#adminRecoverForm'),
   adminRecoverButton: document.querySelector('#adminRecoverButton'),
   adminRecoverMessage: document.querySelector('#adminRecoverMessage'),
@@ -535,6 +539,8 @@ document.querySelectorAll('[data-modifier-preset]').forEach((button) => {
 
 els.setupForm.addEventListener('submit', submitSetup);
 els.loginForm.addEventListener('submit', submitLogin);
+els.adminTwoFactorForm?.addEventListener('submit', submitAdminTwoFactorLogin);
+els.adminTwoFactorBackButton?.addEventListener('click', resetAdminTwoFactorLogin);
 els.adminResendActivationButton?.addEventListener('click', resendAdminActivationFromLogin);
 els.adminRecoverForm?.addEventListener('submit', submitAdminPasswordRecovery);
 els.logoutButton?.addEventListener('click', logout);
@@ -905,6 +911,14 @@ async function submitLogin(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
+    if (result.requires_2fa) {
+      els.adminTwoFactorForm.dataset.challenge = result.challenge || '';
+      els.adminTwoFactorHint.textContent = `Enviamos um código de 6 dígitos para ${result.email_hint || 'o seu e-mail'}.`;
+      els.loginForm.hidden = true;
+      els.adminTwoFactorForm.hidden = false;
+      els.adminTwoFactorForm.elements.code?.focus();
+      return;
+    }
     state.admin = result.admin;
     saveAdminCache();
     showPanel();
@@ -922,6 +936,47 @@ async function submitLogin(event) {
       button.textContent = 'Entrar';
     }
   }
+}
+
+async function submitAdminTwoFactorLogin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const challenge = form.dataset.challenge || '';
+  const code = String(form.elements.code?.value || '').replace(/\D/g, '');
+  if (!challenge || !/^\d{6}$/.test(code)) {
+    els.adminTwoFactorMessage.textContent = 'Informe o código de 6 dígitos enviado por e-mail.';
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'Confirmando...';
+  els.adminTwoFactorMessage.textContent = '';
+  try {
+    const result = await request('/api/admin/login/2fa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge, code })
+    });
+    state.admin = result.admin;
+    saveAdminCache();
+    resetAdminTwoFactorLogin();
+    showPanel();
+    await loadAdminData();
+  } catch (error) {
+    els.adminTwoFactorMessage.textContent = error.message || 'Não foi possível confirmar o código.';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Confirmar e Entrar';
+  }
+}
+
+function resetAdminTwoFactorLogin() {
+  if (!els.adminTwoFactorForm) return;
+  els.adminTwoFactorForm.reset();
+  delete els.adminTwoFactorForm.dataset.challenge;
+  els.adminTwoFactorForm.hidden = true;
+  els.loginForm.hidden = false;
+  if (els.adminTwoFactorMessage) els.adminTwoFactorMessage.textContent = '';
 }
 
 async function resendAdminActivationFromLogin() {
