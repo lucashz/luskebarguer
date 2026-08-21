@@ -19389,6 +19389,76 @@ body.admin-tour-active {
   }
 }
 /* Referral program */
+.commercial-blocker {
+  margin: 0 0 20px;
+}
+
+.commercial-blocker[hidden] {
+  display: none;
+}
+
+.commercial-blocker-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "eyebrow actions"
+    "title actions"
+    "message actions";
+  align-items: center;
+  gap: 3px 24px;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 1px solid #fecdd3;
+  border-left: 5px solid #e11d2e;
+  border-radius: 16px;
+  background: linear-gradient(110deg, #fff7f7 0%, #fff 62%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .06);
+}
+
+.commercial-blocker-card .eyebrow {
+  grid-area: eyebrow;
+  margin: 0;
+  color: #c91522;
+}
+
+.commercial-blocker-card h2 {
+  grid-area: title;
+  margin: 0;
+  color: #071326;
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  line-height: 1.2;
+}
+
+.commercial-blocker-card > p:not(.eyebrow) {
+  grid-area: message;
+  margin: 2px 0 0;
+  color: #506078;
+  line-height: 1.45;
+}
+
+.commercial-blocker-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .commercial-blocker-card {
+    grid-template-columns: 1fr;
+    grid-template-areas: "eyebrow" "title" "message" "actions";
+    gap: 6px;
+    padding: 16px;
+  }
+
+  .commercial-blocker-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+}
+
 .referral-panel {
   display: grid;
   gap: 18px;

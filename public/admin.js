@@ -9799,6 +9799,17 @@ async function request(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const path = String(url || '');
+    if (response.status === 401 && !path.includes('/login') && !path.includes('/setup')) {
+      state.admin = null;
+      clearAdminCache();
+      stopOrderPolling();
+      showAuth();
+      if (els.adminLoginMessage) els.adminLoginMessage.textContent = 'Sua sessão expirou. Entre novamente para continuar.';
+      const sessionError = new Error('Sua sessão expirou. Entre novamente para continuar.');
+      sessionError.code = 'SESSION_EXPIRED';
+      throw sessionError;
+    }
     if (response.status === 402 && data.commercial_status) {
       showCommercialBlocker({
         status: data.commercial_status,
