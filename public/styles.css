@@ -8347,6 +8347,14 @@ textarea {
   box-shadow: 0 -14px 30px rgba(15, 23, 42, 0.08);
 }
 
+.product-save-status {
+  align-self: center;
+  margin-right: auto;
+  color: #506078;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
 .product-dialog-body .modifier-admin {
   margin: 0 18px 18px;
 }

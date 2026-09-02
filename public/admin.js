@@ -409,6 +409,7 @@ const els = {
   productEditorTabs: document.querySelectorAll('[data-product-editor-tab]'),
   productEditorPanels: document.querySelectorAll('[data-product-editor-panel]'),
   saveProductButton: document.querySelector('#saveProductButton'),
+  productSaveStatus: document.querySelector('#productSaveStatus'),
   productOptionsTitle: document.querySelector('#productOptionsTitle'),
   productOptionsPanel: document.querySelector('#productOptionsPanel'),
   productOptionsCount: document.querySelector('#productOptionsCount'),
@@ -7806,17 +7807,32 @@ async function submitCategory(event) {
 
 async function submitItem(event) {
   event.preventDefault();
+  if (els.itemForm.dataset.saving === 'true') return;
   const payload = formToItem(els.itemForm);
-  const file = els.itemImageFile.files[0];
-  if (file) {
-    const uploaded = await uploadImage(file);
-    payload.image_url = uploaded.url;
+  const price = parseMoneyInput(payload.price);
+  if (price === null) {
+    els.productSaveStatus.textContent = 'Informe um preço válido. Exemplo: 29,90.';
+    els.itemForm.elements.price.focus();
+    return;
   }
+  payload.price = price;
   const itemId = els.itemForm.dataset.itemId;
+  els.itemForm.dataset.saving = 'true';
+  els.productSaveStatus.textContent = 'Salvando produto...';
+  let saveSucceeded = false;
   await withSaving(els.itemForm, async () => {
+    const file = els.itemImageFile.files[0];
+    if (file) {
+      els.productSaveStatus.textContent = 'Enviando a foto...';
+      const uploaded = await uploadImage(file);
+      payload.image_url = uploaded.url;
+    }
+    els.productSaveStatus.textContent = itemId ? 'Atualizando produto...' : 'Criando produto...';
     if (itemId) {
       await updateItem(itemId, payload);
       await refreshProductDialog(itemId);
+      saveSucceeded = true;
+      els.productSaveStatus.textContent = 'Produto atualizado com sucesso.';
       toast('Produto atualizado.');
       return;
     }
@@ -7831,9 +7847,12 @@ async function submitItem(event) {
     state.selectedOptionsProductId = null;
     els.itemForm.reset();
     els.itemForm.dataset.itemId = '';
+    saveSucceeded = true;
     if (els.productDialog.open) els.productDialog.close();
     toast('Produto criado.');
   });
+  delete els.itemForm.dataset.saving;
+  if (!saveSucceeded && els.productDialog.open) els.productSaveStatus.textContent = 'Não foi possível salvar. Revise os campos e tente novamente.';
 }
 
 async function submitTable(event) {

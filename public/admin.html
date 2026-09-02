@@ -1566,7 +1566,7 @@
                   <div class="editor-grid product-main-grid">
                     <label>Categoria<select name="category_id" required id="itemCategory"></select></label>
                     <label>Nome do produto<input name="name" required placeholder="Ex: X-Burger"></label>
-                    <label class="product-price-field">Preço de venda<input name="price" required type="number" min="0" step="0.01" placeholder="0,00"></label>
+                    <label class="product-price-field">Preço de venda<input name="price" required type="text" inputmode="decimal" placeholder="0,00" aria-describedby="productSaveStatus"></label>
                     <label class="editor-wide">Descrição para o cliente<textarea name="description" placeholder="Ex: Pão brioche, burger artesanal, queijo e molho da casa."></textarea></label>
                   </div>
                 </section>
@@ -1611,6 +1611,7 @@
           </div>
 
           <div class="product-dialog-footer">
+            <span class="product-save-status" id="productSaveStatus" role="status" aria-live="polite"></span>
             <form method="dialog">
               <button class="ghost-button compact" type="submit">Fechar</button>
             </form>
@@ -1622,7 +1623,7 @@
       </section>
     </main>
 
-    <script src="/admin.js?v=20260820-admin-two-factor-login" type="module"></script>
+    <script src="/admin.js?v=20260902-product-save-flow" type="module"></script>
   </body>
 </html>
 
