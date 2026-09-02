@@ -7246,7 +7246,7 @@ function productEditor(item, _index, products) {
 }
 
 function orderedProducts(categoryId = null) {
-  return orderedCategories()
+  const products = orderedCategories()
     .filter((category) => !categoryId || category.id === categoryId)
     .flatMap((category) => [...(category.items || [])]
       .sort((a, b) =>
@@ -7256,6 +7256,7 @@ function orderedProducts(categoryId = null) {
         ...item,
         categoryName: category.name
       })));
+  return [...new Map(products.filter((item) => item?.id).map((item) => [item.id, item])).values()];
 }
 
 function nextProductSortOrder(categoryId = null) {
