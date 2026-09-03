@@ -477,7 +477,7 @@ function renderFeatured() {
     card.className = 'featured-product';
     if (isStoreClosed()) card.classList.add('disabled');
     card.innerHTML = `
-      ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="">` : '<div class="image-fallback"></div>'}
+      ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="" loading="lazy" decoding="async">` : '<div class="image-fallback"></div>'}
       <div>
         <strong>${escapeHtml(item.name)}</strong>
         <span>${money(item.price)}</span>
@@ -627,7 +627,7 @@ function productRow(item) {
     </div>
     <button class="favorite-button ${isFavorite ? 'active' : ''}" type="button" aria-pressed="${isFavorite ? 'true' : 'false'}" aria-label="${isFavorite ? 'Remover dos favoritos' : 'Favoritar'} ${escapeAttribute(item.name)}">${favoriteIcon(isFavorite)}</button>
     <button class="add-product" type="button" aria-label="Adicionar ${escapeAttribute(item.name)}" ${storeClosed ? 'disabled' : ''}>
-      ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="">` : '<span>+</span>'}
+      ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="" loading="lazy" decoding="async" fetchpriority="low">` : '<span>+</span>'}
       <b>${storeClosed ? 'Fechado' : '+'}</b>
     </button>
   `;
@@ -1001,7 +1001,7 @@ function renderProductDialogMedia(item) {
   els.productDialogMedia.classList.toggle('has-image', Boolean(item.image_url));
   if (item.image_url) {
     els.productDialogMedia.innerHTML = `
-      <img src="${escapeAttribute(item.image_url)}" alt="${escapeAttribute(item.name)}">
+      <img src="${escapeAttribute(item.image_url)}" alt="${escapeAttribute(item.name)}" decoding="async">
       ${description ? `<div class="product-dialog-caption">${escapeHtml(description)}</div>` : ''}
     `;
     return;

@@ -14,6 +14,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import pg from 'pg';
+import sharp from 'sharp';
 import { getLocalPool, localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, syncPublicationMetrics, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
@@ -18867,15 +18868,31 @@ async function uploadImage(data) {
     throw httpError(422, 'O conteúdo do arquivo não corresponde ao tipo de imagem informado.');
   }
 
-  const objectPath = `${folder}/${Date.now()}-${randomBytes(6).toString('hex')}-${fileName}`;
+  let storedBuffer = buffer;
+  let storedFileName = fileName;
+  let optimized = false;
+  if (folder === 'products') {
+    storedBuffer = await sharp(buffer)
+      .rotate()
+      .resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80, effort: 4, smartSubsample: true })
+      .toBuffer();
+    storedFileName = `${path.parse(fileName).name || 'produto'}.webp`;
+    optimized = true;
+  }
+
+  const objectPath = `${folder}/${Date.now()}-${randomBytes(6).toString('hex')}-${storedFileName}`;
   const fullPath = path.join(UPLOAD_DIR, objectPath);
   if (!fullPath.startsWith(UPLOAD_DIR)) throw httpError(400, 'Caminho de upload inválido.');
   await mkdir(path.dirname(fullPath), { recursive: true });
-  await writeFile(fullPath, buffer, { flag: 'wx' });
+  await writeFile(fullPath, storedBuffer, { flag: 'wx' });
 
   return {
     path: objectPath,
-    url: `/uploads/${objectPath.replaceAll(path.sep, '/')}`
+    url: `/uploads/${objectPath.replaceAll(path.sep, '/')}`,
+    optimized,
+    original_size_bytes: buffer.length,
+    size_bytes: storedBuffer.length
   };
 }
 function uploadFolder(usage) {
