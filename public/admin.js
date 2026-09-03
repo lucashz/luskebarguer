@@ -649,6 +649,7 @@ els.addNeighborhoodFeeButton?.addEventListener('click', () => addNeighborhoodFee
 els.integrationsForm?.addEventListener('submit', submitIntegrations);
 els.storeForm.addEventListener('input', () => {
   state.storeFormDirty = true;
+  syncDeliverySettingsVisibility();
   syncNeighborhoodFeesRaw();
   renderStorePathPreview();
   renderThemePreview();
@@ -656,6 +657,7 @@ els.storeForm.addEventListener('input', () => {
 });
 els.storeForm.addEventListener('change', () => {
   state.storeFormDirty = true;
+  syncDeliverySettingsVisibility();
   syncNeighborhoodFeesRaw();
   renderStorePathPreview();
   renderThemePreview();
@@ -7944,6 +7946,11 @@ async function refreshTablesAfterMutation() {
 
 async function submitStore(event) {
   event.preventDefault();
+  if (!els.storeForm.elements.accepts_delivery.checked && !els.storeForm.elements.accepts_pickup.checked) {
+    toast('Ative Aceita Entrega, Aceita Retirada ou as duas modalidades.');
+    els.storeForm.elements.accepts_delivery.focus();
+    return;
+  }
   if (!validateNeighborhoodFeesEditor()) return;
   syncNeighborhoodFeesRaw();
   const payload = formToStore(els.storeForm);
@@ -9286,12 +9293,20 @@ function fillStoreForm() {
   els.storeForm.elements.is_open.checked = store.is_open !== false;
   els.storeForm.elements.accepts_delivery.checked = store.accepts_delivery !== false;
   els.storeForm.elements.accepts_pickup.checked = store.accepts_pickup !== false;
+  syncDeliverySettingsVisibility();
   fillBusinessHours(store.business_hours || {});
   fillThemeSettings(store.theme_settings || {});
   fillPrintSettingsForm();
   renderStorePathPreview();
   renderThemePreview();
   renderPaymentMethodsPreview();
+}
+
+function syncDeliverySettingsVisibility() {
+  const deliveryFields = document.querySelector('#deliverySettingsFields');
+  const acceptsDelivery = els.storeForm?.elements?.accepts_delivery?.checked !== false;
+  if (!deliveryFields) return;
+  deliveryFields.hidden = !acceptsDelivery;
 }
 
 function renderStorePathPreview() {

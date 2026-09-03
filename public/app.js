@@ -296,6 +296,7 @@ function render() {
   renderFeatured();
   renderMenu();
   renderPaymentOptions();
+  configureFulfillmentAvailability();
   renderDeliveryNeighborhoodOptions();
   renderCart();
 }
@@ -502,6 +503,24 @@ function renderFavoritesStrip() {
   }));
 }
 
+function configureFulfillmentAvailability() {
+  if (!els.checkoutForm) return;
+  const deliveryRadio = els.checkoutForm.querySelector('input[name="fulfillment_method"][value="delivery"]');
+  const pickupRadio = els.checkoutForm.querySelector('input[name="fulfillment_method"][value="pickup"]');
+  const acceptsDelivery = state.store?.accepts_delivery !== false;
+  const acceptsPickup = state.store?.accepts_pickup !== false;
+  setFulfillmentOptionAvailability(deliveryRadio, acceptsDelivery);
+  setFulfillmentOptionAvailability(pickupRadio, acceptsPickup);
+  if (deliveryRadio?.checked && !acceptsDelivery && acceptsPickup) pickupRadio.checked = true;
+  if (pickupRadio?.checked && !acceptsPickup && acceptsDelivery) deliveryRadio.checked = true;
+}
+
+function setFulfillmentOptionAvailability(input, available) {
+  if (!input) return;
+  input.disabled = !available;
+  input.closest('label')?.toggleAttribute('hidden', !available);
+}
+
 function applyDemoStoreHints() {
   state.store = {
     ...(state.store || {}),
@@ -668,9 +687,11 @@ function renderCart() {
   }
 
   const totals = cartTotals();
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
   const quantity = state.cart.reduce((sum, item) => sum + item.quantity, 0);
   els.cartSubtotal.textContent = money(totals.subtotal);
   els.cartDelivery.textContent = money(totals.deliveryFee);
+  els.cartDelivery.closest('div')?.toggleAttribute('hidden', method !== 'delivery');
   els.cartTotal.textContent = money(totals.total);
   els.mobileBagCount.textContent = `${quantity} ${quantity === 1 ? 'item' : 'itens'}`;
   els.mobileBagTotal.textContent = money(totals.total);
@@ -1247,6 +1268,7 @@ async function openCheckout() {
   if (!state.customerChecked) {
     await loadLoggedCustomer();
   }
+  configureFulfillmentAvailability();
   updateDineInModes({ preferTableContext: true });
   prefillCheckoutFromCustomer();
   updateCheckoutDeliveryFields();
@@ -1287,8 +1309,10 @@ function renderCheckoutReview() {
   }
 
   const totals = cartTotals();
+  const method = new FormData(els.checkoutForm).get('fulfillment_method') || 'delivery';
   els.checkoutReviewSubtotal.textContent = money(totals.subtotal);
   els.checkoutReviewDelivery.textContent = money(totals.deliveryFee);
+  els.checkoutReviewDelivery.closest('div')?.toggleAttribute('hidden', method !== 'delivery');
   els.checkoutDiscountRow.hidden = !totals.discount;
   els.checkoutReviewDiscount.textContent = `- ${money(totals.discount)}`;
   els.checkoutReviewTotal.textContent = money(totals.total);
@@ -1631,7 +1655,7 @@ function renderCheckoutSnapshot(totals) {
     <div><strong>Pagamento</strong><span>${escapeHtml(payment)}</span></div>
     ${isCashPayment(payment) && changeFor ? `<div><strong>Troco</strong><span>Para ${money(parseMoneyInput(changeFor))}</span></div>` : ''}
     <div><strong>Subtotal</strong><span>${money(totals.subtotal)}</span></div>
-    <div><strong>Entrega</strong><span>${money(totals.deliveryFee)}</span></div>
+    ${method === 'delivery' ? `<div><strong>Entrega</strong><span>${money(totals.deliveryFee)}</span></div>` : ''}
     ${totals.discount ? `<div><strong>Desconto</strong><span>- ${money(totals.discount)}</span></div>` : ''}
     <div><strong>Total final</strong><span>${money(totals.total)}</span></div>
   `;

@@ -795,34 +795,42 @@
                   </section>
                   <div class="switch-row">
                     <label class="check"><input name="is_open" type="checkbox" checked> Loja aberta</label>
-                    <label class="check"><input name="accepts_delivery" type="checkbox" checked> Aceita entrega</label>
-                    <label class="check"><input name="accepts_pickup" type="checkbox" checked> Aceita retirada</label>
                   </div>
                 </div>
               </section>
 
               <section class="store-settings-section">
                 <div class="store-settings-copy">
-                  <strong>Entrega</strong>
-                  <p>Valores usados no carrinho antes do cliente finalizar o pedido.</p>
+                  <strong>Entrega e Retirada</strong>
+                  <p>Escolha como o cliente pode receber o pedido. As taxas aparecem somente quando a entrega estiver ativa.</p>
                 </div>
                 <div class="store-settings-fields">
-                  <div class="two-cols">
-                    <label>Taxa de entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
-                    <label>Pedido mínimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
-                  </div>
-                  <textarea class="sr-only" name="delivery_neighborhood_fees" id="deliveryNeighborhoodFeesRaw" aria-hidden="true" tabindex="-1"></textarea>
-                  <section class="neighborhood-fees-card" aria-labelledby="neighborhoodFeesTitle">
-                    <div class="neighborhood-fees-head">
-                      <div>
-                        <strong id="neighborhoodFeesTitle">Taxas por Bairro</strong>
-                        <small>Se o bairro não estiver na lista, será usada a taxa padrão acima.</small>
-                      </div>
-                      <button class="ghost-button compact" id="addNeighborhoodFeeButton" type="button">Adicionar Bairro</button>
+                  <section class="settings-callout">
+                    <div>
+                      <strong>Modalidades Disponíveis</strong>
+                      <p>Ative entrega, retirada ou as duas opções.</p>
                     </div>
-                    <div class="neighborhood-fees-table" id="neighborhoodFeesEditor"></div>
-                    <p class="field-help" id="neighborhoodFeesSummary">Nenhum bairro configurado.</p>
+                    <div class="switch-row">
+                      <label class="check"><input name="accepts_delivery" type="checkbox" checked> Aceita Entrega</label>
+                      <label class="check"><input name="accepts_pickup" type="checkbox" checked> Aceita Retirada</label>
+                    </div>
                   </section>
+                  <div id="deliverySettingsFields">
+                    <label>Taxa de Entrega<input name="delivery_fee" type="number" min="0" step="0.01" placeholder="0,00"></label>
+                    <textarea class="sr-only" name="delivery_neighborhood_fees" id="deliveryNeighborhoodFeesRaw" aria-hidden="true" tabindex="-1"></textarea>
+                    <section class="neighborhood-fees-card" aria-labelledby="neighborhoodFeesTitle">
+                      <div class="neighborhood-fees-head">
+                        <div>
+                          <strong id="neighborhoodFeesTitle">Taxas por Bairro</strong>
+                          <small>Se o bairro não estiver na lista, será usada a taxa padrão acima.</small>
+                        </div>
+                        <button class="ghost-button compact" id="addNeighborhoodFeeButton" type="button">Adicionar Bairro</button>
+                      </div>
+                      <div class="neighborhood-fees-table" id="neighborhoodFeesEditor"></div>
+                      <p class="field-help" id="neighborhoodFeesSummary">Nenhum bairro configurado.</p>
+                    </section>
+                  </div>
+                  <label>Pedido Mínimo<input name="minimum_order" type="number" min="0" step="0.01" placeholder="0,00"></label>
                 </div>
               </section>
 
