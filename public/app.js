@@ -119,6 +119,15 @@ const els = {
   closedStoreRefreshButton: document.querySelector('#closedStoreRefreshButton'),
   demoOrderDialog: document.querySelector('#demoOrderDialog'),
   demoOrderCode: document.querySelector('#demoOrderCode'),
+  orderSuccessDialog: document.querySelector('#orderSuccessDialog'),
+  orderSuccessCode: document.querySelector('#orderSuccessCode'),
+  orderSuccessText: document.querySelector('#orderSuccessText'),
+  orderSuccessFulfillment: document.querySelector('#orderSuccessFulfillment'),
+  orderSuccessPayment: document.querySelector('#orderSuccessPayment'),
+  orderSuccessTotal: document.querySelector('#orderSuccessTotal'),
+  orderSuccessNote: document.querySelector('#orderSuccessNote'),
+  orderSuccessOrdersLink: document.querySelector('#orderSuccessOrdersLink'),
+  orderSuccessContinueButton: document.querySelector('#orderSuccessContinueButton'),
   paymentCheckoutDialog: document.querySelector('#paymentCheckoutDialog'),
   checkoutSubmitError: document.querySelector('#checkoutSubmitError'),
   paymentCheckoutStatus: document.querySelector('#paymentCheckoutStatus'),
@@ -189,6 +198,10 @@ els.checkoutForm?.addEventListener('submit', submitOrder);
 els.cancelCheckoutButton?.addEventListener('click', () => els.checkoutDialog?.close());
 els.paymentOpenButton?.addEventListener('click', () => openPaymentPopup());
 els.paymentCancelButton?.addEventListener('click', closePaymentCheckoutDialog);
+els.orderSuccessContinueButton?.addEventListener('click', () => {
+  els.orderSuccessDialog?.close();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
 els.paymentCheckoutDialog?.addEventListener('close', () => {
   if (state.paymentCheckout?.status !== 'paid') stopPaymentPolling();
 });
@@ -1400,7 +1413,7 @@ async function submitOrder(event) {
     }
 
     popup?.close?.();
-    finishCreatedOrder(result);
+    finishCreatedOrder(result, { showConfirmation: true });
   } catch (error) {
     popup?.close?.();
     const message = error.message || 'Não foi possível enviar o pedido agora.';
@@ -1418,7 +1431,9 @@ function showCheckoutSubmitError(message = '') {
   if (message) els.checkoutSubmitError.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-function finishCreatedOrder(result = {}) {
+function finishCreatedOrder(result = {}, options = {}) {
+  const order = result.order || {};
+  if (options.showConfirmation) showOrderSuccessDialog(order);
   state.cart = [];
   state.coupon = null;
   clearCouponFeedback();
@@ -1426,6 +1441,50 @@ function finishCreatedOrder(result = {}) {
   renderCart();
   els.checkoutDialog?.close();
   setStatus(`Pedido ${result.order?.public_code || ''} criado.`.trim());
+}
+
+function showOrderSuccessDialog(order = {}) {
+  if (!els.orderSuccessDialog) return;
+  const method = order.fulfillment_method || new FormData(els.checkoutForm).get('fulfillment_method') || 'pickup';
+  const payment = order.payment_method || els.paymentMethod?.value || 'Pagamento combinado com a loja';
+  const copy = orderSuccessCopy(method);
+  if (els.orderSuccessCode) els.orderSuccessCode.textContent = `Pedido #${order.public_code || '-'}`;
+  if (els.orderSuccessText) els.orderSuccessText.textContent = copy.text;
+  if (els.orderSuccessFulfillment) els.orderSuccessFulfillment.textContent = copy.label;
+  if (els.orderSuccessPayment) els.orderSuccessPayment.textContent = payment;
+  if (els.orderSuccessTotal) els.orderSuccessTotal.textContent = money(order.total || cartTotals().total);
+  if (els.orderSuccessNote) els.orderSuccessNote.textContent = copy.note;
+  if (els.orderSuccessOrdersLink) {
+    els.orderSuccessOrdersLink.href = storePageUrl('pedidos');
+    els.orderSuccessOrdersLink.hidden = !state.customer;
+    els.orderSuccessOrdersLink.parentElement?.classList.toggle('has-orders-link', Boolean(state.customer));
+  }
+  els.checkoutDialog?.close();
+  if (typeof els.orderSuccessDialog.showModal === 'function' && !els.orderSuccessDialog.open) {
+    els.orderSuccessDialog.showModal();
+  }
+}
+
+function orderSuccessCopy(method) {
+  if (method === 'delivery') {
+    return {
+      label: 'Entrega',
+      text: 'A loja recebeu seu pedido e vai preparar os itens para entrega.',
+      note: 'Acompanhe o telefone informado. A loja pode entrar em contato para confirmar a entrega.'
+    };
+  }
+  if (method === 'table' || method === 'tab') {
+    return {
+      label: method === 'tab' ? 'Comanda' : 'Mesa',
+      text: 'Seu pedido chegou para a equipe e será preparado.',
+      note: 'Você pode acompanhar o atendimento diretamente no estabelecimento.'
+    };
+  }
+  return {
+    label: 'Retirada no Local',
+    text: 'A loja recebeu seu pedido e vai preparar os itens para retirada.',
+    note: 'Aguarde a confirmação da loja antes de buscar o pedido.'
+  };
 }
 
 function openPaymentCheckoutDialog(result, checkoutUrl, popup = null) {

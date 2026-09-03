@@ -6,7 +6,7 @@
     <title>Loja Demonstração - TáPronto</title>
     <meta name="description" content="Demonstração pública do TáPronto com categorias, produtos, adicionais, sacola e checkout simulado.">
     <link rel="icon" href="/assets/tapronto-favicon.svg">
-    <link rel="stylesheet" href="/styles.css?v=20260731-payment-guided">
+    <link rel="stylesheet" href="/styles.css?v=20260903-order-confirmation">
   </head>
   <body class="menu-page">
     <header class="public-topbar">
@@ -239,6 +239,42 @@
       </form>
     </dialog>
 
+    <dialog class="dialog order-success-dialog" id="orderSuccessDialog">
+      <form method="dialog" class="dialog-header">
+        <div>
+          <p class="eyebrow">Pedido confirmado</p>
+          <h2>Pedido Enviado com Sucesso</h2>
+        </div>
+        <button class="icon-button" title="Fechar" aria-label="Fechar">X</button>
+      </form>
+      <section class="order-success-body">
+        <div class="order-success-icon" aria-hidden="true">&#10003;</div>
+        <div class="order-success-message">
+          <strong id="orderSuccessCode">Pedido #0000</strong>
+          <p id="orderSuccessText">A loja recebeu seu pedido e já pode iniciar o atendimento.</p>
+        </div>
+        <dl class="order-success-summary">
+          <div>
+            <dt>Como Será</dt>
+            <dd id="orderSuccessFulfillment">Retirada</dd>
+          </div>
+          <div>
+            <dt>Pagamento</dt>
+            <dd id="orderSuccessPayment">Na retirada</dd>
+          </div>
+          <div>
+            <dt>Total</dt>
+            <dd id="orderSuccessTotal">R$ 0,00</dd>
+          </div>
+        </dl>
+        <p class="order-success-note" id="orderSuccessNote">Guarde o número do pedido para facilitar o atendimento.</p>
+        <div class="order-success-actions">
+          <a class="ghost-button" id="orderSuccessOrdersLink" href="/pedidos" hidden>Ver Meus Pedidos</a>
+          <button class="primary-button" id="orderSuccessContinueButton" type="button">Continuar no Cardápio</button>
+        </div>
+      </section>
+    </dialog>
+
     <dialog class="dialog payment-checkout-dialog" id="paymentCheckoutDialog">
       <form method="dialog" class="dialog-header">
         <div>
@@ -334,7 +370,7 @@
       </form>
     </dialog>
 
-    <script src="/app.js?v=20260903-delivery-pickup" type="module"></script>
+    <script src="/app.js?v=20260903-order-confirmation" type="module"></script>
   </body>
 </html>
 
