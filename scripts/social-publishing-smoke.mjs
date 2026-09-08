@@ -19,6 +19,8 @@ try {
   assertThrows(() => assertTransition('draft', 'published'), 'Transição editorial inválida foi aceita.');
   assertThrows(() => assertSafeMediaUrl('https://evil.example/uploads/social/a.jpg', config), 'SSRF por host externo foi aceita.');
   assert(assertSafeMediaUrl('https://taprontomenu.com.br/uploads/social/a.jpg', config), 'URL segura foi rejeitada.');
+  assert(assertSafeMediaUrl('https://taprontomenu.com.br/marketing-media/images/a.jpg', config), 'Mídia gerada pelo Marketing foi rejeitada.');
+  assertThrows(() => assertSafeMediaUrl('https://taprontomenu.com.br/uploads/products/a.jpg', config), 'Arquivo fora da biblioteca social foi aceito.');
 
   await pool.query(`insert into social_accounts(id,mode,provider_account_id,username,status,publishing_paused) values($1,'simulation',$2,'smoke','connected',false)`, [ids.account, `smoke-${ids.account}`]);
   await pool.query(`insert into marketing_content_items(id,title,channel,format,caption,cta,utm_url,status,scheduled_at,social_account_id) values($1,'Smoke social','instagram','image','Legenda smoke','Teste agora','https://taprontomenu.com.br/?utm_source=smoke','review',now()-interval '1 minute',$2)`, [ids.content, ids.account]);

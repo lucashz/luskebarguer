@@ -110,7 +110,8 @@ export function assertSafeMediaUrl(rawUrl, config = socialConfig()) {
   const url = new URL(String(rawUrl || ''), config.publicBase || 'https://taprontomenu.com.br');
   if (url.protocol !== 'https:') throw new Error('A mídia precisa estar disponível por HTTPS.');
   if (!config.allowedMediaHosts.has(url.hostname.toLowerCase())) throw new Error('Host de mídia não autorizado.');
-  if (!url.pathname.startsWith('/uploads/social/')) throw new Error('A mídia precisa pertencer à biblioteca social.');
+  const belongsToSocialLibrary = ['/uploads/social/', '/marketing-media/'].some((prefix) => url.pathname.startsWith(prefix));
+  if (!belongsToSocialLibrary) throw new Error('A mídia precisa pertencer à biblioteca social.');
   return url.toString();
 }
 
