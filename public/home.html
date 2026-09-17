@@ -17,6 +17,77 @@
     </script>
     <link rel="icon" href="/assets/tapronto-favicon.svg">
     <link rel="stylesheet" href="/home.css?v=20260804-carousel-gallery">
+    <style>
+      .whatsapp-float {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 999;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #fff;
+        font-family: var(--font-body);
+        text-decoration: none;
+      }
+      .whatsapp-float-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 58px;
+        height: 58px;
+        border-radius: 50%;
+        background: #25d366;
+        color: #fff;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, .22);
+        transition: transform .2s ease, box-shadow .2s ease;
+      }
+      .whatsapp-float-icon svg {
+        display: block;
+        width: 32px;
+        height: 32px;
+      }
+      .whatsapp-float-label {
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #fff;
+        color: var(--home-text);
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
+        transition: transform .2s ease, box-shadow .2s ease;
+      }
+      .whatsapp-float:hover .whatsapp-float-icon {
+        transform: translateY(-2px) scale(1.04);
+        box-shadow: 0 14px 34px rgba(37, 211, 102, .3);
+      }
+      .whatsapp-float:hover .whatsapp-float-label {
+        transform: translateY(-2px);
+      }
+      .whatsapp-float:focus-visible {
+        outline: 3px solid rgba(37, 211, 102, .35);
+        outline-offset: 4px;
+        border-radius: 50%;
+      }
+      @media (max-width: 640px) {
+        .whatsapp-float {
+          right: 16px;
+          bottom: 16px;
+        }
+        .whatsapp-float-label {
+          display: none;
+        }
+        .whatsapp-float-icon {
+          width: 54px;
+          height: 54px;
+        }
+        .whatsapp-float-icon svg {
+          width: 30px;
+          height: 30px;
+        }
+      }
+    </style>
   </head>
   <body>
     <header class="home-header">
@@ -416,6 +487,22 @@
         </div>
       </div>
     </div>
+
+    <a
+      class="whatsapp-float"
+      href="https://wa.me/55936191201?text=Ol%C3%A1%21%20Vim%20pelo%20site%20do%20T%C3%A1Pronto%20e%20gostaria%20de%20tirar%20uma%20d%C3%BAvida."
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Falar com o TáPronto pelo WhatsApp"
+    >
+      <span class="whatsapp-float-label">Dúvidas? Fale com a gente</span>
+      <span class="whatsapp-float-icon" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="currentColor">
+          <path d="M19.11 17.21c-.26-.13-1.51-.74-1.74-.83-.23-.09-.4-.13-.57.13-.17.26-.66.83-.81 1-.15.17-.3.19-.55.06-.26-.13-1.08-.4-2.06-1.27-.76-.68-1.27-1.51-1.42-1.76-.15-.26-.02-.4.11-.53.12-.12.26-.3.38-.45.13-.15.17-.26.26-.43.09-.17.04-.32-.02-.45-.06-.13-.57-1.38-.79-1.89-.21-.5-.42-.43-.57-.44h-.49c-.17 0-.45.06-.68.32-.23.26-.89.87-.89 2.12s.91 2.46 1.04 2.63c.13.17 1.79 2.73 4.34 3.83.61.26 1.08.42 1.45.54.61.19 1.16.17 1.6.1.49-.07 1.51-.62 1.72-1.21.21-.6.21-1.11.15-1.21-.06-.11-.23-.17-.49-.3z"/>
+          <path d="M16.03 3.2c-7.05 0-12.78 5.7-12.78 12.72 0 2.24.59 4.43 1.7 6.36L3.15 28.8l6.69-1.75a12.8 12.8 0 0 0 6.18 1.57h.01c7.04 0 12.77-5.7 12.77-12.72S23.07 3.2 16.03 3.2zm0 23.28h-.01a10.65 10.65 0 0 1-5.44-1.49l-.39-.23-3.97 1.04 1.06-3.86-.25-.4a10.51 10.51 0 0 1-1.63-5.62c0-5.84 4.77-10.59 10.64-10.59 5.86 0 10.63 4.75 10.63 10.59 0 5.84-4.77 10.56-10.64 10.56z"/>
+        </svg>
+      </span>
+    </a>
 
     <script src="/home.js?v=20260804-carousel-gallery" defer></script>
     <script src="/experiments.js?v=20260812-ab-engine" data-surface="home" defer></script>
