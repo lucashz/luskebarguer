@@ -308,19 +308,23 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && (url.pathname === '/api/orders' || url.pathname === '/api/orders/checkout')) {
     const context = await resolveTenant(req, url);
-    json(res, 201, await createOrder(req, await readJson(req), { storeId: context.store.id, db: context.db, tenant: context.tenant }));
+    const result = await createOrder(req, await readJson(req), { storeId: context.store.id, db: context.db, tenant: context.tenant });
+    const { paymentAccess, ...body } = result;
+    json(res, 201, body, paymentAccess ? { 'Set-Cookie': paymentAccessCookie(paymentAccess.code, paymentAccess.token) } : {});
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/payments/order') {
     const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
-    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order'), { db: context.db, tenant: context.tenant, accessToken: url.searchParams.get('token') || '' }));
+    const code = url.searchParams.get('code') || url.searchParams.get('order');
+    json(res, 200, await publicPaymentStatus(code, { db: context.db, tenant: context.tenant, accessToken: paymentAccessFromRequest(req, code) }));
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/payments/regenerate-pix') {
     const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
-    json(res, 200, await regeneratePixPayment(await readJson(req), { db: context.db, tenant: context.tenant }));
+    const data = await readJson(req);
+    json(res, 200, await regeneratePixPayment(data, { db: context.db, tenant: context.tenant, accessToken: paymentAccessFromRequest(req, data.code || data.order) }));
     return;
   }
 
@@ -15537,8 +15541,9 @@ async function createOrder(req, data, options = {}) {
   }
 
   return {
-    order: { ...stripPaymentAccessSecrets(finalOrder), items: itemsWithOrder, ...(paymentAccessToken ? { payment_access_token: paymentAccessToken } : {}) },
+    order: { ...stripPaymentAccessSecrets(finalOrder), items: itemsWithOrder },
     payment,
+    ...(paymentAccessToken ? { paymentAccess: { code: finalOrder.public_code, token: paymentAccessToken } } : {}),
     whatsapp_url: null,
     whatsapp_message: whatsappMessage
   };
@@ -16739,7 +16744,6 @@ async function createAbacateOrderCheckout({ store, order, token, amount, methods
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   const storeSlug = cleanSlug(store.slug || '');
   const paymentQuery = new URLSearchParams({ pedido: order.public_code });
-  if (paymentAccessToken) paymentQuery.set('token', paymentAccessToken);
   const paymentPath = `${storeSlug ? `/${storeSlug}` : ''}/pagamento?${paymentQuery.toString()}`;
   const fallbackUrl = origin ? `${origin}${paymentPath}` : '';
   const externalSuffix = idempotencyKey
@@ -16824,7 +16828,7 @@ async function createMercadoPagoPayment({ store, order, type, integrations, idem
   if (isMaskedSecretValue(token)) throw httpError(422, 'O Access Token do Mercado Pago está salvo apenas como máscara. Reconfigure a credencial real em Integrações.');
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   const storeSlug = cleanSlug(store?.slug || '');
-  const query = new URLSearchParams({ pedido: order.public_code }); if (paymentAccessToken) query.set('token', paymentAccessToken);
+  const query = new URLSearchParams({ pedido: order.public_code });
   const returnUrl = origin ? `${origin}${storeSlug ? `/${storeSlug}` : ''}/pagamento?${query}` : '';
   const notificationUrl = origin ? `${origin}/api/payments/webhook?provider=mercadopago` : undefined;
   if (type === 'pix') {
@@ -17085,6 +17089,32 @@ function assertPaymentAccessToken(order, token) {
   if (!safeSecretEquals(actual, expected)) throw httpError(403, 'Acesso ao pagamento não autorizado.');
   if (order.payment_access_expires_at && new Date(order.payment_access_expires_at).getTime() <= Date.now()) {
     throw httpError(410, 'O acesso a este pagamento expirou.');
+  }
+}
+
+function paymentCookieSecret() {
+  return process.env.PAYMENT_COOKIE_SECRET || process.env.COOKIE_SECRET || process.env.SESSION_SECRET || 'local-payment-cookie-secret';
+}
+
+function paymentAccessCookie(code, token) {
+  const payload = Buffer.from(JSON.stringify({ code: cleanPublicCode(code), token: String(token || '') })).toString('base64url');
+  const signature = createHmac('sha256', paymentCookieSecret()).update(payload).digest('base64url');
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
+  return `payment_access=${payload}.${signature}; Path=/api/payments; HttpOnly; SameSite=Lax; Max-Age=3600${secure}`;
+}
+
+function paymentAccessFromRequest(req, code) {
+  const value = String(parseCookies(req).payment_access || '');
+  const [payload, suppliedSignature] = value.split('.');
+  if (!payload || !suppliedSignature) return '';
+  const expectedSignature = createHmac('sha256', paymentCookieSecret()).update(payload).digest('base64url');
+  if (!safeSecretEquals(suppliedSignature, expectedSignature)) return '';
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (cleanPublicCode(parsed.code) !== cleanPublicCode(code)) return '';
+    return String(parsed.token || '');
+  } catch {
+    return '';
   }
 }
 
