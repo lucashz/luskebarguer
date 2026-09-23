@@ -20,6 +20,7 @@ import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, syncPublicationMetrics, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
+import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -158,6 +159,7 @@ const server = createServer(async (req, res) => {
     await serveStatic(req, res, url.pathname, req.headers['x-forwarded-host'] || req.headers.host, url.search);
   } catch (error) {
     logServerError(error, req);
+    if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
     const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
     json(res, error.status || 500, {
       error: error.message || 'Erro interno do servidor.',
@@ -203,7 +205,13 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  enforceRateLimit(req, method, url.pathname);
+  const persistentRateRule = securityRateRule(method, url.pathname);
+  if (persistentRateRule) {
+    const body = await readJson(req);
+    await enforceSecurityRateLimit({ req, rule: persistentRateRule, identity: securityRateIdentity(persistentRateRule, body) });
+  } else {
+    enforceRateLimit(req, method, url.pathname);
+  }
   enforceAuthenticatedRequestOrigin(req, method);
 
   if (method === 'GET' && url.pathname === '/api/portal/plans') {
@@ -19588,15 +19596,20 @@ async function sendFile(req, res, filePath, options = {}) {
   if (req.method === 'HEAD') res.end(); else res.end(body);
 }
 
-async function readJson(req) {
-  const body = await readRequestBody(req, MAX_JSON_BYTES);
+const parsedJsonBodies = new WeakMap();
 
-  if (!body) return {};
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw httpError(400, 'JSON inválido.');
-  }
+async function readJson(req) {
+  if (parsedJsonBodies.has(req)) return parsedJsonBodies.get(req);
+  const pending = readRequestBody(req, MAX_JSON_BYTES).then((body) => {
+    if (!body) return {};
+    try {
+      return JSON.parse(body);
+    } catch {
+      throw httpError(400, 'JSON inválido.');
+    }
+  });
+  parsedJsonBodies.set(req, pending);
+  return pending;
 }
 
 async function readRequestBody(req, maxBytes = MAX_JSON_BYTES) {

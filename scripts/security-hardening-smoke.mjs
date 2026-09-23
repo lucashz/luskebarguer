@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
+import { randomBytes } from 'node:crypto';
 
 loadEnv(new URL('../.env', import.meta.url));
 
@@ -9,6 +10,7 @@ if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL ausente para o test
 
 const port = Number(process.env.SECURITY_HARDENING_PORT || 4300 + Math.floor(Math.random() * 300));
 const baseUrl = `http://127.0.0.1:${port}`;
+const rateLimitTestSecret = randomBytes(24).toString('hex');
 let child;
 
 export async function request(path, options = {}) {
@@ -28,7 +30,9 @@ export async function startServer() {
       PUBLIC_APP_URL: baseUrl,
       COOKIE_SECURE: 'false',
       NODE_ENV: 'test',
-      SKIP_SIGNUP_ACTIVATION_EMAIL: 'true'
+      SKIP_SIGNUP_ACTIVATION_EMAIL: 'true',
+      TRUSTED_PROXY_HOPS: '1',
+      SECURITY_RATE_LIMIT_SECRET: rateLimitTestSecret
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -66,12 +70,40 @@ try {
   child = await startServer();
   const health = await request('/api/health');
   assert.equal(health.response.status, 200);
+  const suffix = randomBytes(6).toString('hex');
+  for (let index = 0; index < 8; index += 1) {
+    await loginAttempt(`network-${suffix}-${index}@example.invalid`, `198.51.100.${10 + index * 0}`);
+  }
+  const blockedNetwork = await loginAttempt(`network-other-${suffix}@example.invalid`, '198.51.100.10');
+  assert.equal(blockedNetwork.response.status, 429, 'limite por rede nao bloqueou a nona tentativa');
+  assert.match(blockedNetwork.response.headers.get('retry-after') || '', /^\d+$/, '429 sem Retry-After');
+
+  const equivalentIdentity = ` Identity-${suffix}@Example.Invalid `;
+  for (let index = 0; index < 8; index += 1) {
+    await loginAttempt(index % 2 ? equivalentIdentity.trim().toLowerCase() : equivalentIdentity, `203.0.113.${10 + index}`);
+  }
+  const blockedIdentity = await loginAttempt(equivalentIdentity.trim().toLowerCase(), '203.0.113.99');
+  assert.equal(blockedIdentity.response.status, 429, 'limite por identidade normalizada nao bloqueou a nona tentativa');
+
+  for (let index = 0; index < 8; index += 1) {
+    await loginAttempt(`malformed-${suffix}-${index}@example.invalid`, 'valor-invalido, 192.0.2.44');
+  }
+  const blockedMalformedChain = await loginAttempt(`malformed-other-${suffix}@example.invalid`, 'outro-invalido, 192.0.2.44');
+  assert.equal(blockedMalformedChain.response.status, 429, 'cadeia X-Forwarded-For malformada multiplicou o limite');
   console.log('Security hardening smoke: base HTTP OK');
 } finally {
   if (child && child.exitCode === null) {
     child.kill();
     await new Promise((resolve) => child.once('exit', resolve));
   }
+}
+
+function loginAttempt(email, forwardedFor) {
+  return request('/api/admin/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': forwardedFor },
+    body: JSON.stringify({ email, password: 'senha-incorreta' })
+  });
 }
 
 function loadEnv(url) {
