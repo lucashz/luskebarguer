@@ -36,6 +36,7 @@ try {
         name: 'Trial Expired Smoke',
         email,
         phone: '5599999999999',
+        document: '12345678909',
         password,
         confirm_password: password
       },
@@ -79,6 +80,15 @@ try {
 
   console.log('Trial vencido validado: areas pagas bloqueadas; Plano, Suporte e Conta acessiveis.');
 } finally {
+  if (!companyId) {
+    const leaked = await client.query(`
+      select company_id
+        from public.admin_users
+       where email = $1
+       limit 1
+    `, [email]).catch(() => ({ rows: [] }));
+    companyId = leaked.rows[0]?.company_id || null;
+  }
   if (companyId) {
     await client.query('delete from public.companies where id = $1', [companyId]).catch(() => {});
   }
@@ -127,7 +137,9 @@ async function startServer() {
       HOST: '127.0.0.1',
       PORT: String(port),
       APP_URL: baseUrl,
-      PUBLIC_APP_URL: baseUrl
+      PUBLIC_APP_URL: baseUrl,
+      SECURITY_RATE_LIMIT_SECRET: `trial-smoke-${suffix}`,
+      SKIP_SIGNUP_ACTIVATION_EMAIL: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

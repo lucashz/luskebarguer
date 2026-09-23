@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
-import { randomBytes } from 'node:crypto';
+import { pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto';
 
 loadEnv(new URL('../.env', import.meta.url));
 
@@ -12,6 +12,7 @@ const port = Number(process.env.SECURITY_HARDENING_PORT || 4300 + Math.floor(Mat
 const baseUrl = `http://127.0.0.1:${port}`;
 const rateLimitTestSecret = randomBytes(24).toString('hex');
 let child;
+let syntheticCompanyId = '';
 
 export async function request(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, options);
@@ -71,6 +72,14 @@ try {
   const health = await request('/api/health');
   assert.equal(health.response.status, 200);
   const suffix = randomBytes(6).toString('hex');
+  const syntheticAdmin = await createSyntheticAdmin(suffix);
+  syntheticCompanyId = syntheticAdmin.companyId;
+  const unknown = await timedLogin(`unknown-${suffix}@example.invalid`, '192.0.2.10');
+  const wrong = await timedLogin(syntheticAdmin.email, '192.0.2.11');
+  assert.equal(unknown.result.response.status, 401);
+  assert.equal(wrong.result.response.status, 401);
+  assert.equal(unknown.result.body.error, wrong.result.body.error);
+  assert.ok(Math.abs(unknown.durationMs - wrong.durationMs) < 250, 'tempo permite distinguir conta existente');
   for (let index = 0; index < 8; index += 1) {
     await loginAttempt(`network-${suffix}-${index}@example.invalid`, `198.51.100.${10 + index * 0}`);
   }
@@ -92,10 +101,41 @@ try {
   assert.equal(blockedMalformedChain.response.status, 429, 'cadeia X-Forwarded-For malformada multiplicou o limite');
   console.log('Security hardening smoke: base HTTP OK');
 } finally {
+  if (syntheticCompanyId) await deleteSyntheticCompany(syntheticCompanyId);
   if (child && child.exitCode === null) {
     child.kill();
     await new Promise((resolve) => child.once('exit', resolve));
   }
+}
+
+async function timedLogin(email, forwardedFor) {
+  const startedAt = performance.now();
+  const result = await loginAttempt(email, forwardedFor);
+  return { result, durationMs: performance.now() - startedAt };
+}
+
+async function createSyntheticAdmin(suffix) {
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    const companyId = randomUUID();
+    const adminId = randomUUID();
+    const email = `security-${suffix}@example.invalid`;
+    const salt = randomBytes(16).toString('hex');
+    const digest = pbkdf2Sync('senha-valida-sintetica', salt, 310000, 32, 'sha256').toString('hex');
+    const passwordHash = `pbkdf2_sha256$310000$${salt}$${digest}`;
+    await client.query('insert into companies(id,name,status) values($1,$2,$3)', [companyId, `Security ${suffix}`, 'trial']);
+    await client.query('insert into admin_users(id,company_id,name,email,password_hash,role,is_active) values($1,$2,$3,$4,$5,$6,true)', [adminId, companyId, 'Security Smoke', email, passwordHash, 'admin']);
+    return { companyId, email };
+  } finally {
+    await client.end();
+  }
+}
+
+async function deleteSyntheticCompany(companyId) {
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try { await client.query('delete from companies where id = $1', [companyId]); } finally { await client.end(); }
 }
 
 function loginAttempt(email, forwardedFor) {

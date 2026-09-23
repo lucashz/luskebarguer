@@ -266,7 +266,7 @@ try {
     body: { email, password },
     allowFailure: true
   });
-  assert(deletedLogin.status === 404, 'Login deveria falhar apos excluir a conta.');
+  assert(deletedLogin.status === 401 && /e-mail ou senha/i.test(deletedLogin.data.error || ''), 'Login excluido deveria usar resposta generica de credenciais.');
 
   console.log('Fluxos principais validados com sucesso.');
 } finally {
@@ -339,6 +339,7 @@ async function startServer() {
       HOST: '127.0.0.1',
       PORT: String(port),
       COOKIE_SECURE: 'false',
+      SECURITY_RATE_LIMIT_SECRET: `core-flow-${suffix}`,
       PLATFORM_BILLING_PROVIDER: 'mock',
       PUBLIC_APP_URL: baseUrl,
       APP_URL: baseUrl

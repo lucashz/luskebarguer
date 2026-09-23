@@ -21,6 +21,7 @@ import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assert
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
+import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -2451,19 +2452,14 @@ async function loginAdmin(data) {
   });
 
   const admin = rows[0];
-  if (!admin) {
-    throw httpError(404, 'Não existe uma conta administrativa com este e-mail.');
-  }
+  const passwordValid = verifyPassword(password, passwordHashForVerification(admin));
+  if (!admin || !passwordValid) throw invalidCredentialError(httpError);
   if (admin.is_active === false) {
     const pendingActivation = await hasPendingAdminActivation(admin.id).catch(() => false);
     throw httpError(403, pendingActivation
       ? 'Sua conta ainda não foi ativada. Confira seu e-mail e clique no link de ativação. Verifique também spam, lixo eletrônico e a aba Promoções.'
       : 'Esta conta administrativa está desativada.');
   }
-  if (!verifyPassword(password, admin.password_hash)) {
-    throw httpError(401, 'Senha incorreta.');
-  }
-
   if (ADMIN_2FA_REQUIRED && normalizeAdminRole(admin.role) === 'superadmin') {
     const challenge = await createAdminTwoFactorChallenge(admin);
     return { requiresTwoFactor: true, adminId: admin.id, email: admin.email, ...challenge };
@@ -2569,7 +2565,7 @@ async function requestAdminPasswordRecovery(req, data = {}) {
         severity: 'warning',
         after_data: { email: maskEmailOrToken(email), message: error.message || 'Falha ao enviar recuperação.' }
       });
-      throw httpError(502, 'Não foi possível enviar o e-mail de recuperação. Verifique a configuração SMTP.');
+      return null;
     });
     await audit('admin.password_recovery.request', {
       req,
