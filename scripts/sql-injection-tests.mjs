@@ -16,6 +16,12 @@ try {
 
   const payloads = [
     {
+      name: 'GET /api/payments/order rejeita codigo e paginacao malformados',
+      path: `/api/payments/order?code=${encodeURIComponent("x' OR '1'='1")}&limit=${encodeURIComponent('1;drop table orders')}`,
+      options: { method: 'GET' },
+      allowedStatuses: [400, 403, 404, 422]
+    },
+    {
       name: 'POST /api/orders rejeita id de item malformado',
       path: '/api/orders',
       options: {
@@ -73,6 +79,12 @@ try {
         })
       },
       allowedStatuses: [400, 401, 404, 422]
+    },
+    {
+      name: 'GET autenticado obrigatorio nao interpreta filtro SQL em URL',
+      path: `/api/admin/support/tickets?search=${encodeURIComponent("%' OR 1=1 --")}&order=${encodeURIComponent('created_at;drop table support_tickets')}`,
+      options: { method: 'GET' },
+      allowedStatuses: [400, 401, 403, 404, 422]
     }
   ];
 

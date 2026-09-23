@@ -14604,11 +14604,12 @@ async function deleteCustomerAddressByAdmin(customerId, addressId, storeId = nul
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId);
   await assertCustomerBelongsToStore(customerId, resolvedStoreId, options);
-  await db('DELETE', 'customer_addresses', {
+  const deleted = await db('DELETE', 'customer_addresses', {
     id: `eq.${addressId}`,
     customer_id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
-  }, undefined, ['Prefer: return=minimal']);
+  }, undefined, ['Prefer: return=representation']);
+  if (!deleted[0]) throw httpError(404, 'Endereço não encontrado nesta loja.');
   const addresses = await listCustomerAddresses(customerId, resolvedStoreId, options);
   if (addresses.length && !addresses.some((address) => address.is_default)) {
     await db('PATCH', 'customer_addresses', { id: `eq.${addresses[0].id}` }, {
