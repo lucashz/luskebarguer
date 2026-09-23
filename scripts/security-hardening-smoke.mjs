@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto';
 import { assertSafePublicPayload, redactSensitive } from '../src/lib/security-redaction.js';
+import { allowedOrigins } from '../src/lib/security-http.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 
@@ -91,6 +92,23 @@ try {
   assert.equal(JSON.stringify(redacted).includes('00000000000'), false);
   const cookieA = sessionCookieFrom(sessionA.response);
   const cookieB = sessionCookieFrom(sessionB.response);
+  const configuredOrigins = allowedOrigins({ ALLOWED_ORIGINS: `${baseUrl},https://taprontomenu.com.br` });
+  assert.equal(configuredOrigins.has(baseUrl), true);
+  assert.equal(configuredOrigins.has('https://evil-taprontomenu.com.br'), false);
+  const hostileMutation = await request('/api/admin/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookieA, Origin: 'https://evil.example' },
+    body: JSON.stringify({ current_password: syntheticAdmin.password, new_password: 'nao-deve-alterar' })
+  });
+  assert.equal(hostileMutation.response.status, 403);
+  assert.equal(hostileMutation.response.headers.get('access-control-allow-origin'), null);
+  const hostilePreflight = await request('/api/health', {
+    method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET' }
+  });
+  assert.equal(hostilePreflight.response.headers.get('access-control-allow-origin'), null);
+  const adminHtml = await fetch(`${baseUrl}/admin`);
+  assert.equal(adminHtml.headers.get('x-frame-options'), 'DENY');
+  assert.match(adminHtml.headers.get('content-security-policy') || '', /frame-ancestors 'none'/);
   assert.match(sessionA.response.headers.get('set-cookie') || '', /HttpOnly/i);
   assert.match(sessionA.response.headers.get('set-cookie') || '', /Secure/i);
   assert.match(sessionA.response.headers.get('set-cookie') || '', /SameSite=Lax/i);

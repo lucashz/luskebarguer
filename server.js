@@ -23,6 +23,7 @@ import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
 import { redactSensitive } from './src/lib/security-redaction.js';
+import { assertAuthenticatedOrigin, securityHeaders } from './src/lib/security-http.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -122,6 +123,9 @@ const server = createServer(async (req, res) => {
   let pathname = '/';
   const originalWriteHead = res.writeHead.bind(res);
   res.writeHead = (...args) => {
+    for (const [key, value] of Object.entries(securityHeaders({ production: APP_ENV === 'production' }))) {
+      if (!res.hasHeader(key)) res.setHeader(key, value);
+    }
     if (!res.headersSent && !res.hasHeader('Server-Timing')) {
       res.setHeader('Server-Timing', `app;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`);
     }
@@ -15950,38 +15954,11 @@ function enforceRateLimit(req, method, pathname) {
 }
 
 function enforceAuthenticatedRequestOrigin(req, method) {
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return;
   const cookies = parseCookies(req);
-  if (!cookies[ADMIN_COOKIE] && !cookies[CUSTOMER_COOKIE]) return;
-
-  const fetchSite = cleanText(req.headers['sec-fetch-site'] || '').toLowerCase();
-  if (fetchSite === 'cross-site') throw httpError(403, 'Origem da requisição não autorizada.');
-
-  const source = cleanText(req.headers.origin || req.headers.referer || '');
-  if (!source) return; // Clientes não-browser continuam suportados; cookies HttpOnly não ficam expostos a eles.
-  let sourceOrigin = '';
-  try {
-    sourceOrigin = new URL(source).origin.toLowerCase();
-  } catch {
-    throw httpError(403, 'Origem da requisição inválida.');
-  }
-  const trusted = trustedRequestOrigins(req);
-  if (!trusted.has(sourceOrigin)) throw httpError(403, 'Origem da requisição não autorizada.');
-}
-
-function trustedRequestOrigins(req) {
-  const origins = new Set();
-  const add = (value) => {
-    const text = String(value || '').trim();
-    if (!text) return;
-    try { origins.add(new URL(text).origin.toLowerCase()); } catch {}
-  };
-  add(requestOrigin(req));
-  add(process.env.APP_URL);
-  add(process.env.PUBLIC_APP_URL);
-  add(process.env.PANEL_BASE_URL);
-  add(process.env.PLATFORM_BASE_URL);
-  return origins;
+  assertAuthenticatedOrigin(req, {
+    authenticated: Boolean(cookies[ADMIN_COOKIE] || cookies[CUSTOMER_COOKIE]),
+    env: process.env
+  });
 }
 
 function rateLimitRule(method, pathname) {
@@ -19557,7 +19534,7 @@ async function sendFile(req, res, filePath, options = {}) {
       ? 'public, max-age=300, stale-while-revalidate=60'
       : 'public, max-age=86400, stale-while-revalidate=3600';
   const baseHeaders = {
-    ...securityHeaders({ allowSameOriginFrame: ext === '.html' }),
+    ...securityHeaders({ allowSameOriginFrame: ext === '.html' && !shouldNoIndexResponse(req, filePath), production: APP_ENV === 'production' }),
     'Cache-Control': cacheControl,
     ETag: entry.etag,
     Vary: 'Accept-Encoding',
@@ -20261,31 +20238,6 @@ function publicCustomer(customer) {
 function json(res, status, data, headers = {}) {
   res.writeHead(status, { ...securityHeaders(), 'Cache-Control': 'no-store', 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(data));
-}
-
-function securityHeaders(options = {}) {
-  const frameAncestors = options.allowSameOriginFrame ? "frame-ancestors 'self'" : "frame-ancestors 'none'";
-  return {
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': options.allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY',
-    'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-    'Content-Security-Policy': [
-      "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
-      "media-src 'self' blob: https://taprontomenu.com.br https://*.taprontomenu.com.br",
-      "font-src 'self' data:",
-      "connect-src 'self'",
-      "frame-src 'self'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      frameAncestors,
-      "object-src 'none'"
-    ].join('; ')
-  };
 }
 
 async function safeResponse(response) {
