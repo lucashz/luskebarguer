@@ -51,6 +51,7 @@ const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
 const COOKIE_SECURE = parseBoolean(process.env.COOKIE_SECURE, false);
+const APP_ENV = cleanText(process.env.APP_ENV || process.env.NODE_ENV || '').toLowerCase();
 const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH || 8), 8, 72);
 const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
 const ADMIN_2FA_REQUIRED = parseBoolean(process.env.ADMIN_2FA_REQUIRED, true);
@@ -2636,7 +2637,7 @@ async function resetAdminPassword(req, token, data = {}) {
   }, {
     status: 'cancelled'
   }, ['Prefer: return=minimal']).catch(() => {});
-  clearSessionCacheByOwner('admin', admin.id);
+  await deleteOwnerSessions('admin', admin.id);
   await audit('admin.password_recovery.reset', {
     req,
     actor_admin_id: admin.id,
@@ -2935,7 +2936,8 @@ async function updateAdminUser(id, data, session) {
 
   const [updated] = await dbRequest('PATCH', 'admin_users', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Conta admin não encontrada.');
-  clearSessionCacheByOwner('admin', id);
+  if (payload.password_hash || payload.is_active === false) await deleteOwnerSessions('admin', id);
+  else clearSessionCacheByOwner('admin', id);
   clearAdminStoreAccessCache(id);
   clearAdminUsersCache();
   return publicAdmin(updated);
@@ -2993,7 +2995,7 @@ async function updateAdminAccount(session, data) {
   session.name = updated.name;
   session.email = updated.email;
   session.role = updated.role;
-  clearSessionCacheByOwner('admin', session.id);
+  await deleteOwnerSessions('admin', session.id);
   clearAdminUsersCache();
   return publicAdmin(updated);
 }
@@ -4606,7 +4608,7 @@ function signupTrialOffer(attribution = {}) {
 }
 
 function marketingAttributionCookie(req, attribution = {}) {
-  const secure = COOKIE_SECURE ? '; Secure' : '';
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
   const hostname = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].split(':')[0].toLowerCase();
   const domain = hostname === 'taprontomenu.com.br' || hostname.endsWith('.taprontomenu.com.br') ? '; Domain=taprontomenu.com.br' : '';
   const encoded = Buffer.from(JSON.stringify(sanitizeMarketingAttribution(attribution)), 'utf8').toString('base64url');
@@ -14429,6 +14431,7 @@ async function resetCustomerPassword(data, storeId = null, options = {}) {
   await db('PATCH', 'customers', { id: `eq.${customer.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=minimal']);
+  await deleteOwnerSessions('customer', customer.id);
 }
 
 async function createCustomerSession(customer) {
@@ -14566,7 +14569,8 @@ async function updateCustomerByAdmin(customerId, data, storeId = null, options =
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Cliente não encontrado nesta loja.');
-  clearSessionCacheByOwner('customer', customerId);
+  if (payload.password_hash) await deleteOwnerSessions('customer', customerId);
+  else clearSessionCacheByOwner('customer', customerId);
   return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
@@ -15802,6 +15806,16 @@ async function deleteSession(token) {
   if (!token) return;
   clearSessionCacheToken(token);
   await dbRequest('DELETE', 'app_sessions', { token: `eq.${sessionTokenHash(token)}` }, undefined, ['Prefer: return=minimal']);
+}
+
+async function deleteOwnerSessions(type, ownerId, exceptTokenHash = '') {
+  const filters = {
+    type: `eq.${type}`,
+    owner_id: `eq.${cleanUuid(ownerId)}`,
+    ...(exceptTokenHash ? { token: `neq.${exceptTokenHash}` } : {})
+  };
+  await dbRequest('DELETE', 'app_sessions', filters, undefined, ['Prefer: return=minimal']);
+  clearSessionCacheByOwner(type, ownerId);
 }
 
 function sessionTokenHash(token) {
@@ -20148,7 +20162,7 @@ function parseCookies(req) {
 }
 
 function sessionCookie(name, value) {
-  const secure = COOKIE_SECURE ? '; Secure' : '';
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
   return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}${secure}`;
 }
 

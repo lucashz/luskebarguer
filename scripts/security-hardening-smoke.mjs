@@ -30,6 +30,7 @@ export async function startServer() {
       APP_URL: baseUrl,
       PUBLIC_APP_URL: baseUrl,
       COOKIE_SECURE: 'false',
+      APP_ENV: 'production',
       NODE_ENV: 'test',
       SKIP_SIGNUP_ACTIVATION_EMAIL: 'true',
       TRUSTED_PROXY_HOPS: '1',
@@ -74,6 +75,24 @@ try {
   const suffix = randomBytes(6).toString('hex');
   const syntheticAdmin = await createSyntheticAdmin(suffix);
   syntheticCompanyId = syntheticAdmin.companyId;
+  const sessionA = await adminLogin(syntheticAdmin.email, syntheticAdmin.password, '192.0.2.5');
+  const sessionB = await adminLogin(syntheticAdmin.email, syntheticAdmin.password, '192.0.2.6');
+  assert.equal(sessionA.response.status, 200);
+  assert.equal(sessionB.response.status, 200);
+  const cookieA = sessionCookieFrom(sessionA.response);
+  const cookieB = sessionCookieFrom(sessionB.response);
+  assert.match(sessionA.response.headers.get('set-cookie') || '', /HttpOnly/i);
+  assert.match(sessionA.response.headers.get('set-cookie') || '', /Secure/i);
+  assert.match(sessionA.response.headers.get('set-cookie') || '', /SameSite=Lax/i);
+  assert.doesNotMatch(sessionA.response.headers.get('set-cookie') || '', /Domain=/i);
+  const changed = await request('/api/admin/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookieA },
+    body: JSON.stringify({ current_password: syntheticAdmin.password, new_password: 'nova-senha-segura' })
+  });
+  assert.equal(changed.response.status, 200);
+  assert.equal((await request('/api/admin/me', { headers: { Cookie: cookieA } })).response.status, 401);
+  assert.equal((await request('/api/admin/me', { headers: { Cookie: cookieB } })).response.status, 401);
   const unknown = await timedLogin(`unknown-${suffix}@example.invalid`, '192.0.2.10');
   const wrong = await timedLogin(syntheticAdmin.email, '192.0.2.11');
   assert.equal(unknown.result.response.status, 401);
@@ -122,11 +141,12 @@ async function createSyntheticAdmin(suffix) {
     const adminId = randomUUID();
     const email = `security-${suffix}@example.invalid`;
     const salt = randomBytes(16).toString('hex');
-    const digest = pbkdf2Sync('senha-valida-sintetica', salt, 310000, 32, 'sha256').toString('hex');
+    const password = 'senha-valida-sintetica';
+    const digest = pbkdf2Sync(password, salt, 310000, 32, 'sha256').toString('hex');
     const passwordHash = `pbkdf2_sha256$310000$${salt}$${digest}`;
     await client.query('insert into companies(id,name,status) values($1,$2,$3)', [companyId, `Security ${suffix}`, 'trial']);
     await client.query('insert into admin_users(id,company_id,name,email,password_hash,role,is_active) values($1,$2,$3,$4,$5,$6,true)', [adminId, companyId, 'Security Smoke', email, passwordHash, 'admin']);
-    return { companyId, email };
+    return { companyId, email, password };
   } finally {
     await client.end();
   }
@@ -144,6 +164,18 @@ function loginAttempt(email, forwardedFor) {
     headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': forwardedFor },
     body: JSON.stringify({ email, password: 'senha-incorreta' })
   });
+}
+
+function adminLogin(email, password, forwardedFor) {
+  return request('/api/admin/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': forwardedFor },
+    body: JSON.stringify({ email, password })
+  });
+}
+
+function sessionCookieFrom(response) {
+  return String(response.headers.get('set-cookie') || '').split(';')[0];
 }
 
 function loadEnv(url) {
