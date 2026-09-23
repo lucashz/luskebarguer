@@ -22,6 +22,7 @@ import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPo
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
+import { redactSensitive } from './src/lib/security-redaction.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -13718,35 +13719,7 @@ function sanitizeAuditSeverity(value) {
 }
 
 function sanitizeAuditPayload(value, depth = 0) {
-  if (value === undefined || value === null) return null;
-  if (depth > 5) return '[truncated]';
-  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => sanitizeAuditPayload(entry, depth + 1));
-  if (typeof value !== 'object') return value;
-  const blocked = new Set([
-    'password',
-    'password_hash',
-    'current_password',
-    'new_password',
-    'token',
-    'access_token',
-    'refresh_token',
-    'api_key',
-    'apikey',
-    'secret',
-    'webhook_secret',
-    'service_role',
-    'authorization'
-  ]);
-  const output = {};
-  for (const [key, entry] of Object.entries(value)) {
-    const normalizedKey = key.toLowerCase();
-    if ([...blocked].some((blockedKey) => normalizedKey.includes(blockedKey))) {
-      output[key] = '[redacted]';
-      continue;
-    }
-    output[key] = sanitizeAuditPayload(entry, depth + 1);
-  }
-  return output;
+  return redactSensitive(value, depth) ?? null;
 }
 
 async function requireAdmin(req, res) {
@@ -20356,17 +20329,18 @@ function logServerError(error, req) {
     method: req?.method,
     url: req?.url,
     status,
-    message: error.message,
+    error_type: cleanText(error?.name || 'Error'),
+    error_code: cleanText(error?.code || error?.detail?.code || ''),
     detail: sanitizeErrorDetailForLog(error.detail)
   }));
 }
 
 function sanitizeErrorDetailForLog(detail) {
   if (!detail) return undefined;
-  if (typeof detail === 'string') return detail.slice(0, 500);
+  if (typeof detail === 'string') return '[redacted]';
   if (isPlainObject(detail)) {
-    const { message, code, details, hint, error } = detail;
-    return { message, code, details, hint, error };
+    const { code } = detail;
+    return redactSensitive({ code });
   }
   return undefined;
 }

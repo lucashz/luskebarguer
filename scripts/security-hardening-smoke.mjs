@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto';
+import { assertSafePublicPayload, redactSensitive } from '../src/lib/security-redaction.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 
@@ -79,6 +80,15 @@ try {
   const sessionB = await adminLogin(syntheticAdmin.email, syntheticAdmin.password, '192.0.2.6');
   assert.equal(sessionA.response.status, 200);
   assert.equal(sessionB.response.status, 200);
+  assertSafePublicPayload(sessionA.body.admin);
+  assertSafePublicPayload(sessionB.body.admin);
+  const redacted = redactSensitive({
+    profile: { name: 'Teste', password_hash: 'senha-secreta', document: '00000000000' },
+    authorization: 'Bearer token-secreto'
+  });
+  assert.equal(JSON.stringify(redacted).includes('senha-secreta'), false);
+  assert.equal(JSON.stringify(redacted).includes('token-secreto'), false);
+  assert.equal(JSON.stringify(redacted).includes('00000000000'), false);
   const cookieA = sessionCookieFrom(sessionA.response);
   const cookieB = sessionCookieFrom(sessionB.response);
   assert.match(sessionA.response.headers.get('set-cookie') || '', /HttpOnly/i);
