@@ -28,6 +28,7 @@ import { createAssistedRegistration, getAssistedRegistration, listAssistedRegist
 import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
+import { publishAssistedRegistration } from './src/lib/assisted-registration-publish.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -817,6 +818,22 @@ async function handleApi(req, res, url) {
       return menu;
     });
     json(res, 200, { menu_draft: { id: saved.id, registration_id: saved.registration_id, content: saved.content, version: saved.version, reviewed_at: saved.reviewed_at, reviewed_hash: saved.reviewed_hash }, status: 'ready_to_publish' }); return;
+  }
+  const assistedPublishMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/publish$/i);
+  if (assistedPublishMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const body = await readJson(req);
+    if (body.confirm !== true) return json(res, 422, { error: 'Confirme a revisão antes de publicar.' });
+    const result = await publishAssistedRegistration(getLocalPool(), cleanUuid(assistedPublishMatch[1], 'cadastro'), admin);
+    let emailStatus = result.registration.email_status;
+    if (result.activation.token) {
+      try {
+        await sendAdminActivationEmail(req, { admin: { id: result.activation.admin_id, name: result.activation.name, email: result.activation.email }, company: result.company, store: result.store, token: result.activation.token, expiresAt: result.activation.expires_at });
+        emailStatus = 'sent';
+      } catch (error) { emailStatus = 'failed'; }
+      await getLocalPool().query('update assisted_registrations set email_status=$2,updated_at=now() where id=$1', [result.registration.id, emailStatus]);
+    }
+    json(res, 200, { ...result, activation: { admin_id: result.activation.admin_id, email: result.activation.email }, registration: { ...result.registration, email_status: emailStatus } }); return;
   }
   if (assistedRegistrationMatch && method === 'GET') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');

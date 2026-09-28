@@ -16,6 +16,7 @@ let server;
 let companyId;
 let platformAdminId;
 let regularAdminId;
+let publishedCompanyId;
 
 try {
   await client.connect();
@@ -35,14 +36,15 @@ try {
     phone: '(55) 9 9100-2200',
     email: `lead-${suffix}@example.test`,
     establishment_name: 'Lancheria Smoke',
-    document: '529.982.247-25',
+    document: formatCpf(generateCpf()),
     answers: { establishment: { city: 'Horizontina' } },
     attribution: { utm_source: 'instagram', utm_campaign: 'smoke' }
   };
+  const documentDigits = payload.document.replace(/\D/g, '');
   const created = await request('/api/platform/assisted-registrations', { method: 'POST', cookie: platformCookie, body: payload });
   assert.equal(created.status, 201);
   assert.match(created.data.registration.document_masked, /\*{3}/);
-  assert.ok(!JSON.stringify(created.data).includes('52998224725'), 'Documento completo vazou na resposta.');
+  assert.ok(!JSON.stringify(created.data).includes(documentDigits), 'Documento completo vazou na resposta.');
   const registrationId = created.data.registration.id;
 
   const uploaded = await request(`/api/platform/assisted-registrations/${registrationId}/files`, { method: 'POST', cookie: platformCookie, body: { name: 'menu.txt', mime_type: 'text/plain', data_base64: Buffer.from('Lanches\nXis - R$ 25,00').toString('base64') } });
@@ -58,13 +60,13 @@ try {
   assert.equal(reviewedMenu.data.status, 'ready_to_publish');
   assert.ok(reviewedMenu.data.menu_draft.reviewed_hash);
 
-  for (const query of ['Contato%20Smoke', '529.982.247-25', '55991002200']) {
+  for (const query of ['Contato%20Smoke', encodeURIComponent(payload.document), '55991002200']) {
     const listed = await request(`/api/platform/assisted-registrations?q=${query}`, { cookie: platformCookie });
     assert.ok(listed.data.registrations.some((item) => item.id === registrationId), 'Busca nao encontrou o rascunho esperado.');
-    assert.ok(!JSON.stringify(listed.data).includes('52998224725'), 'Busca expos documento completo.');
+    assert.ok(!JSON.stringify(listed.data).includes(documentDigits), 'Busca expos documento completo.');
   }
 
-  const duplicate = await request('/api/platform/assisted-registrations', { method: 'POST', cookie: platformCookie, body: { ...payload, document: '52998224725' }, allowFailure: true });
+  const duplicate = await request('/api/platform/assisted-registrations', { method: 'POST', cookie: platformCookie, body: { ...payload, document: payload.document.replace(/\D/g, '') }, allowFailure: true });
   assert.equal(duplicate.status, 409, 'Documento duplicado deve impedir novo rascunho.');
   assert.ok(Array.isArray(duplicate.data.duplicates) && duplicate.data.duplicates.length > 0);
 
@@ -75,6 +77,16 @@ try {
   const stale = await request(`/api/platform/assisted-registrations/${registrationId}`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: versionBeforeUpdate, responsible_name: 'Conflito' }, allowFailure: true });
   assert.equal(stale.status, 409, 'Autosave com versao antiga deve retornar conflito.');
 
+  const published = await request(`/api/platform/assisted-registrations/${registrationId}/publish`, { method: 'POST', cookie: platformCookie, body: { confirm: true } });
+  publishedCompanyId = published.data.company.id;
+  assert.equal(published.data.subscription.status, 'pending_activation');
+  assert.equal(published.data.subscription.trial_ends_at, null);
+  assert.equal(published.data.company.status, 'onboarding');
+  assert.equal(published.data.store.is_active, false);
+  assert.ok(!('token' in published.data.activation), 'Token de ativação não pode vazar na API.');
+  const repeatedPublish = await request(`/api/platform/assisted-registrations/${registrationId}/publish`, { method: 'POST', cookie: platformCookie, body: { confirm: true } });
+  assert.equal(repeatedPublish.data.company.id, published.data.company.id, 'Publicação repetida precisa ser idempotente.');
+
   console.log('Assisted registration API smoke: OK');
 } finally {
   if (server) server.kill();
@@ -82,6 +94,7 @@ try {
     await client.query("delete from public.assisted_registrations where establishment_name = 'Lancheria Smoke'").catch(() => {});
     await client.query('delete from public.admin_user_store_access where admin_user_id = any($1::uuid[])', [[platformAdminId, regularAdminId].filter(Boolean)]).catch(() => {});
     await client.query('delete from public.admin_users where id = any($1::uuid[])', [[platformAdminId, regularAdminId].filter(Boolean)]).catch(() => {});
+    if (publishedCompanyId) await client.query('delete from public.companies where id = $1', [publishedCompanyId]).catch(() => {});
     if (companyId) await client.query('delete from public.companies where id = $1', [companyId]).catch(() => {});
     await client.end();
   }
@@ -143,3 +156,14 @@ function loadEnv(file) {
 }
 
 function shouldUseSsl(value) { return !/localhost|127\.0\.0\.1/i.test(String(value || '')); }
+
+function generateCpf() {
+  const base = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10));
+  for (let position = 9; position <= 10; position += 1) {
+    const total = base.slice(0, position).reduce((sum, digit, index) => sum + digit * (position + 1 - index), 0);
+    const rest = (total * 10) % 11;
+    base.push(rest === 10 ? 0 : rest);
+  }
+  return base.join('');
+}
+function formatCpf(value) { return `${value.slice(0, 3)}.${value.slice(3, 6)}.${value.slice(6, 9)}-${value.slice(9)}`; }
