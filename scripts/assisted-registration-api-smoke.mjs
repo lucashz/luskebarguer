@@ -44,6 +44,14 @@ try {
   assert.ok(!JSON.stringify(created.data).includes('52998224725'), 'Documento completo vazou na resposta.');
   const registrationId = created.data.registration.id;
 
+  const uploaded = await request(`/api/platform/assisted-registrations/${registrationId}/files`, { method: 'POST', cookie: platformCookie, body: { name: 'menu.txt', mime_type: 'text/plain', data_base64: Buffer.from('Lanches\nXis - R$ 25,00').toString('base64') } });
+  assert.equal(uploaded.status, 201);
+  assert.ok(!JSON.stringify(uploaded.data).includes('storage_key'), 'Caminho privado não pode vazar na API.');
+  const imported = await request(`/api/platform/assisted-registrations/${registrationId}/import`, { method: 'POST', cookie: platformCookie, body: {} });
+  assert.equal(imported.data.menu_draft.content.categories[0].items[0].price_cents, 2500);
+  const menuDraft = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft`, { cookie: platformCookie });
+  assert.equal(menuDraft.data.menu_draft.registration_id, registrationId);
+
   for (const query of ['Contato%20Smoke', '529.982.247-25', '55991002200']) {
     const listed = await request(`/api/platform/assisted-registrations?q=${query}`, { cookie: platformCookie });
     assert.ok(listed.data.registrations.some((item) => item.id === registrationId), 'Busca nao encontrou o rascunho esperado.');

@@ -25,6 +25,8 @@ import { invalidCredentialError, passwordHashForVerification } from './src/lib/s
 import { redactSensitive } from './src/lib/security-redaction.js';
 import { assertAuthenticatedOrigin, securityHeaders } from './src/lib/security-http.js';
 import { createAssistedRegistration, getAssistedRegistration, listAssistedRegistrations, updateAssistedRegistration } from './src/lib/assisted-registration-store.js';
+import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
+import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -35,6 +37,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const UPLOAD_DIR = path.resolve(__dirname, process.env.UPLOAD_DIR || 'uploads');
+const ASSISTED_UPLOAD_DIR = path.resolve(__dirname, process.env.ASSISTED_UPLOAD_DIR || 'private-uploads/assisted');
 const MARKETING_MEDIA_DIR = path.resolve(process.env.MARKETING_MEDIA_DIR || path.join(__dirname, '..', 'tapronto-marketing'));
 const MARKETING_MEDIA_MAX_BYTES = Math.max(100 * 1024 * 1024, Number(process.env.MARKETING_MEDIA_MAX_BYTES || 2 * 1024 * 1024 * 1024));
 const BACKUP_DIR = path.resolve(__dirname, process.env.BACKUP_DIR || 'backups');
@@ -752,6 +755,38 @@ async function handleApi(req, res, url) {
   }
 
   const assistedRegistrationMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})$/i);
+  const assistedFilesMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/files$/i);
+  if (assistedFilesMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFilesMatch[1], 'cadastro');
+    if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    const body = await readJson(req);
+    const stored = await storeAssistedFile({ directory: ASSISTED_UPLOAD_DIR, name: body.name, mime_type: body.mime_type, buffer: Buffer.from(String(body.data_base64 || ''), 'base64') });
+    const result = await getLocalPool().query(`insert into assisted_registration_files (registration_id,original_name,safe_name,mime_type,size_bytes,storage_key,checksum_sha256) values ($1,$2,$3,$4,$5,$6,$7) returning id,original_name,mime_type,size_bytes,status,created_at`, [id, stored.original_name, stored.safe_name, stored.mime_type, stored.size_bytes, stored.storage_key, stored.checksum_sha256]);
+    json(res, 201, { file: result.rows[0] }); return;
+  }
+
+  const assistedImportMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/import$/i);
+  if (assistedImportMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedImportMatch[1], 'cadastro');
+    if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    const body = await readJson(req);
+    const storedFiles = await getLocalPool().query('select * from assisted_registration_files where registration_id=$1 and status=$2 order by created_at', [id, 'uploaded']);
+    const files = await Promise.all(storedFiles.rows.map(async (file) => ({ ...file, buffer: await readFile(path.join(ASSISTED_UPLOAD_DIR, file.storage_key)) })));
+    const draft = await extractAssistedMenu({ files, text: cleanText(body.text || '') });
+    const saved = await getLocalPool().query(`insert into assisted_menu_drafts (registration_id,content,validation) values ($1,$2::jsonb,$3::jsonb) on conflict (registration_id) do update set content=excluded.content,validation=excluded.validation,version=assisted_menu_drafts.version+1,reviewed_at=null,reviewed_by=null,reviewed_hash=null,updated_at=now() returning id,registration_id,content,validation,version,reviewed_at,updated_at`, [id, JSON.stringify(draft), JSON.stringify({ needs_review: draft.categories.some((group) => group.items.some((item) => item.needs_review)) })]);
+    json(res, 200, { menu_draft: saved.rows[0] }); return;
+  }
+
+  const assistedDraftMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/menu-draft$/i);
+  if (assistedDraftMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedDraftMatch[1], 'cadastro');
+    if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    const result = await getLocalPool().query('select id,registration_id,content,validation,version,reviewed_at,updated_at from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
+    json(res, 200, { menu_draft: result.rows[0] || null }); return;
+  }
   if (assistedRegistrationMatch && method === 'GET') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
     if (!admin) return;
