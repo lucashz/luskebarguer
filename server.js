@@ -24,6 +24,7 @@ import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
 import { redactSensitive } from './src/lib/security-redaction.js';
 import { assertAuthenticatedOrigin, securityHeaders } from './src/lib/security-http.js';
+import { createAssistedRegistration, getAssistedRegistration, listAssistedRegistrations, updateAssistedRegistration } from './src/lib/assisted-registration-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -725,6 +726,53 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await listPlatformCompanies(url.searchParams));
+    return;
+  }
+
+  if (url.pathname === '/api/platform/assisted-registrations' && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    const registrations = await listAssistedRegistrations(getLocalPool(), Object.fromEntries(url.searchParams));
+    json(res, 200, { registrations });
+    return;
+  }
+
+  if (url.pathname === '/api/platform/assisted-registrations' && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    try {
+      const registration = await createAssistedRegistration(getLocalPool(), await readJson(req), admin);
+      await audit('platform.assisted_registration.create', { req, actor_admin_id: admin.id, entity_type: 'assisted_registration', entity_id: registration.id, after_data: { status: registration.status } });
+      json(res, 201, { registration });
+    } catch (error) {
+      if (error.status === 409) return json(res, 409, { error: error.message, duplicates: error.duplicates || [] });
+      throw error;
+    }
+    return;
+  }
+
+  const assistedRegistrationMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})$/i);
+  if (assistedRegistrationMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    const registration = await getAssistedRegistration(getLocalPool(), cleanUuid(assistedRegistrationMatch[1], 'cadastro'));
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    json(res, 200, { registration });
+    return;
+  }
+
+  if (assistedRegistrationMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    try {
+      const registration = await updateAssistedRegistration(getLocalPool(), cleanUuid(assistedRegistrationMatch[1], 'cadastro'), await readJson(req), admin);
+      if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+      await audit('platform.assisted_registration.update', { req, actor_admin_id: admin.id, entity_type: 'assisted_registration', entity_id: registration.id, after_data: { status: registration.status, version: registration.version } });
+      json(res, 200, { registration });
+    } catch (error) {
+      if (error.status === 409) return json(res, 409, { error: error.message, duplicates: error.duplicates || [] });
+      throw error;
+    }
     return;
   }
 
@@ -13883,7 +13931,7 @@ async function requirePlatformAdmin(req, res, permission = 'platform.view') {
 const PLATFORM_PERMISSION_GROUPS = Object.freeze({
   view: ['platform.view', 'platform.audit.view', 'platform.services.view'],
   billing: ['platform.billing.manage'],
-  customer: ['platform.customer.suspend'],
+  customer: ['platform.customer.suspend', 'platform.companies.manage'],
   services: ['platform.services.manage']
 });
 
@@ -13894,6 +13942,7 @@ function platformPermissions(admin) {
     'platform.audit.view',
     'platform.billing.manage',
     'platform.customer.suspend',
+    'platform.companies.manage',
     'platform.services.view',
     'platform.services.manage'
   ];
