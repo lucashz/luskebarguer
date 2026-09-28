@@ -27,6 +27,15 @@
         <h2>Ativar Acesso</h2>
         <p class="muted" id="activationIntro">Validando link de ativação...</p>
         <p id="portalActivationMessage"></p>
+        <div id="assistedActivationPassword" hidden>
+          <label class="signup-field">Crie sua senha
+            <input id="activationPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password">
+          </label>
+          <label class="signup-field">Confirme sua senha
+            <input id="activationPasswordConfirm" type="password" minlength="8" maxlength="72" autocomplete="new-password">
+          </label>
+          <p class="muted">Seus 7 dias grátis começam depois que você criar a senha.</p>
+        </div>
         <div class="signup-submit-row">
           <a class="ghost-button compact" href="https://app.taprontomenu.com.br/">Voltar ao Login</a>
           <button class="portal-button" id="portalActivationButton" type="button" disabled>Ativar e entrar</button>

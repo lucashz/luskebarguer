@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { publishAssistedRegistration } from '../src/lib/assisted-registration-publish.js';
+import { pbkdf2Sync } from 'node:crypto';
+import { activationTokenHash, publishAssistedRegistration } from '../src/lib/assisted-registration-publish.js';
 import { filterPlatformMetricsData, isPlatformPublishedStore, isPlatformRevenueSubscription } from '../src/lib/platform-metrics-exclusions.js';
 
 assert.equal(typeof publishAssistedRegistration, 'function');
+assert.equal(activationTokenHash('fixture-token'), pbkdf2Sync('fixture-token', 'admin_account_activation', 120000, 32, 'sha256').toString('hex'), 'Token assistido precisa usar o mesmo hash da ativação existente.');
 const pendingCompany = { id: '44444444-4444-4444-8444-444444444444', status: 'onboarding' };
 const filtered = filterPlatformMetricsData({ companies: [pendingCompany], stores: [{ id: '55555555-5555-4555-8555-555555555555', company_id: pendingCompany.id, is_active: false }], subscriptions: [{ company_id: pendingCompany.id, status: 'pending_activation' }] });
 assert.equal(filtered.companies.filter((company) => company.status === 'active').length, 0);

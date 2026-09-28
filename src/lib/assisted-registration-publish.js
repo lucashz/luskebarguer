@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { assertMenuDraftPublishable } from './assisted-menu-review.js';
 import { publicAssistedRegistration } from './assisted-registration.js';
 
@@ -42,7 +42,7 @@ export async function publishAssistedRegistration(pool, id, actor = {}, options 
     const plan = (await client.query("select id from subscription_plans where is_active=true order by sort_order asc limit 1")).rows[0];
     const subscription = (await client.query(`insert into company_subscriptions (company_id,plan_id,status,metadata) values ($1,$2,'pending_activation',$3::jsonb) returning *`, [company.id, plan?.id || null, JSON.stringify({ source: 'assisted_registration', registration_id: id })])).rows[0];
     const rawToken = randomBytes(32).toString('hex');
-    await client.query(`insert into admin_activation_tokens (admin_user_id,token_hash,status,expires_at) values ($1,$2,'pending',now()+interval '7 days')`, [admin.id, createHash('sha256').update(rawToken).digest('hex')]);
+    await client.query(`insert into admin_activation_tokens (admin_user_id,token_hash,status,expires_at) values ($1,$2,'pending',now()+interval '7 days')`, [admin.id, activationTokenHash(rawToken)]);
     const published = (await client.query(`update assisted_registrations set status='published',publish_key=coalesce(publish_key,$2),company_id=$3,store_id=$4,admin_id=$5,subscription_id=$6,published_at=now(),updated_at=now() where id=$1 returning *`, [id, `assisted:${id}`, company.id, store.id, admin.id, subscription.id])).rows[0];
     await client.query('commit');
     return { registration: publicAssistedRegistration(published), company: safeCompany(company), store: safeStore(store), activation: { token: rawToken, admin_id: admin.id, name: registration.responsible_name, email: admin.email, expires_at: new Date(Date.now() + 7 * 86400000).toISOString() }, subscription: safeSubscription(subscription) };
@@ -59,3 +59,4 @@ function safeStore(row = {}) { return { id: row.id, name: row.name, slug: row.sl
 function safeSubscription(row = {}) { return { id: row.id, status: row.status, trial_ends_at: row.trial_ends_at, current_period_starts_at: row.current_period_starts_at }; }
 function slugify(value) { return String(value || 'loja').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 45) || 'loja'; }
 function statusError(status, message) { const error = new Error(message); error.status = status; return error; }
+export function activationTokenHash(token) { return pbkdf2Sync(String(token || ''), 'admin_account_activation', 120000, 32, 'sha256').toString('hex'); }

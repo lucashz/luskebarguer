@@ -279,7 +279,7 @@ async function handleApi(req, res, url) {
       return;
     }
     if (method === 'POST') {
-      const result = await activateAdminAccount(req, portalActivationMatch[1]);
+      const result = await activateAdminAccount(req, portalActivationMatch[1], await readJson(req));
       json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
       return;
     }
@@ -828,12 +828,31 @@ async function handleApi(req, res, url) {
     let emailStatus = result.registration.email_status;
     if (result.activation.token) {
       try {
-        await sendAdminActivationEmail(req, { admin: { id: result.activation.admin_id, name: result.activation.name, email: result.activation.email }, company: result.company, store: result.store, token: result.activation.token, expiresAt: result.activation.expires_at });
+        await sendAssistedActivationEmail(req, { admin: { id: result.activation.admin_id, name: result.activation.name, email: result.activation.email }, company: result.company, store: result.store, token: result.activation.token, expiresAt: result.activation.expires_at });
         emailStatus = 'sent';
       } catch (error) { emailStatus = 'failed'; }
       await getLocalPool().query('update assisted_registrations set email_status=$2,updated_at=now() where id=$1', [result.registration.id, emailStatus]);
     }
     json(res, 200, { ...result, activation: { admin_id: result.activation.admin_id, email: result.activation.email }, registration: { ...result.registration, email_status: emailStatus } }); return;
+  }
+  const assistedResendMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/resend-activation$/i);
+  if (assistedResendMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedResendMatch[1], 'cadastro');
+    const rows = await getLocalPool().query(`select ar.*,au.name admin_name,au.email admin_email,c.name company_name,s.name store_name,s.slug store_slug,s.public_url from assisted_registrations ar join admin_users au on au.id=ar.admin_id join companies c on c.id=ar.company_id join stores s on s.id=ar.store_id where ar.id=$1 limit 1`, [id]);
+    const registration = rows.rows[0];
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (registration.status === 'activated') return json(res, 409, { error: 'Esta conta já foi ativada.' });
+    const token = randomBytes(32).toString('hex'); const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    await withLocalTransaction(async (db) => {
+      await db('PATCH', 'admin_activation_tokens', { admin_user_id: `eq.${registration.admin_id}`, status: 'eq.pending' }, { status: 'cancelled' });
+      await db('POST', 'admin_activation_tokens', {}, { admin_user_id: registration.admin_id, token_hash: hashAdminActivationToken(token), status: 'pending', expires_at: expiresAt });
+    });
+    let emailStatus = 'sent';
+    try { await sendAssistedActivationEmail(req, { admin: { id: registration.admin_id, name: registration.admin_name, email: registration.admin_email }, company: { id: registration.company_id, name: registration.company_name }, store: { id: registration.store_id, name: registration.store_name, slug: registration.store_slug, public_url: registration.public_url }, token, expiresAt }); }
+    catch { emailStatus = 'failed'; }
+    await getLocalPool().query('update assisted_registrations set email_status=$2,updated_at=now() where id=$1', [id, emailStatus]);
+    json(res, 200, { ok: true, email_status: emailStatus }); return;
   }
   if (assistedRegistrationMatch && method === 'GET') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
@@ -5624,16 +5643,20 @@ async function getPublicAdminActivation(token) {
     limit: '1'
   });
   if (!admin) throw httpError(404, 'Link de ativação inválido.');
+  const assisted = await getLocalPool().query('select id from assisted_registrations where admin_id=$1 limit 1', [activation.admin_user_id]);
   return {
     email: admin.email,
     name: admin.name || '',
     is_active: admin.is_active === true,
-    expires_at: activation.expires_at
+    expires_at: activation.expires_at,
+    requires_password: Boolean(assisted.rows[0])
   };
 }
 
-async function activateAdminAccount(req, token) {
+async function activateAdminAccount(req, token, data = {}) {
   const activation = await findAdminActivationByToken(token);
+  const assisted = await getLocalPool().query('select id from assisted_registrations where admin_id=$1 limit 1', [activation.admin_user_id]);
+  if (assisted.rows[0]) return activateAssistedAdminAccount(req, activation, data);
   const [admin] = await dbRequest('PATCH', 'admin_users', { id: `eq.${activation.admin_user_id}` }, {
     is_active: true,
     updated_at: new Date().toISOString()
@@ -5666,6 +5689,40 @@ async function activateAdminAccount(req, token) {
     after_data: { email: maskEmailOrToken(admin.email) }
   });
   return createAdminSession(admin);
+}
+
+async function activateAssistedAdminAccount(req, activation, data = {}) {
+  const password = validatePassword(data.password || '');
+  const client = await getLocalPool().connect();
+  let admin;
+  try {
+    await client.query('begin');
+    const lockedToken = (await client.query("select * from admin_activation_tokens where id=$1 and status='pending' for update", [activation.id])).rows[0];
+    if (!lockedToken || new Date(lockedToken.expires_at).getTime() < Date.now()) throw httpError(410, 'Este link de ativação expirou ou já foi utilizado.');
+    const registration = (await client.query('select * from assisted_registrations where admin_id=$1 for update', [activation.admin_user_id])).rows[0];
+    if (!registration) throw httpError(404, 'Cadastro assistido não encontrado.');
+    admin = (await client.query('update admin_users set password_hash=$2,is_active=true,updated_at=now() where id=$1 returning *', [activation.admin_user_id, hashPassword(password)])).rows[0];
+    await client.query("update admin_activation_tokens set status=case when id=$2 then 'used' else 'cancelled' end,used_at=case when id=$2 then now() else used_at end where admin_user_id=$1 and status='pending'", [admin.id, activation.id]);
+    await client.query("update companies set status='trial',updated_at=now() where id=$1", [registration.company_id]);
+    await client.query('update stores set is_active=true,updated_at=now() where id=$1', [registration.store_id]);
+    await client.query(`update company_subscriptions set status='trial',trial_ends_at=coalesce(trial_ends_at,now()+interval '7 days'),current_period_starts_at=coalesce(current_period_starts_at,now()),current_period_ends_at=coalesce(current_period_ends_at,now()+interval '7 days'),next_renewal_at=coalesce(next_renewal_at,now()+interval '7 days'),updated_at=now() where id=$1 and status='pending_activation'`, [registration.subscription_id]);
+    await client.query("update assisted_registrations set status='activated',activated_at=coalesce(activated_at,now()),updated_at=now() where id=$1", [registration.id]);
+    await client.query('commit');
+  } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+  finally { client.release(); }
+  clearAdminUsersCache();
+  await recordPublicMarketingEvent(req, { event_name: 'signup_completed', placement: 'assisted_activation', company_id: admin.company_id }).catch(() => {});
+  return createAdminSession(admin);
+}
+
+async function sendAssistedActivationEmail(req, { admin, company, store, token, expiresAt }) {
+  const activationUrl = absoluteAppUrl(req, `/ativar-conta?token=${token}`);
+  await sendPlatformTemplateEmail({
+    to: admin.email,
+    templateKey: 'assisted_account_ready',
+    variables: { customer_name: admin.name || admin.email, company_name: company.name, store_name: store.name, cardapio_url: absolutePublicUrl(store.public_url || `/${store.slug}`), activation_url: activationUrl, dashboard_url: activationUrl, due_date: formatDateTimePt(expiresAt), support_url: absolutePanelUrl('/') },
+    requireActive: true
+  });
 }
 
 async function findAdminActivationByToken(token) {
@@ -12448,6 +12505,7 @@ async function recordPublicExperimentEvent(req, data = {}) {
 }
 
 const EMAIL_TEMPLATE_DEFINITIONS = [
+  { key: 'assisted_account_ready', name: 'Cardápio assistido pronto', subject: 'Seu cardápio TáPronto já está pronto 🎉', body: 'Olá {{customer_name}},\n\nA gente terminou de montar o cardápio da {{store_name}} no TáPronto.\n\nConfira seu cardápio: {{cardapio_url}}\n\nCrie sua senha e comece: {{activation_url}}\n\nSeus 7 dias grátis começam somente depois que você criar a senha. Se precisar, fale com a gente: {{support_url}}' },
   { key: 'account_activation', name: 'Ativação de conta', subject: 'Ative sua conta no TáPronto', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada no TáPronto.\n\nPara liberar o acesso ao painel, ative sua conta pelo link abaixo:\n{{activation_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não criou essa conta, ignore este e-mail.' },
   { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada com sucesso.\n\nAcesse o painel para concluir a configuração, cadastrar produtos e publicar seu cardápio:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
   { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao painel da sua loja.\n\nClique no link abaixo para criar uma nova senha:\n{{reset_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não solicitou isso, ignore este e-mail.' },

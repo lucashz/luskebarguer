@@ -427,6 +427,9 @@ async function initAccountActivation() {
       const email = data.activation?.email ? ` para ${data.activation.email}` : '';
       intro.textContent = `Link válido${email}. Clique no botão abaixo para liberar o painel.`;
     }
+    const passwordFields = document.querySelector('#assistedActivationPassword');
+    if (passwordFields) passwordFields.hidden = !data.activation?.requires_password;
+    portalActivationButton.dataset.requiresPassword = data.activation?.requires_password ? 'true' : 'false';
     portalActivationButton.disabled = false;
   } catch (error) {
     if (intro) intro.textContent = error.message || 'Link inválido ou expirado.';
@@ -438,7 +441,11 @@ async function initAccountActivation() {
     portalActivationButton.textContent = 'Ativando...';
     if (message) message.textContent = '';
     try {
-      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, { method: 'POST' });
+      const requiresPassword = portalActivationButton.dataset.requiresPassword === 'true';
+      const password = document.querySelector('#activationPassword')?.value || '';
+      const confirmation = document.querySelector('#activationPasswordConfirm')?.value || '';
+      if (requiresPassword && password !== confirmation) throw new Error('A confirmação da senha não confere.');
+      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, { method: 'POST', body: requiresPassword ? { password } : {} });
       if (message) message.textContent = data.message || 'Conta ativada com sucesso.';
       setTimeout(() => {
         location.href = canonicalPanelRedirect(data.redirect);
