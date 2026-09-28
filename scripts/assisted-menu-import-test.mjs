@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { extractAssistedMenu, validateMenuDraft } from '../src/lib/assisted-menu-import.js';
 import { storeAssistedFile, validateAssistedFile } from '../src/lib/assisted-registration-files.js';
+import { applyMenuDraftPatch, assertMenuDraftPublishable, reviewMenuDraft } from '../src/lib/assisted-menu-review.js';
 
 const { default: ExcelJS } = await import('exceljs');
 
@@ -40,6 +41,19 @@ try {
   assert.ok(stored.storage_key && !stored.storage_key.includes('menu.txt'));
   assert.equal((await readFile(stored.absolute_path)).length, text.length);
   assert.ok(!stored.absolute_path.includes('public'), 'Arquivo assistido precisa ficar fora do diretório público.');
+
+  const categoryId = '11111111-1111-4111-8111-111111111111';
+  const itemId = '22222222-2222-4222-8222-222222222222';
+  const baseDraft = { version: 1, schema_version: 1, categories: [{ id: categoryId, name: 'Lanches', items: [{ id: itemId, name: 'Xis', description: '', price_cents: 2500, needs_review: false, option_groups: [] }] }] };
+  const edited = applyMenuDraftPatch(baseDraft, { expected_version: 1, operations: [{ type: 'update_item', item_id: itemId, changes: { price_cents: 2690 } }, { type: 'duplicate_item', item_id: itemId }] });
+  assert.equal(edited.version, 2);
+  assert.equal(edited.categories[0].items[0].price_cents, 2690);
+  assert.equal(edited.categories[0].items.length, 2);
+  assert.notEqual(edited.categories[0].items[1].id, itemId);
+  assert.throws(() => applyMenuDraftPatch(edited, { expected_version: 1, operations: [] }), /outra tela|versão/i);
+  assert.throws(() => assertMenuDraftPublishable({ ...baseDraft, categories: [{ ...baseDraft.categories[0], items: [{ ...baseDraft.categories[0].items[0], price_cents: null, needs_review: true }] }] }), /categories\[0\]\.items\[0\]/);
+  const reviewed = reviewMenuDraft(edited, { id: '33333333-3333-4333-8333-333333333333' });
+  assert.ok(reviewed.reviewed_at && reviewed.reviewed_hash && reviewed.reviewed_by);
 
   console.log('Assisted menu import: OK');
 } finally {

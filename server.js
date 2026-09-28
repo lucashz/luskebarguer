@@ -27,6 +27,7 @@ import { assertAuthenticatedOrigin, securityHeaders } from './src/lib/security-h
 import { createAssistedRegistration, getAssistedRegistration, listAssistedRegistrations, updateAssistedRegistration } from './src/lib/assisted-registration-store.js';
 import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
+import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -776,6 +777,7 @@ async function handleApi(req, res, url) {
     const files = await Promise.all(storedFiles.rows.map(async (file) => ({ ...file, buffer: await readFile(path.join(ASSISTED_UPLOAD_DIR, file.storage_key)) })));
     const draft = await extractAssistedMenu({ files, text: cleanText(body.text || '') });
     const saved = await getLocalPool().query(`insert into assisted_menu_drafts (registration_id,content,validation) values ($1,$2::jsonb,$3::jsonb) on conflict (registration_id) do update set content=excluded.content,validation=excluded.validation,version=assisted_menu_drafts.version+1,reviewed_at=null,reviewed_by=null,reviewed_hash=null,updated_at=now() returning id,registration_id,content,validation,version,reviewed_at,updated_at`, [id, JSON.stringify(draft), JSON.stringify({ needs_review: draft.categories.some((group) => group.items.some((item) => item.needs_review)) })]);
+    await getLocalPool().query("update assisted_registrations set status='reviewing_menu',updated_at=now(),version=version+1 where id=$1", [id]);
     json(res, 200, { menu_draft: saved.rows[0] }); return;
   }
 
@@ -786,6 +788,35 @@ async function handleApi(req, res, url) {
     if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
     const result = await getLocalPool().query('select id,registration_id,content,validation,version,reviewed_at,updated_at from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
     json(res, 200, { menu_draft: result.rows[0] || null }); return;
+  }
+  if (assistedDraftMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedDraftMatch[1], 'cadastro');
+    const current = await getLocalPool().query('select * from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
+    if (!current.rows[0]) return json(res, 404, { error: 'Rascunho de cardápio não encontrado.' });
+    const body = await readJson(req);
+    let content;
+    try { content = applyMenuDraftPatch({ ...current.rows[0].content, version: current.rows[0].version }, body); }
+    catch (error) { if (error.status === 409) return json(res, 409, { error: error.message }); throw error; }
+    const saved = await getLocalPool().query(`update assisted_menu_drafts set content=$3::jsonb,version=version+1,reviewed_at=null,reviewed_by=null,reviewed_hash=null,updated_at=now() where registration_id=$1 and version=$2 returning id,registration_id,content,validation,version,reviewed_at,updated_at`, [id, body.expected_version, JSON.stringify({ ...content, version: undefined })]);
+    if (!saved.rows[0]) return json(res, 409, { error: 'Este cardápio foi alterado em outra tela.' });
+    json(res, 200, { menu_draft: saved.rows[0] }); return;
+  }
+
+  const assistedReviewMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/menu-draft\/review$/i);
+  if (assistedReviewMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedReviewMatch[1], 'cadastro');
+    const current = await getLocalPool().query('select * from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
+    if (!current.rows[0]) return json(res, 404, { error: 'Rascunho de cardápio não encontrado.' });
+    const reviewed = reviewMenuDraft({ ...current.rows[0].content, version: current.rows[0].version }, admin);
+    const saved = await withLocalTransaction(async (db) => {
+      const [menu] = await db('PATCH', 'assisted_menu_drafts', { registration_id: `eq.${id}`, version: `eq.${current.rows[0].version}` }, { reviewed_at: reviewed.reviewed_at, reviewed_by: reviewed.reviewed_by, reviewed_hash: reviewed.reviewed_hash, updated_at: reviewed.reviewed_at });
+      if (!menu) throw Object.assign(new Error('Este cardápio foi alterado em outra tela.'), { status: 409 });
+      await db('PATCH', 'assisted_registrations', { id: `eq.${id}` }, { status: 'ready_to_publish', updated_at: reviewed.reviewed_at });
+      return menu;
+    });
+    json(res, 200, { menu_draft: { id: saved.id, registration_id: saved.registration_id, content: saved.content, version: saved.version, reviewed_at: saved.reviewed_at, reviewed_hash: saved.reviewed_hash }, status: 'ready_to_publish' }); return;
   }
   if (assistedRegistrationMatch && method === 'GET') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');

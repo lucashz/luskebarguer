@@ -10,6 +10,7 @@ const port = 3600 + Math.floor(Math.random() * 300);
 const baseUrl = `http://127.0.0.1:${port}`;
 const suffix = randomUUID();
 const password = 'AssistedSmoke123!';
+const fixtureIp = `198.51.100.${20 + Math.floor(Math.random() * 180)}`;
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: shouldUseSsl(process.env.DATABASE_URL) ? { rejectUnauthorized: false } : false });
 let server;
 let companyId;
@@ -51,6 +52,11 @@ try {
   assert.equal(imported.data.menu_draft.content.categories[0].items[0].price_cents, 2500);
   const menuDraft = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft`, { cookie: platformCookie });
   assert.equal(menuDraft.data.menu_draft.registration_id, registrationId);
+  const patchedMenu = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: 1, operations: [] } });
+  assert.equal(patchedMenu.data.menu_draft.version, 2);
+  const reviewedMenu = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft/review`, { method: 'POST', cookie: platformCookie, body: {} });
+  assert.equal(reviewedMenu.data.status, 'ready_to_publish');
+  assert.ok(reviewedMenu.data.menu_draft.reviewed_hash);
 
   for (const query of ['Contato%20Smoke', '529.982.247-25', '55991002200']) {
     const listed = await request(`/api/platform/assisted-registrations?q=${query}`, { cookie: platformCookie });
@@ -63,10 +69,10 @@ try {
   assert.ok(Array.isArray(duplicate.data.duplicates) && duplicate.data.duplicates.length > 0);
 
   const fetched = await request(`/api/platform/assisted-registrations/${registrationId}`, { cookie: platformCookie });
-  assert.equal(fetched.data.registration.version, 1);
-  const updated = await request(`/api/platform/assisted-registrations/${registrationId}`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: 1, responsible_name: 'Contato Atualizado' } });
-  assert.equal(updated.data.registration.version, 2);
-  const stale = await request(`/api/platform/assisted-registrations/${registrationId}`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: 1, responsible_name: 'Conflito' }, allowFailure: true });
+  const versionBeforeUpdate = fetched.data.registration.version;
+  const updated = await request(`/api/platform/assisted-registrations/${registrationId}`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: versionBeforeUpdate, responsible_name: 'Contato Atualizado' } });
+  assert.equal(updated.data.registration.version, versionBeforeUpdate + 1);
+  const stale = await request(`/api/platform/assisted-registrations/${registrationId}`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: versionBeforeUpdate, responsible_name: 'Conflito' }, allowFailure: true });
   assert.equal(stale.status, 409, 'Autosave com versao antiga deve retornar conflito.');
 
   console.log('Assisted registration API smoke: OK');
@@ -111,7 +117,7 @@ async function startServer() {
 }
 
 async function request(path, options = {}) {
-  const headers = {};
+  const headers = { 'X-Forwarded-For': fixtureIp };
   if (options.cookie) headers.Cookie = options.cookie;
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(baseUrl + path, { method: options.method || 'GET', headers, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
