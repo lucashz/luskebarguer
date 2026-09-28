@@ -88,6 +88,7 @@ enum SessionType {
 }
 
 enum SubscriptionStatus {
+  pending_activation
   trial
   active
   payment_pending
@@ -97,6 +98,17 @@ enum SubscriptionStatus {
   cancelled
   expired
   suspended
+}
+
+enum AssistedRegistrationStatus {
+  new
+  in_progress
+  awaiting_menu
+  reviewing_menu
+  ready_to_publish
+  published
+  activated
+  cancelled
 }
 
 enum OverrideType {
@@ -1384,4 +1396,75 @@ model MarketingExperiment {
 
   @@index([status, createdAt])
   @@map("marketing_experiments")
+}
+
+model AssistedRegistration {
+  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status             AssistedRegistrationStatus @default(new)
+  responsibleName    String                     @default("") @map("responsible_name")
+  phone              String                     @default("")
+  email              String                     @default("")
+  establishmentName  String                     @default("") @map("establishment_name")
+  documentNormalized String                     @map("document_normalized")
+  answers            Json                       @default("{}")
+  attribution        Json                       @default("{}")
+  operatorAdminId    String?                    @map("operator_admin_id") @db.Uuid
+  version            Int                        @default(1)
+  publishKey         String?                    @unique @map("publish_key")
+  companyId          String?                    @map("company_id") @db.Uuid
+  storeId            String?                    @map("store_id") @db.Uuid
+  adminId            String?                    @map("admin_id") @db.Uuid
+  subscriptionId     String?                    @map("subscription_id") @db.Uuid
+  emailStatus        String                     @default("not_sent") @map("email_status")
+  emailLastErrorCode String?                    @map("email_last_error_code")
+  publishedAt        DateTime?                  @map("published_at") @db.Timestamptz(6)
+  activatedAt        DateTime?                  @map("activated_at") @db.Timestamptz(6)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  files     AssistedRegistrationFile[]
+  menuDraft AssistedMenuDraft?
+
+  @@index([status, updatedAt])
+  @@index([phone])
+  @@index([email])
+  @@map("assisted_registrations")
+}
+
+model AssistedRegistrationFile {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  registrationId String   @map("registration_id") @db.Uuid
+  originalName   String   @map("original_name")
+  safeName       String   @map("safe_name")
+  mimeType       String   @map("mime_type")
+  sizeBytes      BigInt   @map("size_bytes")
+  storageKey     String   @unique @map("storage_key")
+  checksumSha256 String   @map("checksum_sha256")
+  status         String   @default("uploaded")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  registration AssistedRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([registrationId, status, createdAt])
+  @@map("assisted_registration_files")
+}
+
+model AssistedMenuDraft {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  registrationId String    @unique @map("registration_id") @db.Uuid
+  schemaVersion  Int       @default(1) @map("schema_version")
+  content        Json      @default("{}")
+  validation     Json      @default("{}")
+  version        Int       @default(1)
+  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy     String?   @map("reviewed_by") @db.Uuid
+  reviewedHash   String?   @map("reviewed_hash")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  registration AssistedRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([reviewedAt, updatedAt])
+  @@map("assisted_menu_drafts")
 }

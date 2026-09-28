@@ -40,8 +40,9 @@
     "test:marketing-ui": "node scripts/marketing-autopilot-ui-smoke.mjs",
     "capture:marketing": "node scripts/capture-marketing-workspace.mjs",
     "test:social": "node scripts/social-publishing-smoke.mjs",
-    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:security-hardening && npm run test:idor && npm run test:payments && npm run test:flows && npm run test:platform-health && npm run test:marketing && npm run test:social && npm run test:seo",
-    "test:security-hardening": "node scripts/security-hardening-smoke.mjs"
+    "test:all": "npm run test:syntax && npm run test:local && npm run test:plans && npm run test:trial && npm run test:security && npm run test:security-hardening && npm run test:assisted-registration && npm run test:idor && npm run test:payments && npm run test:flows && npm run test:platform-health && npm run test:marketing && npm run test:social && npm run test:seo",
+    "test:security-hardening": "node scripts/security-hardening-smoke.mjs",
+    "test:assisted-registration": "node scripts/assisted-registration-domain-test.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
