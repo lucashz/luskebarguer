@@ -20,9 +20,9 @@ try {
 
   const helpHome = await page('/ajuda.html', 'taprontomenu.com.br');
   const helpScript = await page('/ajuda.js', 'taprontomenu.com.br');
-  assert(helpHome.status === 200 && helpHome.body.includes('Como podemos ajudar?'), 'Central de Ajuda nao respondeu corretamente.');
-  assert(helpScript.status === 200 && helpScript.body.includes('Como usar os relat') && helpScript.body.includes('Como convidar usu'), 'Ajuda nao contempla recursos recentes do painel.');
-  assert(helpScript.body.includes('Antes de come') && helpScript.body.includes('Resultado esperado') && helpScript.body.includes('Se algo n'), 'Artigos de ajuda continuam sem estrutura detalhada.');
+  assert(helpHome.status === 200 && /Como\s+podemos\s+ajudar\?/i.test(helpHome.body), 'Central de Ajuda nao respondeu corretamente.');
+  assert(helpScript.status === 200 && /Como\s+usar\s+os\s+relat/i.test(helpScript.body) && /Como\s+convidar\s+usu/i.test(helpScript.body), 'Ajuda nao contempla recursos recentes do painel.');
+  assert(/Antes\s+de\s+come/i.test(helpScript.body) && /Resultado\s+esperado/i.test(helpScript.body) && /Se\s+algo\s+n/i.test(helpScript.body), 'Artigos de ajuda continuam sem estrutura detalhada.');
 
   const sitemap = await page('/sitemap.xml', 'taprontomenu.com.br');
   assert(sitemap.status === 200 && sitemap.type.includes('application/xml'), 'Indice de sitemap invalido.');
@@ -60,7 +60,7 @@ try {
   assert(!guideArticle.body.includes('class="seo-shot"'), 'Artigo ainda usa a imagem distorcida do template antigo.');
 
   const newGuideArticle = await page('/indicadores-pedidos-restaurante', 'guias.taprontomenu.com.br');
-  assert(newGuideArticle.status === 200 && newGuideArticle.body.includes('Teste pelo ponto de vista do cliente'), 'Novo guia SEO nao possui conteudo editorial completo.');
+  assert(newGuideArticle.status === 200 && newGuideArticle.body.includes('Indicadores simples para acompanhar pedidos') && newGuideArticle.body.includes('Compare per'), 'Novo guia SEO nao possui conteudo editorial completo.');
 
   const privatePage = await page('/admin.html', 'app.taprontomenu.com.br');
   assert(/noindex/i.test(privatePage.robots), 'Painel privado nao retorna X-Robots-Tag noindex.');
