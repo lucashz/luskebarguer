@@ -67,12 +67,16 @@ a { color: inherit; }
 .steps h3 { margin: 22px 0 9px; font-size: 20px; }
 .steps p { margin: 0; color: var(--muted); line-height: 1.55; }
 
-.product-proof { max-width: 1124px; margin: 0 auto; padding: 110px 28px; display: grid; grid-template-columns: .82fr 1.18fr; align-items: center; gap: 65px; }
+.product-proof { max-width: 900px; margin: 0 auto; padding: 90px 28px; }
 .product-proof ul { margin: 28px 0 0; padding: 0; list-style: none; }
 .product-proof li { position: relative; margin: 14px 0; padding-left: 30px; color: var(--muted); line-height: 1.45; }
 .product-proof li::before { content: "\2713"; position: absolute; left: 0; top: 0; color: var(--green); font-weight: 900; }
 .product-proof > *, .proof-carousel, .proof-images, .proof-images figure { min-width: 0; }
 .proof-carousel { display:grid; gap:18px; }
+.hero-visual .proof-carousel { position:relative; z-index:1; }
+.hero-visual .proof-images img { height:360px; background:#fff; }
+.hero-visual .proof-images figure { box-shadow:0 18px 45px rgba(0,0,0,.22); }
+.hero-visual .proof-carousel-controls button { border-color:rgba(255,255,255,.5); box-shadow:0 5px 16px rgba(0,0,0,.12); }
 .proof-images { display: block; }
 .proof-images figure { overflow: hidden; margin: 0; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: var(--shadow); cursor: zoom-in; transition: transform .18s ease, border-color .18s ease; }
 .proof-images figure[hidden] { display:none; }
@@ -127,7 +131,7 @@ body.delivery-modal-open .delivery-whatsapp-float { visibility: hidden; }
   .hero h1 { font-size: clamp(40px, 12vw, 58px); }
   .hero-lead { font-size: 18px; }
   .primary-cta { width: 100%; text-align: center; }
-  .hero-visual { max-width: 520px; margin: 0 auto; padding: 27px; border-radius: 28px; }
+  .hero-visual { width:100%; max-width:520px; margin:0 auto; padding:4px; border-radius:22px; }
   .visual-badge { left: 10px; }
   .visual-proof { right: 8px; bottom: 16px; }
   .pain-strip { margin-bottom: 72px; padding: 0 20px; grid-template-columns: 1fr; }
@@ -155,7 +159,7 @@ body.delivery-modal-open .delivery-whatsapp-float { visibility: hidden; }
   .hero { padding-top: 32px; }
   .hero h1 { font-size: 42px; }
   .offer-card { padding: 15px; }
-  .hero-visual { padding: 22px; }
+  .hero-visual { padding:4px; }
   .visual-proof { max-width: 210px; }
   .proof-images { gap: 9px; }
 }

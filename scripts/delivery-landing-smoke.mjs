@@ -29,6 +29,9 @@ try {
   assert(/class="mobile-signup-bar"[^>]*>[\s\S]*data-delivery-whatsapp/.test(html), 'A landing precisa ter CTA assistido fixo no celular.');
   assert(/class="delivery-whatsapp-float"[^>]*data-delivery-whatsapp/.test(html), 'A landing precisa ter botão flutuante do WhatsApp rastreável.');
   assert((html.match(/data-delivery-gallery-item/g) || []).length === 5, 'O carrossel precisa apresentar as cinco telas reais.');
+  assert((html.match(/data-proof-carousel/g) || []).length === 1, 'A landing deve ter um único carrossel.');
+  assert(/class="hero-visual"[\s\S]*data-proof-carousel[\s\S]*<\/section>/.test(html), 'O carrossel precisa ocupar o destaque visual do topo.');
+  assert(!html.includes('class="phone-shell"'), 'O mockup inclinado antigo precisa ser removido do topo.');
   for (const label of ['Cardápio', 'Pedidos', 'Produtos', 'Operação', 'Configuração']) assert(html.includes(`data-carousel-label="${label}"`), `Controle ausente: ${label}`);
   assert(html.includes('data-delivery-image-modal') && html.includes('role="dialog"'), 'A landing precisa oferecer modal acessível para ampliar as capturas.');
   assert(html.includes('/delivery.css') && html.includes('/delivery.js'), 'A landing precisa carregar seus assets dedicados.');
