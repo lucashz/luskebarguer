@@ -45,6 +45,7 @@ function applyOperation(draft, operation = {}) {
   else if (operation.type === 'duplicate_item' && found) found.category.items.splice(found.index + 1, 0, { ...structuredClone(found.item), id: randomUUID(), name: `${found.item.name} (cópia)` });
   else if (operation.type === 'move_item' && found) { const target = draft.categories.find((entry) => entry.id === operation.category_id); if (!target) throw validation('Categoria de destino inválida.'); found.category.items.splice(found.index, 1); target.items.push(found.item); }
   else if (operation.type === 'delete_category') { const index = draft.categories.findIndex((entry) => entry.id === operation.category_id); if (index < 0) throw validation('Categoria inválida.'); draft.categories.splice(index, 1); }
+  else if (operation.type === 'update_category') { const target = draft.categories.find((entry) => entry.id === operation.category_id); if (!target) throw validation('Categoria inválida.'); if (operation.changes?.name !== undefined) target.name = clean(operation.changes.name); }
   else if (operation.type === 'add_option_group' && found) { found.item.option_groups ||= []; found.item.option_groups.push({ id: randomUUID(), name: clean(operation.name), options: Array.isArray(operation.options) ? operation.options.map((option) => ({ id: randomUUID(), name: clean(option.name), price_cents: Number(option.price_cents || 0) })) : [] }); }
   else throw validation('Operação de revisão inválida.');
 }

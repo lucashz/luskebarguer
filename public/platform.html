@@ -23,6 +23,7 @@
           <button class="active" data-platform-view="overview" type="button"><span aria-hidden="true">⌂</span>Visão Geral</button>
           <button data-platform-view="commercial" type="button"><span aria-hidden="true">▥</span>Métricas Comerciais</button>
           <button data-platform-view="marketing" type="button"><span aria-hidden="true">◎</span>Marketing</button>
+          <button data-platform-view="assisted" type="button"><span aria-hidden="true">✎</span>Cadastros assistidos</button>
           <button data-platform-view="clients" type="button"><span aria-hidden="true">◎</span>Clientes</button>
           <button data-platform-view="billing" type="button"><span aria-hidden="true">□</span>Billing</button>
           <button data-platform-view="support" type="button"><span aria-hidden="true">☏</span>Atendimentos</button>
@@ -880,6 +881,41 @@
             <button class="ghost-button compact">Filtrar</button>
           </form>
           <div class="audit-list" id="auditList"></div>
+        </section>
+
+        <section class="panel assisted-workspace" data-platform-section="assisted" hidden>
+          <div class="section-actions">
+            <div><p class="eyebrow">Atendimento humano</p><h2>Cadastros assistidos</h2><p class="muted">O cliente responde. A equipe TáPronto monta, revisa e publica.</p></div>
+            <button class="primary-button compact" id="assistedNewButton" type="button">Novo cadastro</button>
+          </div>
+          <div class="assisted-toolbar"><label>Pesquisar <input id="assistedSearch" type="search" placeholder="Nome, telefone ou CPF/CNPJ"></label><button class="ghost-button compact" id="assistedRefresh" type="button">Atualizar</button></div>
+          <div class="assisted-list" id="assistedList" aria-live="polite"></div>
+
+          <section class="assisted-editor" id="assistedEditor" hidden>
+            <form id="assistedWizard">
+              <input name="registration_id" type="hidden"><input name="expected_version" type="hidden" value="1">
+              <ol class="assisted-steps" aria-label="Etapas do cadastro"><li>Contato</li><li>Estabelecimento</li><li>Operação</li><li>Diagnóstico</li><li>Identidade</li><li>Cardápio</li></ol>
+              <div class="assisted-form-grid">
+                <label>Responsável<input name="responsible_name" required></label><label>WhatsApp<input name="phone" inputmode="tel" required></label>
+                <label>E-mail<input name="email" type="email" required></label><label>Estabelecimento<input name="establishment_name" required></label>
+                <label>CPF ou CNPJ<input name="document" inputmode="numeric" required></label><label>Cidade<input name="city"></label>
+                <label>Nicho<input name="niche" placeholder="Pizzaria, hamburgueria..."></label><label>Funcionamento<input name="hours"></label>
+                <label class="assisted-wide">Maior dificuldade<textarea name="biggest_pain"></textarea></label>
+              </div>
+              <p class="form-message" id="assistedSaveStatus" role="status"></p>
+              <div class="row-actions"><button class="primary-button compact" type="submit">Salvar e continuar</button><button class="ghost-button compact" id="assistedClose" type="button">Fechar</button></div>
+            </form>
+            <section class="assisted-menu-area">
+              <label>Enviar cardápio atual<input id="assistedFileInput" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple></label>
+              <label>Ou cole uma lista<textarea id="assistedMenuText" placeholder="Categoria, produto e preço"></textarea></label>
+              <button class="ghost-button compact" id="assistedImport" type="button">Interpretar cardápio</button>
+              <div class="assisted-review-tabs"><button type="button" data-assisted-review-tab="original">Original</button><button type="button" data-assisted-review-tab="interpreted">Interpretado</button></div>
+              <div class="assisted-review-grid"><article id="assistedOriginalPanel"><h3>Material original</h3><div id="assistedOriginalFiles"></div></article><article id="assistedInterpretedPanel"><h3>Cardápio interpretado</h3><div id="assistedMenuDraft"></div></article></div>
+              <p class="form-message" id="assistedReviewAlert" role="alert"></p>
+              <button class="primary-button compact" id="assistedReviewButton" type="button">Confirmar revisão obrigatória</button>
+            </section>
+            <section class="assisted-publish-box"><label><input id="assistedPublishConfirm" type="checkbox"> Revisei o cardápio e confirmo a publicação</label><button class="primary-button" id="assistedPublishButton" type="button" disabled>Publicar cadastro</button><div id="assistedPublishResult" aria-live="polite"></div><button class="ghost-button compact" id="assistedResendButton" type="button" hidden>Reenviar e-mail</button></section>
+          </section>
         </section>
 
         <section class="panel" data-platform-section="backups" hidden>

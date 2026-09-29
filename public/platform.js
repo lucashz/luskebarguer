@@ -85,6 +85,10 @@ const PLATFORM_VIEW_META = {
     title: 'Clientes',
     subtitle: 'Empresas, lojas, planos, ativação, uso e sinais de risco.',
   },
+  assisted: {
+    title: 'Cadastros assistidos',
+    subtitle: 'Atenda o lead, monte o cardápio e publique somente depois da revisão.',
+  },
   billing: {
     title: 'Billing',
     subtitle: 'Assinaturas, cobranças, inadimplência, eventos e reativações.',
