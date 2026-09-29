@@ -29,6 +29,7 @@ import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
 import { publishAssistedRegistration } from './src/lib/assisted-registration-publish.js';
+import { assistedRegistrationMetrics } from './src/lib/platform-ad-funnel.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -739,6 +740,18 @@ async function handleApi(req, res, url) {
     if (!admin) return;
     const registrations = await listAssistedRegistrations(getLocalPool(), Object.fromEntries(url.searchParams));
     json(res, 200, { registrations });
+    return;
+  }
+
+  if (url.pathname === '/api/platform/assisted-registrations-metrics' && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    const [registrations, events, subscriptions] = await Promise.all([
+      getLocalPool().query("select id,status,answers,email_status,published_at,activated_at,company_id from assisted_registrations where status <> 'cancelled'"),
+      getLocalPool().query("select id,event_name,visitor_key,company_id,attribution from marketing_events where event_name='whatsapp_click' order by created_at desc limit 10000"),
+      getLocalPool().query("select company_id,status,current_period_starts_at as trial_started_at,created_at from company_subscriptions where company_id in (select company_id from assisted_registrations where company_id is not null)")
+    ]);
+    json(res, 200, { metrics: assistedRegistrationMetrics(registrations.rows, events.rows, subscriptions.rows) });
     return;
   }
 

@@ -23,9 +23,34 @@
 
   async function loadList() {
     const q = $('#assistedSearch').value.trim();
-    const data = await api(`/assisted-registrations${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+    const [data, metricData] = await Promise.all([
+      api(`/assisted-registrations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+      api('/assisted-registrations-metrics')
+    ]);
+    renderMetrics(metricData.metrics);
     list.innerHTML = data.registrations.length ? data.registrations.map((item) => `<button class="assisted-list-row" type="button" data-assisted-id="${item.id}"><strong>${escapeHtml(item.establishment_name || 'Sem nome')}</strong><span>${escapeHtml(item.responsible_name)} · ${maskPhone(item.phone)}</span><small>${labels[item.status] || item.status} · ${formatDate(item.updated_at)}</small><b>Abrir →</b></button>`).join('') : '<p class="muted">Nenhum cadastro assistido encontrado.</p>';
     list.querySelectorAll('[data-assisted-id]').forEach((button) => button.addEventListener('click', () => loadRegistration(button.dataset.assistedId)));
+  }
+  function renderMetrics(metrics = {}) {
+    let container = $('#assistedMetrics');
+    if (!container) {
+      container = document.createElement('section');
+      container.id = 'assistedMetrics';
+      container.className = 'assisted-metrics';
+      list.before(container);
+    }
+    const stages = [
+      ['Cliques no WhatsApp', metrics.whatsapp_clicks],
+      ['Atendimentos iniciados', metrics.initiated],
+      ['Cardápios recebidos', metrics.menus_received],
+      ['Em revisão', metrics.menus_in_review],
+      ['Publicados', metrics.published],
+      ['E-mails enviados', metrics.emails_sent],
+      ['Contas ativadas', metrics.activated],
+      ['Trials iniciados', metrics.trials_started],
+      ['Assinaturas posteriores', metrics.subscriptions_created]
+    ];
+    container.innerHTML = `<div class="assisted-metrics-heading"><div><p class="eyebrow">Conversão assistida</p><h3>Do atendimento à assinatura</h3></div><small>${escapeHtml(metrics.attribution_notice || '')}</small></div><div class="assisted-metrics-grid">${stages.map(([label,value])=>`<article><span>${escapeHtml(label)}</span><strong>${Number(value||0)}</strong></article>`).join('')}</div><div class="assisted-metrics-rates"><span>Atendimento → publicação: <b>${Number(metrics.initiated_to_published_rate||0)}%</b></span><span>Publicação → ativação: <b>${Number(metrics.published_to_activated_rate||0)}%</b></span></div>${(metrics.declared_sources||[]).length?`<p class="assisted-sources"><b>Origem informada pelo lead:</b> ${(metrics.declared_sources||[]).map((item)=>`${escapeHtml(item.source)} (${Number(item.count||0)})`).join(' · ')}</p>`:''}<p class="assisted-utm-label"><b>UTM técnica:</b> os cliques acima consideram somente a campanha paga configurada e permanecem anônimos.</p>`;
   }
   async function loadRegistration(id) { const data = await api(`/assisted-registrations/${id}`); openEditor(data.registration); const draft = await api(`/assisted-registrations/${id}/menu-draft`); menuDraft = draft.menu_draft; renderDraft(); }
   function openEditor(registration = null) { active = registration; editor.hidden = false; form.reset(); form.registration_id.value = registration?.id || ''; form.expected_version.value = registration?.version || 1; for (const name of ['responsible_name','phone','email','establishment_name']) if (registration) form.elements[name].value = registration[name] || ''; if (registration) { form.elements.city.value=registration.answers?.establishment?.city||''; form.elements.niche.value=registration.answers?.establishment?.niche||''; form.elements.hours.value=registration.answers?.operation?.hours||''; form.elements.biggest_pain.value=registration.answers?.diagnosis?.biggest_pain||''; } editor.scrollIntoView({ behavior:'smooth',block:'start' }); }
