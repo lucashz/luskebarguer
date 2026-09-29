@@ -6,6 +6,7 @@
   saveAttribution(attribution);
   propagateSignupAttribution(attribution);
   track('landing_view', 'delivery_landing', attribution);
+  setupProofCarousel();
   setupImageGallery();
 
   document.querySelectorAll('[data-delivery-signup]').forEach((link) => {
@@ -18,6 +19,36 @@
 
   function trackWhatsappClick(placement) {
     track('whatsapp_click', placement, attribution);
+  }
+
+  function setupProofCarousel() {
+    const carousel = document.querySelector('[data-proof-carousel]');
+    const slides = [...carousel?.querySelectorAll('[data-carousel-slide]') || []];
+    const controls = [...carousel?.querySelectorAll('[data-carousel-label]') || []];
+    if (slides.length < 2 || controls.length !== slides.length) return;
+    let activeIndex = 0;
+    let timer = null;
+
+    const show = (index) => {
+      activeIndex = (index + slides.length) % slides.length;
+      slides.forEach((slide, position) => { slide.hidden = position !== activeIndex; });
+      controls.forEach((button, position) => button.setAttribute('aria-pressed', String(position === activeIndex)));
+    };
+    const stop = () => { if (timer) clearInterval(timer); timer = null; };
+    const start = () => {
+      stop();
+      if (document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      timer = setInterval(() => show(activeIndex + 1), 5000);
+    };
+
+    controls.forEach((button, index) => button.addEventListener('click', () => { show(index); start(); }));
+    carousel.addEventListener('mouseenter', stop);
+    carousel.addEventListener('mouseleave', start);
+    carousel.addEventListener('focusin', stop);
+    carousel.addEventListener('focusout', (event) => { if (!carousel.contains(event.relatedTarget)) start(); });
+    document.addEventListener('visibilitychange', start);
+    show(0);
+    start();
   }
 
   function setupImageGallery() {

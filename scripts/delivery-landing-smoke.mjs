@@ -24,11 +24,12 @@ try {
   assert(html.includes('Você responde. A gente deixa tudo pronto.'), 'O H1 precisa prometer que a equipe fará a montagem.');
   assert(html.includes('até 5 categorias') && html.includes('20 produtos'), 'A oferta precisa informar os limites do cadastro assistido.');
   assert(/<span class="offer-icon" aria-hidden="true"><\/span>/.test(html), 'O círculo verde da oferta precisa ficar vazio.');
-  assert((html.match(/Quero que montem para mim/g) || []).length >= 2, 'O CTA assistido precisa aparecer no hero e no celular.');
+  assert((html.match(/Quero ajuda para montar meu cardápio/g) || []).length >= 3, 'O novo CTA assistido precisa aparecer no hero, no fechamento e no celular.');
   assert(html.includes('Atendimento pelo WhatsApp · sem cartão · 7 dias grátis depois de criar sua senha'), 'A landing precisa explicar quando o teste começa.');
   assert(/class="mobile-signup-bar"[^>]*>[\s\S]*data-delivery-whatsapp/.test(html), 'A landing precisa ter CTA assistido fixo no celular.');
   assert(/class="delivery-whatsapp-float"[^>]*data-delivery-whatsapp/.test(html), 'A landing precisa ter botão flutuante do WhatsApp rastreável.');
-  assert((html.match(/data-delivery-gallery-item/g) || []).length === 2, 'As duas capturas precisam ser itens clicáveis da galeria.');
+  assert((html.match(/data-delivery-gallery-item/g) || []).length === 5, 'O carrossel precisa apresentar as cinco telas reais.');
+  for (const label of ['Cardápio', 'Pedidos', 'Produtos', 'Operação', 'Configuração']) assert(html.includes(`data-carousel-label="${label}"`), `Controle ausente: ${label}`);
   assert(html.includes('data-delivery-image-modal') && html.includes('role="dialog"'), 'A landing precisa oferecer modal acessível para ampliar as capturas.');
   assert(html.includes('/delivery.css') && html.includes('/delivery.js'), 'A landing precisa carregar seus assets dedicados.');
 
@@ -37,6 +38,7 @@ try {
   const script = await scriptResponse.text();
   assert(script.includes('trackWhatsappClick') && script.includes("'whatsapp_click'"), 'O clique no WhatsApp precisa ser rastreado antes da navegação.');
   assert(script.includes('keepalive: true'), 'O tracking precisa sobreviver à navegação para o WhatsApp.');
+  assert(script.includes('setupProofCarousel') && script.includes('5000'), 'O carrossel precisa alternar automaticamente a cada 5 segundos.');
 
   const layout = await layoutMetrics();
   for (const mobile of layout.mobile) {
@@ -51,7 +53,7 @@ try {
   assert(layout.desktop.proofSectionHeight <= 800, `A seção de demonstração ficou alta demais (${layout.desktop.proofSectionHeight}px).`);
   assert(layout.desktop.objectFit === 'contain', `As capturas precisam aparecer inteiras nos cards (${layout.desktop.objectFit}).`);
   assert(layout.desktop.modalOpened === true, 'Clicar na captura precisa abrir o modal.');
-  assert(layout.desktop.modalCounter === '1 de 2', `O modal precisa indicar a posição da captura (${layout.desktop.modalCounter}).`);
+  assert(layout.desktop.modalCounter === '1 de 5', `O modal precisa indicar a posição da captura (${layout.desktop.modalCounter}).`);
   assert(layout.desktop.whatsappPosition === 'fixed' && layout.desktop.whatsappRightGap <= 30 && layout.desktop.whatsappBottomGap <= 30, 'O WhatsApp precisa ficar no canto inferior direito no desktop.');
 
   console.log('Delivery landing smoke: OK');
