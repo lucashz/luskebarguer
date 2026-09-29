@@ -3227,7 +3227,7 @@ async function changeAdminPassword(session, data) {
   await dbRequest('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=representation']);
-  clearSessionCacheByOwner('admin', session.id);
+  await deleteOwnerSessions('admin', session.id);
   clearAdminUsersCache();
 }
 
