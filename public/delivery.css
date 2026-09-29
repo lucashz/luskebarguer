@@ -31,14 +31,14 @@ a { color: inherit; }
 .offer-card div span { color: var(--muted); font-size: 14px; line-height: 1.45; }
 .primary-cta { min-height: 58px; width: fit-content; padding: 17px 23px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 16px; color: #fff; background: var(--red); box-shadow: 0 14px 30px rgba(239, 24, 35, .24); font-size: 17px; font-weight: 900; text-decoration: none; transition: transform .18s ease, background .18s ease; }
 .primary-cta:hover { background: var(--red-dark); transform: translateY(-2px); }
-.assisted-whatsapp-cta { background:#159455; box-shadow:0 14px 34px rgba(21,148,85,.34); animation:whatsapp-invite 2.8s ease-in-out infinite; }
-.assisted-whatsapp-cta:hover { background:#117a47; }
+.assisted-whatsapp-cta { background:#ef1823; box-shadow:0 14px 34px rgba(239,24,35,.32); animation:whatsapp-invite 2.8s ease-in-out infinite; }
+.assisted-whatsapp-cta:hover { background:#c90f19; }
 .cta-note { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
 .final-note { color: #dce4ed; }
 
 @keyframes whatsapp-invite {
-  0%, 72%, 100% { transform:translateY(0) scale(1); box-shadow:0 14px 34px rgba(21,148,85,.34); }
-  82% { transform:translateY(-2px) scale(1.025); box-shadow:0 17px 38px rgba(21,148,85,.4),0 0 0 10px rgba(37,211,102,.14); }
+  0%, 72%, 100% { transform:translateY(0) scale(1); box-shadow:0 14px 34px rgba(239,24,35,.32); }
+  82% { transform:translateY(-2px) scale(1.025); box-shadow:0 17px 38px rgba(239,24,35,.4),0 0 0 10px rgba(239,24,35,.13); }
   90% { transform:translateY(0) scale(1); }
 }
 
@@ -112,7 +112,7 @@ body.delivery-modal-open { overflow: hidden; }
 .final-offer h2 { max-width: 830px; margin: 0 auto; }
 .final-offer > p:not(.eyebrow) { max-width: 650px; margin: 20px auto 28px; color: #c5cfdb; font-size: 18px; line-height: 1.55; }
 .primary-cta.light { color: var(--red); background: #fff; box-shadow: none; }
-.primary-cta.light.assisted-whatsapp-cta { color:#fff; background:#159455; box-shadow:0 14px 34px rgba(21,148,85,.34); }
+.primary-cta.light.assisted-whatsapp-cta { color:#fff; background:#ef1823; box-shadow:0 14px 34px rgba(239,24,35,.32); }
 .whatsapp-link { display: block; width: fit-content; margin: 22px auto 0; color: #dce4ed; font-size: 14px; }
 footer { padding: 35px 28px 45px; display: flex; align-items: center; justify-content: center; gap: 22px; color: var(--muted); background: #f7f9fb; }
 .mobile-signup-bar { display: none; }

@@ -19,5 +19,6 @@ assert(html.includes('Ol%C3%A1%21%20Quero%20ajuda%20para%20montar%20meu%20card%C
 assert(js.includes('trackWhatsappClick') && js.includes("'whatsapp_click'") && js.includes('keepalive: true'), 'A home precisa rastrear o clique no WhatsApp com keepalive.');
 assert(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*animation:\s*none/s.test(css), 'A animação do CTA precisa ser removida para movimento reduzido.');
 assert(/\.assisted-whatsapp-cta\s*\{[^}]*animation:\s*whatsapp-invite/s.test(css), 'O CTA principal precisa chamar atenção com uma animação suave.');
+assert(/\.assisted-whatsapp-cta\s*\{[^}]*background:\s*#ef1823/s.test(css), 'O CTA principal precisa permanecer vermelho.');
 
 console.log('CTA flutuante do WhatsApp validado com sucesso.');

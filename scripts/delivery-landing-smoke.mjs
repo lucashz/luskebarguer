@@ -42,6 +42,8 @@ try {
   assert(script.includes('trackWhatsappClick') && script.includes("'whatsapp_click'"), 'O clique no WhatsApp precisa ser rastreado antes da navegação.');
   assert(script.includes('keepalive: true'), 'O tracking precisa sobreviver à navegação para o WhatsApp.');
   assert(script.includes('setupProofCarousel') && script.includes('5000'), 'O carrossel precisa alternar automaticamente a cada 5 segundos.');
+  const deliveryCss = await (await fetch(`${baseUrl}/delivery.css`, { headers: { Host: 'taprontomenu.com.br' } })).text();
+  assert(/\.assisted-whatsapp-cta\s*\{[^}]*background:\s*#ef1823/s.test(deliveryCss), 'O CTA principal da landing precisa ser vermelho.');
 
   const layout = await layoutMetrics();
   for (const mobile of layout.mobile) {
