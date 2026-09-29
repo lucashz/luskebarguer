@@ -33,7 +33,7 @@ try {
 
   const payload = {
     responsible_name: 'Contato Smoke',
-    phone: '(55) 9 9100-2200',
+    phone: `559${String(Math.floor(Math.random()*100000000)).padStart(8,'0')}`,
     email: `lead-${suffix}@example.test`,
     establishment_name: 'Lancheria Smoke',
     document: formatCpf(generateCpf()),
@@ -56,11 +56,11 @@ try {
   assert.equal(menuDraft.data.menu_draft.registration_id, registrationId);
   const patchedMenu = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft`, { method: 'PATCH', cookie: platformCookie, body: { expected_version: 1, operations: [] } });
   assert.equal(patchedMenu.data.menu_draft.version, 2);
-  const reviewedMenu = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft/review`, { method: 'POST', cookie: platformCookie, body: {} });
+  const reviewedMenu = await request(`/api/platform/assisted-registrations/${registrationId}/menu-draft/review`, { method: 'POST', cookie: platformCookie, body: { expected_version: patchedMenu.data.menu_draft.version } });
   assert.equal(reviewedMenu.data.status, 'ready_to_publish');
   assert.ok(reviewedMenu.data.menu_draft.reviewed_hash);
 
-  for (const query of ['Contato%20Smoke', encodeURIComponent(payload.document), '55991002200']) {
+  for (const query of ['Contato%20Smoke', encodeURIComponent(payload.document), payload.phone]) {
     const listed = await request(`/api/platform/assisted-registrations?q=${query}`, { cookie: platformCookie });
     assert.ok(listed.data.registrations.some((item) => item.id === registrationId), 'Busca nao encontrou o rascunho esperado.');
     assert.ok(!JSON.stringify(listed.data).includes(documentDigits), 'Busca expos documento completo.');
@@ -82,7 +82,7 @@ try {
   assert.equal(published.data.subscription.status, 'pending_activation');
   assert.equal(published.data.subscription.trial_ends_at, null);
   assert.equal(published.data.company.status, 'onboarding');
-  assert.equal(published.data.store.is_active, false);
+  assert.equal(published.data.store.is_active, true);
   assert.ok(!('token' in published.data.activation), 'Token de ativação não pode vazar na API.');
   const repeatedPublish = await request(`/api/platform/assisted-registrations/${registrationId}/publish`, { method: 'POST', cookie: platformCookie, body: { confirm: true } });
   assert.equal(repeatedPublish.data.company.id, published.data.company.id, 'Publicação repetida precisa ser idempotente.');

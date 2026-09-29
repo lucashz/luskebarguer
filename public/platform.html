@@ -899,7 +899,11 @@
                 <label>Responsável<input name="responsible_name" required></label><label>WhatsApp<input name="phone" inputmode="tel" required></label>
                 <label>E-mail<input name="email" type="email" required></label><label>Estabelecimento<input name="establishment_name" required></label>
                 <label>CPF ou CNPJ<input name="document" inputmode="numeric" required></label><label>Cidade<input name="city"></label>
-                <label>Nicho<input name="niche" placeholder="Pizzaria, hamburgueria..."></label><label>Funcionamento<input name="hours"></label>
+                <label>Nicho<input name="niche" placeholder="Pizzaria, hamburgueria..."></label><label>Origem informada pelo lead<input name="declared_source" placeholder="Instagram, indicação..."></label>
+                <label>WhatsApp dos pedidos<input name="whatsapp" inputmode="tel"></label><label>Endereço<input name="address"></label>
+                <fieldset class="assisted-wide"><legend>Como atende?</legend><label><input name="fulfillment" type="checkbox" value="delivery"> Delivery</label><label><input name="fulfillment" type="checkbox" value="pickup"> Retirada</label><label><input name="fulfillment" type="checkbox" value="counter"> Balcão</label></fieldset>
+                <label>Formas de pagamento<input name="payment_methods" placeholder="Pix, dinheiro, cartão"></label><label>Funcionamento<textarea name="hours"></textarea></label>
+                <label class="assisted-wide">Bairros e taxas de entrega<textarea name="neighborhoods"></textarea></label>
                 <label class="assisted-wide">Maior dificuldade<textarea name="biggest_pain"></textarea></label>
               </div>
               <p class="form-message" id="assistedSaveStatus" role="status"></p>

@@ -45,6 +45,15 @@ export function assertAssistedTransition(from, to) {
   return target;
 }
 
+export function assertAssistedIdentityComplete(value = {}) {
+  const responsible_name = cleanText(value.responsible_name, 120);
+  const establishment_name = cleanText(value.establishment_name, 160);
+  const email = cleanEmail(value.email);
+  const phone = digits(value.phone, 15);
+  if (!responsible_name || !establishment_name || !email || phone.length < 10) throw validationError('Preencha responsável, WhatsApp, e-mail válido e estabelecimento antes de publicar.');
+  return { responsible_name, establishment_name, email, phone };
+}
+
 export function sanitizeAssistedAnswers(value = {}) {
   const data = isObject(value) ? value : {};
   const contact = isObject(data.contact) ? data.contact : {};

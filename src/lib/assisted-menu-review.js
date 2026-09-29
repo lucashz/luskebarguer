@@ -22,7 +22,10 @@ export function assertMenuDraftPublishable(draft = {}) {
       const itemPath = `${categoryPath}.items[${itemIndex}]`;
       if (!isUuid(item.id) || !clean(item.name) || !Number.isInteger(item.price_cents) || item.price_cents < 0 || item.needs_review) errors.push(itemPath);
       (item.option_groups || []).forEach((group, groupIndex) => {
-        if (!isUuid(group.id) || !clean(group.name) || !Array.isArray(group.options) || !group.options.length) errors.push(`${itemPath}.option_groups[${groupIndex}]`);
+        const groupPath = `${itemPath}.option_groups[${groupIndex}]`;
+        const min = Number(group.min_choices ?? 0); const max = Number(group.max_choices ?? 1);
+        if (!isUuid(group.id) || !clean(group.name) || !Array.isArray(group.options) || !group.options.length || !Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max < 1 || min > max || (group.is_required === true && min < 1)) errors.push(groupPath);
+        (group.options || []).forEach((option, optionIndex) => { if (!isUuid(option.id) || !clean(option.name) || !Number.isInteger(option.price_cents) || option.price_cents < 0) errors.push(`${groupPath}.options[${optionIndex}]`); });
       });
     });
   });
@@ -46,11 +49,18 @@ function applyOperation(draft, operation = {}) {
   else if (operation.type === 'move_item' && found) { const target = draft.categories.find((entry) => entry.id === operation.category_id); if (!target) throw validation('Categoria de destino inválida.'); found.category.items.splice(found.index, 1); target.items.push(found.item); }
   else if (operation.type === 'delete_category') { const index = draft.categories.findIndex((entry) => entry.id === operation.category_id); if (index < 0) throw validation('Categoria inválida.'); draft.categories.splice(index, 1); }
   else if (operation.type === 'update_category') { const target = draft.categories.find((entry) => entry.id === operation.category_id); if (!target) throw validation('Categoria inválida.'); if (operation.changes?.name !== undefined) target.name = clean(operation.changes.name); }
+  else if (operation.type === 'add_category') { const name = clean(operation.name); if (!name) throw validation('Informe o nome da categoria.'); draft.categories.push({ id: randomUUID(), name, items: [] }); }
+  else if (operation.type === 'add_item') { const target = draft.categories.find((entry) => entry.id === operation.category_id); if (!target) throw validation('Categoria inválida.'); target.items.push({ id: randomUUID(), name: clean(operation.name || 'Novo produto'), description: '', price_cents: null, needs_review: true, option_groups: [] }); }
   else if (operation.type === 'add_option_group' && found) { found.item.option_groups ||= []; found.item.option_groups.push({ id: randomUUID(), name: clean(operation.name), options: Array.isArray(operation.options) ? operation.options.map((option) => ({ id: randomUUID(), name: clean(option.name), price_cents: Number(option.price_cents || 0) })) : [] }); }
+  else if (operation.type === 'update_option_group') { const group=findGroup(draft,operation.group_id); if(!group) throw validation('Grupo de adicionais inválido.'); if(operation.changes?.name!==undefined) group.name=clean(operation.changes.name); }
+  else if (operation.type === 'add_option') { const group=findGroup(draft,operation.group_id); if(!group) throw validation('Grupo de adicionais inválido.'); group.options.push({id:randomUUID(),name:clean(operation.name||'Novo adicional'),price_cents:Number.isInteger(operation.price_cents)?operation.price_cents:0}); }
+  else if (operation.type === 'update_option') { const option=findOption(draft,operation.option_id); if(!option) throw validation('Adicional inválido.'); if(operation.changes?.name!==undefined) option.name=clean(operation.changes.name); if(operation.changes?.price_cents!==undefined) option.price_cents=Number.isInteger(operation.changes.price_cents)?operation.changes.price_cents:null; }
   else throw validation('Operação de revisão inválida.');
 }
 function normalizeIds(categories) { return categories.map((category) => ({ ...category, id: isUuid(category.id) ? category.id : randomUUID(), items: (category.items || []).map((item) => ({ ...item, id: isUuid(item.id) ? item.id : randomUUID(), option_groups: (item.option_groups || []).map((group) => ({ ...group, id: isUuid(group.id) ? group.id : randomUUID(), options: (group.options || []).map((option) => ({ ...option, id: isUuid(option.id) ? option.id : randomUUID() })) })) })) })); }
 function findItem(draft, id) { for (const category of draft.categories) { const index = category.items.findIndex((item) => item.id === id); if (index >= 0) return { category, item: category.items[index], index }; } return null; }
+function findGroup(draft,id){for(const category of draft.categories)for(const item of category.items)for(const group of item.option_groups||[])if(group.id===id)return group;return null;}
+function findOption(draft,id){for(const category of draft.categories)for(const item of category.items)for(const group of item.option_groups||[])for(const option of group.options||[])if(option.id===id)return option;return null;}
 function sanitizeChanges(value = {}) { const changes = {}; if ('name' in value) changes.name = clean(value.name); if ('description' in value) changes.description = clean(value.description); if ('price_cents' in value) changes.price_cents = Number.isInteger(value.price_cents) ? value.price_cents : null; if ('needs_review' in value) changes.needs_review = Boolean(value.needs_review); return changes; }
 function isUuid(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '')); }
 function clean(value) { return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 300); }

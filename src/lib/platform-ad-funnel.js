@@ -63,7 +63,7 @@ export function assistedRegistrationMetrics(rows = [], events = [], subscription
   const stagesWithMenu = new Set(['reviewing_menu', 'ready_to_publish', 'published', 'activated']);
   const declaredSourceCounts = new Map();
   for (const row of rows) {
-    const source = String(row.declared_source || row.answers?.contact?.source || 'Não informada').trim() || 'Não informada';
+    const source = String(row.attribution?.declared_source || row.declared_source || row.answers?.contact?.source || 'Não informada').trim() || 'Não informada';
     declaredSourceCounts.set(source, (declaredSourceCounts.get(source) || 0) + 1);
   }
   const companyIds = new Set(rows.map((row) => row.company_id).filter(Boolean));

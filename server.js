@@ -25,6 +25,7 @@ import { invalidCredentialError, passwordHashForVerification } from './src/lib/s
 import { redactSensitive } from './src/lib/security-redaction.js';
 import { assertAuthenticatedOrigin, securityHeaders } from './src/lib/security-http.js';
 import { createAssistedRegistration, getAssistedRegistration, listAssistedRegistrations, updateAssistedRegistration } from './src/lib/assisted-registration-store.js';
+import { publicAssistedRegistration } from './src/lib/assisted-registration.js';
 import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
@@ -747,7 +748,7 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
     if (!admin) return;
     const [registrations, events, subscriptions] = await Promise.all([
-      getLocalPool().query("select id,status,answers,email_status,published_at,activated_at,company_id from assisted_registrations where status <> 'cancelled'"),
+      getLocalPool().query("select id,status,answers,attribution,email_status,published_at,activated_at,company_id from assisted_registrations where status <> 'cancelled'"),
       getLocalPool().query("select id,event_name,visitor_key,company_id,attribution from marketing_events where event_name='whatsapp_click' order by created_at desc limit 10000"),
       getLocalPool().query("select company_id,status,current_period_starts_at as trial_started_at,created_at from company_subscriptions where company_id in (select company_id from assisted_registrations where company_id is not null)")
     ]);
@@ -771,10 +772,37 @@ async function handleApi(req, res, url) {
 
   const assistedRegistrationMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})$/i);
   const assistedFilesMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/files$/i);
+  const assistedFileMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/files\/([0-9a-f-]{36})$/i);
+  if (assistedFilesMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFilesMatch[1], 'cadastro');
+    const result = await getLocalPool().query('select id,original_name,mime_type,size_bytes,status,created_at from assisted_registration_files where registration_id=$1 order by created_at', [id]);
+    json(res, 200, { files: result.rows }); return;
+  }
+  if (assistedFileMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFileMatch[1], 'cadastro'); const fileId = cleanUuid(assistedFileMatch[2], 'arquivo');
+    const file = (await getLocalPool().query('select original_name,mime_type,storage_key from assisted_registration_files where id=$1 and registration_id=$2 limit 1', [fileId,id])).rows[0];
+    if (!file) return json(res, 404, { error: 'Arquivo não encontrado.' });
+    const content = await readFile(path.join(ASSISTED_UPLOAD_DIR, file.storage_key));
+    res.writeHead(200, { 'Content-Type': file.mime_type, 'Content-Length': content.length, 'Content-Disposition': `inline; filename="${String(file.original_name).replace(/["\r\n]/g,'_')}"`, 'Cache-Control': 'private, no-store' }); res.end(content); return;
+  }
+  if (assistedFileMatch && method === 'DELETE') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFileMatch[1], 'cadastro'); const fileId = cleanUuid(assistedFileMatch[2], 'arquivo');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Arquivo de cadastro publicado não pode ser removido.' });
+    const file = (await getLocalPool().query('delete from assisted_registration_files where id=$1 and registration_id=$2 returning storage_key', [fileId,id])).rows[0];
+    if (!file) return json(res, 404, { error: 'Arquivo não encontrado.' });
+    await unlink(path.join(ASSISTED_UPLOAD_DIR, file.storage_key)).catch(()=>{}); json(res, 200, { ok:true }); return;
+  }
   if (assistedFilesMatch && method === 'POST') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
     const id = cleanUuid(assistedFilesMatch[1], 'cadastro');
-    if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Este cadastro não aceita novos arquivos.' });
     const body = await readJson(req);
     const stored = await storeAssistedFile({ directory: ASSISTED_UPLOAD_DIR, name: body.name, mime_type: body.mime_type, buffer: Buffer.from(String(body.data_base64 || ''), 'base64') });
     const result = await getLocalPool().query(`insert into assisted_registration_files (registration_id,original_name,safe_name,mime_type,size_bytes,storage_key,checksum_sha256) values ($1,$2,$3,$4,$5,$6,$7) returning id,original_name,mime_type,size_bytes,status,created_at`, [id, stored.original_name, stored.safe_name, stored.mime_type, stored.size_bytes, stored.storage_key, stored.checksum_sha256]);
@@ -785,14 +813,18 @@ async function handleApi(req, res, url) {
   if (assistedImportMatch && method === 'POST') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
     const id = cleanUuid(assistedImportMatch[1], 'cadastro');
-    if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Cadastro publicado não pode ser reimportado.' });
     const body = await readJson(req);
     const storedFiles = await getLocalPool().query('select * from assisted_registration_files where registration_id=$1 and status=$2 order by created_at', [id, 'uploaded']);
     const files = await Promise.all(storedFiles.rows.map(async (file) => ({ ...file, buffer: await readFile(path.join(ASSISTED_UPLOAD_DIR, file.storage_key)) })));
-    const draft = await extractAssistedMenu({ files, text: cleanText(body.text || '') });
+    const pastedText = String(body.text || '').trim();
+    if (pastedText.length > 100000) return json(res, 413, { error: 'A lista colada excede 100 mil caracteres.' });
+    const draft = await extractAssistedMenu({ files, text: pastedText, aiRequest: requestAssistedMenuVision, normalizeImage: normalizeAssistedMenuImage });
     const saved = await getLocalPool().query(`insert into assisted_menu_drafts (registration_id,content,validation) values ($1,$2::jsonb,$3::jsonb) on conflict (registration_id) do update set content=excluded.content,validation=excluded.validation,version=assisted_menu_drafts.version+1,reviewed_at=null,reviewed_by=null,reviewed_hash=null,updated_at=now() returning id,registration_id,content,validation,version,reviewed_at,updated_at`, [id, JSON.stringify(draft), JSON.stringify({ needs_review: draft.categories.some((group) => group.items.some((item) => item.needs_review)) })]);
-    await getLocalPool().query("update assisted_registrations set status='reviewing_menu',updated_at=now(),version=version+1 where id=$1", [id]);
-    json(res, 200, { menu_draft: saved.rows[0] }); return;
+    const updated = (await getLocalPool().query("update assisted_registrations set status='reviewing_menu',updated_at=now(),version=version+1 where id=$1 returning *", [id])).rows[0];
+    json(res, 200, { menu_draft: saved.rows[0], registration: publicAssistedRegistration(updated) }); return;
   }
 
   const assistedDraftMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/menu-draft$/i);
@@ -806,6 +838,9 @@ async function handleApi(req, res, url) {
   if (assistedDraftMatch && method === 'PATCH') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
     const id = cleanUuid(assistedDraftMatch[1], 'cadastro');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Cadastro publicado não pode ser editado.' });
     const current = await getLocalPool().query('select * from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
     if (!current.rows[0]) return json(res, 404, { error: 'Rascunho de cardápio não encontrado.' });
     const body = await readJson(req);
@@ -821,8 +856,13 @@ async function handleApi(req, res, url) {
   if (assistedReviewMatch && method === 'POST') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
     const id = cleanUuid(assistedReviewMatch[1], 'cadastro');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (!['reviewing_menu', 'ready_to_publish'].includes(registration.status)) return json(res, 409, { error: 'Este cadastro não está em revisão.' });
+    const body = await readJson(req);
     const current = await getLocalPool().query('select * from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
     if (!current.rows[0]) return json(res, 404, { error: 'Rascunho de cardápio não encontrado.' });
+    if (Number(body.expected_version) !== Number(current.rows[0].version)) return json(res, 409, { error: 'Este cardápio foi alterado em outra tela.' });
     const reviewed = reviewMenuDraft({ ...current.rows[0].content, version: current.rows[0].version }, admin);
     const saved = await withLocalTransaction(async (db) => {
       const [menu] = await db('PATCH', 'assisted_menu_drafts', { registration_id: `eq.${id}`, version: `eq.${current.rows[0].version}` }, { reviewed_at: reviewed.reviewed_at, reviewed_by: reviewed.reviewed_by, reviewed_hash: reviewed.reviewed_hash, updated_at: reviewed.reviewed_at });
@@ -852,15 +892,18 @@ async function handleApi(req, res, url) {
   if (assistedResendMatch && method === 'POST') {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
     const id = cleanUuid(assistedResendMatch[1], 'cadastro');
-    const rows = await getLocalPool().query(`select ar.*,au.name admin_name,au.email admin_email,c.name company_name,s.name store_name,s.slug store_slug,s.public_url from assisted_registrations ar join admin_users au on au.id=ar.admin_id join companies c on c.id=ar.company_id join stores s on s.id=ar.store_id where ar.id=$1 limit 1`, [id]);
-    const registration = rows.rows[0];
-    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
-    if (registration.status === 'activated') return json(res, 409, { error: 'Esta conta já foi ativada.' });
     const token = randomBytes(32).toString('hex'); const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
-    await withLocalTransaction(async (db) => {
-      await db('PATCH', 'admin_activation_tokens', { admin_user_id: `eq.${registration.admin_id}`, status: 'eq.pending' }, { status: 'cancelled' });
-      await db('POST', 'admin_activation_tokens', {}, { admin_user_id: registration.admin_id, token_hash: hashAdminActivationToken(token), status: 'pending', expires_at: expiresAt });
-    });
+    const client = await getLocalPool().connect(); let registration;
+    try {
+      await client.query('begin');
+      registration = (await client.query(`select ar.*,au.name admin_name,au.email admin_email,c.name company_name,s.name store_name,s.slug store_slug,s.public_url from assisted_registrations ar join admin_users au on au.id=ar.admin_id join companies c on c.id=ar.company_id join stores s on s.id=ar.store_id where ar.id=$1 for update`, [id])).rows[0];
+      if (!registration) throw httpError(404, 'Cadastro assistido não encontrado.');
+      if (registration.status !== 'published') throw httpError(409, 'Esta conta já foi ativada ou não está pronta para reenvio.');
+      await client.query("update admin_activation_tokens set status='cancelled' where admin_user_id=$1 and status='pending'", [registration.admin_id]);
+      await client.query("insert into admin_activation_tokens (admin_user_id,token_hash,status,expires_at) values ($1,$2,'pending',$3)", [registration.admin_id, hashAdminActivationToken(token), expiresAt]);
+      await client.query('commit');
+    } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+    finally { client.release(); }
     let emailStatus = 'sent';
     try { await sendAssistedActivationEmail(req, { admin: { id: registration.admin_id, name: registration.admin_name, email: registration.admin_email }, company: { id: registration.company_id, name: registration.company_name }, store: { id: registration.store_id, name: registration.store_name, slug: registration.store_slug, public_url: registration.public_url }, token, expiresAt }); }
     catch { emailStatus = 'failed'; }
@@ -4673,7 +4716,7 @@ async function recordAccessEvent(req, data = {}) {
 
 async function recordPublicMarketingEvent(req, data = {}) {
   const eventName = cleanMarketingEventName(data.event_name || data.eventName || '');
-  const allowed = new Set(['content_view', 'landing_view', 'demo_started', 'signup_started']);
+  const allowed = new Set(['content_view', 'landing_view', 'whatsapp_click', 'demo_started', 'signup_started']);
   if (!allowed.has(eventName)) throw httpError(422, 'Evento de marketing inválido.');
   const attribution = marketingAttributionFromRequest(req, data.attribution);
   await recordMarketingMilestone(eventName, {
@@ -4685,6 +4728,10 @@ async function recordPublicMarketingEvent(req, data = {}) {
       placement: cleanText(data.placement || '').slice(0, 80)
     }
   });
+}
+
+async function recordTrustedMarketingEvent(eventName, options = {}) {
+  return recordMarketingMilestone(eventName, options);
 }
 
 async function recordMarketingMilestone(eventName, options = {}) {
@@ -5714,6 +5761,7 @@ async function activateAssistedAdminAccount(req, activation, data = {}) {
     if (!lockedToken || new Date(lockedToken.expires_at).getTime() < Date.now()) throw httpError(410, 'Este link de ativação expirou ou já foi utilizado.');
     const registration = (await client.query('select * from assisted_registrations where admin_id=$1 for update', [activation.admin_user_id])).rows[0];
     if (!registration) throw httpError(404, 'Cadastro assistido não encontrado.');
+    if (registration.status !== 'published') throw httpError(409, 'Esta conta já foi ativada ou não está pronta para ativação.');
     admin = (await client.query('update admin_users set password_hash=$2,is_active=true,updated_at=now() where id=$1 returning *', [activation.admin_user_id, hashPassword(password)])).rows[0];
     await client.query("update admin_activation_tokens set status=case when id=$2 then 'used' else 'cancelled' end,used_at=case when id=$2 then now() else used_at end where admin_user_id=$1 and status='pending'", [admin.id, activation.id]);
     await client.query("update companies set status='trial',updated_at=now() where id=$1", [registration.company_id]);
@@ -5724,8 +5772,26 @@ async function activateAssistedAdminAccount(req, activation, data = {}) {
   } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
   finally { client.release(); }
   clearAdminUsersCache();
-  await recordPublicMarketingEvent(req, { event_name: 'signup_completed', placement: 'assisted_activation', company_id: admin.company_id }).catch(() => {});
+  await recordTrustedMarketingEvent('signup_completed', { companyId: admin.company_id, idempotencyKey: `assisted-activation:${activation.admin_user_id}`, properties: { placement: 'assisted_activation' } }).catch(() => {});
   return createAdminSession(admin);
+}
+
+async function normalizeAssistedMenuImage(buffer) {
+  return sharp(Buffer.from(buffer), { limitInputPixels: 24_000_000 }).rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+}
+
+async function requestAssistedMenuVision({ mime_type, buffer }) {
+  const apiKey = process.env.OPENAI_API_KEY || '';
+  if (!apiKey) throw httpError(503, 'Extração visual indisponível. Configure o provedor ou cole a lista em texto.');
+  const content = [{ type: 'input_text', text: 'Extraia este cardápio. Responda somente JSON: {"schema_version":1,"categories":[{"name":"...","items":[{"name":"...","description":"","price_cents":1234,"needs_review":false}]}]}. Use null e needs_review=true quando o preço estiver ilegível. Não invente dados.' }];
+  if (mime_type === 'application/pdf') content.push({ type: 'input_file', filename: 'cardapio.pdf', file_data: `data:application/pdf;base64,${Buffer.from(buffer).toString('base64')}` });
+  else content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${Buffer.from(buffer).toString('base64')}`, detail: 'high' });
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120000), body: JSON.stringify({ model: process.env.OPENAI_VISION_MODEL || 'gpt-4.1-mini', store: false, max_output_tokens: 5000, input: [{ role: 'user', content }] }) });
+  const payload = await response.json().catch(() => ({}));
+  const output = payload.output?.flatMap((item) => item.content || []).filter((item) => item.type === 'output_text').map((item) => item.text).join('\n').trim();
+  if (!response.ok || !output) throw httpError(502, 'Não foi possível interpretar o cardápio visual. Tente outra imagem ou cole a lista.');
+  try { return JSON.parse(output.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
+  catch { throw httpError(502, 'O cardápio visual retornou um formato inválido. Tente novamente.'); }
 }
 
 async function sendAssistedActivationEmail(req, { admin, company, store, token, expiresAt }) {

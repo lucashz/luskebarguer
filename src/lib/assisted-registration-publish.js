@@ -1,6 +1,6 @@
 import { createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { assertMenuDraftPublishable } from './assisted-menu-review.js';
-import { publicAssistedRegistration } from './assisted-registration.js';
+import { assertAssistedIdentityComplete, publicAssistedRegistration } from './assisted-registration.js';
 
 export async function publishAssistedRegistration(pool, id, actor = {}, options = {}) {
   const client = await pool.connect();
@@ -12,20 +12,21 @@ export async function publishAssistedRegistration(pool, id, actor = {}, options 
       const result = await linkedResult(client, registration); await client.query('commit'); return result;
     }
     if (registration.status !== 'ready_to_publish') throw statusError(422, 'Revise o cardápio antes de publicar.');
+    assertAssistedIdentityComplete(registration);
     const menu = (await client.query('select * from assisted_menu_drafts where registration_id=$1 for update', [id])).rows[0];
     if (!menu?.reviewed_at || !menu.reviewed_hash) throw statusError(422, 'A revisão obrigatória do cardápio está pendente.');
     const content = { ...menu.content, version: menu.version };
     assertMenuDraftPublishable(content);
     const expectedHash = createHash('sha256').update(JSON.stringify({ schema_version: content.schema_version || 1, categories: content.categories, version: content.version || 1 })).digest('hex');
     if (expectedHash !== menu.reviewed_hash) throw statusError(409, 'O cardápio mudou depois da revisão. Revise novamente.');
-    const duplicate = await client.query('select id from companies where regexp_replace(coalesce(document,\'\'), \'\\D\', \'\', \'g\')=$1 limit 1', [registration.document_normalized]);
+    const duplicate = await client.query(`select c.id from companies c left join admin_users au on au.company_id=c.id where regexp_replace(coalesce(c.document,''), '\\D', '', 'g')=$1 or regexp_replace(coalesce(c.phone,''), '\\D', '', 'g')=$2 or lower(coalesce(c.billing_email,''))=$3 or lower(coalesce(au.email,''))=$3 limit 1`, [registration.document_normalized, registration.phone, registration.email]);
     if (duplicate.rows[0]) throw statusError(409, 'Já existe uma empresa com este CPF ou CNPJ.');
 
     const company = (await client.query(`insert into companies (name,document,billing_email,phone,status,marketing_attribution) values ($1,$2,$3,$4,'onboarding',$5::jsonb) returning *`, [registration.establishment_name, registration.document_normalized, registration.email || null, registration.phone || null, JSON.stringify(registration.attribution || {})])).rows[0];
     const slug = `${slugify(registration.establishment_name)}-${id.slice(0, 6)}`;
-    const store = (await client.query(`insert into stores (company_id,name,slug,description,public_url,is_active) values ($1,$2,$3,$4,$5,false) returning *`, [company.id, registration.establishment_name, slug, 'Cardápio criado com a ajuda da equipe TáPronto.', `/${slug}`])).rows[0];
+    const store = (await client.query(`insert into stores (company_id,name,slug,description,public_url,is_active) values ($1,$2,$3,$4,$5,true) returning *`, [company.id, registration.establishment_name, slug, 'Cardápio criado com a ajuda da equipe TáPronto.', `/${slug}`])).rows[0];
     const answers = registration.answers || {};
-    await client.query(`insert into store_settings (store_id,name,slug,description,whatsapp_number,address,payment_methods,business_hours,onboarding_completed) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,false)`, [store.id, store.name, slug, store.description, answers.establishment?.whatsapp || registration.phone || null, answers.establishment?.address || null, answers.operation?.payment_methods || [], JSON.stringify({ declared: answers.operation?.hours || '' })]);
+    await client.query(`insert into store_settings (store_id,name,slug,description,whatsapp_number,address,payment_methods,business_hours,onboarding_completed) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,true)`, [store.id, store.name, slug, store.description, answers.establishment?.whatsapp || registration.phone || null, answers.establishment?.address || null, answers.operation?.payment_methods || [], JSON.stringify(parseBusinessHours(answers.operation?.hours))]);
     const admin = (await client.query(`insert into admin_users (company_id,name,email,password_hash,role,is_active) values ($1,$2,$3,$4,'owner',false) returning id,name,email,is_active`, [company.id, registration.responsible_name, registration.email, `pending_activation$${randomBytes(32).toString('hex')}`])).rows[0];
     await client.query(`insert into admin_user_store_access (admin_user_id,company_id,store_id,role,permissions,is_active) values ($1,$2,$3,'owner',array[]::text[],true)`, [admin.id, company.id, store.id]);
     for (const [categoryIndex, category] of content.categories.entries()) {
@@ -59,4 +60,5 @@ function safeStore(row = {}) { return { id: row.id, name: row.name, slug: row.sl
 function safeSubscription(row = {}) { return { id: row.id, status: row.status, trial_ends_at: row.trial_ends_at, current_period_starts_at: row.current_period_starts_at }; }
 function slugify(value) { return String(value || 'loja').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 45) || 'loja'; }
 function statusError(status, message) { const error = new Error(message); error.status = status; return error; }
+function parseBusinessHours(value) { if (value && typeof value === 'object') return value; const text=String(value||'').trim(); const times=text.match(/(\d{1,2})(?::(\d{2}))?\D+(\d{1,2})(?::(\d{2}))?/); if(!times) return { notes:text.slice(0,1000) }; const day={open:`${times[1].padStart(2,'0')}:${times[2]||'00'}`,close:`${times[3].padStart(2,'0')}:${times[4]||'00'}`,closed:false}; return Object.fromEntries(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map((key)=>[key,{...day}])); }
 export function activationTokenHash(token) { return pbkdf2Sync(String(token || ''), 'admin_account_activation', 120000, 32, 'sha256').toString('hex'); }

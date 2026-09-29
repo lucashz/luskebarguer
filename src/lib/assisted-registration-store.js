@@ -16,7 +16,23 @@ export async function findAssistedDuplicates(pool, identity = {}) {
      order by updated_at desc
      limit 20
   `, [document, phone, email]);
-  return result.rows.map(publicAssistedRegistration);
+  const external = await pool.query(`
+    select distinct null::uuid id, 'existing_account'::text status,
+      coalesce(au.name,c.name,'Conta existente') responsible_name,
+      coalesce(c.phone,'') phone, coalesce(au.email,c.billing_email,'') email,
+      coalesce(c.name,'Empresa existente') establishment_name,
+      regexp_replace(coalesce(c.document,''), '\\D', '', 'g') document_normalized,
+      '{}'::jsonb answers, '{}'::jsonb attribution, 1 version,
+      c.id company_id, null::uuid store_id, au.id admin_id, null::uuid subscription_id,
+      'not_sent'::text email_status, null::timestamptz published_at, null::timestamptz activated_at,
+      c.created_at, c.updated_at
+    from companies c left join admin_users au on au.company_id=c.id
+    where ($1 <> '' and regexp_replace(coalesce(c.document,''), '\\D', '', 'g')=$1)
+       or ($2 <> '' and regexp_replace(coalesce(c.phone,''), '\\D', '', 'g')=$2)
+       or ($3 <> '' and (lower(coalesce(au.email,''))=$3 or lower(coalesce(c.billing_email,''))=$3))
+    limit 20
+  `, [document, phone, email]);
+  return [...result.rows, ...external.rows].map(publicAssistedRegistration);
 }
 
 export async function createAssistedRegistration(pool, data = {}, actor = {}) {
@@ -74,6 +90,7 @@ export async function updateAssistedRegistration(pool, id, patch = {}, actor = {
   const current = await pool.query('select * from assisted_registrations where id = $1 limit 1', [id]);
   if (!current.rows[0]) return null;
   const row = current.rows[0];
+  if (['published', 'activated'].includes(row.status)) throw conflictError('Cadastro publicado não pode mais ser alterado.');
   const values = {
     responsible_name: patch.responsible_name === undefined ? row.responsible_name : cleanText(patch.responsible_name, 120),
     phone: patch.phone === undefined ? row.phone : digits(patch.phone),
@@ -83,6 +100,9 @@ export async function updateAssistedRegistration(pool, id, patch = {}, actor = {
     answers: patch.answers === undefined ? row.answers : sanitizeAssistedAnswers(patch.answers),
     attribution: patch.attribution === undefined ? row.attribution : sanitizeObject(patch.attribution)
   };
+  const duplicates = await findAssistedDuplicates(pool, { document: values.document_normalized, phone: values.phone, email: values.email });
+  const conflicts = duplicates.filter((duplicate) => duplicate.id !== id);
+  if (conflicts.length) throw conflictError('Já existe um cadastro ou conta com estes dados.', conflicts);
   const result = await pool.query(`
     update assisted_registrations set responsible_name=$3, phone=$4, email=$5, establishment_name=$6,
       document_normalized=$7, answers=$8::jsonb, attribution=$9::jsonb, operator_admin_id=$10,

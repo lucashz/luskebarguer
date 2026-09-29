@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { PDFParse } from 'pdf-parse';
+import { randomUUID } from 'node:crypto';
 
 export async function extractAssistedMenu({ files = [], text = '', aiRequest, normalizeImage } = {}) {
   const categories = [];
@@ -12,8 +13,10 @@ export async function extractAssistedMenu({ files = [], text = '', aiRequest, no
       const parser = new PDFParse({ data: Buffer.from(file.buffer) });
       try {
         const result = await parser.getText();
-        if (!String(result.text || '').trim()) throw invalid('PDF sem texto legível; envie uma foto ou use a extração visual.');
-        parseText(result.text, categories);
+        if (!String(result.text || '').trim()) {
+          if (!aiRequest) throw invalid('PDF sem texto legível; envie uma foto ou configure a extração visual.');
+          mergeDraft(categories, await aiRequest({ mime_type: mime, buffer: Buffer.from(file.buffer), normalized: false, schema_version: 1 }));
+        } else parseText(result.text, categories);
       } finally { await parser.destroy(); }
     }
     else if (mime.startsWith('image/')) {
@@ -29,9 +32,9 @@ export function validateMenuDraft(value = {}) {
   if (!Array.isArray(value.categories)) throw invalid('Cardápio inválido: categorias ausentes.');
   const categories = value.categories.map((category) => {
     if (!category || typeof category.name !== 'string' || !Array.isArray(category.items)) throw invalid('Categoria inválida.');
-    return { name: clean(category.name), items: category.items.map((item) => {
+    return { id: validId(category.id), name: clean(category.name), items: category.items.map((item) => {
       if (!item || typeof item.name !== 'string' || (item.price_cents !== null && !Number.isInteger(item.price_cents))) throw invalid('Produto ou preço inválido.');
-      return { name: clean(item.name), description: clean(item.description || ''), price_cents: item.price_cents, needs_review: item.needs_review === true || item.price_cents === null };
+      return { id: validId(item.id), name: clean(item.name), description: clean(item.description || ''), price_cents: item.price_cents, needs_review: item.needs_review === true || item.price_cents === null, option_groups: (Array.isArray(item.option_groups) ? item.option_groups : []).map((group) => ({ id: validId(group?.id), name: clean(group?.name), min_choices: Number.isInteger(group?.min_choices) ? group.min_choices : 0, max_choices: Number.isInteger(group?.max_choices) ? group.max_choices : 1, is_required: group?.is_required === true, options: (Array.isArray(group?.options) ? group.options : []).map((option) => ({ id: validId(option?.id), name: clean(option?.name), price_cents: Number.isInteger(option?.price_cents) ? option.price_cents : null })) })) };
     }).filter((item) => item.name) };
   }).filter((category) => category.name && category.items.length);
   return { schema_version: 1, categories };
@@ -59,7 +62,8 @@ async function parseWorkbook(buffer, categories) {
   workbook.eachSheet((sheet) => sheet.eachRow((row, index) => { if (index === 1) return; const [cat, name, price] = [row.getCell(1).text, row.getCell(2).text, row.getCell(3).value]; if (!cat || !name) return; category(categories, cat).items.push(item(name, price)); }));
 }
 function category(categories, name) { const value = clean(name); let found = categories.find((entry) => entry.name === value); if (!found) { found = { name: value, items: [] }; categories.push(found); } return found; }
-function item(name, price) { const cents = price === undefined || price === null || price === '' ? null : Math.round(Number(String(price).replace(/[^\d,.-]/g, '').replace(',', '.')) * 100); return { name: clean(name), description: '', price_cents: Number.isFinite(cents) ? cents : null, needs_review: !Number.isFinite(cents) }; }
+function item(name, price) { const normalized = String(price ?? '').replace(/[^\d,.-]/g, '').replace(',', '.'); const numeric = normalized && /^-?\d+(?:\.\d+)?$/.test(normalized) ? Number(normalized) : NaN; const cents = Number.isFinite(numeric) ? Math.round(numeric * 100) : null; return { name: clean(name), description: '', price_cents: cents, needs_review: cents === null || cents < 0 }; }
 function mergeDraft(categories, draft) { const valid = validateMenuDraft(draft); for (const group of valid.categories) { const target = category(categories, group.name); target.items.push(...group.items); } }
 function clean(value) { return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 300); }
+function validId(value) { return /^[0-9a-f-]{36}$/i.test(String(value || '')) ? value : randomUUID(); }
 function invalid(message) { const error = new Error(message); error.status = 422; return error; }

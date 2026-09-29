@@ -18,6 +18,9 @@ try {
   const csv = await readFile(new URL('./fixtures/assisted-menu/menu.csv', import.meta.url));
   const csvDraft = await extractAssistedMenu({ files: [{ mime_type: 'text/csv', buffer: csv }] });
   assert.equal(csvDraft.categories[0].items[0].price_cents, 3250, 'CSV precisa aceitar vírgula decimal.');
+  const ambiguousDraft = await extractAssistedMenu({ files: [{ mime_type: 'text/csv', buffer: Buffer.from('Categoria;Produto;Preço\nLanches;Especial;Consultar') }] });
+  assert.equal(ambiguousDraft.categories[0].items[0].price_cents, null, 'Preço não numérico não pode virar zero.');
+  assert.equal(ambiguousDraft.categories[0].items[0].needs_review, true, 'Preço ambíguo exige revisão.');
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Cardapio');
@@ -52,6 +55,7 @@ try {
   assert.notEqual(edited.categories[0].items[1].id, itemId);
   assert.throws(() => applyMenuDraftPatch(edited, { expected_version: 1, operations: [] }), /outra tela|versão/i);
   assert.throws(() => assertMenuDraftPublishable({ ...baseDraft, categories: [{ ...baseDraft.categories[0], items: [{ ...baseDraft.categories[0].items[0], price_cents: null, needs_review: true }] }] }), /categories\[0\]\.items\[0\]/);
+  assert.throws(() => assertMenuDraftPublishable({ ...baseDraft, categories: [{ ...baseDraft.categories[0], items: [{ ...baseDraft.categories[0].items[0], option_groups: [{ id: categoryId, name: 'Tamanho', min_choices: 2, max_choices: 1, options: [{ id: itemId, name: '', price_cents: -150 }] }] }] }] }), /option_groups/, 'Adicional inválido não pode ser aprovado.');
   const reviewed = reviewMenuDraft(edited, { id: '33333333-3333-4333-8333-333333333333' });
   assert.ok(reviewed.reviewed_at && reviewed.reviewed_hash && reviewed.reviewed_by);
 

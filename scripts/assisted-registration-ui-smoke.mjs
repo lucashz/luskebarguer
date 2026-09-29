@@ -7,13 +7,17 @@ const js = readFileSync(new URL('../public/platform-assisted-registration.js', i
 
 assert.match(html, /data-platform-view="assisted"[^>]*>[\s\S]*Cadastros assistidos/i);
 assert.match(html, /data-platform-section="assisted"/);
+assert.match(html, /<script[^>]+platform-assisted-registration\.js/, 'O artefato versionado precisa carregar o módulo assistido.');
 for (const step of ['Contato', 'Estabelecimento', 'Operação', 'Diagnóstico', 'Identidade', 'Cardápio']) assert.ok(html.includes(step), `Etapa ausente: ${step}`);
 for (const status of ['new', 'in_progress', 'awaiting_menu', 'reviewing_menu', 'ready_to_publish', 'published', 'activated', 'cancelled']) assert.ok(js.includes(status), `Estado ausente: ${status}`);
 for (const endpoint of ['/assisted-registrations', '/files', '/import', '/menu-draft', '/review', '/publish', '/resend-activation']) assert.ok(js.includes(endpoint), `Integração ausente: ${endpoint}`);
 assert.ok(js.includes('expected_version'), 'Autosave precisa enviar a versão esperada.');
+assert.ok(js.includes("expected_version:menuDraft.version"), 'Confirmação da revisão precisa informar a versão vista pelo operador.');
 assert.ok(js.includes('update_category') && js.includes('update_item') && js.includes('delete_item'), 'Revisor precisa editar categorias e produtos em linha.');
+assert.ok(js.includes('add_category') && js.includes('add_item') && js.includes('duplicate_item'), 'Revisor precisa completar itens ou categorias ausentes.');
 assert.ok(js.includes('data_base64') && html.includes('accept="image/jpeg'), 'Upload precisa converter formatos aceitos.');
 assert.ok(html.includes('assistedOriginalPanel') && html.includes('assistedInterpretedPanel'), 'Revisor precisa mostrar original e interpretado.');
 assert.ok(html.includes('assistedPublishConfirm') && html.includes('Reenviar e-mail'), 'Publicação precisa de confirmação e reenvio.');
 assert.match(css, /@media\s*\(max-width:\s*760px\)[\s\S]*\.assisted-review-grid/);
+for (const field of ['address','whatsapp','fulfillment','payment_methods','neighborhoods','declared_source']) assert.match(html, new RegExp(`name="${field}"`), `Pergunta operacional ausente: ${field}`);
 console.log('Assisted registration UI smoke: OK');
