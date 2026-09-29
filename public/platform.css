@@ -3200,6 +3200,10 @@ body.platform-redesign [hidden] {
 .assisted-list-row { display:grid; grid-template-columns:1.2fr 1fr 1fr auto; gap:12px; align-items:center; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; }
 .assisted-list-row small,.assisted-list-row span { color:#64748b; }
 .assisted-editor { margin-top:20px; padding-top:20px; border-top:1px solid #e2e8f0; }
+.assisted-discovery { margin-bottom:20px; padding:20px; border:1px solid #fecaca; border-radius:16px; background:#fffafa; }
+.assisted-discovery h3 { margin:4px 0 6px; }
+.assisted-discovery .primary-button { margin-top:14px; }
+#assistedRegistrationFields { padding-top:4px; }
 .assisted-steps { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; padding:0; list-style:none; }
 .assisted-steps li { padding:9px; border-radius:9px; background:#f1f5f9; text-align:center; font-size:12px; font-weight:700; }
 .assisted-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }

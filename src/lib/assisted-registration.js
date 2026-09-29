@@ -56,12 +56,21 @@ export function assertAssistedIdentityComplete(value = {}) {
 
 export function sanitizeAssistedAnswers(value = {}) {
   const data = isObject(value) ? value : {};
+  const discovery = isObject(data.discovery) ? data.discovery : {};
   const contact = isObject(data.contact) ? data.contact : {};
   const establishment = isObject(data.establishment) ? data.establishment : {};
   const operation = isObject(data.operation) ? data.operation : {};
   const diagnosis = isObject(data.diagnosis) ? data.diagnosis : {};
   const branding = isObject(data.branding) ? data.branding : {};
   return {
+    discovery: {
+      business_story: cleanText(discovery.business_story, 1000),
+      order_channels: cleanText(discovery.order_channels, 300),
+      order_pain: cleanText(discovery.order_pain, 500),
+      current_menu: cleanText(discovery.current_menu, 500),
+      organized_orders_value: cleanText(discovery.organized_orders_value, 1000),
+      trial_interest: ['yes', 'maybe', 'no'].includes(discovery.trial_interest) ? discovery.trial_interest : ''
+    },
     contact: {
       name: cleanText(contact.name, 120),
       email: cleanEmail(contact.email),

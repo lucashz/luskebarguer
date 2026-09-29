@@ -20,4 +20,7 @@ assert.ok(html.includes('assistedOriginalPanel') && html.includes('assistedInter
 assert.ok(html.includes('assistedPublishConfirm') && html.includes('Reenviar e-mail'), 'Publicação precisa de confirmação e reenvio.');
 assert.match(css, /@media\s*\(max-width:\s*760px\)[\s\S]*\.assisted-review-grid/);
 for (const field of ['address','whatsapp','fulfillment','payment_methods','neighborhoods','declared_source']) assert.match(html, new RegExp(`name="${field}"`), `Pergunta operacional ausente: ${field}`);
+for (const field of ['business_story','order_channels','order_pain','current_menu','organized_orders_value','trial_interest']) assert.match(html, new RegExp(`name="${field}"`), `Pergunta de descoberta ausente: ${field}`);
+assert.ok(html.includes('Conhecer o negócio') && html.includes('Vamos deixar tudo pronto'), 'O diagnóstico precisa aparecer antes do cadastro formal.');
+assert.ok(js.includes('discovery') && js.includes('trial_interest') && js.includes('assistedRegistrationFields'), 'As respostas de descoberta precisam ser preservadas e liberar o cadastro.');
 console.log('Assisted registration UI smoke: OK');

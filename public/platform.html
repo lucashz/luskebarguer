@@ -894,8 +894,23 @@
           <section class="assisted-editor" id="assistedEditor" hidden>
             <form id="assistedWizard">
               <input name="registration_id" type="hidden"><input name="expected_version" type="hidden" value="1">
-              <ol class="assisted-steps" aria-label="Etapas do cadastro"><li>Contato</li><li>Estabelecimento</li><li>Operação</li><li>Diagnóstico</li><li>Identidade</li><li>Cardápio</li></ol>
-              <div class="assisted-form-grid">
+              <section class="assisted-discovery">
+                <p class="eyebrow">Antes do cadastro</p>
+                <h3>Conhecer o negócio</h3>
+                <p class="muted">Converse com o cliente e registre respostas curtas. A ideia é entender a operação antes de oferecer a montagem.</p>
+                <div class="assisted-form-grid">
+                  <label class="assisted-wide">Me conta um pouco sobre o negócio: o que vocês vendem e há quanto tempo atendem?<textarea name="business_story"></textarea></label>
+                  <label>Por onde chegam a maioria dos pedidos?<input name="order_channels" placeholder="WhatsApp, Instagram, telefone..."></label>
+                  <label>O que mais atrapalha os pedidos atualmente?<input name="order_pain" placeholder="Erros, demora, mensagens acumuladas..."></label>
+                  <label>Como apresentam o cardápio hoje?<input name="current_menu" placeholder="Fotos, PDF, mensagens, cardápio digital..."></label>
+                  <label>Pedidos organizados automaticamente ajudariam a operação?<textarea name="organized_orders_value"></textarea></label>
+                  <label>Se montarmos tudo, gostaria de testar grátis por 7 dias?<select name="trial_interest"><option value="">Selecione</option><option value="yes">Sim, quero testar</option><option value="maybe">Talvez, quero entender melhor</option><option value="no">Agora não</option></select></label>
+                </div>
+                <button class="primary-button compact" id="assistedStartRegistration" type="button" hidden>Ótimo! Vamos deixar tudo pronto</button>
+              </section>
+              <section id="assistedRegistrationFields" hidden>
+                <ol class="assisted-steps" aria-label="Etapas do cadastro"><li>Contato</li><li>Estabelecimento</li><li>Operação</li><li>Diagnóstico</li><li>Identidade</li><li>Cardápio</li></ol>
+                <div class="assisted-form-grid">
                 <label>Responsável<input name="responsible_name" required></label><label>WhatsApp<input name="phone" inputmode="tel" required></label>
                 <label>E-mail<input name="email" type="email" required></label><label>Estabelecimento<input name="establishment_name" required></label>
                 <label>CPF ou CNPJ<input name="document" inputmode="numeric" required></label><label>Cidade<input name="city"></label>
@@ -905,9 +920,10 @@
                 <label>Formas de pagamento<input name="payment_methods" placeholder="Pix, dinheiro, cartão"></label><label>Funcionamento<textarea name="hours"></textarea></label>
                 <label class="assisted-wide">Bairros e taxas de entrega<textarea name="neighborhoods"></textarea></label>
                 <label class="assisted-wide">Maior dificuldade<textarea name="biggest_pain"></textarea></label>
-              </div>
-              <p class="form-message" id="assistedSaveStatus" role="status"></p>
-              <div class="row-actions"><button class="primary-button compact" type="submit">Salvar e continuar</button><button class="ghost-button compact" id="assistedClose" type="button">Fechar</button></div>
+                </div>
+                <p class="form-message" id="assistedSaveStatus" role="status"></p>
+                <div class="row-actions"><button class="primary-button compact" type="submit">Salvar e continuar</button><button class="ghost-button compact" id="assistedClose" type="button">Fechar</button></div>
+              </section>
             </form>
             <section class="assisted-menu-area">
               <label>Enviar cardápio atual<input id="assistedFileInput" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple></label>

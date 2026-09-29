@@ -30,6 +30,7 @@ assert.throws(() => assertAssistedTransition('new', 'published'), /Transição i
 assert.throws(() => assertAssistedTransition('activated', 'in_progress'), /Transição inválida/);
 
 const answers = sanitizeAssistedAnswers({
+  discovery: { business_story: 'Lancheria familiar', order_channels: 'WhatsApp', order_pain: 'Mensagens acumuladas', current_menu: 'PDF', organized_orders_value: 'Ajudaria muito', trial_interest: 'yes', ignored: 'x' },
   contact: { name: '  Ana   Silva ', email: ' ANA@EXAMPLE.COM ', phone: '(55) 99999-0000', ignored: 'x' },
   establishment: { name: '  Pizzaria da Ana ', niche: 'Pizzaria', city: 'Horizontina', address: 'Rua A, 10', instagram: '@ana', whatsapp: '55999990000' },
   operation: { fulfillment: ['delivery', 'pickup', 'invalid'], payment_methods: ['Pix', 'Dinheiro'], hours: '18h às 23h', neighborhoods: 'Centro', average_orders: '30' },
@@ -39,6 +40,7 @@ const answers = sanitizeAssistedAnswers({
 });
 assert.deepEqual(answers.contact, { name: 'Ana Silva', email: 'ana@example.com', phone: '55999990000' });
 assert.deepEqual(answers.operation.fulfillment, ['delivery', 'pickup']);
+assert.deepEqual(answers.discovery, { business_story: 'Lancheria familiar', order_channels: 'WhatsApp', order_pain: 'Mensagens acumuladas', current_menu: 'PDF', organized_orders_value: 'Ajudaria muito', trial_interest: 'yes' });
 assert.equal(answers.password, undefined);
 assert.equal(answers.token, undefined);
 assert.equal(answers.contact.ignored, undefined);
