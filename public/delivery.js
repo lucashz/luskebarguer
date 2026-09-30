@@ -25,6 +25,7 @@
     const carousel = document.querySelector('[data-proof-carousel]');
     const slides = [...carousel?.querySelectorAll('[data-carousel-slide]') || []];
     const controls = [...carousel?.querySelectorAll('[data-carousel-label]') || []];
+    const progress = carousel?.querySelector('[data-carousel-progress]');
     if (slides.length < 2 || controls.length !== slides.length) return;
     let activeIndex = 0;
     let timer = null;
@@ -33,11 +34,13 @@
       activeIndex = (index + slides.length) % slides.length;
       slides.forEach((slide, position) => { slide.hidden = position !== activeIndex; });
       controls.forEach((button, position) => button.setAttribute('aria-pressed', String(position === activeIndex)));
+      if (progress) { progress.style.animation = 'none'; void progress.offsetHeight; progress.style.animation = ''; }
     };
-    const stop = () => { if (timer) clearInterval(timer); timer = null; };
+    const stop = () => { if (timer) clearInterval(timer); timer = null; carousel.classList.add('is-paused'); };
     const start = () => {
       stop();
       if (document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      carousel.classList.remove('is-paused');
       timer = setInterval(() => show(activeIndex + 1), 5000);
     };
 

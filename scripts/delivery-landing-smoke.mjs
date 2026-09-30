@@ -32,6 +32,8 @@ try {
   assert((html.match(/data-proof-carousel/g) || []).length === 1, 'A landing deve ter um único carrossel.');
   assert(/class="hero-visual"[\s\S]*data-proof-carousel[\s\S]*<\/section>/.test(html), 'O carrossel precisa ocupar o destaque visual do topo.');
   assert(!html.includes('class="phone-shell"'), 'O mockup inclinado antigo precisa ser removido do topo.');
+  assert(html.includes('class="proof-browser-bar"') && html.includes('taprontomenu.com.br'), 'O carrossel precisa usar uma moldura discreta de navegador.');
+  assert(html.includes('data-carousel-progress'), 'O carrossel precisa indicar visualmente a troca automática.');
   for (const label of ['Cardápio', 'Pedidos', 'Produtos', 'Operação', 'Configuração']) assert(html.includes(`data-carousel-label="${label}"`), `Controle ausente: ${label}`);
   assert(html.includes('data-delivery-image-modal') && html.includes('role="dialog"'), 'A landing precisa oferecer modal acessível para ampliar as capturas.');
   assert(html.includes('/delivery.css') && html.includes('/delivery.js'), 'A landing precisa carregar seus assets dedicados.');
@@ -44,6 +46,8 @@ try {
   assert(script.includes('setupProofCarousel') && script.includes('5000'), 'O carrossel precisa alternar automaticamente a cada 5 segundos.');
   const deliveryCss = await (await fetch(`${baseUrl}/delivery.css`, { headers: { Host: 'taprontomenu.com.br' } })).text();
   assert(/\.assisted-whatsapp-cta\s*\{[^}]*background:\s*#ef1823/s.test(deliveryCss), 'O CTA principal da landing precisa ser vermelho.');
+  assert(/\.hero-visual\s*\{[^}]*background:\s*#f[0-9a-f]{5}/s.test(deliveryCss), 'O carrossel precisa usar fundo neutro claro.');
+  assert(!/\.hero-visual\s*\{[^}]*radial-gradient/s.test(deliveryCss), 'O fundo vermelho antigo precisa ser removido.');
 
   const layout = await layoutMetrics();
   for (const mobile of layout.mobile) {
