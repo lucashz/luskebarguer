@@ -5,6 +5,11 @@
     return [...companies].sort((left, right) => collator.compare(String(left?.name || ''), String(right?.name || '')));
   }
 
+  function companiesEligibleForAttention(companies = []) {
+    const terminalStatuses = new Set(['cancelled', 'archived', 'deleted']);
+    return companies.filter((company) => !company?.excluded_from_metrics && !terminalStatuses.has(String(company?.status || '').toLowerCase()));
+  }
+
   function compactClientSummary({ company = {}, responsible = null, store = null, planName = 'Sem plano', status = '', ordersMonth = 0, revenueLabel = 'R$ 0,00' } = {}) {
     const responsibleLabel = [responsible?.name, responsible?.email].filter(Boolean).join(' · ') || 'Sem responsável';
     return [
@@ -20,5 +25,5 @@
     ];
   }
 
-  root.PlatformClientList = Object.freeze({ sortCompaniesAlphabetically, compactClientSummary });
+  root.PlatformClientList = Object.freeze({ sortCompaniesAlphabetically, companiesEligibleForAttention, compactClientSummary });
 })(globalThis);

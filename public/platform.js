@@ -2770,7 +2770,7 @@ function filteredCompanies() {
 }
 
 function platformClientAlerts() {
-  return state.companies.flatMap((company) => clientAlertsForCompany(company, companyMetrics(company.id)).map((alert) => ({
+  return globalThis.PlatformClientList.companiesEligibleForAttention(state.companies).flatMap((company) => clientAlertsForCompany(company, companyMetrics(company.id)).map((alert) => ({
     ...alert,
     company_id: company.id,
     company_name: company.name
