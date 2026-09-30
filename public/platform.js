@@ -1566,7 +1566,7 @@ function renderSocialApprovalPreview() {
     ? `<button class="social-preview-arrow previous" data-social-preview-direction="-1" type="button" aria-label="Imagem anterior">‹</button><button class="social-preview-arrow next" data-social-preview-direction="1" type="button" aria-label="Próxima imagem">›</button><span class="social-preview-counter">1/${assets.length}</span>`
     : '';
   const hashtags = Array.isArray(item.hashtags) ? item.hashtags.join(' ') : String(item.hashtags || '');
-  target.innerHTML = `<div class="social-preview-label"><span>Prévia no Instagram</span><b>${escapeHtml(marketingFormatLabel(item.format))}</b></div><article class="instagram-post-preview"><header><span class="instagram-preview-avatar"><img src="/assets/tapronto-favicon.svg" alt=""></span><strong>${escapeHtml(author)}</strong><span>•••</span></header><div class="instagram-preview-media">${media}${carouselControls}</div>${assets.length > 1 ? `<div class="social-preview-dots">${assets.map((_, index) => `<button class="${index ? '' : 'active'}" data-social-preview-index="${index}" type="button" aria-label="Ver imagem ${index + 1}"></button>`).join('')}</div>` : ''}<div class="instagram-preview-actions"><span>♡</span><span>○</span><span>➤</span><span>⌑</span></div><div class="instagram-preview-caption"><p><strong>${escapeHtml(author)}</strong> ${escapeHtml(item.caption || item.hook || '').replaceAll('\n', '<br>')}</p>${hashtags ? `<p class="instagram-preview-hashtags">${escapeHtml(hashtags)}</p>` : ''}${item.cta ? `<small>CTA: ${escapeHtml(item.cta)}</small>` : ''}</div></article>`;
+  target.innerHTML = `<div class="social-preview-label"><span>Prévia no Instagram</span><b>${escapeHtml(marketingFormatLabel(item.format))}</b></div><article class="instagram-post-preview"><header><span class="instagram-preview-avatar"><img src="/assets/tapronto-mark-2026.png?v=20260921" alt=""></span><strong>${escapeHtml(author)}</strong><span>•••</span></header><div class="instagram-preview-media">${media}${carouselControls}</div>${assets.length > 1 ? `<div class="social-preview-dots">${assets.map((_, index) => `<button class="${index ? '' : 'active'}" data-social-preview-index="${index}" type="button" aria-label="Ver imagem ${index + 1}"></button>`).join('')}</div>` : ''}<div class="instagram-preview-actions"><span>♡</span><span>○</span><span>➤</span><span>⌑</span></div><div class="instagram-preview-caption"><p><strong>${escapeHtml(author)}</strong> ${escapeHtml(item.caption || item.hook || '').replaceAll('\n', '<br>')}</p>${hashtags ? `<p class="instagram-preview-hashtags">${escapeHtml(hashtags)}</p>` : ''}${item.cta ? `<small>CTA: ${escapeHtml(item.cta)}</small>` : ''}</div></article>`;
   target.querySelectorAll('[data-social-preview-index]').forEach((button) => button.addEventListener('click', () => showSocialPreviewSlide(target, Number(button.dataset.socialPreviewIndex), assets.length)));
   target.querySelectorAll('[data-social-preview-direction]').forEach((button) => button.addEventListener('click', () => {
     const current = Number(target.querySelector('.social-preview-slide.active')?.dataset.socialPreviewSlide || 0);
@@ -2179,6 +2179,7 @@ function renderAccessMetrics() {
   const byPage = access.by_page || [];
   const byChannel = access.by_channel || [];
   const topStores = access.top_stores || [];
+  const instagramPaid = state.analytics?.marketing?.instagram_paid || {};
   const maxStoreViews = Math.max(1, ...topStores.map((row) => Number(row.views || 0)));
   const deviceLabel = {
     desktop: 'Desktop',
@@ -2191,7 +2192,15 @@ function renderAccessMetrics() {
     cardapio: 'Cardápios',
     checkout: 'Checkout',
     conta: 'Conta',
-    pedido: 'Pedido'
+    pedido: 'Pedido',
+    page: 'Páginas de divulgação'
+  };
+  const channelLabel = {
+    Direto: 'Acesso direto ou origem não identificada',
+    Interno: 'Navegação dentro do TáPronto',
+    'Redes sociais': 'Instagram, Facebook ou outra rede social',
+    Referência: 'Outro site',
+    'Busca orgânica': 'Google ou outro buscador'
   };
   els.platformAccessMetrics.innerHTML = Number(access.total_views || 0) ? `
     <div class="platform-access-summary">
@@ -2211,9 +2220,32 @@ function renderAccessMetrics() {
         <small>Visualizações por visitante</small>
       </article>
     </div>
+    <section class="platform-ad-funnel-card">
+      <div>
+        <p class="eyebrow">Instagram Ads</p>
+        <h4>Funil do anúncio</h4>
+        <small>Somente acessos identificados como Instagram/Facebook pago.</small>
+      </div>
+      <div class="platform-ad-funnel-grid">
+        ${[
+          ['Acessaram pelo anúncio', instagramPaid.landing_views],
+          ['Clicaram em Começar grátis', instagramPaid.signup_clicks],
+          ['Concluíram o cadastro', instagramPaid.signup_completed],
+          ['Clicaram no WhatsApp', instagramPaid.whatsapp_clicks],
+          ['Criaram uma assinatura', instagramPaid.subscriptions]
+        ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></article>`).join('')}
+      </div>
+      <div class="platform-ad-funnel-rates">
+        <span>Anúncio → cadastro: <strong>${Number(instagramPaid.landing_to_signup_click_rate || 0)}%</strong></span>
+        <span>Clique → cadastro concluído: <strong>${Number(instagramPaid.signup_click_to_completed_rate || 0)}%</strong></span>
+        <span>Anúncio → WhatsApp: <strong>${Number(instagramPaid.landing_to_whatsapp_rate || 0)}%</strong></span>
+        <span>Anúncio → assinatura: <strong>${Number(instagramPaid.landing_to_subscription_rate || 0)}%</strong></span>
+      </div>
+      ${(instagramPaid.campaigns || []).length ? `<div class="platform-ad-campaigns"><strong>Por campanha</strong>${instagramPaid.campaigns.map((campaign) => `<p><span>${escapeHtml(campaign.campaign || 'Sem campanha')}</span><small>${Number(campaign.landing_views || 0)} acesso(s) · ${Number(campaign.signup_clicks || 0)} clique(s) para cadastro · ${Number(campaign.signup_completed || 0)} cadastro(s)</small></p>`).join('')}</div>` : ''}
+    </section>
     <div class="platform-access-columns">
       <section>
-        <h4>Por Página</h4>
+        <h4>Páginas acessadas</h4>
         ${(byPage.length ? byPage : []).slice(0, 5).map((row) => `
           <p><span>${escapeHtml(pageLabel[row.page_type] || row.page_type || 'Página')}</span><strong>${Number(row.count || 0)}</strong></p>
         `).join('') || '<p class="empty-state">Sem páginas registradas.</p>'}
@@ -2225,9 +2257,9 @@ function renderAccessMetrics() {
         `).join('') || '<p class="empty-state">Sem dispositivos registrados.</p>'}
       </section>
       <section>
-        <h4>Por Canal</h4>
+        <h4>Origem do acesso</h4>
         ${(byChannel.length ? byChannel : []).slice(0, 5).map((row) => `
-          <p><span>${escapeHtml(row.channel || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
+          <p><span>${escapeHtml(channelLabel[row.channel] || row.channel || 'Outro')}</span><strong>${Number(row.count || 0)}</strong></p>
         `).join('') || '<p class="empty-state">Sem canais registrados.</p>'}
       </section>
     </div>
@@ -2252,13 +2284,16 @@ function renderMarketingFunnel() {
   const marketing = state.analytics?.marketing || {};
   const stages = marketing.stages || {};
   const rows = [
-    ['Demonstração', stages.demo_started],
-    ['Cadastro iniciado', stages.signup_started],
-    ['Cadastro concluído', stages.signup_completed],
-    ['Primeiro produto', stages.first_product_created],
-    ['Cardápio publicado', stages.menu_published],
-    ['Primeiro pedido', stages.first_order_received],
-    ['Plano ativado', stages.subscription_activated]
+    ['Visitantes', stages.landing_view],
+    ['Cliques no WhatsApp', stages.whatsapp_click],
+    ['Cadastros', stages.signup_completed],
+    ['Assinaturas', stages.subscription_created]
+  ];
+  const rates = [
+    ['Visita → WhatsApp', marketing.rates?.landing_to_whatsapp],
+    ['WhatsApp → cadastro', marketing.rates?.whatsapp_to_signup],
+    ['Cadastro → assinatura', marketing.rates?.signup_to_subscription],
+    ['Visita → assinatura', marketing.rates?.landing_to_subscription]
   ];
   const hasData = rows.some(([, value]) => Number(value || 0) > 0);
   if (!hasData) {
@@ -2271,9 +2306,7 @@ function renderMarketingFunnel() {
       ${rows.map(([label, value]) => `<article><div><strong>${escapeHtml(label)}</strong></div><span>${Number(value || 0)}</span><i style="--value:${Math.max(4, (Number(value || 0) / max) * 100)}%"></i></article>`).join('')}
     </div>
     <div class="platform-access-summary">
-      <article><span>Cadastro → publicação</span><strong>${Number(marketing.rates?.signup_to_publish || 0)}%</strong></article>
-      <article><span>Publicação → pedido</span><strong>${Number(marketing.rates?.publish_to_first_order || 0)}%</strong></article>
-      <article><span>Cadastros atribuídos</span><strong>${Number(marketing.attributed_signups || 0)}</strong></article>
+      ${rates.map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}%</strong></article>`).join('')}
     </div>
     ${(marketing.by_source || []).length ? `<section class="platform-access-columns"><section><h4>Origem dos Cadastros</h4>${marketing.by_source.map((row) => `<p><span>${escapeHtml(row.source)}</span><strong>${Number(row.count || 0)}</strong></p>`).join('')}</section></section>` : ''}
   `;
@@ -2547,38 +2580,37 @@ function renderCompanies() {
     const metrics = companyMetrics(company.id);
     const detail = state.companyDetails[company.id];
     const attention = clientAlertsForCompany(company, metrics);
+    const summary = globalThis.PlatformClientList.compactClientSummary({
+      company,
+      responsible,
+      store: stores[0] || null,
+      planName: metrics.plan_name || plan?.name || 'Sem plano',
+      status: statusLabel(metrics.subscription_status || subscription.status || company.status),
+      ordersMonth: metrics.orders_month || 0,
+      revenueLabel: moneyCents(metrics.revenue_month_cents, metrics.revenue_month)
+    });
     return `
       <details class="platform-company-card" data-company-card="${escapeAttribute(company.id)}">
         <summary class="platform-company-summary">
-          <div>
-            <strong>${escapeHtml(company.name)}</strong>
-            <small>${escapeHtml(responsible ? `${responsible.name} - ${responsible.email}` : company.billing_email || company.phone || 'Sem responsável')}</small>
+          <div class="platform-company-identity">
+            <strong>${escapeHtml(summary[0].value)}</strong>
+            <small>${escapeHtml(summary[1].value)}</small>
           </div>
-          <div class="platform-company-summary-metrics">
-            <span>${escapeHtml(metrics.plan_name || plan?.name || 'Sem plano')}</span>
-            <span>${Number(metrics.orders_month || 0)} pedido(s)/mês</span>
-            <span>${moneyCents(metrics.revenue_month_cents, metrics.revenue_month)}</span>
-            <span>${Number(metrics.stores_count || stores.length || 0)} loja(s)</span>
+          <div class="platform-company-compact-data">
+            ${summary.slice(2).filter((item) => item.key !== 'status').map((item) => `
+              <span class="platform-company-compact-field field-${escapeAttribute(item.key)}">
+                <small>${escapeHtml(item.label)}</small>
+                <b>${escapeHtml(item.value)}</b>
+              </span>
+            `).join('')}
           </div>
           <div class="platform-company-summary-status">
             ${attention.length ? `<span class="pill pill-muted">${attention.length} atenção</span>` : ''}
-            <span class="pill ${company.status === 'active' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(statusLabel(company.status))}</span>
+            <span class="pill ${company.status === 'active' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(summary.find((item) => item.key === 'status')?.value || statusLabel(company.status))}</span>
           </div>
         </summary>
 
         <div class="platform-company-dropdown">
-          <section class="platform-client-metrics">
-            <article><span>Lojas</span><strong>${Number(metrics.stores_count || stores.length || 0)}</strong></article>
-            <article><span>Plano</span><strong>${escapeHtml(metrics.plan_name || plan?.name || 'Sem plano')}</strong></article>
-            <article><span>Pedidos/mês</span><strong>${Number(metrics.orders_month || 0)}</strong></article>
-            <article><span>Faturamento/mês</span><strong>${moneyCents(metrics.revenue_month_cents, metrics.revenue_month)}</strong></article>
-            <article><span>MRR</span><strong>${moneyCents(metrics.mrr_cents, metrics.mrr)}</strong></article>
-            <article><span>Último pedido</span><strong>${metrics.last_order_at ? new Date(metrics.last_order_at).toLocaleDateString('pt-BR') : 'Sem pedidos'}</strong></article>
-            <article><span>Último acesso</span><strong>${metrics.last_access_at ? new Date(metrics.last_access_at).toLocaleDateString('pt-BR') : 'Sem acesso'}</strong></article>
-            <article><span>Responsável</span><strong>${escapeHtml(responsible?.name || 'Sem responsável')}</strong></article>
-            <article><span>Cadastro</span><strong>${company.created_at ? new Date(company.created_at).toLocaleDateString('pt-BR') : '-'}</strong></article>
-          </section>
-
           <section class="platform-client-block">
             <div class="section-actions compact-section-actions">
               <div>
@@ -2629,12 +2661,6 @@ function renderCompanies() {
                 <p class="eyebrow">Informações completas</p>
                 <h3>Cliente, Cobrança, Uso e Timeline</h3>
               </div>
-            </div>
-            <div class="platform-client-detail-grid">
-              <article><span>Cadastro</span><strong>${company.created_at ? new Date(company.created_at).toLocaleDateString('pt-BR') : '-'}</strong></article>
-              <article><span>Status assinatura</span><strong>${escapeHtml(statusLabel(metrics.subscription_status || subscription.status || company.status))}</strong></article>
-              <article><span>Lojas ativas</span><strong>${Number(metrics.active_stores_count || 0)}</strong></article>
-              <article><span>Contato</span><strong>${escapeHtml(company.phone || company.billing_email || '-')}</strong></article>
             </div>
             <div class="platform-client-detail-body">
               ${detail ? renderCompanyDetail(detail) : '<p class="empty-state">Carregue os detalhes para ver lojas, admins, plano, cobrança, uso, timeline e notas internas.</p>'}
@@ -2716,7 +2742,7 @@ function filteredCompanies() {
   const plan = data.get('plan') || '';
   const activity = data.get('activity') || '';
   const delinquent = new Set(['payment_pending', 'grace_period', 'past_due', 'blocked', 'suspended']);
-  return state.companies.filter((company) => {
+  const filtered = state.companies.filter((company) => {
     const metrics = companyMetrics(company.id);
     const stores = company.stores || [];
     const haystack = normalizeSearch([
@@ -2740,6 +2766,7 @@ function filteredCompanies() {
     if (activity === 'needs_attention' && !clientAlertsForCompany(company, metrics).length) return false;
     return true;
   });
+  return globalThis.PlatformClientList.sortCompaniesAlphabetically(filtered);
 }
 
 function platformClientAlerts() {

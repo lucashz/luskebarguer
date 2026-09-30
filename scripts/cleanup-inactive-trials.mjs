@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
+import { trialDeletionCutoff } from '../src/lib/maintenance-policy.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 
 const args = new Set(process.argv.slice(2));
 const apply = args.has('--apply');
-const days = positiveInt(valueForArg('--days'), 5);
+const days = positiveInt(valueForArg('--days'), 14);
 const limit = positiveInt(valueForArg('--limit'), 100);
 
 if (!process.env.DATABASE_URL) {
@@ -14,19 +15,19 @@ if (!process.env.DATABASE_URL) {
 }
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
-const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+const cutoff = trialDeletionCutoff(new Date(), days);
 
 try {
   await client.connect();
   const candidates = await findCandidates();
   if (!candidates.length) {
-    console.log(`Nenhuma loja/empresa de teste inativa ha mais de ${days} dia(s).`);
+    console.log(`Nenhuma empresa com trial expirado e inativa ha mais de ${days} dia(s).`);
     process.exit(0);
   }
 
-  console.log(`${candidates.length} empresa(s) de teste elegivel(is) para exclusao:`);
+  console.log(`${candidates.length} empresa(s) com trial expirado elegivel(is) para exclusao:`);
   for (const row of candidates) {
-    console.log(`- ${row.company_name} (${row.company_id}) | lojas: ${row.store_count} | criada em: ${formatDate(row.company_created_at)} | ultimo acesso: ${formatDate(row.last_access_at) || 'nunca'}`);
+    console.log(`- ${row.company_name} (${row.company_id}) | lojas: ${row.store_count} | trial expirou: ${formatDate(row.trial_ends_at)} | ultimo acesso: ${formatDate(row.last_access_at) || 'nunca'}`);
   }
 
   if (!apply) {
@@ -57,25 +58,32 @@ async function findCandidates() {
         c.name,
         c.billing_email,
         c.created_at,
+        trial.trial_ends_at,
         greatest(
-          c.created_at,
-          coalesce(max(au.last_login_at), c.created_at),
-          coalesce(max(s.created_at), c.created_at),
-          coalesce(max(s.updated_at), c.created_at),
-          coalesce(max(sess.created_at), c.created_at),
-          coalesce(max(sess.updated_at), c.created_at)
+          trial.trial_ends_at,
+          coalesce(max(au.last_login_at), trial.trial_ends_at),
+          coalesce(max(sess.created_at), trial.trial_ends_at),
+          coalesce(max(sess.updated_at), trial.trial_ends_at)
         ) as last_access_at,
         count(distinct s.id)::int as store_count,
         count(distinct o.id)::int as order_count,
         bool_or(coalesce(sub.status::text, '') in ('active', 'payment_pending', 'grace_period', 'past_due')) as has_paid_or_pending_subscription
       from companies c
+      join lateral (
+        select cs.trial_ends_at
+        from company_subscriptions cs
+        where cs.company_id = c.id
+          and cs.trial_ends_at is not null
+        order by cs.created_at desc
+        limit 1
+      ) trial on true
       left join stores s on s.company_id = c.id
       left join admin_users au on au.company_id = c.id
       left join app_sessions sess on sess.company_id = c.id
       left join orders o on o.store_id = s.id
       left join company_subscriptions sub on sub.company_id = c.id
-      where c.status::text = 'trial'
-        and c.created_at < $1
+      where c.status::text in ('trial', 'cancelled')
+        and trial.trial_ends_at < $1
         and coalesce(c.billing_email, '') <> 'admin@cardapio.local'
         and not exists (
           select 1
@@ -83,12 +91,13 @@ async function findCandidates() {
           where demo_store.company_id = c.id
             and demo_store.slug in ('cardapio', 'demo', 'demonstracao')
         )
-      group by c.id, c.name, c.billing_email, c.created_at
+      group by c.id, c.name, c.billing_email, c.created_at, trial.trial_ends_at
     )
     select
       id as company_id,
       name as company_name,
       created_at as company_created_at,
+      trial_ends_at,
       last_access_at,
       store_count,
       order_count

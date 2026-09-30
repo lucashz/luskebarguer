@@ -20,6 +20,10 @@ import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, syncPublicationMetrics, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
+import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, TERMINAL_SALES_STAGES } from './src/lib/sales-automation.js';
+import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, sendEvolutionV2SalesText, setEvolutionV2SalesWebhook } from './src/lib/evolution-v2-sales.js';
+import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions.js';
+import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
 import { redactSensitive } from './src/lib/security-redaction.js';
@@ -30,10 +34,10 @@ import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
 import { publishAssistedRegistration } from './src/lib/assisted-registration-publish.js';
-import { assistedRegistrationMetrics } from './src/lib/platform-ad-funnel.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
+const IS_MAIN_MODULE = process.argv[1] ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false;
 
 loadEnv(path.join(__dirname, '.env'));
 
@@ -55,8 +59,10 @@ const CUSTOMER_COOKIE = 'customer_session';
 const MARKETING_ATTRIBUTION_COOKIE = 'tapronto_attribution';
 const INSTAGRAM_PROFILE_DESTINATION = 'https://taprontomenu.com.br/?utm_source=instagram&utm_medium=organic&utm_campaign=bio&utm_content=profile_link';
 const FIRST_CUSTOMERS_TRIAL_CAMPAIGN = 'primeiros_clientes';
+const REGIONAL_PARTNERS_TRIAL_CAMPAIGN = 'parceiros_regiao';
 const DEFAULT_TRIAL_DAYS = 14;
 const FIRST_CUSTOMERS_TRIAL_DAYS = 21;
+const REGIONAL_PARTNERS_TRIAL_DAYS = 30;
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 30), 1, 90);
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
@@ -161,6 +167,36 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/lemangiare\/?$/i.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=lemangiare',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/garden\/?$/i.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=garden_hamburgueria',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/bavarium\/?$/i.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=bavarium',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);
       return;
@@ -190,14 +226,14 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
+if (IS_MAIN_MODULE) server.listen(PORT, HOST, () => {
   console.log(`Servidor Node iniciado em http://${HOST}:${PORT}`);
 });
 
-setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
-setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
+if (IS_MAIN_MODULE) setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
+if (IS_MAIN_MODULE) setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
 const MARKETING_AUTOMATION_ENABLED = parseBoolean(process.env.MARKETING_AUTOMATION_ENABLED, true);
-if (MARKETING_AUTOMATION_ENABLED) {
+if (IS_MAIN_MODULE && MARKETING_AUTOMATION_ENABLED) {
   setInterval(runMarketingLifecycleAutomations, 1000 * 60 * 60 * 6).unref?.();
   setTimeout(runMarketingLifecycleAutomations, 1000 * 60).unref?.();
   setInterval(runMarketingWeeklyReportAutomation, 1000 * 60 * 60 * 6).unref?.();
@@ -3210,7 +3246,7 @@ async function updateAdminAccount(session, data) {
   session.name = updated.name;
   session.email = updated.email;
   session.role = updated.role;
-  await deleteOwnerSessions('admin', session.id);
+  clearSessionCacheByOwner('admin', session.id);
   clearAdminUsersCache();
   return publicAdmin(updated);
 }
@@ -3412,7 +3448,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
   const [companies, features] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
-      order: 'created_at.desc',
+      order: 'name.asc',
       limit: String(perPage),
       offset: String(offset)
     }),
@@ -3467,7 +3503,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
       limit: '10000'
     }).catch(() => []),
     dbRequest('GET', 'menu_items', {
-      select: 'id,store_id,is_active',
+      select: 'id,store_id,is_available',
       store_id: storeFilter,
       limit: '10000'
     }).catch(() => []),
@@ -3568,7 +3604,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
           last_order_at: lastOrder?.created_at || null,
           last_access_at: lastAccessAt,
           products_count: companyProducts.length,
-          active_products_count: companyProducts.filter((item) => item.is_active !== false).length,
+          active_products_count: companyProducts.filter((item) => item.is_available !== false).length,
           stores_without_whatsapp_count: companyStores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number).length,
           incomplete_onboarding_count: companyStores.filter((store) => settingsByStore.get(store.id)?.onboarding_completed === false).length
         }
@@ -4078,27 +4114,28 @@ async function platformCommercialSummary() {
     platformBackupStatus().catch(() => ({ status: 'unknown' })),
     listOperationalLogs(thirtyDaysAgo).catch(() => [])
   ]);
-  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
-  const todayOrders = orders.filter((order) => new Date(order.created_at) >= todayStart && order.status !== 'cancelled');
-  const monthOrders = orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
+  const metricData = filterPlatformMetricsData({ companies, stores, subscriptions, subscriptionEvents, orders, settings, products });
+  const context = platformAnalyticsContext({ ...metricData, plans });
+  const todayOrders = metricData.orders.filter((order) => new Date(order.created_at) >= todayStart && order.status !== 'cancelled');
+  const monthOrders = metricData.orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
   const activeStatuses = new Set(['active']);
   const trialStatuses = new Set(['trial']);
   const delinquentStatuses = new Set(['payment_pending', 'grace_period', 'past_due']);
   const churnStatuses = new Set(['cancelled', 'archived']);
   const suspendedStatuses = new Set(['suspended']);
-  const alerts = platformCommercialAlerts(companies, stores, context, { backup, operationalLogs });
+  const alerts = platformCommercialAlerts(metricData.companies, metricData.stores, context, { backup, operationalLogs });
   const delayedBackups = alerts.filter((alert) => alert.type === 'backup').length;
   const webhookErrors = alerts.filter((alert) => alert.type === 'webhook').length;
   const trialsEnding = alerts.filter((alert) => alert.type === 'trial').length;
   const revenueToday = roundMoney(todayOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0));
-  const mrrEstimated = platformEstimatedMrr(companies, context.subscriptionByCompany, context.planById);
+  const mrrEstimated = platformEstimatedMrr(metricData.companies, context.subscriptionByCompany, context.planById);
   const cards = {
-    active_clients: companies.filter((company) => activeStatuses.has(company.status)).length,
-    trial_clients: companies.filter((company) => trialStatuses.has(company.status)).length,
-    delinquent_clients: companies.filter((company) => delinquentStatuses.has(company.status)).length,
-    suspended_clients: companies.filter((company) => suspendedStatuses.has(company.status)).length,
-    published_stores: stores.filter((store) => store.is_active !== false).length,
-    unpublished_stores: stores.filter((store) => store.is_active === false).length,
+    active_clients: metricData.companies.filter((company) => activeStatuses.has(company.status)).length,
+    trial_clients: metricData.companies.filter((company) => trialStatuses.has(company.status)).length,
+    delinquent_clients: metricData.companies.filter((company) => delinquentStatuses.has(company.status)).length,
+    suspended_clients: metricData.companies.filter((company) => suspendedStatuses.has(company.status)).length,
+    published_stores: metricData.stores.filter((store) => store.is_active !== false).length,
+    unpublished_stores: metricData.stores.filter((store) => store.is_active === false).length,
     orders_today: todayOrders.length,
     revenue_today: revenueToday,
     revenue_today_cents: moneyToCents(revenueToday),
@@ -4107,13 +4144,13 @@ async function platformCommercialSummary() {
     trials_ending: trialsEnding,
     webhook_errors: webhookErrors,
     delayed_backups: delayedBackups,
-    churn_clients: companies.filter((company) => churnStatuses.has(company.status)).length,
+    churn_clients: metricData.companies.filter((company) => churnStatuses.has(company.status)).length,
     generated_without_nan: true
   };
   return {
     generated_at: new Date().toISOString(),
     cards,
-    billing: platformBillingMetrics({ companies, subscriptions, plans, subscriptionEvents, monthOrders }),
+    billing: platformBillingMetrics({ companies: metricData.companies, subscriptions: metricData.subscriptions, plans, subscriptionEvents: metricData.subscriptionEvents, monthOrders }),
     alerts
   };
 }
@@ -4154,24 +4191,25 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
       limit: '10000'
     }).catch(() => [])
   ]);
-  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
-  const revenue = platformRevenueSnapshot({ companies, subscriptions, plans, orders, period });
-  const conversion = platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period });
+  const metricData = filterPlatformMetricsData({ companies, stores, subscriptions, subscriptionEvents, orders, settings, products, accessEvents, marketingEvents });
+  const context = platformAnalyticsContext({ ...metricData, plans });
+  const revenue = platformRevenueSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, plans, orders: metricData.orders, period });
+  const conversion = platformConversionSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, subscriptionEvents: metricData.subscriptionEvents, period });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
-    daily: platformDailySeries(orders, period),
-    ranking: platformStoreRanking(orders, context.storeById).slice(0, 8),
-    by_payment: platformGroupOrders(orders.filter((order) => order.status !== 'cancelled'), 'payment_method'),
-    by_status: platformGroupOrders(orders, 'status'),
-    company_metrics: platformCompanyMetrics(companies, context),
-    comparison: platformAnalyticsComparison(orders, period),
+    daily: platformDailySeries(metricData.orders, period),
+    ranking: platformStoreRanking(metricData.orders, context.storeById).slice(0, 8),
+    by_payment: platformGroupOrders(metricData.orders.filter((order) => order.status !== 'cancelled'), 'payment_method'),
+    by_status: platformGroupOrders(metricData.orders, 'status'),
+    company_metrics: platformCompanyMetrics(metricData.companies, context),
+    comparison: platformAnalyticsComparison(metricData.orders, period),
     revenue,
     conversion,
-    new_clients_daily: platformNewClientsDaily(companies, period),
+    new_clients_daily: platformNewClientsDaily(metricData.companies, period),
     mrr_by_plan: revenue.mrr_by_plan,
-    marketing: platformMarketingFunnelSnapshot(marketingEvents, subscriptionEvents),
-    access: platformAccessSnapshot(accessEvents, period, context.storeById)
+    marketing: platformMarketingFunnelSnapshot(metricData.marketingEvents, metricData.subscriptionEvents),
+    access: platformAccessSnapshot(metricData.accessEvents, period, context.storeById)
   };
 }
 
@@ -4190,6 +4228,7 @@ function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
   const rate = (part, total) => total ? Number(((part / total) * 100).toFixed(1)) : 0;
   return {
     stages: counts,
+    instagram_paid: instagramPaidFunnel(events),
     rates: {
       signup_to_publish: rate(counts.menu_published, counts.signup_completed),
       publish_to_first_order: rate(counts.first_order_received, counts.menu_published),
@@ -4265,10 +4304,11 @@ async function platformExecutiveRevenue(params = new URLSearchParams()) {
       limit: '8000'
     }).catch(() => [])
   ]);
+  const metricData = filterPlatformMetricsData({ companies, subscriptions, orders });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
-    ...platformRevenueSnapshot({ companies, subscriptions, plans, orders, period })
+    ...platformRevenueSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, plans, orders: metricData.orders, period })
   };
 }
 
@@ -4283,10 +4323,11 @@ async function platformExecutiveConversion(params = new URLSearchParams()) {
       limit: '2000'
     }).catch(() => [])
   ]);
+  const metricData = filterPlatformMetricsData({ companies, subscriptions, subscriptionEvents });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
-    ...platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period })
+    ...platformConversionSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, subscriptionEvents: metricData.subscriptionEvents, period })
   };
 }
 
@@ -4310,24 +4351,25 @@ async function platformBillingDataset(params = new URLSearchParams()) {
       limit: '10000'
     }).catch(() => [])
   ]);
+  const metricData = filterPlatformMetricsData({ companies, subscriptions, subscriptionEvents: events, stores, orders });
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
-  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const companyById = new Map(metricData.companies.map((company) => [company.id, company]));
   const subscriptionsByCompany = new Map();
-  for (const subscription of subscriptions) {
+  for (const subscription of metricData.subscriptions) {
     if (!subscriptionsByCompany.has(subscription.company_id)) subscriptionsByCompany.set(subscription.company_id, []);
     subscriptionsByCompany.get(subscription.company_id).push(subscription);
   }
-  const subscriptionById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]));
-  const storeCompanyById = new Map(stores.map((store) => [store.id, store.company_id]));
-  const billableOrders = orders.filter((order) => order.status !== 'cancelled');
+  const subscriptionById = new Map(metricData.subscriptions.map((subscription) => [subscription.id, subscription]));
+  const storeCompanyById = new Map(metricData.stores.map((store) => [store.id, store.company_id]));
+  const billableOrders = metricData.orders.filter((order) => order.status !== 'cancelled');
   return {
     period,
-    companies,
-    subscriptions,
+    companies: metricData.companies,
+    subscriptions: metricData.subscriptions,
     plans,
-    events,
-    stores,
-    orders,
+    events: metricData.subscriptionEvents,
+    stores: metricData.stores,
+    orders: metricData.orders,
     billableOrders,
     planById,
     companyById,
@@ -4812,7 +4854,7 @@ function marketingAttributionFromRequest(req, explicit = {}) {
   return sanitizeMarketingAttribution({ ...stored, ...(isPlainObject(explicit) ? explicit : {}) });
 }
 
-function signupTrialOffer(attribution = {}) {
+export function signupTrialOffer(attribution = {}) {
   const normalized = (value) => String(value || '').trim().toLowerCase();
   const source = normalized(attribution.utm_source);
   const medium = normalized(attribution.utm_medium);
@@ -4820,14 +4862,18 @@ function signupTrialOffer(attribution = {}) {
   const isFirstCustomersCampaign = source === 'instagram'
     && medium === 'direct'
     && campaign === FIRST_CUSTOMERS_TRIAL_CAMPAIGN;
+  const isRegionalPartnersCampaign = source === 'whatsapp'
+    && medium === 'outbound'
+    && campaign === REGIONAL_PARTNERS_TRIAL_CAMPAIGN;
   return {
-    trialDays: isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_DAYS : DEFAULT_TRIAL_DAYS,
-    campaign: isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_CAMPAIGN : ''
+    trialDays: isRegionalPartnersCampaign ? REGIONAL_PARTNERS_TRIAL_DAYS : isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_DAYS : DEFAULT_TRIAL_DAYS,
+    campaign: isRegionalPartnersCampaign ? REGIONAL_PARTNERS_TRIAL_CAMPAIGN : isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_CAMPAIGN : '',
+    planCode: isRegionalPartnersCampaign ? 'premium' : 'trial'
   };
 }
 
 function marketingAttributionCookie(req, attribution = {}) {
-  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
+  const secure = COOKIE_SECURE ? '; Secure' : '';
   const hostname = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].split(':')[0].toLowerCase();
   const domain = hostname === 'taprontomenu.com.br' || hostname.endsWith('.taprontomenu.com.br') ? '; Domain=taprontomenu.com.br' : '';
   const encoded = Buffer.from(JSON.stringify(sanitizeMarketingAttribution(attribution)), 'utf8').toString('base64url');
@@ -5828,7 +5874,8 @@ function sanitizePortalSignup(data = {}, req = null) {
   const owner = data.owner || {};
   const business = data.business || {};
   const signupUrl = req?.url ? new URL(req.url, `http://${req.headers?.host || HOST}`) : null;
-  const planCode = 'trial';
+  const attribution = marketingAttributionFromRequest(req, data.attribution);
+  const planCode = signupTrialOffer(attribution).planCode;
   const ownerName = cleanText(owner.name || data.name || '');
   const ownerEmail = cleanEmail(owner.email || data.email || '');
   const ownerPhone = onlyDigits(owner.phone || data.phone || '');
@@ -5853,7 +5900,7 @@ function sanitizePortalSignup(data = {}, req = null) {
     referralCode: cleanReferralCode(data.referral_code || data.referralCode || data.ref || signupUrl?.searchParams.get('ref') || ''),
     businessType: cleanSlug(business.type || 'outro') || 'outro',
     marketingOptIn: Boolean(data.marketing_opt_in || data.marketingOptIn),
-    attribution: marketingAttributionFromRequest(req, data.attribution),
+    attribution,
     owner: {
       name: ownerName,
       email: ownerEmail,
@@ -10830,6 +10877,41 @@ async function connectAdminWhatsappIntegration(req, admin) {
   return publicStoreWhatsappIntegration(saved);
 }
 
+// CLI/operational entry point for the TáPronto-owned sales number. It deliberately
+// reuses the platform Evolution Go settings and the existing store integration.
+export async function connectSalesWhatsappIntegration(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) throw httpError(422, 'Informe uma loja comercial válida.');
+  const config = await privatePlatformWhatsappSettings();
+  if (!config.is_active || !config.base_url || !config.api_key) throw httpError(503, 'WhatsApp global ainda não foi configurado pela Central.');
+  const store = await getStoreSettings(resolvedStoreId);
+  if (!store?.store_id || store.store_id !== resolvedStoreId) throw httpError(404, 'Loja comercial não encontrada.');
+  const existing = await getStoreWhatsappIntegration(resolvedStoreId);
+  const instanceName = existing?.instance_name || buildEvolutionInstanceName(store);
+  const providerData = existing?.instance_id
+    ? await evolutionRestartOrConnectInstance(instanceName, config, { store, instanceId: existing.instance_id, instanceToken: existing.instance_token || null })
+    : await evolutionCreateInstance(instanceName, store, config);
+  await setEvolutionWebhook(instanceName, config, {
+    store,
+    instanceId: providerData.instance_id || existing?.instance_id || null,
+    instanceToken: providerData.instance_token || existing?.instance_token || null
+  }).catch(() => null);
+  const status = normalizeWhatsappIntegrationStatus(providerData.status || 'connecting');
+  const saved = await upsertStoreWhatsappIntegration({
+    current: existing,
+    store,
+    instance_name: instanceName,
+    instance_id: providerData.instance_id || existing?.instance_id || null,
+    instance_token: providerData.instance_token || existing?.instance_token || null,
+    status,
+    qr_code_base64: status === 'connecting' ? (providerData.qr_code_base64 || existing?.qr_code_base64 || null) : null,
+    last_qr_at: status === 'connecting' && (providerData.qr_code_base64 || existing?.qr_code_base64) ? new Date().toISOString() : null,
+    last_error: null,
+    billing_status: 'internal'
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
 async function refreshAdminWhatsappQrCode(admin) {
   await assertAutomaticWhatsappAccess(admin);
   const config = await privatePlatformWhatsappSettings();
@@ -11455,6 +11537,23 @@ function maskPhone(value = '') {
 }
 
 async function receiveEvolutionWebhook(req, payload = {}) {
+  const salesProvider = salesConfig();
+  const salesEvolution = evolutionV2SalesConfig();
+  const payloadInstance = cleanText(payload?.instance || payload?.instanceName || payload?.instance_name || '');
+  if (salesProvider.provider === 'evolution_v2' && payloadInstance === salesEvolution.instance) {
+    const receivedSecret = req.headers['x-evolution-webhook-secret'] || req.headers['x-webhook-secret'] || '';
+    if (!salesEvolution.webhookSecret || receivedSecret !== salesEvolution.webhookSecret) throw httpError(401, 'Webhook comercial Evolution não autorizado.');
+    const event = String(payload?.event || payload?.type || '').toUpperCase();
+    if (event.includes('CONNECTION')) {
+      const state = String(payload?.data?.state || payload?.data?.status || payload?.state || '').toLowerCase();
+      if (!['open', 'connected'].includes(state)) {
+        await dbRequest('PATCH', 'sales_automation_settings', { id: 'eq.global' }, { paused: true, metadata: { reason: 'provider_disconnected', state }, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+      }
+      return { ok: true, connection_state: state || 'unknown' };
+    }
+    const sales = await receiveSalesEvolutionMessage({ id: null, store_id: null, company_id: null, instance_name: salesEvolution.instance, provider: 'evolution_v2' }, payload);
+    return { ok: true, ...(sales?.accepted ? { sales_accepted: true } : {}) };
+  }
   const config = await privatePlatformWhatsappSettings();
   const expectedSecret = config.webhook_secret;
   const receivedSecret = req.headers['x-evolution-webhook-secret'] || req.headers['x-webhook-secret'] || '';
@@ -11470,7 +11569,7 @@ async function receiveEvolutionWebhook(req, payload = {}) {
   const qrData = normalizeEvolutionQrResponse(payload);
   const status = event.includes('QRCODE') || qrData.qr_code_base64
     ? 'connecting'
-    : event.includes('CONNECTION') || state
+    : event.includes('CONNECTION')
       ? normalizeWhatsappIntegrationStatus(state)
       : integration.status;
   const resolvedStatus = normalizeWhatsappIntegrationStatus(status);
@@ -11486,7 +11585,11 @@ async function receiveEvolutionWebhook(req, payload = {}) {
     last_error: resolvedStatus === 'error' ? cleanText(payload?.data?.message || payload?.message || 'Erro recebido no webhook.').slice(0, 500) : null,
     updated_at: new Date().toISOString()
   });
-  return { ok: true };
+  const sales = await receiveSalesEvolutionMessage(integration, payload).catch((error) => {
+    console.error(JSON.stringify({ scope: 'sales-evolution-webhook', integration_id: integration.id, message: error.message }));
+    return { accepted: false, error: true };
+  });
+  return { ok: true, ...(sales?.accepted ? { sales_accepted: true } : {}) };
 }
 
 async function findWhatsappIntegrationByEvolutionIdentity({ instanceName = '', instanceId = '', instanceToken = '' } = {}) {
@@ -11513,6 +11616,349 @@ async function findWhatsappIntegrationByEvolutionIdentity({ instanceName = '', i
   return null;
 }
 
+async function receiveSalesEvolutionMessage(integration, payload = {}) {
+  const config = salesConfig();
+  if (config.provider === 'evolution_v2') {
+    if (integration.instance_name !== evolutionV2SalesConfig().instance) return { accepted: false };
+  } else if (!config.storeId || integration.store_id !== config.storeId) return { accepted: false };
+  const inbound = parseEvolutionInbound(payload);
+  if (!inbound) return { accepted: false };
+  inbound.providerMessageId = salesInboundEventKey(payload, inbound);
+  const [lead] = await dbRequest('GET', 'sales_leads', { normalized_phone: `eq.${inbound.phone}`, limit: '1' });
+  if (!lead || lead.automation_status !== 'active' || TERMINAL_SALES_STAGES.has(lead.stage)) return { accepted: false };
+  await dbRequest('PATCH', 'sales_automation_jobs', { lead_id: `eq.${lead.id}`, job_type: 'eq.followup', status: 'in.(pending,retry,claimed)' }, { status: 'cancelled', lock_expires_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { next_followup_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  let [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  if (!conversation) [conversation] = await dbRequest('POST', 'sales_conversations', {}, { lead_id: lead.id, whatsapp_integration_id: integration.id || null }, ['Prefer: return=representation']);
+  if (inbound.providerMessageId) {
+    const [existing] = await dbRequest('GET', 'sales_messages', { provider_message_id: `eq.${inbound.providerMessageId}`, limit: '1' });
+    if (existing) return { accepted: true, duplicate: true };
+  }
+  const whatsappLog = await createWhatsappMessageLog({
+    company_id: integration.company_id || null,
+    store_id: integration.store_id,
+    provider: integration.provider || 'evolution_go',
+    instance_name: integration.instance_name,
+    destination_phone: inbound.phone,
+    message_type: 'sales_inbound',
+    status: 'received',
+    provider_message_id: inbound.providerMessageId || null
+  });
+  const [message] = await dbRequest('POST', 'sales_messages', {}, {
+    lead_id: lead.id,
+    conversation_id: conversation.id,
+    whatsapp_message_log_id: whatsappLog.id,
+    provider_message_id: inbound.providerMessageId || null,
+    direction: 'inbound',
+    body: inbound.body || `[${inbound.messageType || 'mídia não suportada'}]`,
+    status: 'received',
+    requires_approval: false,
+    received_at: new Date().toISOString(),
+    metadata: { message_type: inbound.messageType, instance_name: integration.instance_name }
+  }, ['Prefer: return=representation']);
+  await createSalesEvent(lead.id, 'message_received', lead.stage, lead.stage, { message_id: message.id, provider_message_id: inbound.providerMessageId || null });
+  if (lead.stage === 'human_handoff') return { accepted: true, human_handoff: true };
+  if (!inbound.body || inbound.messageType !== 'text') {
+    await updateSalesLeadStage(lead, 'human_handoff', { stop_reason: 'Mídia recebida requer atendimento humano.' });
+    return { accepted: true, human_handoff: true };
+  }
+  if (isOptOutMessage(inbound.body)) {
+    await optOutSalesLead(lead.id, 'Solicitação recebida pelo WhatsApp.');
+    await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { intent: 'opt_out', confidence: 1 });
+    return { accepted: true, opted_out: true };
+  }
+  await enqueueSalesJob('classify_inbound', lead.id, message.id, `inbound:${inbound.providerMessageId || message.id}`, { integration_id: integration.id });
+  return { accepted: true };
+}
+
+async function createSalesLead(data = {}) {
+  const normalizedPhone = normalizeSalesPhone(data.normalized_phone || data.phone || '');
+  if (!cleanText(data.business_name || data.businessName || '')) throw httpError(422, 'Informe o nome do estabelecimento.');
+  if (normalizedPhone) {
+    const [existing] = await dbRequest('GET', 'sales_leads', { normalized_phone: `eq.${normalizedPhone}`, limit: '1' });
+    if (existing) throw httpError(409, 'Já existe um lead com este telefone.');
+  }
+  const [lead] = await dbRequest('POST', 'sales_leads', {}, {
+    business_name: cleanText(data.business_name || data.businessName).slice(0, 200),
+    contact_name: cleanText(data.contact_name || data.contactName || '').slice(0, 160) || null,
+    phone: cleanText(data.phone || '') || null,
+    normalized_phone: normalizedPhone || null,
+    city: cleanText(data.city || '').slice(0, 120) || null,
+    state: cleanText(data.state || 'RS').slice(0, 2).toUpperCase(),
+    segment: cleanText(data.segment || '').slice(0, 120) || null,
+    instagram: cleanText(data.instagram || '').slice(0, 160) || null,
+    source: cleanText(data.source || 'manual').slice(0, 80),
+    current_platform: cleanText(data.current_platform || data.currentPlatform || '').slice(0, 160) || null,
+    apparent_activity: cleanText(data.apparent_activity || data.apparentActivity || '').slice(0, 80) || null,
+    score: clampNumber(Number(data.score || 0), 0, 100),
+    stage: Number(data.score || 0) >= 55 ? 'qualified' : 'discovered',
+    metadata: isPlainObject(data.metadata) ? data.metadata : {}
+  }, ['Prefer: return=representation']);
+  await createSalesEvent(lead.id, 'lead_created', null, lead.stage, { source: lead.source });
+  return lead;
+}
+
+async function createSalesDraft(leadId, options = {}) {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${cleanUuid(leadId)}`, limit: '1' });
+  if (!lead) throw httpError(404, 'Lead não encontrado.');
+  if (TERMINAL_SALES_STAGES.has(lead.stage) || lead.automation_status !== 'active') throw httpError(409, 'Lead não está disponível para contato.');
+  if (lead.normalized_phone) {
+    const [suppression] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+    if (suppression) throw httpError(409, 'Lead está na lista de supressão.');
+  }
+  let [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  if (!conversation) [conversation] = await dbRequest('POST', 'sales_conversations', {}, { lead_id: lead.id }, ['Prefer: return=representation']);
+  const body = cleanText(options.body || initialSalesMessage(lead)).slice(0, 1200);
+  const autonomous = salesConfig().enabled && salesConfig().mode === 'autonomous';
+  const [message] = await dbRequest('POST', 'sales_messages', {}, {
+    lead_id: lead.id, conversation_id: conversation.id, direction: 'outbound', body,
+    status: autonomous ? 'approved' : 'draft', requires_approval: !autonomous,
+    approved_at: autonomous ? new Date().toISOString() : null,
+    metadata: { kind: options.kind || 'first_contact' }
+  }, ['Prefer: return=representation']);
+  const nextStage = lead.stage === 'discovered' ? 'qualified' : 'awaiting_first_message_approval';
+  const current = lead.stage === 'discovered' ? await updateSalesLeadStage(lead, 'qualified') : lead;
+  if (current.stage !== 'awaiting_first_message_approval') await updateSalesLeadStage(current, 'awaiting_first_message_approval');
+  await createSalesEvent(lead.id, 'message_drafted', lead.stage, 'awaiting_first_message_approval', { message_id: message.id });
+  if (autonomous) await enqueueSalesJob('send_message', lead.id, message.id, `send:${message.id}`);
+  return message;
+}
+
+async function queueAutonomousSalesOutreach({ limit = 10, dryRun = false } = {}) {
+  const config = salesConfig();
+  if (!config.enabled || config.mode !== 'autonomous') throw httpError(409, 'Ative o modo autônomo antes de enfileirar contatos.');
+  const capped = Math.min(config.dailyLimit, Math.max(1, Number(limit) || 10));
+  const leads = await dbRequest('GET', 'sales_leads', { stage: 'eq.qualified', automation_status: 'eq.active', order: 'score.desc,created_at.asc', limit: String(capped * 3) });
+  const selected = [];
+  for (const lead of leads) {
+    if (!lead.normalized_phone || selected.length >= capped) continue;
+    const [suppressed] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+    const prior = await dbRequest('GET', 'sales_messages', { lead_id: `eq.${lead.id}`, direction: 'eq.outbound', limit: '1' });
+    if (suppressed || prior.length) continue;
+    selected.push(dryRun ? { lead_id: lead.id, business_name: lead.business_name, phone: maskPhone(lead.normalized_phone) } : await createSalesDraft(lead.id, { kind: 'first_contact' }));
+  }
+  return { dry_run: dryRun, queued: selected.length, items: selected };
+}
+
+async function approveSalesMessage(messageId) {
+  const [message] = await dbRequest('GET', 'sales_messages', { id: `eq.${cleanUuid(messageId)}`, limit: '1' });
+  if (!message) throw httpError(404, 'Mensagem não encontrada.');
+  if (message.direction !== 'outbound' || message.status !== 'draft') throw httpError(409, 'Somente rascunhos de saída podem ser aprovados.');
+  const [updated] = await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { status: 'approved', approved_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await createSalesEvent(message.lead_id, 'message_approved', null, null, { message_id: message.id });
+  return updated;
+}
+
+async function sendApprovedSalesMessage(messageId, options = {}) {
+  const config = salesConfig();
+  const [message] = await dbRequest('GET', 'sales_messages', { id: `eq.${cleanUuid(messageId)}`, limit: '1' });
+  if (!message) throw httpError(404, 'Mensagem não encontrada.');
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${message.lead_id}`, limit: '1' });
+  if (!lead?.normalized_phone) throw httpError(422, 'Lead não possui telefone válido.');
+  const [settings] = await dbRequest('GET', 'sales_automation_settings', { id: 'eq.global', limit: '1' });
+  const [suppression] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+  const gate = canAutomaticallySend({ config, lead, message, paused: Boolean(settings?.paused), suppressed: Boolean(suppression) });
+  if (!gate.allowed) throw httpError(409, gate.reason);
+  if (!config.enabled) throw httpError(409, 'SALES_AUTOMATION_ENABLED precisa estar ativo para qualquer envio real.');
+  if (config.provider !== 'evolution_v2' && !config.storeId) throw httpError(409, 'SALES_WHATSAPP_STORE_ID não configurado.');
+  if (config.mode === 'draft') throw httpError(409, 'Modo draft nunca envia mensagens.');
+  const evolutionV2 = config.provider === 'evolution_v2' ? evolutionV2SalesConfig() : null;
+  const integration = config.provider === 'evolution_v2'
+    ? { id: null, store_id: null, company_id: null, instance_name: evolutionV2.instance, provider: 'evolution_v2', status: 'connected' }
+    : await requireStoreWhatsappIntegration(config.storeId);
+  if (config.provider !== 'evolution_v2' && integration.store_id !== config.storeId) throw httpError(403, 'Instância não pertence à loja comercial configurada.');
+  const store = config.provider === 'evolution_v2' ? null : await getStoreSettings(config.storeId);
+  await assertSalesSendLimits(config, integration);
+  const [sending] = await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}`, status: 'eq.approved' }, { status: 'sending' }, ['Prefer: return=representation']);
+  if (!sending) throw httpError(409, 'Mensagem já foi processada por outro worker.');
+  try {
+    let result;
+    if (config.provider === 'evolution_v2') {
+      const live = await getEvolutionV2ConnectionState(evolutionV2);
+      if (!live.connected) throw httpError(409, 'Instância comercial Evolution v2 não está conectada.');
+      const sentProvider = await sendEvolutionV2SalesText({ phone: lead.normalized_phone, text: message.body }, evolutionV2);
+      const log = await createWhatsappMessageLog({ provider: 'evolution_v2', instance_name: evolutionV2.instance, destination_phone: lead.normalized_phone, message_type: 'sales_outreach', status: 'sent', provider_message_id: sentProvider.id });
+      result = { id: sentProvider.id, log };
+    } else {
+      result = await sendEvolutionStoreMessage(store, integration, lead.normalized_phone, message.body, { messageType: 'sales_outreach' });
+    }
+    const [sent] = await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, {
+      status: 'sent', sent_at: new Date().toISOString(), provider_message_id: result.id,
+      whatsapp_message_log_id: result.log?.id || null, requires_approval: false
+    }, ['Prefer: return=representation']);
+    const messageKind = message.metadata?.kind || '';
+    const firstContact = messageKind === 'first_contact';
+    let nextLead = lead;
+    if (firstContact) {
+      nextLead = await updateSalesLeadStage(lead, 'first_message_sent', {
+        attempt_count: Number(lead.attempt_count || 0) + 1,
+        last_contact_at: new Date().toISOString(),
+        next_followup_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+      });
+      nextLead = await updateSalesLeadStage(nextLead, 'awaiting_reply');
+    } else {
+      [nextLead] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { attempt_count: Number(lead.attempt_count || 0) + 1, last_contact_at: new Date().toISOString(), next_followup_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+    }
+    await createSalesEvent(lead.id, 'message_sent', lead.stage, nextLead.stage, { message_id: message.id, whatsapp_log_id: result.log?.id || null, kind: messageKind });
+    return sent;
+  } catch (error) {
+    await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { status: 'failed', error_message: cleanText(error.message).slice(0, 500) });
+    throw error;
+  }
+}
+
+async function assertSalesSendLimits(config, integration) {
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  const providerFilter = config.provider === 'evolution_v2' ? { instance_name: `eq.${integration.instance_name}` } : { store_id: `eq.${config.storeId}` };
+  const logs = await dbRequest('GET', 'whatsapp_message_logs', { ...providerFilter, message_type: 'eq.sales_outreach', created_at: `gte.${today.toISOString()}`, order: 'created_at.desc', limit: String(config.dailyLimit + 1) });
+  if (logs.length >= Math.min(config.dailyLimit, config.instanceDailyLimit)) throw httpError(429, 'Limite diário de prospecção atingido.');
+  const last = logs[0];
+  if (last && Date.now() - new Date(last.created_at).getTime() < config.minIntervalSeconds * 1000) throw httpError(429, 'Intervalo mínimo entre contatos ainda não foi atingido.');
+  if (config.provider !== 'evolution_v2' && normalizeWhatsappIntegrationStatus(integration.status) !== 'connected') throw httpError(409, 'Instância comercial não está conectada.');
+}
+
+async function updateSalesLeadStage(lead, nextStage, extra = {}) {
+  assertSalesTransition(lead.stage, nextStage);
+  const [updated] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { stage: nextStage, ...extra, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await createSalesEvent(lead.id, 'stage_changed', lead.stage, nextStage, {});
+  return updated;
+}
+
+async function optOutSalesLead(leadId, reason = 'Solicitação de não contato.') {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${cleanUuid(leadId)}`, limit: '1' });
+  if (!lead) throw httpError(404, 'Lead não encontrado.');
+  if (lead.normalized_phone) {
+    const [existing] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+    if (!existing) await dbRequest('POST', 'sales_suppressions', {}, { normalized_phone: lead.normalized_phone, reason, source: 'lead_opt_out' }, ['Prefer: return=minimal']);
+  }
+  const [updated] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, {
+    stage: 'opted_out', automation_status: 'stopped', opted_out_at: new Date().toISOString(), stop_reason: reason, next_followup_at: null, updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'sales_automation_jobs', { lead_id: `eq.${lead.id}`, status: 'in.(pending,retry)' }, { status: 'cancelled', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await createSalesEvent(lead.id, 'opt_out', lead.stage, 'opted_out', { reason });
+  return updated;
+}
+
+async function createSalesEvent(leadId, eventType, previousStage, nextStage, details = {}) {
+  const [event] = await dbRequest('POST', 'sales_automation_events', {}, { lead_id: leadId || null, event_type: eventType, previous_stage: previousStage || null, next_stage: nextStage || null, details }, ['Prefer: return=representation']);
+  return event;
+}
+
+async function enqueueSalesJob(jobType, leadId, messageId, idempotency, payload = {}, runAt = null) {
+  const key = salesIdempotencyKey(jobType, idempotency);
+  const [existing] = await dbRequest('GET', 'sales_automation_jobs', { idempotency_key: `eq.${key}`, limit: '1' });
+  if (existing) return existing;
+  const [job] = await dbRequest('POST', 'sales_automation_jobs', {}, {
+    lead_id: leadId || null, message_id: messageId || null, job_type: jobType, idempotency_key: key,
+    payload, run_at: runAt || new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  return job;
+}
+
+async function claimNextSalesJob() {
+  const pool = getLocalPool();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const result = await client.query(`select * from sales_automation_jobs where status in ('pending','retry') and run_at<=now() and (lock_expires_at is null or lock_expires_at<now()) order by run_at,created_at for update skip locked limit 1`);
+    const job = result.rows[0];
+    if (!job) { await client.query('commit'); return null; }
+    const claimed = (await client.query(`update sales_automation_jobs set status='claimed',attempt_count=attempt_count+1,lock_expires_at=now()+interval '5 minutes',updated_at=now() where id=$1 returning *`, [job.id])).rows[0];
+    await client.query('commit');
+    return claimed;
+  } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+  finally { client.release(); }
+}
+
+async function processNextSalesJob() {
+  const job = await claimNextSalesJob();
+  if (!job) return null;
+  try {
+    if (job.job_type === 'classify_inbound') await processSalesInboundJob(job);
+    else if (job.job_type === 'send_message') await sendApprovedSalesMessage(job.message_id);
+    else if (job.job_type === 'followup') await processSalesFollowupJob(job);
+    await dbRequest('PATCH', 'sales_automation_jobs', { id: `eq.${job.id}` }, { status: 'completed', lock_expires_at: null, last_error: null, updated_at: new Date().toISOString() });
+    return { ...job, result: 'completed' };
+  } catch (error) {
+    const retry = Number(job.attempt_count || 0) < Number(job.max_attempts || 3);
+    await dbRequest('PATCH', 'sales_automation_jobs', { id: `eq.${job.id}` }, {
+      status: retry ? 'retry' : 'failed', lock_expires_at: null,
+      run_at: retry ? new Date(Date.now() + Math.min(30, 2 ** Number(job.attempt_count || 1)) * 60_000).toISOString() : job.run_at,
+      last_error: cleanText(error.message || 'Falha no job comercial.').slice(0, 1000), updated_at: new Date().toISOString()
+    });
+    if (!retry && job.lead_id) {
+      const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${job.lead_id}`, limit: '1' });
+      if (lead && !TERMINAL_SALES_STAGES.has(lead.stage)) await updateSalesLeadStage(lead, 'human_handoff', { stop_reason: 'Falha permanente na automação.' }).catch(() => {});
+    }
+    throw error;
+  }
+}
+
+async function processSalesInboundJob(job) {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${job.lead_id}`, limit: '1' });
+  const [message] = await dbRequest('GET', 'sales_messages', { id: `eq.${job.message_id}`, limit: '1' });
+  if (!lead || !message || TERMINAL_SALES_STAGES.has(lead.stage)) return;
+  const messages = await dbRequest('GET', 'sales_messages', { lead_id: `eq.${lead.id}`, order: 'created_at.asc', limit: '30' });
+  const [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  let decision;
+  try { decision = await requestSalesDecision({ lead, messages, summary: conversation?.summary || '', config: salesConfig() }); }
+  catch (error) { decision = { ...fallbackSalesDecision(message.body), requires_human: true, human_reason: `Falha ao classificar: ${cleanText(error.message).slice(0, 250)}` }; }
+  await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { intent: decision.intent, confidence: decision.confidence });
+  if (decision.intent === 'opt_out' || decision.should_stop_automation) return optOutSalesLead(lead.id, decision.stop_reason || 'Solicitação de não contato.');
+  const belowConfidence = decision.confidence < salesConfig().minConfidence;
+  let nextStage = belowConfidence || decision.requires_human ? 'human_handoff' : decision.next_stage;
+  try { assertSalesTransition(lead.stage, nextStage); } catch { nextStage = 'human_handoff'; }
+  const updated = await updateSalesLeadStage(lead, nextStage, { stop_reason: decision.requires_human || belowConfidence ? (decision.human_reason || 'Revisão humana necessária.') : null });
+  if (conversation) await dbRequest('PATCH', 'sales_conversations', { id: `eq.${conversation.id}` }, { summary: decision.summary, updated_at: new Date().toISOString() });
+  if (nextStage === 'human_handoff') {
+    await sendPlatformTemplateEmail({
+      to: PLATFORM_SYSTEM_EMAIL_RECIPIENT,
+      templateKey: 'sales_handoff_required',
+      variables: {
+        business_name: lead.business_name,
+        phone: maskPhone(lead.normalized_phone),
+        question: cleanText(message.body).slice(0, 500),
+        summary: cleanText(decision.summary || conversation?.summary || '').slice(0, 800),
+        reason: cleanText(decision.human_reason || 'Revisão humana necessária.').slice(0, 500)
+      }
+    }).catch((error) => console.error(JSON.stringify({ scope: 'sales-handoff-email', lead_id: lead.id, message: cleanText(error.message).slice(0, 250) })));
+  }
+  const maySendContainment = decision.intent === 'unknown' && decision.reply;
+  if (!decision.should_reply || !decision.reply || (decision.requires_human && !maySendContainment) || (belowConfidence && !maySendContainment)) return;
+  const autonomous = autonomousSalesMessageAllowed(decision, salesConfig()) || maySendContainment && salesConfig().mode === 'autonomous';
+  const [draft] = await dbRequest('POST', 'sales_messages', {}, {
+    lead_id: lead.id, conversation_id: conversation?.id || null, direction: 'outbound', body: decision.reply,
+    intent: decision.intent, confidence: decision.confidence, status: autonomous ? 'approved' : 'draft', requires_approval: !autonomous,
+    approved_at: autonomous ? new Date().toISOString() : null,
+    metadata: { kind: maySendContainment ? 'handoff_containment' : 'agent_reply', source_message_id: message.id }
+  }, ['Prefer: return=representation']);
+  if (salesConfig().enabled && autonomous) await enqueueSalesJob('send_message', lead.id, draft.id, `send:${draft.id}`);
+  return updated;
+}
+
+async function processSalesFollowupJob(job) {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${job.lead_id}`, limit: '1' });
+  if (!lead || TERMINAL_SALES_STAGES.has(lead.stage) || Number(lead.followup_count || 0) >= 1) return;
+  const inbound = await dbRequest('GET', 'sales_messages', { lead_id: `eq.${lead.id}`, direction: 'eq.inbound', created_at: `gt.${lead.last_contact_at}`, limit: '1' });
+  if (inbound.length) return;
+  const count = Number(lead.followup_count || 0) + 1;
+  const body = `Oi, ${cleanText(lead.contact_name || lead.business_name).split(/\s+/)[0]}. Passando apenas para saber se faz sentido eu te enviar uma demonstração do cardápio. Se não for o momento, sem problema.`;
+  const [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  const autonomous = salesConfig().enabled && salesConfig().mode === 'autonomous';
+  const [message] = await dbRequest('POST', 'sales_messages', {}, { lead_id: lead.id, conversation_id: conversation?.id || null, direction: 'outbound', body, status: autonomous ? 'approved' : 'draft', requires_approval: !autonomous, approved_at: autonomous ? new Date().toISOString() : null, metadata: { kind: 'followup', number: count } }, ['Prefer: return=representation']);
+  if (autonomous) await enqueueSalesJob('send_message', lead.id, message.id, `send:${message.id}`);
+  await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { followup_count: count, next_followup_at: null, stage: 'followup_scheduled', updated_at: new Date().toISOString() });
+}
+
+async function scheduleDueSalesFollowups() {
+  const leads = await dbRequest('GET', 'sales_leads', { automation_status: 'eq.active', next_followup_at: `lte.${new Date().toISOString()}`, order: 'next_followup_at.asc', limit: '100' });
+  const jobs = [];
+  for (const lead of leads.filter((item) => !TERMINAL_SALES_STAGES.has(item.stage) && Number(item.followup_count || 0) < 1)) {
+    jobs.push(await enqueueSalesJob('followup', lead.id, null, `followup:${lead.id}:${lead.followup_count}`, {}, lead.next_followup_at));
+  }
+  return jobs;
+}
+
 const PLATFORM_SYSTEM_EMAIL_RECIPIENT = 'lucasbulow@hotmail.com';
 const PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS = new Set([
   'backup_failed',
@@ -11529,7 +11975,8 @@ const PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS = new Set([
   'internal_account_suspended',
   'internal_trial_expiring',
   'internal_trial_expired',
-  'internal_plan_changed'
+  'internal_plan_changed',
+  'sales_handoff_required'
 ]);
 
 function platformEmailRecipient(templateKey, fallbackTo) {
@@ -13936,7 +14383,7 @@ async function createDefaultSubscription(companyId, planCode, options = {}) {
     limit: '1'
   }))[0];
   if (!plan) return null;
-  const trialDays = clampInteger(Number(options.trialDays || DEFAULT_TRIAL_DAYS), DEFAULT_TRIAL_DAYS, FIRST_CUSTOMERS_TRIAL_DAYS);
+  const trialDays = clampInteger(Number(options.trialDays || DEFAULT_TRIAL_DAYS), DEFAULT_TRIAL_DAYS, REGIONAL_PARTNERS_TRIAL_DAYS);
   const startsAt = new Date();
   const endsAt = new Date(startsAt.getTime() + trialDays * 86400000);
   const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
@@ -14790,7 +15237,8 @@ async function updateCustomerProfile(customerId, data, storeId = null, options =
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Cliente não encontrado nesta loja.');
-  clearSessionCacheByOwner('customer', customerId);
+  if (payload.password_hash) await deleteOwnerSessions('customer', customerId);
+  else clearSessionCacheByOwner('customer', customerId);
   if (data.address?.street) {
     await upsertAddress(customerId, sanitizeAddress(data.address), updated.store_id, options);
   }
@@ -14820,8 +15268,7 @@ async function updateCustomerByAdmin(customerId, data, storeId = null, options =
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Cliente não encontrado nesta loja.');
-  if (payload.password_hash) await deleteOwnerSessions('customer', customerId);
-  else clearSessionCacheByOwner('customer', customerId);
+  clearSessionCacheByOwner('customer', customerId);
   return getCustomerProfile(customerId, resolvedStoreId, options);
 }
 
@@ -19390,12 +19837,12 @@ function sendSeoLandingPage(req, res, page) {
   <meta property="og:type" content="website"><meta property="og:title" content="${emailEscapeAttribute(page.title)}">
   <meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}">
   <meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css">
+  <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921"><link rel="stylesheet" href="/home.css">
   <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>.seo-main{color:#172033}.seo-hero{padding:72px 0 52px;display:grid;grid-template-columns:1.1fr .9fr;gap:42px;align-items:center}.seo-hero h1{font-size:clamp(2.3rem,5vw,4.6rem);line-height:1.02;margin:14px 0}.seo-hero p,.seo-copy p{font-size:1.08rem;line-height:1.7;color:#596277}.seo-shot{width:100%;border-radius:24px;box-shadow:0 24px 70px #17203324}.seo-section{padding:56px 0}.seo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.seo-card{padding:24px;border:1px solid #e5e7eb;border-radius:18px;background:#fff}.seo-card strong{display:block;font-size:1.08rem;margin-bottom:8px}.seo-faq details{padding:18px 0;border-bottom:1px solid #e5e7eb}.seo-faq summary{font-weight:750;cursor:pointer}.seo-related{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.seo-related a{padding:16px;border:1px solid #e5e7eb;border-radius:14px;text-decoration:none;color:#172033;font-weight:700}@media(max-width:800px){.seo-hero,.seo-grid{grid-template-columns:1fr}.seo-related{grid-template-columns:1fr}}</style>
   <style>.seo-main img{max-width:100%;height:auto!important;aspect-ratio:auto!important;object-fit:contain!important;object-position:center}.seo-main .seo-shot{display:block;width:100%;height:auto!important;aspect-ratio:auto!important}</style>
 </head><body class="seo-main">
-  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="${guidesBaseUrl()}/">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="${guidesBaseUrl()}/">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container seo-hero"><div><p class="home-badge">TáPronto para vender</p><h1>${emailEscapeHtml(page.heading)}</h1><p>${emailEscapeHtml(page.intro)}</p><div class="home-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div><ul class="home-trust"><li>Teste grátis</li><li>Sem taxa por pedido</li><li>Cancele quando quiser</li></ul></div><img class="seo-shot" src="/assets/sistema-cardapio-preview.png" alt="Exemplo do cardápio digital TáPronto no celular" width="1440" height="980"></section>
     <section class="seo-section" style="background:#f7f8fb"><div class="home-container"><p class="home-badge">Benefícios</p><h2>Menos Atrito para o Cliente. Mais Controle para Sua Equipe.</h2><div class="seo-grid">${page.benefits.map((benefit) => `<article class="seo-card"><strong>${emailEscapeHtml(benefit)}</strong><p>Configure pelo painel e publique as mudanças sem depender de aplicativo ou material impresso.</p></article>`).join('')}</div></div></section>
@@ -19443,7 +19890,7 @@ function sendSeoGuideArticlePage(req, res, page) {
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${emailEscapeHtml(page.title)}</title>
   <meta name="description" content="${emailEscapeAttribute(page.description)}"><link rel="canonical" href="${emailEscapeAttribute(canonical)}">
   <meta property="og:type" content="article"><meta property="og:title" content="${emailEscapeAttribute(page.title)}"><meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}"><meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css"><script type="application/ld+json">${safeJsonForHtml(structured)}</script>
+  <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921"><link rel="stylesheet" href="/home.css"><script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>
     .article-page{color:#172033;background:#fff}.article-page *{box-sizing:border-box}.article-nav{border-bottom:1px solid #edf0f3;background:#fff}.article-breadcrumb{display:flex;gap:8px;align-items:center;padding-top:30px;color:#858c9b;font-size:.86rem}.article-breadcrumb a{color:#667085;text-decoration:none}.article-hero{max-width:900px;padding:52px 0 38px}.article-category{display:inline-flex;padding:7px 11px;border-radius:999px;background:#fff1f1;color:#d31820;font-size:.74rem;font-weight:850;letter-spacing:.07em;text-transform:uppercase}.article-hero h1{font-size:clamp(2.5rem,6vw,5rem);line-height:1.02;letter-spacing:-.045em;margin:17px 0 20px}.article-lead{font-size:1.18rem;line-height:1.72;color:#596277;max-width:760px}.article-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:#858c9b;font-size:.86rem;margin-top:24px}.article-visual{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:30px;border-radius:26px;background:linear-gradient(140deg,#ed1c24,#a8070d);color:#fff;box-shadow:0 24px 60px #9c08152b}.article-visual-card{padding:22px;border-radius:18px;background:#fff;color:#172033;box-shadow:0 12px 30px #59000622}.article-visual-card>span{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#fff0f1;color:#d31820;font-weight:900}.article-visual-card strong{display:block;margin:14px 0 6px}.article-visual-card small{color:#667085;line-height:1.45}.article-layout{display:grid;grid-template-columns:240px minmax(0,720px);gap:70px;align-items:start;padding:68px 0}.article-toc{position:sticky;top:24px;padding:20px;border:1px solid #e7e9ee;border-radius:17px}.article-toc strong{display:block;margin-bottom:13px}.article-toc a{display:block;padding:8px 0;color:#667085;text-decoration:none;font-size:.86rem;line-height:1.35;border-bottom:1px solid #f0f1f3}.article-toc a:last-child{border:0}.article-summary{padding:24px;border-left:4px solid #ed1c24;border-radius:0 15px 15px 0;background:#fff5f5;margin-bottom:52px}.article-summary strong{display:block;margin-bottom:8px}.article-summary p{margin:0;color:#596277;line-height:1.65}.article-section{scroll-margin-top:25px;margin-bottom:56px}.article-step{font-size:.75rem;font-weight:900;letter-spacing:.1em;color:#d31820}.article-section h2{font-size:clamp(1.7rem,3vw,2.35rem);line-height:1.15;margin:8px 0 18px}.article-section>p{font-size:1.03rem;line-height:1.78;color:#4f596d;margin:0 0 15px}.article-list{display:grid;gap:9px;padding:0;margin:22px 0;list-style:none}.article-list li{display:flex;gap:10px;align-items:flex-start;padding:13px 15px;border-radius:12px;background:#f7f8fa}.article-list li span{color:#159455;font-weight:900}.article-checklist{display:grid;gap:10px;padding:22px;border-radius:16px;background:#f7f8fa;margin-top:22px}.article-checklist strong{margin-bottom:4px}.article-checklist span{display:flex;gap:10px;color:#4f596d}.article-checklist i{width:18px;height:18px;border:2px solid #c8cdd7;border-radius:5px;background:#fff}.article-example{display:grid;gap:12px;padding:22px;border:1px solid #e7e9ee;border-radius:16px;margin-top:22px}.article-example>strong{font-size:1.05rem}.article-example>div{display:grid;grid-template-columns:60px 1fr;gap:10px;align-items:start}.article-example p{margin:0;color:#4f596d}.example-bad,.example-good{font-size:.7rem;font-weight:850;text-transform:uppercase}.example-bad{color:#c73b42}.example-good{color:#15834d}.article-inline-cta{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px;border-radius:17px;background:#1d2433;color:#fff;margin:-15px 0 55px}.article-inline-cta div{display:grid;gap:5px}.article-inline-cta small{color:#c9ced8}.article-inline-cta a{white-space:nowrap;color:#fff;text-decoration:none;font-weight:850}.article-faq{padding:55px 0;border-top:1px solid #edf0f3}.article-faq h2,.article-related h2{font-size:2rem}.article-faq details{padding:18px 0;border-bottom:1px solid #e7e9ee}.article-faq summary{font-weight:800;cursor:pointer}.article-faq p{color:#596277;line-height:1.65}.article-related{padding:55px 0;background:#f7f8fa}.article-related-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.article-related a{display:flex;flex-direction:column;gap:10px;padding:22px;border:1px solid #e3e6eb;border-radius:16px;background:#fff;color:#172033;text-decoration:none}.article-related small{color:#d31820;font-weight:800;text-transform:uppercase}.article-final{padding:70px 0}.article-final-box{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:42px;border-radius:24px;background:#fff1f1}.article-final h2{margin:0 0 8px;font-size:2rem}.article-final p{margin:0;color:#596277}.article-footer{border-top:1px solid #edf0f3;padding:34px 0}.article-footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.article-footer a{color:#667085;text-decoration:none;margin-left:15px}
     @media(max-width:850px){.article-layout{grid-template-columns:1fr;gap:30px}.article-toc{position:static}.article-visual{grid-template-columns:1fr}.article-related-grid{grid-template-columns:1fr}.article-final-box{display:block}.article-final .home-button{margin-top:22px}.home-nav{display:none}}
@@ -19451,7 +19898,7 @@ function sendSeoGuideArticlePage(req, res, page) {
   </style>
   <style>.article-page img{max-width:100%;height:auto!important;aspect-ratio:auto!important;object-fit:contain!important;object-position:center}</style>
 </head><body class="article-page">
-  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <div class="home-container article-breadcrumb"><a href="${origin}/">Início</a><span>/</span><a href="${guideOrigin}/">Guias</a><span>/</span><span>${emailEscapeHtml(article.category)}</span></div>
     <section class="home-container article-hero"><span class="article-category">${emailEscapeHtml(article.category)}</span><h1>${emailEscapeHtml(page.heading)}</h1><p class="article-lead">${emailEscapeHtml(page.intro)}</p><div class="article-meta"><span>${emailEscapeHtml(article.author)}</span><span>•</span><span>Atualizado em ${emailEscapeHtml(article.updatedAt)}</span><span>•</span><span>${emailEscapeHtml(article.readTime)} de leitura</span></div></section>
@@ -19504,7 +19951,7 @@ function sendSeoGuidesHubPage(req, res, page) {
   <link rel="canonical" href="${emailEscapeAttribute(canonical)}"><meta property="og:type" content="website">
   <meta property="og:title" content="${emailEscapeAttribute(page.title)}"><meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}">
   <meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css">
+  <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921"><link rel="stylesheet" href="/home.css">
   <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>
     .guides-page{color:#172033;background:#fff}.guides-page *{box-sizing:border-box}.guides-nav{border-bottom:1px solid #edf0f3;background:#fff}.guides-hero{padding:72px 0 48px;text-align:center;max-width:820px}.guides-hero h1{font-size:clamp(2.45rem,6vw,4.8rem);line-height:1.02;letter-spacing:-.045em;margin:15px 0 20px}.guides-hero>p{font-size:1.16rem;line-height:1.7;color:#667085;max-width:680px;margin:0 auto}.guides-eyebrow{display:inline-flex;padding:8px 13px;border-radius:999px;background:#fff1f1;color:#d31820;font-size:.78rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.guides-topics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding-bottom:64px}.guides-topic{padding:20px;border:1px solid #e7e9ee;border-radius:18px;text-decoration:none;color:#172033;background:#fff;transition:.2s ease}.guides-topic:hover{transform:translateY(-3px);border-color:#efb1b4;box-shadow:0 12px 34px #1720330d}.guides-topic b{display:block;margin:10px 0 6px}.guides-topic span:last-child{display:block;color:#667085;font-size:.9rem;line-height:1.45}.guides-topic-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:#fff1f1;color:#d31820;font-size:1.25rem}.guides-feature-wrap{background:#f7f8fa;padding:64px 0}.guides-section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:24px}.guides-section-head h2{font-size:clamp(1.8rem,3vw,2.6rem);margin:6px 0}.guides-section-head p{margin:0;color:#667085}.guides-feature{display:grid;grid-template-columns:.9fr 1.1fr;min-height:350px;border-radius:26px;overflow:hidden;background:#fff;box-shadow:0 20px 60px #17203310;border:1px solid #e7e9ee}.guides-feature-art{display:grid;place-items:center;background:linear-gradient(145deg,#ef2029,#a9070e);padding:50px;position:relative}.guides-feature-phone{width:190px;padding:13px;border-radius:29px;background:#1b1f2a;box-shadow:0 25px 55px #47000455;transform:rotate(-5deg)}.guides-feature-phone img{width:100%;display:block;border-radius:19px}.guides-feature-copy{padding:48px;display:flex;flex-direction:column;justify-content:center}.guides-category{font-size:.75rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;color:#d31820}.guides-feature-copy h2{font-size:clamp(2rem,4vw,3rem);line-height:1.08;margin:12px 0 16px}.guides-feature-copy p{color:#667085;line-height:1.65}.guides-read{display:flex;gap:10px;align-items:center;color:#858c9b;font-size:.86rem;margin:4px 0 24px}.guides-link{font-weight:800;color:#d31820;text-decoration:none}.guides-library{padding:70px 0}.guides-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.guide-card{display:flex;flex-direction:column;border:1px solid #e7e9ee;border-radius:20px;overflow:hidden;text-decoration:none;color:#172033;background:#fff;transition:.2s ease}.guide-card:hover{transform:translateY(-4px);box-shadow:0 18px 44px #17203312;border-color:#d9dce3}.guide-card-art{height:128px;display:grid;place-items:center;font-size:2.4rem}.guide-card-art.coral{background:#fff0ee;color:#e23a32}.guide-card-art.violet{background:#f4efff;color:#7556c9}.guide-card-art.blue{background:#edf6ff;color:#2672bb}.guide-card-art.amber{background:#fff7e7;color:#c87a12}.guide-card-art.green{background:#edf9f2;color:#228957}.guide-card-art.red{background:#fff0f1;color:#d31820}.guide-card-copy{padding:22px;display:flex;flex-direction:column;flex:1}.guide-card h3{font-size:1.22rem;line-height:1.28;margin:9px 0}.guide-card p{color:#667085;line-height:1.55;font-size:.94rem;margin:0 0 18px}.guide-card .guides-read{margin-top:auto;margin-bottom:0}.guides-cta{padding:0 0 72px}.guides-cta-box{display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:30px;padding:48px;border-radius:26px;background:#1d2433;color:#fff;overflow:hidden}.guides-cta h2{font-size:clamp(1.8rem,4vw,3rem);margin:8px 0 13px}.guides-cta p{color:#c9ced8;line-height:1.6}.guides-cta-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}.guides-cta .home-button.ghost{color:#fff;border-color:#ffffff55}.guides-footer{border-top:1px solid #edf0f3;padding:35px 0 48px}.guides-footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.guides-footer a{color:#667085;text-decoration:none;margin-left:18px}
@@ -19514,7 +19961,7 @@ function sendSeoGuidesHubPage(req, res, page) {
   </style>
   <style>.guides-page img{display:block;max-width:100%;height:auto!important;aspect-ratio:auto!important;object-fit:contain!important;object-position:center}.guides-feature-phone img{width:100%;height:auto!important}</style>
 </head><body class="guides-page">
-  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container guides-hero"><span class="guides-eyebrow">Conteúdo prático para sua loja</span><h1>Menos bagunça.<br>Mais pedidos organizados.</h1><p>Guias diretos para montar seu cardápio, divulgar a loja e melhorar o atendimento sem complicação.</p></section>
     <section class="home-container guides-topics" aria-label="Navegue por assunto">${topics.map(([title, description, icon]) => `<a class="guides-topic" href="#todos"><span class="guides-topic-icon" aria-hidden="true">${icon}</span><b>${emailEscapeHtml(title)}</b><span>${emailEscapeHtml(description)}</span></a>`).join('')}</section>
@@ -19553,7 +20000,7 @@ async function sendSeoStorePage(req, res, store) {
   const name = cleanText(settings?.name || store.name || 'Cardápio');
   const description = cleanText(settings?.description || store.description || `Confira o cardápio online de ${name} e faça seu pedido.`).slice(0, 240);
   const title = cleanText(settings?.page_title || `Cardápio de ${name} | TáPronto`).slice(0, 90);
-  const image = absoluteSeoAssetUrl(settings?.cover_url || settings?.logo_url || '/assets/tapronto-logo-horizontal.png', origin);
+  const image = absoluteSeoAssetUrl(settings?.cover_url || settings?.logo_url || '/assets/tapronto-logo-2026.png?v=20260921', origin);
   const structured = {
     '@context': 'https://schema.org',
     '@type': 'Restaurant',
@@ -19586,7 +20033,7 @@ function seoEscapeXml(value = '') {
 function absoluteSeoAssetUrl(value = '', origin = '') {
   const text = String(value || '');
   if (/^https?:\/\//i.test(text)) return text;
-  return absoluteFromBase(origin, text || '/assets/tapronto-logo-horizontal.png');
+  return absoluteFromBase(origin, text || '/assets/tapronto-logo-2026.png?v=20260921');
 }
 
 function safeJsonForHtml(value) {
@@ -19671,7 +20118,7 @@ function helpHostRedirectUrl(requestPath, hostHeader = '') {
     '/ajuda.html',
     '/ajuda.css',
     '/ajuda.js',
-    '/assets/tapronto-favicon.svg',
+    '/assets/tapronto-mark-2026.png',
     '/favicon.ico',
     '/robots.txt',
     '/sitemap.xml'
@@ -20419,7 +20866,7 @@ function sessionCookie(name, value) {
 }
 
 function clearCookie(name) {
-  const secure = COOKIE_SECURE ? '; Secure' : '';
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
   return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
@@ -20809,6 +21256,20 @@ function loadEnv(filePath) {
     if (!process.env[key.trim()]) process.env[key.trim()] = value;
   }
 }
+
+export {
+  approveSalesMessage,
+  createSalesDraft,
+  createSalesLead,
+  dbRequest,
+  getStoreWhatsappIntegration,
+  optOutSalesLead,
+  processNextSalesJob,
+  queueAutonomousSalesOutreach,
+  receiveSalesEvolutionMessage,
+  scheduleDueSalesFollowups,
+  sendApprovedSalesMessage
+};
 
 
 

@@ -4,6 +4,7 @@ server.out.log
 server.err.log
 backups/
 uploads/
+.studio-data/
 .tmp/
 npm-debug.log*
 backup-*.tar.gz

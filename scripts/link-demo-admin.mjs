@@ -6,6 +6,11 @@ const prisma = new PrismaClient();
 const email = process.env.DEMO_ADMIN_EMAIL || 'admin@cardapio.local';
 const password = process.env.DEMO_ADMIN_PASSWORD || '12345678';
 const storeSlug = process.env.DEMO_STORE_SLUG || 'cardapio';
+const adminRole = process.env.DEMO_ADMIN_ROLE || 'owner';
+
+if (!['owner', 'superadmin'].includes(adminRole)) {
+  throw new Error('DEMO_ADMIN_ROLE deve ser owner ou superadmin.');
+}
 
 function hashPassword(value) {
   const salt = randomBytes(16).toString('hex');
@@ -27,7 +32,7 @@ async function main() {
         name: admin.name || 'Administrador Demo',
         email,
         passwordHash: hashPassword(password),
-        role: 'owner',
+        role: adminRole,
         isActive: true
       }
     });
@@ -38,7 +43,7 @@ async function main() {
         name: 'Administrador Demo',
         email,
         passwordHash: hashPassword(password),
-        role: 'owner',
+        role: adminRole,
         isActive: true
       }
     });

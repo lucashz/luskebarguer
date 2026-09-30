@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Estúdio de Marketing</title><link rel="stylesheet" href="/studio.css"><script type="module" src="/studio.js"></script></head>
+<body>
+  <header><a class="wordmark" href="/">Estúdio<span>de marketing</span></a><div><span id="organization">Sua marca, em cada post.</span><small>Prévia de desenvolvimento</small><button id="logout" type="button" hidden>Sair</button></div></header>
+  <main>
+    <div class="intro"><div><p class="eyebrow">DA IDEIA AO INSTAGRAM</p><h1>Crie com a sua identidade.</h1><p>Um assunto, suas referências e uma publicação pronta para revisar.</p></div><p id="usage" class="usage"></p></div>
+    <p id="status" role="status" aria-live="polite">Conectando…</p>
+    <section id="activationPanel" class="card" hidden><h2>Ative sua conta administradora</h2><p>Defina uma senha pessoal para acessar o marketing.</p><form id="activationForm"><label>Nova senha<input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><label>Confirme a senha<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><button type="submit">Ativar conta</button></form></section>
+    <section id="loginPanel" class="card" hidden><h2>Acesse o seu marketing</h2><p>Entre com seu usuário e senha de marketing.</p><form id="loginForm"><label>Usuário<input name="username" autocomplete="username" maxlength="80" required></label><label>Senha<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label><button type="submit">Entrar</button></form></section>
+    <div id="workspace" hidden>
+      <details id="profilePanel" hidden><summary>Meu perfil <span>Foto, dados pessoais e senha</span></summary><div class="brand-grid">
+        <form id="profileForm"><label>Nome<input name="displayName" maxlength="80" required></label><label>E-mail<input name="email" type="email" maxlength="160"></label><p id="profileAccount" class="hint"></p><button type="submit">Salvar perfil</button></form>
+        <div><img id="profilePhoto" alt="Sua foto de perfil" width="96" height="96" hidden><label>Foto do perfil<input id="profilePhotoUpload" type="file" accept="image/png,image/jpeg,image/webp"></label><p class="hint">PNG, JPEG ou WebP, até 2 MB.</p><button id="removeProfilePhoto" type="button" class="secondary">Remover foto</button></div>
+        <form id="passwordForm"><label>Senha atual<input name="currentPassword" type="password" autocomplete="current-password" maxlength="256" required></label><label>Nova senha<input name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><label>Confirme a nova senha<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><p id="passwordNotice" class="hint"></p><button type="submit">Alterar senha</button></form>
+      </div></details>
+      <details id="brandPanel"><summary>Identidade da marca <span>Logo, cores e voz</span></summary>
+        <form id="brandForm" class="brand-grid">
+          <label>Nome<input name="name" maxlength="60" required></label>
+          <label>Contato para a legenda<input name="contact" maxlength="70" placeholder="WhatsApp ou @perfil"></label>
+          <label>Cor principal<input name="color" type="color" value="#496653"></label>
+          <label>Cor de fundo<input name="background" type="color" value="#f5f1eb"></label>
+          <label>Serviços<textarea name="services" maxlength="500" placeholder="Liste apenas serviços oferecidos"></textarea></label>
+          <label>Tom de comunicação<input name="tone" maxlength="120" placeholder="Acolhedor e claro"></label>
+          <label>Logo da biblioteca<select name="logoId" id="logoSelect"><option value="">Sem logo</option></select></label>
+          <button type="submit">Salvar identidade</button>
+        </form>
+      </details>
+      <div class="studio-grid">
+        <section class="card creator"><p class="eyebrow">01 / SUA IDEIA</p><h2>O que vamos compartilhar?</h2>
+          <form id="createForm"><label>Prompt da imagem<textarea name="subject" maxlength="700" required placeholder="Descreva a imagem desejada: cenário, pessoas, cores, estilo, iluminação e texto que deve aparecer."></textarea></label>
+            <label>Formato<select name="format"><option value="4:5">Feed · 4:5</option><option value="9:16">Story · 9:16</option></select></label>
+            <div class="section-label"><h3>Referências</h3><label class="upload">Enviar imagem<input id="upload" type="file" accept="image/png,image/jpeg,image/webp"></label></div>
+            <div class="canva-reference">
+              <div class="section-label"><h3>Minha conta Canva</h3><button id="connectCanva" type="button" class="secondary">Conectar Canva</button></div>
+              <p id="canvaStatus" class="hint">Verificando conexão…</p>
+              <label>Pesquisar meus designs no Canva<input id="canvaSearch" maxlength="100" placeholder="Ex.: skincare ou harmonização facial"></label>
+              <button id="searchCanva" type="button" class="secondary">Pesquisar no Canva</button>
+              <div id="canvaResults" class="library-results" aria-live="polite"></div>
+            </div>
+            <div class="canva-reference">
+              <label>Adicionar por link direto<input id="referenceUrl" type="url" maxlength="2000" placeholder="https://site.com/imagem.jpg"></label>
+              <button id="addReferenceUrl" type="button" class="secondary">Usar imagem do link</button>
+              <p class="hint">Aceita link HTTPS direto para PNG, JPEG ou WebP de até 5 MB.</p>
+            </div>
+            <p class="hint">Selecione até 3 imagens. PNG, JPEG ou WebP, até 5 MB. O logo também pode ser enviado aqui.</p>
+            <div id="references" class="references"></div><p id="providerHint" class="hint"></p>
+            <button id="createButton" type="submit" class="primary">Gerar imagem e descrição</button>
+          </form>
+        </section>
+        <section class="card result"><p class="eyebrow">02 / SUA PUBLICAÇÃO</p><h2 id="previewTitle">Espaço para sua próxima ideia.</h2>
+          <div id="emptyPreview" class="empty">Sua imagem aparece aqui.<br><small>Depois, ajuste e prepare a legenda.</small></div>
+          <div id="editor" hidden>
+            <img id="preview" class="preview" alt="Imagem da publicação selecionada">
+            <div class="toolbar"><label>Versão<select id="versions"></select></label><a id="download" class="button" download>Baixar imagem</a></div>
+            <form id="adjustForm"><label>Ajuste desta versão<input name="adjustment" maxlength="300" required placeholder="Ex.: deixe o fundo mais claro"></label><button type="submit">Criar versão ajustada</button></form>
+            <form id="captionForm"><div class="section-label"><h3>Legenda</h3><button id="generateCaption" type="button" class="secondary">Gerar pela imagem</button></div><label class="sr-only" for="caption">Legenda da publicação</label><textarea id="caption" name="caption" maxlength="2200" rows="7" placeholder="Gere uma legenda pela imagem ou escreva a sua."></textarea><div class="toolbar"><button type="submit">Salvar legenda</button><button id="copyCaption" type="button" class="secondary">Copiar</button></div></form>
+          </div>
+        </section>
+      </div>
+      <section class="history-section"><p class="eyebrow">SUA BIBLIOTECA</p><h2>Ideias que já ganharam forma.</h2><div id="history" class="history"></div></section>
+    </div>
+  </main><footer>Revise a imagem e a legenda antes de publicar.</footer>
+</body></html>

@@ -774,6 +774,140 @@ model WhatsappMessageLog {
   @@map("whatsapp_message_logs")
 }
 
+model SalesLead {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  businessName       String    @map("business_name")
+  contactName        String?   @map("contact_name")
+  phone              String?
+  normalizedPhone    String?   @unique @map("normalized_phone")
+  city               String?
+  state              String?   @default("RS")
+  segment            String?
+  instagram          String?
+  source             String?   @default("manual")
+  currentPlatform    String?   @map("current_platform")
+  apparentActivity   String?   @map("apparent_activity")
+  score              Int       @default(0)
+  stage              String    @default("discovered")
+  automationStatus   String    @default("active") @map("automation_status")
+  attemptCount       Int       @default(0) @map("attempt_count")
+  followupCount      Int       @default(0) @map("followup_count")
+  lastContactAt      DateTime? @map("last_contact_at") @db.Timestamptz(6)
+  nextFollowupAt     DateTime? @map("next_followup_at") @db.Timestamptz(6)
+  optedOutAt         DateTime? @map("opted_out_at") @db.Timestamptz(6)
+  stopReason         String?   @map("stop_reason")
+  assignedUserId     String?   @map("assigned_user_id") @db.Uuid
+  metadata           Json      @default("{}")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversations      SalesConversation[]
+  messages           SalesMessage[]
+  events             SalesAutomationEvent[]
+  jobs               SalesAutomationJob[]
+
+  @@index([stage, automationStatus, updatedAt])
+  @@index([nextFollowupAt, automationStatus])
+  @@map("sales_leads")
+}
+
+model SalesConversation {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId                String    @map("lead_id") @db.Uuid
+  whatsappIntegrationId String?   @map("whatsapp_integration_id") @db.Uuid
+  openaiConversationId  String?   @map("openai_conversation_id")
+  summary               String?   @default("")
+  status                String    @default("active")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lead                  SalesLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages              SalesMessage[]
+
+  @@index([leadId, status, updatedAt])
+  @@map("sales_conversations")
+}
+
+model SalesMessage {
+  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId               String            @map("lead_id") @db.Uuid
+  conversationId       String?           @map("conversation_id") @db.Uuid
+  whatsappMessageLogId String?           @map("whatsapp_message_log_id") @db.Uuid
+  providerMessageId    String?           @unique @map("provider_message_id")
+  direction            String
+  body                 String
+  intent               String?
+  confidence           Decimal?          @db.Decimal(4, 3)
+  status               String            @default("draft")
+  requiresApproval     Boolean           @default(true) @map("requires_approval")
+  approvedAt           DateTime?         @map("approved_at") @db.Timestamptz(6)
+  sentAt               DateTime?         @map("sent_at") @db.Timestamptz(6)
+  receivedAt           DateTime?         @map("received_at") @db.Timestamptz(6)
+  errorMessage         String?           @map("error_message")
+  metadata             Json              @default("{}")
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  lead                 SalesLead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  conversation         SalesConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([status, requiresApproval, createdAt])
+  @@map("sales_messages")
+}
+
+model SalesAutomationEvent {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId        String?   @map("lead_id") @db.Uuid
+  eventType     String    @map("event_type")
+  previousStage String?   @map("previous_stage")
+  nextStage     String?   @map("next_stage")
+  details       Json      @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lead          SalesLead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("sales_automation_events")
+}
+
+model SalesAutomationJob {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId        String?   @map("lead_id") @db.Uuid
+  messageId     String?   @map("message_id") @db.Uuid
+  jobType       String    @map("job_type")
+  status        String    @default("pending")
+  attemptCount  Int       @default(0) @map("attempt_count")
+  maxAttempts   Int       @default(3) @map("max_attempts")
+  idempotencyKey String   @unique @map("idempotency_key")
+  runAt         DateTime  @default(now()) @map("run_at") @db.Timestamptz(6)
+  lockExpiresAt DateTime? @map("lock_expires_at") @db.Timestamptz(6)
+  lastError     String?   @map("last_error")
+  payload       Json      @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lead          SalesLead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt, lockExpiresAt])
+  @@index([leadId, createdAt])
+  @@map("sales_automation_jobs")
+}
+
+model SalesSuppression {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  normalizedPhone String   @unique @map("normalized_phone")
+  reason          String?
+  source          String?  @default("lead_opt_out")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("sales_suppressions")
+}
+
+model SalesAutomationSetting {
+  id        String   @id @default("global")
+  paused    Boolean  @default(false)
+  metadata  Json     @default("{}")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("sales_automation_settings")
+}
+
 model OrderPaymentEvent {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   storeId         String?  @map("store_id") @db.Uuid
@@ -1031,6 +1165,77 @@ model CompanySubscription {
 
   @@index([companyId, status, createdAt])
   @@map("company_subscriptions")
+}
+
+model AssistedRegistration {
+  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status             AssistedRegistrationStatus @default(new)
+  responsibleName    String                     @default("") @map("responsible_name")
+  phone              String                     @default("")
+  email              String                     @default("")
+  establishmentName  String                     @default("") @map("establishment_name")
+  documentNormalized String                     @map("document_normalized")
+  answers            Json                       @default("{}")
+  attribution        Json                       @default("{}")
+  operatorAdminId    String?                    @map("operator_admin_id") @db.Uuid
+  version            Int                        @default(1)
+  publishKey         String?                    @unique @map("publish_key")
+  companyId          String?                    @map("company_id") @db.Uuid
+  storeId            String?                    @map("store_id") @db.Uuid
+  adminId            String?                    @map("admin_id") @db.Uuid
+  subscriptionId     String?                    @map("subscription_id") @db.Uuid
+  emailStatus        String                     @default("not_sent") @map("email_status")
+  emailLastErrorCode String?                    @map("email_last_error_code")
+  publishedAt        DateTime?                  @map("published_at") @db.Timestamptz(6)
+  activatedAt        DateTime?                  @map("activated_at") @db.Timestamptz(6)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  files     AssistedRegistrationFile[]
+  menuDraft AssistedMenuDraft?
+
+  @@index([status, updatedAt])
+  @@index([phone])
+  @@index([email])
+  @@map("assisted_registrations")
+}
+
+model AssistedRegistrationFile {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  registrationId String   @map("registration_id") @db.Uuid
+  originalName   String   @map("original_name")
+  safeName       String   @map("safe_name")
+  mimeType       String   @map("mime_type")
+  sizeBytes      BigInt   @map("size_bytes")
+  storageKey     String   @unique @map("storage_key")
+  checksumSha256 String   @map("checksum_sha256")
+  status         String   @default("uploaded")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  registration AssistedRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([registrationId, status, createdAt])
+  @@map("assisted_registration_files")
+}
+
+model AssistedMenuDraft {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  registrationId String    @unique @map("registration_id") @db.Uuid
+  schemaVersion  Int       @default(1) @map("schema_version")
+  content        Json      @default("{}")
+  validation     Json      @default("{}")
+  version        Int       @default(1)
+  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy     String?   @map("reviewed_by") @db.Uuid
+  reviewedHash   String?   @map("reviewed_hash")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  registration AssistedRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([reviewedAt, updatedAt])
+  @@map("assisted_menu_drafts")
 }
 
 model SubscriptionPaymentTransaction {
@@ -1396,75 +1601,4 @@ model MarketingExperiment {
 
   @@index([status, createdAt])
   @@map("marketing_experiments")
-}
-
-model AssistedRegistration {
-  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status             AssistedRegistrationStatus @default(new)
-  responsibleName    String                     @default("") @map("responsible_name")
-  phone              String                     @default("")
-  email              String                     @default("")
-  establishmentName  String                     @default("") @map("establishment_name")
-  documentNormalized String                     @map("document_normalized")
-  answers            Json                       @default("{}")
-  attribution        Json                       @default("{}")
-  operatorAdminId    String?                    @map("operator_admin_id") @db.Uuid
-  version            Int                        @default(1)
-  publishKey         String?                    @unique @map("publish_key")
-  companyId          String?                    @map("company_id") @db.Uuid
-  storeId            String?                    @map("store_id") @db.Uuid
-  adminId            String?                    @map("admin_id") @db.Uuid
-  subscriptionId     String?                    @map("subscription_id") @db.Uuid
-  emailStatus        String                     @default("not_sent") @map("email_status")
-  emailLastErrorCode String?                    @map("email_last_error_code")
-  publishedAt        DateTime?                  @map("published_at") @db.Timestamptz(6)
-  activatedAt        DateTime?                  @map("activated_at") @db.Timestamptz(6)
-  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  files     AssistedRegistrationFile[]
-  menuDraft AssistedMenuDraft?
-
-  @@index([status, updatedAt])
-  @@index([phone])
-  @@index([email])
-  @@map("assisted_registrations")
-}
-
-model AssistedRegistrationFile {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  registrationId String   @map("registration_id") @db.Uuid
-  originalName   String   @map("original_name")
-  safeName       String   @map("safe_name")
-  mimeType       String   @map("mime_type")
-  sizeBytes      BigInt   @map("size_bytes")
-  storageKey     String   @unique @map("storage_key")
-  checksumSha256 String   @map("checksum_sha256")
-  status         String   @default("uploaded")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  registration AssistedRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
-
-  @@index([registrationId, status, createdAt])
-  @@map("assisted_registration_files")
-}
-
-model AssistedMenuDraft {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  registrationId String    @unique @map("registration_id") @db.Uuid
-  schemaVersion  Int       @default(1) @map("schema_version")
-  content        Json      @default("{}")
-  validation     Json      @default("{}")
-  version        Int       @default(1)
-  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
-  reviewedBy     String?   @map("reviewed_by") @db.Uuid
-  reviewedHash   String?   @map("reviewed_hash")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  registration AssistedRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
-
-  @@index([reviewedAt, updatedAt])
-  @@map("assisted_menu_drafts")
 }

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import pg from 'pg';
+import { isManagedBackupFile } from '../src/lib/maintenance-policy.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 
@@ -59,7 +60,7 @@ try {
     key: 'backups',
     directory: backupDir,
     retentionDays: retention.backups,
-    pattern: /^postgres-.+\.dump$/
+    pattern: { test: isManagedBackupFile }
   });
   await cleanupDirectory(result, {
     key: 'tmp',

@@ -1020,6 +1020,7 @@ small,
   display: block;
   flex: 0 0 auto;
   border-radius: 9px;
+  object-fit: contain;
 }
 
 .platform-redesign .platform-sidebar-brand strong,

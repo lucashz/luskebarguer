@@ -101,13 +101,18 @@ function applySignupTrialOffer() {
   const isFirstCustomersOffer = window.location.pathname === '/21dias' || (normalized('utm_source') === 'instagram'
     && normalized('utm_medium') === 'direct'
     && normalized('utm_campaign') === 'primeiros_clientes');
-  if (!isFirstCustomersOffer) return;
+  const isRegionalPartnersOffer = normalized('utm_source') === 'whatsapp'
+    && normalized('utm_medium') === 'outbound'
+    && normalized('utm_campaign') === 'parceiros_regiao';
+  if (!isFirstCustomersOffer && !isRegionalPartnersOffer) return;
 
   const eyebrow = document.querySelector('#signupTrialEyebrow');
   const description = document.querySelector('#signupTrialDescription');
-  if (eyebrow) eyebrow.textContent = '21 Dias Grátis';
+  if (eyebrow) eyebrow.textContent = isRegionalPartnersOffer ? 'Premium Grátis por 30 Dias' : '21 Dias Grátis';
   if (description) {
-    description.textContent = 'Você recebeu 21 dias grátis para testar o TáPronto. Cadastre o responsável, os dados da loja e o endereço público do cardápio. Você poderá escolher um plano depois, dentro do painel.';
+    description.textContent = isRegionalPartnersOffer
+      ? 'Como parceiro inicial da região, você recebeu 30 dias grátis do plano Premium do TáPronto. Cadastre sua loja para liberar o benefício.'
+      : 'Você recebeu 21 dias grátis para testar o TáPronto. Cadastre o responsável, os dados da loja e o endereço público do cardápio. Você poderá escolher um plano depois, dentro do painel.';
   }
 }
 
