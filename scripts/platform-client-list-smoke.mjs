@@ -28,7 +28,7 @@ assert.deepEqual(
 assert.deepEqual(
   helpers.companiesEligibleForAttention([
     { id: 'real', status: 'trial' },
-    { id: 'demo', status: 'active', excluded_from_metrics: true },
+    { id: '2f11b078-bf31-40e6-8328-1e1200a02b07', status: 'active' },
     { id: 'archived', status: 'archived' },
     { id: 'cancelled', status: 'cancelled' }
   ]).map((company) => company.id),

@@ -1,5 +1,6 @@
 (function exposePlatformClientList(root) {
   const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
+  const demoCompanyId = '2f11b078-bf31-40e6-8328-1e1200a02b07';
 
   function sortCompaniesAlphabetically(companies = []) {
     return [...companies].sort((left, right) => collator.compare(String(left?.name || ''), String(right?.name || '')));
@@ -7,7 +8,7 @@
 
   function companiesEligibleForAttention(companies = []) {
     const terminalStatuses = new Set(['cancelled', 'archived', 'deleted']);
-    return companies.filter((company) => !company?.excluded_from_metrics && !terminalStatuses.has(String(company?.status || '').toLowerCase()));
+    return companies.filter((company) => company?.id !== demoCompanyId && !company?.excluded_from_metrics && !terminalStatuses.has(String(company?.status || '').toLowerCase()));
   }
 
   function compactClientSummary({ company = {}, responsible = null, store = null, planName = 'Sem plano', status = '', ordersMonth = 0, revenueLabel = 'R$ 0,00' } = {}) {

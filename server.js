@@ -22,7 +22,7 @@ import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPo
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, TERMINAL_SALES_STAGES } from './src/lib/sales-automation.js';
 import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, sendEvolutionV2SalesText, setEvolutionV2SalesWebhook } from './src/lib/evolution-v2-sales.js';
-import { filterPlatformMetricsData, platformMetricsExcludedCompanyIds } from './src/lib/platform-metrics-exclusions.js';
+import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions.js';
 import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
@@ -3445,7 +3445,6 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
   const offset = (page - 1) * perPage;
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const excludedCompanyIds = platformMetricsExcludedCompanyIds();
   const [companies, features] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
@@ -3592,7 +3591,6 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
         .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
       return {
         ...company,
-        excluded_from_metrics: excludedCompanyIds.has(company.id),
         stores: companyStores,
         admins: companyAdmins,
         subscription: subscriptionByCompany.get(company.id) || null,
