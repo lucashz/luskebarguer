@@ -7,7 +7,7 @@ const js = readFileSync(new URL('../public/platform-assisted-registration.js', i
 
 assert.match(html, /data-platform-view="assisted"[^>]*>[\s\S]*Cadastros assistidos/i);
 assert.match(html, /data-platform-section="assisted"/);
-assert.match(html, /<script[^>]+platform-assisted-registration\.js/, 'O artefato versionado precisa carregar o módulo assistido.');
+assert.match(html, /<script[^>]+platform-assisted-registration\.js\?v=20260930-review-guard/, 'A Central precisa invalidar o cache do módulo com a correção da revisão.');
 for (const step of ['Contato', 'Estabelecimento', 'Operação', 'Diagnóstico', 'Identidade', 'Cardápio']) assert.ok(html.includes(step), `Etapa ausente: ${step}`);
 for (const status of ['new', 'in_progress', 'awaiting_menu', 'reviewing_menu', 'ready_to_publish', 'published', 'activated', 'cancelled']) assert.ok(js.includes(status), `Estado ausente: ${status}`);
 for (const endpoint of ['/assisted-registrations', '/files', '/import', '/menu-draft', '/review', '/publish', '/resend-activation']) assert.ok(js.includes(endpoint), `Integração ausente: ${endpoint}`);
@@ -23,4 +23,6 @@ for (const field of ['address','whatsapp','fulfillment','payment_methods','neigh
 for (const field of ['business_story','order_channels','order_pain','current_menu','organized_orders_value','trial_interest']) assert.match(html, new RegExp(`name="${field}"`), `Pergunta de descoberta ausente: ${field}`);
 assert.ok(html.includes('Conhecer o negócio') && html.includes('Vamos deixar tudo pronto'), 'O diagnóstico precisa aparecer antes do cadastro formal.');
 assert.ok(js.includes('discovery') && js.includes('trial_interest') && js.includes('assistedRegistrationFields'), 'As respostas de descoberta precisam ser preservadas e liberar o cadastro.');
+assert.match(js, /if\s*\(!active\?\.id\s*\|\|\s*!menuDraft\?\.version\)\s*return alertMessage/, 'A revisão deve orientar o operador quando ainda não há cadastro e rascunho ativos.');
+assert.match(js, /if\s*\(!registration\)\s*\{\s*menuDraft\s*=\s*null;\s*renderDraft\(\);\s*\}/, 'Um novo atendimento não pode reutilizar o rascunho do cadastro anterior.');
 console.log('Assisted registration UI smoke: OK');
