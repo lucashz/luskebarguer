@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
-import { buildSalesMetricsQuery } from '../src/lib/sales-metrics.js';
+import { buildSalesMetricsQuery, salesSentEventType } from '../src/lib/sales-metrics.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 loadEnv(new URL('../../../.env', import.meta.url));
@@ -25,18 +25,24 @@ try {
     received_at timestamptz, metadata jsonb not null default '{}'::jsonb
   ) on commit drop`);
   const contactedLeadId = randomUUID();
+  const legacyContactedLeadId = randomUUID();
   const uncontactedLeadId = randomUUID();
   const suffix = Date.now();
 
   await client.query(
     `insert into sales_leads(id,business_name,normalized_phone,stage)
-     values ($1,'Lead contatado',$2,'engaged'),($3,'Lead sem disparo',$4,'engaged')`,
-    [contactedLeadId, `5599${suffix}`, uncontactedLeadId, `5588${suffix}`]
+     values ($1,'Lead contatado',$2,'engaged'),($3,'Lead legado',$4,'awaiting_reply'),($5,'Lead sem disparo',$6,'engaged')`,
+    [contactedLeadId, `5599${suffix}`, legacyContactedLeadId, `5577${suffix}`, uncontactedLeadId, `5588${suffix}`]
   );
   await client.query(
     `insert into sales_automation_events(lead_id,event_type,details)
      values($1,'outreach_sent',$2::jsonb)`,
     [contactedLeadId, JSON.stringify({ campaign_key: `test-${suffix}`, delivery_status: 'read' })]
+  );
+  await client.query(
+    `insert into sales_automation_events(lead_id,event_type,details)
+     values($1,'message_sent',$2::jsonb)`,
+    [legacyContactedLeadId, JSON.stringify({ kind: 'first_contact' })]
   );
   for (let index = 0; index < 4; index += 1) {
     await client.query(
@@ -61,15 +67,17 @@ try {
   const result = await client.query(buildSalesMetricsQuery());
   const metrics = result.rows[0];
 
-  assert(metrics.outreaches === 1, `Esperava 1 disparo, recebeu ${metrics.outreaches}.`);
+  assert(salesSentEventType('first_contact') === 'outreach_sent', 'Envio inicial não gera o evento canônico de disparo.');
+  assert(salesSentEventType('followup') === 'message_sent', 'Follow-up foi classificado como novo disparo.');
+  assert(metrics.outreaches === 2, `Esperava 2 disparos, recebeu ${metrics.outreaches}.`);
   assert(metrics.outbound_message_parts === 4, `Esperava 4 partes, recebeu ${metrics.outbound_message_parts}.`);
   assert(metrics.responding_contacts === 1, `Esperava 1 contato respondente, recebeu ${metrics.responding_contacts}.`);
   assert(metrics.inbound_messages === 3, `Esperava 3 respostas do contato abordado, recebeu ${metrics.inbound_messages}.`);
   assert(metrics.delivered_contacts === 1, `Esperava 1 contato entregue, recebeu ${metrics.delivered_contacts}.`);
   assert(metrics.read_contacts === 1, `Esperava 1 contato que leu, recebeu ${metrics.read_contacts}.`);
-  assert(Number(metrics.reply_rate) === 100, `Esperava taxa de resposta 100, recebeu ${metrics.reply_rate}.`);
-  assert(Number(metrics.delivery_rate) === 100, `Esperava taxa de entrega 100, recebeu ${metrics.delivery_rate}.`);
-  assert(Number(metrics.read_rate) === 100, `Esperava taxa de leitura 100, recebeu ${metrics.read_rate}.`);
+  assert(Number(metrics.reply_rate) === 50, `Esperava taxa de resposta 50, recebeu ${metrics.reply_rate}.`);
+  assert(Number(metrics.delivery_rate) === 50, `Esperava taxa de entrega 50, recebeu ${metrics.delivery_rate}.`);
+  assert(Number(metrics.read_rate) === 50, `Esperava taxa de leitura 50, recebeu ${metrics.read_rate}.`);
 
   console.log('Sales metrics test: OK');
 } finally {

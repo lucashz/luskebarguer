@@ -40,12 +40,23 @@ export async function reconcileSalesOutreach(client, manifest, { apply = false }
     if (!apply) continue;
 
     await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [`sales-outreach:${lead.id}:${entry.campaignKey}`]);
+    const currentLead = (await client.query(
+      `select id,business_name,stage,attempt_count,last_contact_at
+       from sales_leads where id=$1 for update`,
+      [lead.id]
+    )).rows[0];
+    if (!currentLead) {
+      summary.matched -= 1;
+      summary.missing += 1;
+      summary.missingLeads.push({ businessName: entry.businessName, normalizedPhone: entry.normalizedPhone });
+      continue;
+    }
     if (await findEvent(client, lead.id, entry.campaignKey)) {
       summary.unchanged += 1;
       continue;
     }
 
-    const nextStage = OUTREACH_ELIGIBLE_STAGES.has(lead.stage) ? 'awaiting_reply' : lead.stage;
+    const nextStage = OUTREACH_ELIGIBLE_STAGES.has(currentLead.stage) ? 'awaiting_reply' : currentLead.stage;
     const details = {
       campaign_key: entry.campaignKey,
       channel: 'whatsapp',
@@ -57,7 +68,7 @@ export async function reconcileSalesOutreach(client, manifest, { apply = false }
     await client.query(
       `insert into sales_automation_events(lead_id,event_type,previous_stage,next_stage,details,created_at)
        values($1,'outreach_sent',$2,$3,$4::jsonb,$5::timestamptz)`,
-      [lead.id, lead.stage, nextStage, JSON.stringify(details), entry.contactedAt]
+      [currentLead.id, currentLead.stage, nextStage, JSON.stringify(details), entry.contactedAt]
     );
     await client.query(
       `update sales_leads
@@ -66,7 +77,7 @@ export async function reconcileSalesOutreach(client, manifest, { apply = false }
            last_contact_at=case when last_contact_at is null or last_contact_at<$3::timestamptz then $3::timestamptz else last_contact_at end,
            updated_at=now()
        where id=$1`,
-      [lead.id, nextStage, entry.contactedAt]
+      [currentLead.id, nextStage, entry.contactedAt]
     );
     summary.inserted += 1;
     summary.updated += 1;

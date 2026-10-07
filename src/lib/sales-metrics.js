@@ -5,7 +5,10 @@ export function buildSalesMetricsQuery() {
         lead_id,
         lower(coalesce(details->>'delivery_status', '')) as event_delivery_status
       from sales_automation_events
-      where event_type = 'outreach_sent' and lead_id is not null
+      where lead_id is not null and (
+        event_type = 'outreach_sent'
+        or (event_type = 'message_sent' and details->>'kind' = 'first_contact')
+      )
       order by lead_id, created_at desc
     ), message_rollup as (
       select
@@ -54,4 +57,8 @@ export function buildSalesMetricsQuery() {
       case when outreaches = 0 then 0 else round(responding_contacts * 100.0 / outreaches, 1) end::float8 as reply_rate
     from totals
   `;
+}
+
+export function salesSentEventType(messageKind = '') {
+  return messageKind === 'first_contact' ? 'outreach_sent' : 'message_sent';
 }

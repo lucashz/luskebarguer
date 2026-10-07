@@ -21,6 +21,7 @@ import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assert
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
 import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, TERMINAL_SALES_STAGES } from './src/lib/sales-automation.js';
+import { salesSentEventType } from './src/lib/sales-metrics.js';
 import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, sendEvolutionV2SalesText, setEvolutionV2SalesWebhook } from './src/lib/evolution-v2-sales.js';
 import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions.js';
 import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
@@ -11799,7 +11800,7 @@ async function sendApprovedSalesMessage(messageId, options = {}) {
     } else {
       [nextLead] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { attempt_count: Number(lead.attempt_count || 0) + 1, last_contact_at: new Date().toISOString(), next_followup_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
     }
-    await createSalesEvent(lead.id, 'message_sent', lead.stage, nextLead.stage, { message_id: message.id, whatsapp_log_id: result.log?.id || null, kind: messageKind });
+    await createSalesEvent(lead.id, salesSentEventType(messageKind), lead.stage, nextLead.stage, { message_id: message.id, whatsapp_log_id: result.log?.id || null, kind: messageKind });
     return sent;
   } catch (error) {
     await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { status: 'failed', error_message: cleanText(error.message).slice(0, 500) });

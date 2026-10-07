@@ -66,6 +66,31 @@ try {
   assert(secondApply.inserted === 0 && secondApply.updated === 0 && secondApply.unchanged === 11, `Segunda aplicação não foi idempotente: ${JSON.stringify(secondApply)}`);
   assert(Number((await client.query(`select max(attempt_count) maximum from sales_leads`)).rows[0].maximum) === 1, 'Segunda aplicação incrementou tentativas.');
 
+  const concurrentLeadId = randomUUID();
+  const concurrentPhone = '5511999887766';
+  await client.query(
+    `insert into sales_leads(id,business_name,normalized_phone,stage)
+     values($1,'Lead concorrente',$2,'qualified')`,
+    [concurrentLeadId, concurrentPhone]
+  );
+  let injected = false;
+  const interleavingClient = {
+    async query(sql, values) {
+      if (!injected && String(sql).includes('pg_advisory_xact_lock')) {
+        injected = true;
+        await client.query(`update sales_leads set stage='opted_out' where id=$1`, [concurrentLeadId]);
+      }
+      return client.query(sql, values);
+    }
+  };
+  await reconcileSalesOutreach(interleavingClient, [{
+    businessName: 'Lead concorrente', normalizedPhone: concurrentPhone,
+    campaignKey: 'concurrent-campaign', messageVersion: 'approved-v1',
+    partCount: 4, contactedAt: '2026-10-07T15:00:00.000Z', deliveryStatus: 'delivered'
+  }], { apply: true });
+  const concurrentStage = (await client.query(`select stage from sales_leads where id=$1`, [concurrentLeadId])).rows[0].stage;
+  assert(concurrentStage === 'opted_out', `Reconciliação sobrescreveu estágio concorrente com ${concurrentStage}.`);
+
   console.log('Sales outreach reconciliation test: OK');
 } finally {
   await client.query('rollback').catch(() => {});
