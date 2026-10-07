@@ -1,10 +1,12 @@
 (() => {
   const attribution = readAttribution();
   const visitorKey = getVisitorKey();
+  const trackingCode = createTrackingCode(visitorKey);
   attribution.visitor_key = visitorKey;
   attribution.landing_path = location.pathname;
   saveAttribution(attribution);
   propagateSignupAttribution(attribution);
+  appendTrackingCodeToWhatsappLinks(trackingCode);
   track('landing_view', 'delivery_landing', attribution);
   setupProofCarousel();
   setupImageGallery();
@@ -18,7 +20,7 @@
   });
 
   function trackWhatsappClick(placement) {
-    track('whatsapp_click', placement, attribution);
+    track('whatsapp_click', placement, attribution, { tracking_code: trackingCode });
   }
 
   function setupProofCarousel() {
@@ -163,12 +165,37 @@
     }
   }
 
-  function track(eventName, placement, value) {
+  function createTrackingCode(value) {
+    let hash = 2166136261;
+    for (const character of String(value || '')) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `TP-${(hash >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(-7)}`;
+  }
+
+  function appendTrackingCodeToWhatsappLinks(code) {
+    document.querySelectorAll('[data-delivery-whatsapp]').forEach((link) => {
+      const url = new URL(link.href);
+      const message = url.searchParams.get('text') || '';
+      if (!message.includes('Código de atendimento:')) {
+        url.searchParams.set('text', `${message}\n\nCódigo de atendimento: ${code}`.trim());
+        link.href = url.toString();
+      }
+    });
+  }
+
+  function track(eventName, placement, value, properties = {}) {
+    const body = JSON.stringify({ event_name: eventName, path: location.pathname, placement, attribution: value, properties });
+    if (navigator.sendBeacon) {
+      const sent = navigator.sendBeacon('/api/analytics/funnel', new Blob([body], { type: 'application/json' }));
+      if (sent) return;
+    }
     fetch('/api/analytics/funnel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       keepalive: true,
-      body: JSON.stringify({ event_name: eventName, path: location.pathname, placement, attribution: value })
+      body
     }).catch(() => {});
   }
 })();

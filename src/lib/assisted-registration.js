@@ -161,7 +161,7 @@ function maskDocument(value) {
 
 function sanitizeAttribution(value) {
   const data = isObject(value) ? value : {};
-  return Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'declared_source']
+  return Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'declared_source', 'tracking_code']
     .map((key) => [key, cleanText(data[key], 160)])
     .filter(([, item]) => item));
 }

@@ -1,0 +1,20 @@
+diff --git a/server.js b/server.js
+index 56d48f3..0000000 100644
+--- a/server.js
++++ b/server.js
+@@ -6718,6 +6718,7 @@ function reservedPublicSlugs() {
+     'recursos',
+     'demonstracao',
+     'demo',
++    'delivery',
+     'suporte',
+     'dashboard',
+     'platform',
+@@ -19745,6 +19746,7 @@ function routePath(requestPath, hostHeader = '') {
+   if (requestPath === '/' && isPlatformHost) return '/platform.html';
+   if (requestPath === '/' && isHelpHost) return '/ajuda.html';
+   if (requestPath === '/') return '/home.html';
++  if (requestPath === '/delivery') return '/delivery.html';
+   if (requestPath === '/ajuda' || requestPath === '/help') return '/ajuda.html';
+   if (requestPath === '/cardapio') return '/app.html';
+   if (requestPath === '/planos') return '/plans.html';

@@ -11,8 +11,7 @@ function isInstagramPaid(event) {
 function isCurrentInstagramAd(event) {
   const attribution = event?.attribution || {};
   return isInstagramPaid(event)
-    && normalized(attribution.utm_campaign) === 'delivery_noroeste_rs'
-    && normalized(attribution.utm_content) === '52582798716168';
+    && normalized(attribution.utm_campaign) === 'delivery_noroeste_rs';
 }
 
 function eventIdentity(event, stage) {
@@ -27,12 +26,20 @@ function stageCount(events, names, stage) {
     .filter(Boolean)).size;
 }
 
+function eventCount(events, names) {
+  return events.filter((event) => names.includes(event.event_name)).length;
+}
+
 function stageCounts(events) {
+  const whatsappClicks = eventCount(events, ['whatsapp_click']);
   return {
-    landing_views: stageCount(events, ['landing_view'], 'landing_view'),
-    signup_clicks: stageCount(events, ['signup_started'], 'signup_started'),
+    landing_views: eventCount(events, ['landing_view']),
+    landing_visitors: stageCount(events, ['landing_view'], 'landing_view'),
+    signup_clicks: eventCount(events, ['signup_started']),
     signup_completed: stageCount(events, ['signup_completed'], 'signup_completed'),
-    whatsapp_clicks: stageCount(events, ['whatsapp_click'], 'whatsapp_click'),
+    whatsapp_clicks: whatsappClicks,
+    whatsapp_visitors: stageCount(events, ['whatsapp_click'], 'whatsapp_click'),
+    primary_cta_clicks: whatsappClicks,
     subscriptions: stageCount(events, ['subscription_created', 'subscription_activated'], 'subscription_created')
   };
 }
@@ -41,9 +48,20 @@ function rate(part, total) {
   return total ? Number(((part / total) * 100).toFixed(1)) : 0;
 }
 
-export function instagramPaidFunnel(events = []) {
+export function instagramPaidFunnel(events = [], options = {}) {
   const paidEvents = events.filter(isCurrentInstagramAd);
   const counts = stageCounts(paidEvents);
+  const trackingCodes = new Set(paidEvents
+    .filter((event) => event.event_name === 'whatsapp_click')
+    .map((event) => normalized(event.properties?.tracking_code))
+    .filter(Boolean));
+  const assistedRegistrations = (options.assistedRegistrations || []).filter((row) => (
+    row.status !== 'cancelled' && trackingCodes.has(normalized(row.attribution?.tracking_code))
+  ));
+  const assistedCompanyIds = new Set(assistedRegistrations.map((row) => row.company_id).filter(Boolean));
+  const assistedSubscriptions = new Set((options.subscriptions || [])
+    .filter((row) => assistedCompanyIds.has(row.company_id) && ['active', 'grace_period', 'payment_pending'].includes(row.status))
+    .map((row) => row.company_id)).size;
   const campaignNames = [...new Set(paidEvents.map((event) => String(event.attribution?.utm_campaign || '').trim() || 'Sem campanha'))];
   const campaigns = campaignNames.map((campaign) => ({
     campaign,
@@ -51,9 +69,12 @@ export function instagramPaidFunnel(events = []) {
   })).sort((left, right) => right.landing_views - left.landing_views || left.campaign.localeCompare(right.campaign, 'pt-BR'));
   return {
     ...counts,
+    assisted_registrations: assistedRegistrations.length,
+    assisted_subscriptions: assistedSubscriptions,
     landing_to_signup_click_rate: rate(counts.signup_clicks, counts.landing_views),
     signup_click_to_completed_rate: rate(counts.signup_completed, counts.signup_clicks),
     landing_to_whatsapp_rate: rate(counts.whatsapp_clicks, counts.landing_views),
+    landing_to_primary_cta_rate: rate(counts.primary_cta_clicks, counts.landing_views),
     landing_to_subscription_rate: rate(counts.subscriptions, counts.landing_views),
     campaigns
   };

@@ -450,7 +450,11 @@ async function initAccountActivation() {
       const password = document.querySelector('#activationPassword')?.value || '';
       const confirmation = document.querySelector('#activationPasswordConfirm')?.value || '';
       if (requiresPassword && password !== confirmation) throw new Error('A confirmação da senha não confere.');
-      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, { method: 'POST', body: requiresPassword ? { password } : {} });
+      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requiresPassword ? { password } : {}),
+      });
       if (message) message.textContent = data.message || 'Conta ativada com sucesso.';
       setTimeout(() => {
         location.href = canonicalPanelRedirect(data.redirect);

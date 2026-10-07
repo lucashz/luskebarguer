@@ -4157,7 +4157,7 @@ async function platformCommercialSummary() {
 
 async function platformCommercialAnalytics(params = new URLSearchParams()) {
   const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
-  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents] = await Promise.all([
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents, assistedRegistrations] = await Promise.all([
     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
@@ -4189,6 +4189,11 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
       select: 'id,company_id,store_id,event_name,visitor_key,attribution,properties,created_at',
       created_at: `gte.${period.since.toISOString()}`,
       limit: '10000'
+    }).catch(() => []),
+    dbRequest('GET', 'assisted_registrations', {
+      select: 'id,status,company_id,attribution,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '2000'
     }).catch(() => [])
   ]);
   const metricData = filterPlatformMetricsData({ companies, stores, subscriptions, subscriptionEvents, orders, settings, products, accessEvents, marketingEvents });
@@ -4208,12 +4213,15 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
     conversion,
     new_clients_daily: platformNewClientsDaily(metricData.companies, period),
     mrr_by_plan: revenue.mrr_by_plan,
-    marketing: platformMarketingFunnelSnapshot(metricData.marketingEvents, metricData.subscriptionEvents),
+    marketing: platformMarketingFunnelSnapshot(metricData.marketingEvents, metricData.subscriptionEvents, {
+      assistedRegistrations,
+      subscriptions: metricData.subscriptions
+    }),
     access: platformAccessSnapshot(metricData.accessEvents, period, context.storeById)
   };
 }
 
-function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
+function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = [], options = {}) {
   const names = ['demo_started', 'signup_started', 'signup_completed', 'first_product_created', 'menu_published', 'first_order_received'];
   const eventCompanies = (name) => new Set(events.filter((event) => event.event_name === name).map((event) => event.company_id || event.visitor_key || event.id));
   const counts = Object.fromEntries(names.map((name) => [name, eventCompanies(name).size]));
@@ -4228,7 +4236,7 @@ function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
   const rate = (part, total) => total ? Number(((part / total) * 100).toFixed(1)) : 0;
   return {
     stages: counts,
-    instagram_paid: instagramPaidFunnel(events),
+    instagram_paid: instagramPaidFunnel(events, options),
     rates: {
       signup_to_publish: rate(counts.menu_published, counts.signup_completed),
       publish_to_first_order: rate(counts.first_order_received, counts.menu_published),
@@ -4767,7 +4775,8 @@ async function recordPublicMarketingEvent(req, data = {}) {
     properties: {
       path: cleanPublicPath(data.path || '/'),
       content_id: cleanText(data.content_id || '').slice(0, 100),
-      placement: cleanText(data.placement || '').slice(0, 80)
+      placement: cleanText(data.placement || '').slice(0, 80),
+      tracking_code: cleanText(data.properties?.tracking_code || data.tracking_code || '').toUpperCase().slice(0, 24)
     }
   });
 }

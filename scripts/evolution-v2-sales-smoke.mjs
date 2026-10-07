@@ -1,6 +1,7 @@
 import {
   evolutionV2SalesConfig,
   getEvolutionV2ConnectionState,
+  sendEvolutionV2SalesMedia,
   sendEvolutionV2SalesText,
   setEvolutionV2SalesWebhook
 } from '../src/lib/evolution-v2-sales.js';
@@ -27,6 +28,22 @@ assert(calls[0].url.endsWith('/message/sendText/tapronto%20vendas'), 'Rota de en
 assert(calls[0].options.headers.apikey === secret, 'API key não foi enviada no header.');
 assert(JSON.parse(calls[0].options.body).number === '5555999990000', 'Telefone não foi normalizado.');
 assert(JSON.parse(calls[0].options.body).text === 'Olá', 'Texto não foi normalizado.');
+
+const mediaSent = await sendEvolutionV2SalesMedia({
+  phone: '(55) 93619-1201',
+  mediaUrl: 'https://taprontomenu.com.br/assets/sistema-cardapio-preview.png',
+  mimeType: 'image/png',
+  caption: '  Cardápio visto pelo cliente  '
+}, config, fetchOk);
+assert(mediaSent.id === 'provider-message-1', 'ID do envio de imagem não foi extraído.');
+const mediaCall = calls.at(-1);
+assert(mediaCall.url.endsWith('/message/sendMedia/tapronto%20vendas'), 'Rota de envio de imagem incorreta.');
+const mediaBody = JSON.parse(mediaCall.options.body);
+assert(mediaBody.number === '5555936191201', 'Telefone da imagem não foi normalizado.');
+assert(mediaBody.mediatype === 'image', 'Tipo da mídia não foi enviado.');
+assert(mediaBody.mimetype === 'image/png', 'MIME type da imagem não foi enviado.');
+assert(mediaBody.media === 'https://taprontomenu.com.br/assets/sistema-cardapio-preview.png', 'URL da imagem não foi enviada.');
+assert(mediaBody.caption === 'Cardápio visto pelo cliente', 'Legenda da imagem não foi normalizada.');
 
 const state = await getEvolutionV2ConnectionState(config, fetchOk);
 assert(state.connected && state.state === 'open', 'Estado conectado não foi reconhecido.');

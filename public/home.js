@@ -69,18 +69,6 @@
 
   trackHomeAccess();
   trackMarketingCtas();
-  document.querySelectorAll('[data-assisted-whatsapp]').forEach((link) => {
-    link.addEventListener('click', () => trackWhatsappClick(link.dataset.whatsappPlacement || 'home'));
-  });
-
-  function trackWhatsappClick(placement) {
-    fetch('/api/analytics/funnel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      keepalive: true,
-      body: JSON.stringify({ event_name: 'whatsapp_click', path: location.pathname, placement, attribution: marketingAttribution() })
-    }).catch(() => {});
-  }
 
   function trackHomeAccess() {
     const payload = {

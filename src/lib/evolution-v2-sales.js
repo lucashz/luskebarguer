@@ -49,6 +49,23 @@ export async function sendEvolutionV2SalesText({ phone, text }, config = evoluti
   return { id, raw: data };
 }
 
+export async function sendEvolutionV2SalesMedia({ phone, mediaUrl, mimeType, caption = '' }, config = evolutionV2SalesConfig(), fetchImpl = fetch) {
+  const number = normalizePhone(phone);
+  const media = String(mediaUrl || '').trim();
+  const mimetype = String(mimeType || '').trim().toLowerCase();
+  const normalizedCaption = String(caption || '').replace(/\s+/g, ' ').trim();
+  if (!/^55\d{10,11}$/.test(number)) throw new Error('Informe um telefone brasileiro válido para o envio.');
+  if (!/^https:\/\//i.test(media)) throw new Error('Informe uma URL HTTPS válida para a mídia.');
+  if (!/^image\/(png|jpe?g|webp)$/i.test(mimetype)) throw new Error('Informe um tipo de imagem válido.');
+  const data = await evolutionV2Request(`/message/sendMedia/${encodeURIComponent(config.instance)}`, {
+    method: 'POST',
+    body: JSON.stringify({ number, mediatype: 'image', mimetype, caption: normalizedCaption, media })
+  }, config, fetchImpl);
+  const id = String(data?.key?.id || data?.message?.key?.id || data?.id || '').trim();
+  if (!id) throw new Error('Evolution API v2 não retornou o identificador da mensagem.');
+  return { id, raw: data };
+}
+
 export async function setEvolutionV2SalesWebhook({ url, secret }, config = evolutionV2SalesConfig(), fetchImpl = fetch) {
   const webhookUrl = String(url || '').trim();
   if (!/^https:\/\//i.test(webhookUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(?::\d+)?\//i.test(webhookUrl)) {

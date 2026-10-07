@@ -2228,20 +2228,19 @@ function renderAccessMetrics() {
       </div>
       <div class="platform-ad-funnel-grid">
         ${[
-          ['Acessaram pelo anúncio', instagramPaid.landing_views],
-          ['Clicaram em Começar grátis', instagramPaid.signup_clicks],
-          ['Concluíram o cadastro', instagramPaid.signup_completed],
-          ['Clicaram no WhatsApp', instagramPaid.whatsapp_clicks],
-          ['Criaram uma assinatura', instagramPaid.subscriptions]
+          ['Visualizações registradas', instagramPaid.landing_views],
+          ['Visitantes únicos', instagramPaid.landing_visitors],
+          ['Aberturas do WhatsApp', instagramPaid.whatsapp_clicks],
+          ['Pessoas que abriram', instagramPaid.whatsapp_visitors],
+          ['Cadastros identificados', instagramPaid.assisted_registrations],
+          ['Assinaturas identificadas', instagramPaid.assisted_subscriptions]
         ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></article>`).join('')}
       </div>
       <div class="platform-ad-funnel-rates">
-        <span>Anúncio → cadastro: <strong>${Number(instagramPaid.landing_to_signup_click_rate || 0)}%</strong></span>
-        <span>Clique → cadastro concluído: <strong>${Number(instagramPaid.signup_click_to_completed_rate || 0)}%</strong></span>
-        <span>Anúncio → WhatsApp: <strong>${Number(instagramPaid.landing_to_whatsapp_rate || 0)}%</strong></span>
-        <span>Anúncio → assinatura: <strong>${Number(instagramPaid.landing_to_subscription_rate || 0)}%</strong></span>
+        <span>Visualização → WhatsApp: <strong>${Number(instagramPaid.landing_to_primary_cta_rate ?? instagramPaid.landing_to_whatsapp_rate ?? 0)}%</strong></span>
       </div>
-      ${(instagramPaid.campaigns || []).length ? `<div class="platform-ad-campaigns"><strong>Por campanha</strong>${instagramPaid.campaigns.map((campaign) => `<p><span>${escapeHtml(campaign.campaign || 'Sem campanha')}</span><small>${Number(campaign.landing_views || 0)} acesso(s) · ${Number(campaign.signup_clicks || 0)} clique(s) para cadastro · ${Number(campaign.signup_completed || 0)} cadastro(s)</small></p>`).join('')}</div>` : ''}
+      <small>Dados próprios do site. Não equivalem a cliques ou visualizações reportados pela Meta. Cadastros e assinaturas só aparecem quando possuem o mesmo código anônimo enviado pelo WhatsApp.</small>
+      ${(instagramPaid.campaigns || []).length ? `<div class="platform-ad-campaigns"><strong>Por campanha</strong>${instagramPaid.campaigns.map((campaign) => `<p><span>${escapeHtml(campaign.campaign || 'Sem campanha')}</span><small>${Number(campaign.landing_views || 0)} visualização(ões) · ${Number(campaign.landing_visitors || 0)} visitante(s) · ${Number(campaign.whatsapp_clicks || 0)} abertura(s) do WhatsApp</small></p>`).join('')}</div>` : ''}
     </section>
     <div class="platform-access-columns">
       <section>

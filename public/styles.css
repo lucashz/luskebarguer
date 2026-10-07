@@ -4107,6 +4107,10 @@ textarea {
   color: white;
 }
 
+body.store-closed .add-product b {
+  display: none !important;
+}
+
 .bag-panel {
   display: grid;
   gap: 14px;

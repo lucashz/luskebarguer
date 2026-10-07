@@ -1,0 +1,33 @@
+--- server.js
++++ server.js
+@@ -3225,14 +3225,14 @@
+     dbRequest('GET', 'company_subscriptions', {
+       select: '*',
+       company_id: companyFilter,
+-      order: 'name.asc',
++      order: 'created_at.desc',
+       limit: '3000'
+     }),
+     dbRequest('GET', 'company_feature_overrides', {
+       select: '*',
+       company_id: companyFilter,
+-      order: 'name.asc',
++      order: 'created_at.desc',
+       limit: '5000'
+     })
+@@ -3257,7 +3257,7 @@
+     }).catch(() => []),
+     dbRequest('GET', 'menu_items', {
+-      select: 'id,store_id,is_active',
++      select: 'id,store_id,is_available',
+       store_id: storeFilter,
+       limit: '10000'
+     }).catch(() => []),
+@@ -3335,7 +3335,7 @@
+           last_access_at: lastAccessAt,
+           products_count: companyProducts.length,
+-          active_products_count: companyProducts.filter((item) => item.is_active !== false).length,
++          active_products_count: companyProducts.filter((item) => item.is_available !== false).length,
+           stores_without_whatsapp_count: companyStores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number).length,
+           incomplete_onboarding_count: companyStores.filter((store) => settingsByStore.get(store.id)?.onboarding_completed === false).length
+         }

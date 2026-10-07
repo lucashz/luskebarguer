@@ -1,0 +1,287 @@
+diff --git a/public/delivery.html b/public/delivery.html
+index d00ccd1..1c867bf 100644
+--- a/public/delivery.html
++++ b/public/delivery.html
+@@ -162,6 +162,6 @@
+       </div>
+     </div>
+ 
+-    <script src="/delivery.js?v=20260921-2" defer></script>
++    <script src="/delivery.js?v=20261004-reliable-attribution" defer></script>
+   </body>
+ </html>
+diff --git a/public/delivery.js b/public/delivery.js
+index 9122985..2f2daaf 100644
+--- a/public/delivery.js
++++ b/public/delivery.js
+@@ -1,10 +1,12 @@
+ (() => {
+   const attribution = readAttribution();
+   const visitorKey = getVisitorKey();
++  const trackingCode = createTrackingCode(visitorKey);
+   attribution.visitor_key = visitorKey;
+   attribution.landing_path = location.pathname;
+   saveAttribution(attribution);
+   propagateSignupAttribution(attribution);
++  appendTrackingCodeToWhatsappLinks(trackingCode);
+   track('landing_view', 'delivery_landing', attribution);
+   setupProofCarousel();
+   setupImageGallery();
+@@ -18,7 +20,7 @@
+   });
+ 
+   function trackWhatsappClick(placement) {
+-    track('whatsapp_click', placement, attribution);
++    track('whatsapp_click', placement, attribution, { tracking_code: trackingCode });
+   }
+ 
+   function setupProofCarousel() {
+@@ -163,12 +165,37 @@
+     }
+   }
+ 
+-  function track(eventName, placement, value) {
++  function createTrackingCode(value) {
++    let hash = 2166136261;
++    for (const character of String(value || '')) {
++      hash ^= character.charCodeAt(0);
++      hash = Math.imul(hash, 16777619);
++    }
++    return `TP-${(hash >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(-7)}`;
++  }
++
++  function appendTrackingCodeToWhatsappLinks(code) {
++    document.querySelectorAll('[data-delivery-whatsapp]').forEach((link) => {
++      const url = new URL(link.href);
++      const message = url.searchParams.get('text') || '';
++      if (!message.includes('Código de atendimento:')) {
++        url.searchParams.set('text', `${message}\n\nCódigo de atendimento: ${code}`.trim());
++        link.href = url.toString();
++      }
++    });
++  }
++
++  function track(eventName, placement, value, properties = {}) {
++    const body = JSON.stringify({ event_name: eventName, path: location.pathname, placement, attribution: value, properties });
++    if (navigator.sendBeacon) {
++      const sent = navigator.sendBeacon('/api/analytics/funnel', new Blob([body], { type: 'application/json' }));
++      if (sent) return;
++    }
+     fetch('/api/analytics/funnel', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       keepalive: true,
+-      body: JSON.stringify({ event_name: eventName, path: location.pathname, placement, attribution: value })
++      body
+     }).catch(() => {});
+   }
+ })();
+diff --git a/public/platform-assisted-registration.js b/public/platform-assisted-registration.js
+index 806375a..9a12174 100644
+--- a/public/platform-assisted-registration.js
++++ b/public/platform-assisted-registration.js
+@@ -64,8 +64,8 @@
+     container.innerHTML = `<div class="assisted-metrics-heading"><div><p class="eyebrow">Conversão assistida</p><h3>Do atendimento à assinatura</h3></div><small>${escapeHtml(metrics.attribution_notice || '')}</small></div><div class="assisted-metrics-grid">${stages.map(([label,value])=>`<article><span>${escapeHtml(label)}</span><strong>${Number(value||0)}</strong></article>`).join('')}</div><div class="assisted-metrics-rates"><span>Atendimento → publicação: <b>${Number(metrics.initiated_to_published_rate||0)}%</b></span><span>Publicação → ativação: <b>${Number(metrics.published_to_activated_rate||0)}%</b></span></div>${(metrics.declared_sources||[]).length?`<p class="assisted-sources"><b>Origem informada pelo lead:</b> ${(metrics.declared_sources||[]).map((item)=>`${escapeHtml(item.source)} (${Number(item.count||0)})`).join(' · ')}</p>`:''}<p class="assisted-utm-label"><b>UTM técnica:</b> os cliques acima consideram somente a campanha paga configurada e permanecem anônimos.</p>`;
+   }
+   async function loadRegistration(id) { const data = await api(`/assisted-registrations/${id}`); openEditor(data.registration); const [draft,files] = await Promise.all([api(`/assisted-registrations/${id}/menu-draft`),api(`/assisted-registrations/${id}/files`)]); menuDraft = draft.menu_draft; renderOriginalFiles(files.files||[]); renderDraft(); }
+-  function openEditor(registration = null) { active = registration; if (!registration) { menuDraft = null; renderDraft(); } editor.hidden = false; form.reset(); registrationFields.hidden = !registration; startRegistrationButton.hidden = true; form.registration_id.value = registration?.id || ''; form.expected_version.value = registration?.version || 1; form.elements.document.required=!registration; form.elements.document.placeholder=registration?.document_masked?`Mantido: ${registration.document_masked}`:''; for (const name of ['responsible_name','phone','email','establishment_name']) if (registration) form.elements[name].value = registration[name] || ''; if (registration) { const a=registration.answers||{}, discovery=a.discovery||{}; for (const name of ['business_story','order_channels','order_pain','current_menu','organized_orders_value','trial_interest']) form.elements[name].value=discovery[name]||''; form.elements.city.value=a.establishment?.city||''; form.elements.niche.value=a.establishment?.niche||''; form.elements.address.value=a.establishment?.address||''; form.elements.whatsapp.value=a.establishment?.whatsapp||''; form.elements.hours.value=typeof a.operation?.hours==='string'?a.operation.hours:''; form.elements.neighborhoods.value=a.operation?.neighborhoods||''; form.elements.payment_methods.value=(a.operation?.payment_methods||[]).join(', '); form.elements.biggest_pain.value=a.diagnosis?.biggest_pain||''; form.elements.declared_source.value=registration.attribution?.declared_source||''; form.querySelectorAll('[name="fulfillment"]').forEach((input)=>{input.checked=(a.operation?.fulfillment||[]).includes(input.value);}); } editor.scrollIntoView({ behavior:'smooth',block:'start' }); }
+-  async function saveRegistration(event, autosave = false) { event?.preventDefault(); const formData=new FormData(form); const values=Object.fromEntries(formData); const fulfillment=formData.getAll('fulfillment'); const existing=active?.answers||{}; const payload={ responsible_name:values.responsible_name,phone:values.phone,email:values.email,establishment_name:values.establishment_name,expected_version:Number(values.expected_version),attribution:{...(active?.attribution||{}),declared_source:values.declared_source},answers:{...existing,discovery:{business_story:values.business_story,order_channels:values.order_channels,order_pain:values.order_pain,current_menu:values.current_menu,organized_orders_value:values.organized_orders_value,trial_interest:values.trial_interest},contact:{...(existing.contact||{}),name:values.responsible_name,email:values.email,phone:values.phone},establishment:{...(existing.establishment||{}),name:values.establishment_name,city:values.city,niche:values.niche,address:values.address,whatsapp:values.whatsapp},operation:{...(existing.operation||{}),hours:values.hours,neighborhoods:values.neighborhoods,payment_methods:String(values.payment_methods||'').split(',').map((item)=>item.trim()).filter(Boolean),fulfillment},diagnosis:{...(existing.diagnosis||{}),biggest_pain:values.biggest_pain}}}; if(values.document) payload.document=values.document; const savingId=active?.id||null; try { const data=savingId?await api(`/assisted-registrations/${savingId}`,{method:'PATCH',body:payload}):await api('/assisted-registrations',{method:'POST',body:payload}); if(active?.id && active.id!==savingId) return; active=data.registration; form.registration_id.value=active.id; form.expected_version.value=active.version; form.elements.document.required=false; form.elements.document.value=''; form.elements.document.placeholder=`Mantido: ${active.document_masked||''}`; $('#assistedSaveStatus').textContent=autosave?'Salvo automaticamente.':'Cadastro salvo.'; await loadList(); } catch(error) { $('#assistedSaveStatus').textContent=error.message; if(error.status===409&&active?.id===savingId) await loadRegistration(savingId); } }
++  function openEditor(registration = null) { active = registration; if (!registration) { menuDraft = null; renderDraft(); } editor.hidden = false; form.reset(); registrationFields.hidden = !registration; startRegistrationButton.hidden = true; form.registration_id.value = registration?.id || ''; form.expected_version.value = registration?.version || 1; form.elements.document.required=!registration; form.elements.document.placeholder=registration?.document_masked?`Mantido: ${registration.document_masked}`:''; for (const name of ['responsible_name','phone','email','establishment_name']) if (registration) form.elements[name].value = registration[name] || ''; if (registration) { const a=registration.answers||{}, discovery=a.discovery||{}; for (const name of ['business_story','order_channels','order_pain','current_menu','organized_orders_value','trial_interest']) form.elements[name].value=discovery[name]||''; form.elements.city.value=a.establishment?.city||''; form.elements.niche.value=a.establishment?.niche||''; form.elements.address.value=a.establishment?.address||''; form.elements.whatsapp.value=a.establishment?.whatsapp||''; form.elements.hours.value=typeof a.operation?.hours==='string'?a.operation.hours:''; form.elements.neighborhoods.value=a.operation?.neighborhoods||''; form.elements.payment_methods.value=(a.operation?.payment_methods||[]).join(', '); form.elements.biggest_pain.value=a.diagnosis?.biggest_pain||''; form.elements.declared_source.value=registration.attribution?.declared_source||''; form.elements.tracking_code.value=registration.attribution?.tracking_code||''; form.querySelectorAll('[name="fulfillment"]').forEach((input)=>{input.checked=(a.operation?.fulfillment||[]).includes(input.value);}); } editor.scrollIntoView({ behavior:'smooth',block:'start' }); }
++  async function saveRegistration(event, autosave = false) { event?.preventDefault(); const formData=new FormData(form); const values=Object.fromEntries(formData); const fulfillment=formData.getAll('fulfillment'); const existing=active?.answers||{}; const payload={ responsible_name:values.responsible_name,phone:values.phone,email:values.email,establishment_name:values.establishment_name,expected_version:Number(values.expected_version),attribution:{...(active?.attribution||{}),declared_source:values.declared_source,tracking_code:String(values.tracking_code||'').trim().toUpperCase()},answers:{...existing,discovery:{business_story:values.business_story,order_channels:values.order_channels,order_pain:values.order_pain,current_menu:values.current_menu,organized_orders_value:values.organized_orders_value,trial_interest:values.trial_interest},contact:{...(existing.contact||{}),name:values.responsible_name,email:values.email,phone:values.phone},establishment:{...(existing.establishment||{}),name:values.establishment_name,city:values.city,niche:values.niche,address:values.address,whatsapp:values.whatsapp},operation:{...(existing.operation||{}),hours:values.hours,neighborhoods:values.neighborhoods,payment_methods:String(values.payment_methods||'').split(',').map((item)=>item.trim()).filter(Boolean),fulfillment},diagnosis:{...(existing.diagnosis||{}),biggest_pain:values.biggest_pain}}}; if(values.document) payload.document=values.document; const savingId=active?.id||null; try { const data=savingId?await api(`/assisted-registrations/${savingId}`,{method:'PATCH',body:payload}):await api('/assisted-registrations',{method:'POST',body:payload}); if(active?.id && active.id!==savingId) return; active=data.registration; form.registration_id.value=active.id; form.expected_version.value=active.version; form.elements.document.required=false; form.elements.document.value=''; form.elements.document.placeholder=`Mantido: ${active.document_masked||''}`; $('#assistedSaveStatus').textContent=autosave?'Salvo automaticamente.':'Cadastro salvo.'; await loadList(); } catch(error) { $('#assistedSaveStatus').textContent=error.message; if(error.status===409&&active?.id===savingId) await loadRegistration(savingId); } }
+   async function uploadFiles(event) { if (!active?.id) return alertMessage('Salve o cadastro antes de enviar arquivos.'); for (const file of event.target.files) { try { const data_base64=await fileBase64(file); await api(`/assisted-registrations/${active.id}/files`,{method:'POST',body:{name:file.name,mime_type:file.type,data_base64}}); } catch(error){ alertMessage(error.message); } } const files=await api(`/assisted-registrations/${active.id}/files`); renderOriginalFiles(files.files||[]); }
+   function renderOriginalFiles(files){ $('#assistedOriginalFiles').innerHTML=files.length?files.map((file)=>`<p><a href="/api/platform/assisted-registrations/${active.id}/files/${file.id}" target="_blank" rel="noopener">${escapeHtml(file.original_name)}</a> <small>${Math.ceil(Number(file.size_bytes||0)/1024)} KB</small> <button type="button" data-delete-file="${file.id}">Remover</button></p>`).join(''):'<p class="muted">Nenhum arquivo enviado.</p>'; $('#assistedOriginalFiles').querySelectorAll('[data-delete-file]').forEach((button)=>button.addEventListener('click',async()=>{try{await api(`/assisted-registrations/${active.id}/files/${button.dataset.deleteFile}`,{method:'DELETE'});const data=await api(`/assisted-registrations/${active.id}/files`);renderOriginalFiles(data.files||[]);}catch(error){alertMessage(error.message);}})); }
+   async function importMenu() { if (!active?.id) return; try { const data=await api(`/assisted-registrations/${active.id}/import`,{method:'POST',body:{text:$('#assistedMenuText').value}}); menuDraft=data.menu_draft; if(data.registration){active={...active,...data.registration};form.expected_version.value=active.version;} renderDraft(); } catch(error){ alertMessage(error.message); } }
+diff --git a/public/platform.html b/public/platform.html
+index 8cd5dfb..8f3e008 100644
+--- a/public/platform.html
++++ b/public/platform.html
+@@ -915,6 +915,7 @@
+                 <label>E-mail<input name="email" type="email" required></label><label>Estabelecimento<input name="establishment_name" required></label>
+                 <label>CPF ou CNPJ<input name="document" inputmode="numeric" required></label><label>Cidade<input name="city"></label>
+                 <label>Nicho<input name="niche" placeholder="Pizzaria, hamburgueria..."></label><label>Origem informada pelo lead<input name="declared_source" placeholder="Instagram, indicação..."></label>
++                <label>Código de atendimento<input name="tracking_code" placeholder="TP-ABC123" autocomplete="off"></label>
+                 <label>WhatsApp dos pedidos<input name="whatsapp" inputmode="tel"></label><label>Endereço<input name="address"></label>
+                 <fieldset class="assisted-wide"><legend>Como atende?</legend><label><input name="fulfillment" type="checkbox" value="delivery"> Delivery</label><label><input name="fulfillment" type="checkbox" value="pickup"> Retirada</label><label><input name="fulfillment" type="checkbox" value="counter"> Balcão</label></fieldset>
+                 <label>Formas de pagamento<input name="payment_methods" placeholder="Pix, dinheiro, cartão"></label><label>Funcionamento<textarea name="hours"></textarea></label>
+diff --git a/public/platform.js b/public/platform.js
+index 2f21bd8..c5f5d03 100644
+--- a/public/platform.js
++++ b/public/platform.js
+@@ -2228,20 +2228,19 @@ function renderAccessMetrics() {
+       </div>
+       <div class="platform-ad-funnel-grid">
+         ${[
+-          ['Acessaram pelo anúncio', instagramPaid.landing_views],
+-          ['Clicaram em Começar grátis', instagramPaid.signup_clicks],
+-          ['Concluíram o cadastro', instagramPaid.signup_completed],
+-          ['Clicaram no WhatsApp', instagramPaid.whatsapp_clicks],
+-          ['Criaram uma assinatura', instagramPaid.subscriptions]
++          ['Visualizações registradas', instagramPaid.landing_views],
++          ['Visitantes únicos', instagramPaid.landing_visitors],
++          ['Aberturas do WhatsApp', instagramPaid.whatsapp_clicks],
++          ['Pessoas que abriram', instagramPaid.whatsapp_visitors],
++          ['Cadastros identificados', instagramPaid.assisted_registrations],
++          ['Assinaturas identificadas', instagramPaid.assisted_subscriptions]
+         ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${Number(value || 0)}</strong></article>`).join('')}
+       </div>
+       <div class="platform-ad-funnel-rates">
+-        <span>Anúncio → cadastro: <strong>${Number(instagramPaid.landing_to_signup_click_rate || 0)}%</strong></span>
+-        <span>Clique → cadastro concluído: <strong>${Number(instagramPaid.signup_click_to_completed_rate || 0)}%</strong></span>
+-        <span>Anúncio → WhatsApp: <strong>${Number(instagramPaid.landing_to_whatsapp_rate || 0)}%</strong></span>
+-        <span>Anúncio → assinatura: <strong>${Number(instagramPaid.landing_to_subscription_rate || 0)}%</strong></span>
++        <span>Visualização → WhatsApp: <strong>${Number(instagramPaid.landing_to_primary_cta_rate ?? instagramPaid.landing_to_whatsapp_rate ?? 0)}%</strong></span>
+       </div>
+-      ${(instagramPaid.campaigns || []).length ? `<div class="platform-ad-campaigns"><strong>Por campanha</strong>${instagramPaid.campaigns.map((campaign) => `<p><span>${escapeHtml(campaign.campaign || 'Sem campanha')}</span><small>${Number(campaign.landing_views || 0)} acesso(s) · ${Number(campaign.signup_clicks || 0)} clique(s) para cadastro · ${Number(campaign.signup_completed || 0)} cadastro(s)</small></p>`).join('')}</div>` : ''}
++      <small>Dados próprios do site. Não equivalem a cliques ou visualizações reportados pela Meta. Cadastros e assinaturas só aparecem quando possuem o mesmo código anônimo enviado pelo WhatsApp.</small>
++      ${(instagramPaid.campaigns || []).length ? `<div class="platform-ad-campaigns"><strong>Por campanha</strong>${instagramPaid.campaigns.map((campaign) => `<p><span>${escapeHtml(campaign.campaign || 'Sem campanha')}</span><small>${Number(campaign.landing_views || 0)} visualização(ões) · ${Number(campaign.landing_visitors || 0)} visitante(s) · ${Number(campaign.whatsapp_clicks || 0)} abertura(s) do WhatsApp</small></p>`).join('')}</div>` : ''}
+     </section>
+     <div class="platform-access-columns">
+       <section>
+diff --git a/server.js b/server.js
+index eb06445..0e58ed7 100644
+--- a/server.js
++++ b/server.js
+@@ -4157,7 +4157,7 @@ async function platformCommercialSummary() {
+ 
+ async function platformCommercialAnalytics(params = new URLSearchParams()) {
+   const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
+-  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents] = await Promise.all([
++  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents, assistedRegistrations] = await Promise.all([
+     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
+     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
+     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
+@@ -4189,6 +4189,11 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
+       select: 'id,company_id,store_id,event_name,visitor_key,attribution,properties,created_at',
+       created_at: `gte.${period.since.toISOString()}`,
+       limit: '10000'
++    }).catch(() => []),
++    dbRequest('GET', 'assisted_registrations', {
++      select: 'id,status,company_id,attribution,created_at',
++      created_at: `gte.${period.since.toISOString()}`,
++      limit: '2000'
+     }).catch(() => [])
+   ]);
+   const metricData = filterPlatformMetricsData({ companies, stores, subscriptions, subscriptionEvents, orders, settings, products, accessEvents, marketingEvents });
+@@ -4208,12 +4213,15 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
+     conversion,
+     new_clients_daily: platformNewClientsDaily(metricData.companies, period),
+     mrr_by_plan: revenue.mrr_by_plan,
+-    marketing: platformMarketingFunnelSnapshot(metricData.marketingEvents, metricData.subscriptionEvents),
++    marketing: platformMarketingFunnelSnapshot(metricData.marketingEvents, metricData.subscriptionEvents, {
++      assistedRegistrations,
++      subscriptions: metricData.subscriptions
++    }),
+     access: platformAccessSnapshot(metricData.accessEvents, period, context.storeById)
+   };
+ }
+ 
+-function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
++function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = [], options = {}) {
+   const names = ['demo_started', 'signup_started', 'signup_completed', 'first_product_created', 'menu_published', 'first_order_received'];
+   const eventCompanies = (name) => new Set(events.filter((event) => event.event_name === name).map((event) => event.company_id || event.visitor_key || event.id));
+   const counts = Object.fromEntries(names.map((name) => [name, eventCompanies(name).size]));
+@@ -4228,7 +4236,7 @@ function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
+   const rate = (part, total) => total ? Number(((part / total) * 100).toFixed(1)) : 0;
+   return {
+     stages: counts,
+-    instagram_paid: instagramPaidFunnel(events),
++    instagram_paid: instagramPaidFunnel(events, options),
+     rates: {
+       signup_to_publish: rate(counts.menu_published, counts.signup_completed),
+       publish_to_first_order: rate(counts.first_order_received, counts.menu_published),
+@@ -4767,7 +4775,8 @@ async function recordPublicMarketingEvent(req, data = {}) {
+     properties: {
+       path: cleanPublicPath(data.path || '/'),
+       content_id: cleanText(data.content_id || '').slice(0, 100),
+-      placement: cleanText(data.placement || '').slice(0, 80)
++      placement: cleanText(data.placement || '').slice(0, 80),
++      tracking_code: cleanText(data.properties?.tracking_code || data.tracking_code || '').toUpperCase().slice(0, 24)
+     }
+   });
+ }
+diff --git a/src/lib/assisted-registration.js b/src/lib/assisted-registration.js
+index a0d1b96..d72683e 100644
+--- a/src/lib/assisted-registration.js
++++ b/src/lib/assisted-registration.js
+@@ -161,7 +161,7 @@ function maskDocument(value) {
+ 
+ function sanitizeAttribution(value) {
+   const data = isObject(value) ? value : {};
+-  return Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'declared_source']
++  return Object.fromEntries(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'declared_source', 'tracking_code']
+     .map((key) => [key, cleanText(data[key], 160)])
+     .filter(([, item]) => item));
+ }
+diff --git a/src/lib/platform-ad-funnel.js b/src/lib/platform-ad-funnel.js
+index 08fec36..39b730a 100644
+--- a/src/lib/platform-ad-funnel.js
++++ b/src/lib/platform-ad-funnel.js
+@@ -11,8 +11,7 @@ function isInstagramPaid(event) {
+ function isCurrentInstagramAd(event) {
+   const attribution = event?.attribution || {};
+   return isInstagramPaid(event)
+-    && normalized(attribution.utm_campaign) === 'delivery_noroeste_rs'
+-    && normalized(attribution.utm_content) === '52582798716168';
++    && normalized(attribution.utm_campaign) === 'delivery_noroeste_rs';
+ }
+ 
+ function eventIdentity(event, stage) {
+@@ -27,12 +26,20 @@ function stageCount(events, names, stage) {
+     .filter(Boolean)).size;
+ }
+ 
++function eventCount(events, names) {
++  return events.filter((event) => names.includes(event.event_name)).length;
++}
++
+ function stageCounts(events) {
++  const whatsappClicks = eventCount(events, ['whatsapp_click']);
+   return {
+-    landing_views: stageCount(events, ['landing_view'], 'landing_view'),
+-    signup_clicks: stageCount(events, ['signup_started'], 'signup_started'),
++    landing_views: eventCount(events, ['landing_view']),
++    landing_visitors: stageCount(events, ['landing_view'], 'landing_view'),
++    signup_clicks: eventCount(events, ['signup_started']),
+     signup_completed: stageCount(events, ['signup_completed'], 'signup_completed'),
+-    whatsapp_clicks: stageCount(events, ['whatsapp_click'], 'whatsapp_click'),
++    whatsapp_clicks: whatsappClicks,
++    whatsapp_visitors: stageCount(events, ['whatsapp_click'], 'whatsapp_click'),
++    primary_cta_clicks: whatsappClicks,
+     subscriptions: stageCount(events, ['subscription_created', 'subscription_activated'], 'subscription_created')
+   };
+ }
+@@ -41,9 +48,20 @@ function rate(part, total) {
+   return total ? Number(((part / total) * 100).toFixed(1)) : 0;
+ }
+ 
+-export function instagramPaidFunnel(events = []) {
++export function instagramPaidFunnel(events = [], options = {}) {
+   const paidEvents = events.filter(isCurrentInstagramAd);
+   const counts = stageCounts(paidEvents);
++  const trackingCodes = new Set(paidEvents
++    .filter((event) => event.event_name === 'whatsapp_click')
++    .map((event) => normalized(event.properties?.tracking_code))
++    .filter(Boolean));
++  const assistedRegistrations = (options.assistedRegistrations || []).filter((row) => (
++    row.status !== 'cancelled' && trackingCodes.has(normalized(row.attribution?.tracking_code))
++  ));
++  const assistedCompanyIds = new Set(assistedRegistrations.map((row) => row.company_id).filter(Boolean));
++  const assistedSubscriptions = new Set((options.subscriptions || [])
++    .filter((row) => assistedCompanyIds.has(row.company_id) && ['active', 'grace_period', 'payment_pending'].includes(row.status))
++    .map((row) => row.company_id)).size;
+   const campaignNames = [...new Set(paidEvents.map((event) => String(event.attribution?.utm_campaign || '').trim() || 'Sem campanha'))];
+   const campaigns = campaignNames.map((campaign) => ({
+     campaign,
+@@ -51,9 +69,12 @@ export function instagramPaidFunnel(events = []) {
+   })).sort((left, right) => right.landing_views - left.landing_views || left.campaign.localeCompare(right.campaign, 'pt-BR'));
+   return {
+     ...counts,
++    assisted_registrations: assistedRegistrations.length,
++    assisted_subscriptions: assistedSubscriptions,
+     landing_to_signup_click_rate: rate(counts.signup_clicks, counts.landing_views),
+     signup_click_to_completed_rate: rate(counts.signup_completed, counts.signup_clicks),
+     landing_to_whatsapp_rate: rate(counts.whatsapp_clicks, counts.landing_views),
++    landing_to_primary_cta_rate: rate(counts.primary_cta_clicks, counts.landing_views),
+     landing_to_subscription_rate: rate(counts.subscriptions, counts.landing_views),
+     campaigns
+   };

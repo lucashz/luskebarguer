@@ -334,7 +334,6 @@ function renderStore() {
   if (store.cover_url) {
     els.storeCover.style.backgroundImage = cssImageUrl(store.cover_url);
   }
-
   if (store.logo_url) {
     els.storeLogo.style.backgroundImage = cssImageUrl(store.logo_url);
   }
@@ -660,7 +659,7 @@ function productRow(item) {
     <button class="favorite-button ${isFavorite ? 'active' : ''}" type="button" aria-pressed="${isFavorite ? 'true' : 'false'}" aria-label="${isFavorite ? 'Remover dos favoritos' : 'Favoritar'} ${escapeAttribute(item.name)}">${favoriteIcon(isFavorite)}</button>
     <button class="add-product" type="button" aria-label="Adicionar ${escapeAttribute(item.name)}" ${storeClosed ? 'disabled' : ''}>
       ${item.image_url ? `<img src="${escapeAttribute(item.image_url)}" alt="" loading="lazy" decoding="async" fetchpriority="low">` : '<span>+</span>'}
-      <b>${storeClosed ? 'Fechado' : '+'}</b>
+      ${storeClosed ? '' : '<b>+</b>'}
     </button>
   `;
   row.querySelector('.favorite-button').addEventListener('click', (event) => {

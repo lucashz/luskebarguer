@@ -55,7 +55,7 @@ const dto = publicAssistedRegistration({
   establishment_name: 'Pizzaria da Ana',
   document_normalized: '52998224725',
   answers,
-  attribution: { utm_source: 'instagram', utm_campaign: 'delivery' },
+  attribution: { utm_source: 'instagram', utm_campaign: 'delivery', tracking_code: 'TP-ABC123' },
   version: 3,
   created_at: '2026-09-28T12:00:00.000Z',
   updated_at: '2026-09-28T13:00:00.000Z',
@@ -64,6 +64,7 @@ const dto = publicAssistedRegistration({
   storage_key: 'private/file.pdf'
 });
 assert.equal(dto.document_masked, '***.***.***-25');
+assert.equal(dto.attribution.tracking_code, 'TP-ABC123');
 assert.equal(dto.document_normalized, undefined);
 assert.equal(dto.publish_key, undefined);
 assert.equal(dto.activation_token, undefined);

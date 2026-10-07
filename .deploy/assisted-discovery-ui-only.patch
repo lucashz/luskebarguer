@@ -1,0 +1,57 @@
+diff --git a/public/platform.css b/public/platform.css
+--- a/public/platform.css
++++ b/public/platform.css
+@@ -3200,6 +3200,10 @@ body.platform-redesign [hidden] {
+ .assisted-list-row { display:grid; grid-template-columns:1.2fr 1fr 1fr auto; gap:12px; align-items:center; padding:12px 14px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; }
+ .assisted-list-row small,.assisted-list-row span { color:#64748b; }
+ .assisted-editor { margin-top:20px; padding-top:20px; border-top:1px solid #e2e8f0; }
++.assisted-discovery { margin-bottom:20px; padding:20px; border:1px solid #fecaca; border-radius:16px; background:#fffafa; }
++.assisted-discovery h3 { margin:4px 0 6px; }
++.assisted-discovery .primary-button { margin-top:14px; }
++#assistedRegistrationFields { padding-top:4px; }
+ .assisted-steps { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; padding:0; list-style:none; }
+diff --git a/public/platform.html b/public/platform.html
+--- a/public/platform.html
++++ b/public/platform.html
+@@ -894,8 +894,23 @@
+           <section class="assisted-editor" id="assistedEditor" hidden>
+             <form id="assistedWizard">
+               <input name="registration_id" type="hidden"><input name="expected_version" type="hidden" value="1">
+-              <ol class="assisted-steps" aria-label="Etapas do cadastro"><li>Contato</li><li>Estabelecimento</li><li>Operação</li><li>Diagnóstico</li><li>Identidade</li><li>Cardápio</li></ol>
+-              <div class="assisted-form-grid">
++              <section class="assisted-discovery">
++                <p class="eyebrow">Antes do cadastro</p>
++                <h3>Conhecer o negócio</h3>
++                <p class="muted">Converse com o cliente e registre respostas curtas. A ideia é entender a operação antes de oferecer a montagem.</p>
++                <div class="assisted-form-grid">
++                  <label class="assisted-wide">Me conta um pouco sobre o negócio: o que vocês vendem e há quanto tempo atendem?<textarea name="business_story"></textarea></label>
++                  <label>Por onde chegam a maioria dos pedidos?<input name="order_channels" placeholder="WhatsApp, Instagram, telefone..."></label>
++                  <label>O que mais atrapalha os pedidos atualmente?<input name="order_pain" placeholder="Erros, demora, mensagens acumuladas..."></label>
++                  <label>Como apresentam o cardápio hoje?<input name="current_menu" placeholder="Fotos, PDF, mensagens, cardápio digital..."></label>
++                  <label>Pedidos organizados automaticamente ajudariam a operação?<textarea name="organized_orders_value"></textarea></label>
++                  <label>Se montarmos tudo, gostaria de testar grátis por 7 dias?<select name="trial_interest"><option value="">Selecione</option><option value="yes">Sim, quero testar</option><option value="maybe">Talvez, quero entender melhor</option><option value="no">Agora não</option></select></label>
++                </div>
++                <button class="primary-button compact" id="assistedStartRegistration" type="button" hidden>Ótimo! Vamos deixar tudo pronto</button>
++              </section>
++              <section id="assistedRegistrationFields" hidden>
++                <ol class="assisted-steps" aria-label="Etapas do cadastro"><li>Contato</li><li>Estabelecimento</li><li>Operação</li><li>Diagnóstico</li><li>Identidade</li><li>Cardápio</li></ol>
++                <div class="assisted-form-grid">
+                 <label>Responsável<input name="responsible_name" required></label><label>WhatsApp<input name="phone" inputmode="tel" required></label>
+@@ -905,9 +920,10 @@
+                 <label>Formas de pagamento<input name="payment_methods" placeholder="Pix, dinheiro, cartão"></label><label>Funcionamento<textarea name="hours"></textarea></label>
+                 <label class="assisted-wide">Bairros e taxas de entrega<textarea name="neighborhoods"></textarea></label>
+                 <label class="assisted-wide">Maior dificuldade<textarea name="biggest_pain"></textarea></label>
+-              </div>
+-              <p class="form-message" id="assistedSaveStatus" role="status"></p>
+-              <div class="row-actions"><button class="primary-button compact" type="submit">Salvar e continuar</button><button class="ghost-button compact" id="assistedClose" type="button">Fechar</button></div>
++                </div>
++                <p class="form-message" id="assistedSaveStatus" role="status"></p>
++                <div class="row-actions"><button class="primary-button compact" type="submit">Salvar e continuar</button><button class="ghost-button compact" id="assistedClose" type="button">Fechar</button></div>
++              </section>
+             </form>
+@@ -962,7 +978,7 @@
+     <div class="toast" id="toast"></div>
+     <script src="/platform.js?v=20260816-approval-preview-fix"></script>
+-    <script src="/platform-assisted-registration.js?v=20260928"></script>
++    <script src="/platform-assisted-registration.js?v=20260929-discovery"></script>
+   </body>
