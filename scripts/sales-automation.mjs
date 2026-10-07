@@ -3,6 +3,7 @@ import { createSalesLead, createSalesDraft, approveSalesMessage, sendApprovedSal
 import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, setEvolutionV2SalesWebhook } from '../src/lib/evolution-v2-sales.js';
 import { getLocalPool } from '../src/lib/local-postgrest-adapter.js';
 import { normalizeSalesPhone, salesConfig } from '../src/lib/sales-automation.js';
+import { buildSalesMetricsQuery } from '../src/lib/sales-metrics.js';
 
 const [command = 'help', ...positionals] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
 const flags = parseFlags(process.argv.slice(2));
@@ -97,8 +98,8 @@ async function resumeLead(id) { const [lead] = await dbRequest('GET', 'sales_lea
 
 async function metrics() {
   const pool = getLocalPool();
-  const result = await pool.query(`select (select count(*)::int from sales_leads) leads,(select count(*)::int from sales_messages where direction='outbound' and status='sent') contacts_sent,(select count(*)::int from sales_messages where direction='inbound') replies,(select count(*)::int from sales_leads where stage='demo_requested') demos,(select count(*)::int from sales_leads where stage='opted_out') opt_outs,(select count(*)::int from sales_leads where stage='human_handoff') handoffs,(select count(*)::int from sales_messages where status='failed') send_failures`);
-  const data = result.rows[0]; data.reply_rate = data.contacts_sent ? Number((data.replies / data.contacts_sent * 100).toFixed(1)) : 0; return data;
+  const result = await pool.query(buildSalesMetricsQuery());
+  return result.rows[0];
 }
 
 async function simulateInbound(leadId, options) {
