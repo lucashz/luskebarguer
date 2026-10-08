@@ -44,6 +44,7 @@
     "test:security": "node scripts/sql-injection-tests.mjs",
     "test:security-hardening": "node scripts/security-hardening-smoke.mjs",
     "test:assisted-registration": "node scripts/assisted-registration-domain-test.mjs",
+    "test:registration-provenance": "node scripts/registration-provenance-test.mjs",
     "test:idor": "node scripts/idor-security-smoke.mjs",
     "test:flows": "node scripts/core-flow-smoke.mjs",
     "test:platform-health": "node scripts/platform-health-smoke.mjs",
