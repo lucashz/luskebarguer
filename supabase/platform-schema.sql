@@ -336,3 +336,22 @@ alter table public.usage_events enable row level security;
 alter table public.onboarding_progress enable row level security;
 alter table public.subscription_events enable row level security;
 alter table public.audit_logs enable row level security;
+
+alter table public.companies
+  add column if not exists creation_source text,
+  add column if not exists creation_purpose text,
+  add column if not exists created_by_admin_id uuid,
+  add column if not exists created_by_name_snapshot text,
+  add column if not exists creation_note text,
+  add column if not exists creation_metadata jsonb,
+  add column if not exists last_customer_login_at timestamptz;
+alter table public.companies drop constraint if exists companies_creation_source_check;
+alter table public.companies add constraint companies_creation_source_check check (creation_source is null or creation_source in ('self_service', 'assisted', 'platform_admin', 'sales_automation', 'import', 'api'));
+alter table public.companies drop constraint if exists companies_creation_purpose_check;
+alter table public.companies add constraint companies_creation_purpose_check check (creation_purpose is null or creation_purpose in ('customer_request', 'lead_capture', 'demo', 'migration', 'internal_test'));
+alter table public.companies drop constraint if exists companies_created_by_admin_id_fkey;
+alter table public.companies add constraint companies_created_by_admin_id_fkey foreign key (created_by_admin_id) references public.admin_users(id) on delete set null;
+create index if not exists companies_creation_source_idx on public.companies (creation_source);
+create index if not exists companies_creation_purpose_idx on public.companies (creation_purpose);
+create index if not exists companies_created_by_admin_id_idx on public.companies (created_by_admin_id);
+create index if not exists companies_last_customer_login_at_idx on public.companies (last_customer_login_at);

@@ -133,6 +133,13 @@ model Company {
   marketingAttribution Json          @default("{}") @map("marketing_attribution")
   marketingOptIn Boolean             @default(false) @map("marketing_opt_in")
   marketingUnsubscribedAt DateTime?  @map("marketing_unsubscribed_at") @db.Timestamptz(6)
+  creationSource String?             @map("creation_source")
+  creationPurpose String?            @map("creation_purpose")
+  createdByAdminId String?           @map("created_by_admin_id") @db.Uuid
+  createdByNameSnapshot String?      @map("created_by_name_snapshot")
+  creationNote String?               @map("creation_note")
+  creationMetadata Json?             @map("creation_metadata")
+  lastCustomerLoginAt DateTime?      @map("last_customer_login_at") @db.Timestamptz(6)
   status       CompanyStatus @default(trial)
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -140,7 +147,8 @@ model Company {
   @@unique([document])
 
   stores               Store[]
-  adminUsers           AdminUser[]
+  adminUsers           AdminUser[]                       @relation("CompanyAdmins")
+  createdByAdmin       AdminUser?                        @relation("CompanyCreator", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   adminAccess          AdminUserStoreAccess[]
   adminInvitations     AdminInvitation[]
   subscriptions        CompanySubscription[]
@@ -163,6 +171,10 @@ model Company {
   referralsReceived    Referral[]                       @relation("ReferralReferredCompany")
   referralRewards      ReferralReward[]
 
+  @@index([creationSource])
+  @@index([creationPurpose])
+  @@index([createdByAdminId])
+  @@index([lastCustomerLoginAt])
   @@map("companies")
 }
 
@@ -281,7 +293,8 @@ model AdminUser {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  company             Company?                  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company             Company?                  @relation("CompanyAdmins", fields: [companyId], references: [id], onDelete: SetNull)
+  createdCompanies    Company[]                 @relation("CompanyCreator")
   access              AdminUserStoreAccess[]
   invitationsSent     AdminInvitation[]         @relation("InvitationSender")
   invitationsAccepted AdminInvitation[]         @relation("InvitationAccepter")
