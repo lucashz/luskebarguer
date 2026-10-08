@@ -156,7 +156,10 @@ const els = {
   platformPlanMrr: document.querySelector('#platformPlanMrr'),
   platformConversionGrid: document.querySelector('#platformConversionGrid'),
   clientFilterForm: document.querySelector('#clientFilterForm'),
+  platformCompanyCreateForm: document.querySelector('#platformCompanyCreateForm'),
+  platformCompanyCreateStatus: document.querySelector('#platformCompanyCreateStatus'),
   clientPlanFilter: document.querySelector('#clientPlanFilter'),
+  clientCreatorFilter: document.querySelector('#clientCreatorFilter'),
   platformAttentionPanel: document.querySelector('#platformAttentionPanel'),
   auditFilterForm: document.querySelector('#auditFilterForm'),
   auditCompanySelect: document.querySelector('#auditCompanySelect'),
@@ -430,8 +433,12 @@ els.platformBillingConfigForm?.addEventListener('submit', submitBillingConfig);
 els.testBillingConfigButton?.addEventListener('click', testBillingConfig);
 els.testBillingConfigButtonHealth?.addEventListener('click', testBillingConfig);
 els.openCommunicationFromHealth?.addEventListener('click', () => activatePlatformView('communication', { load: true }));
-els.clientFilterForm?.addEventListener('input', renderCompanies);
-els.clientFilterForm?.addEventListener('change', renderCompanies);
+els.clientFilterForm?.addEventListener('input', (event) => { if (event.target.name === 'search') renderCompanies(); });
+els.clientFilterForm?.addEventListener('change', (event) => {
+  if (['creation_source', 'creation_purpose', 'created_by_admin_id', 'customer_access'].includes(event.target.name)) loadPlatform({ force: true });
+  else renderCompanies();
+});
+els.platformCompanyCreateForm?.addEventListener('submit', submitPlatformCompanyCreate);
 els.operationalLogTypeFilter?.addEventListener('change', loadHealth);
 els.operationalLogStatusFilter?.addEventListener('change', loadHealth);
 els.operationalLogSeverityFilter?.addEventListener('change', loadHealth);
@@ -649,10 +656,16 @@ async function loadPlatform(options = {}) {
 }
 
 function companiesUrl() {
-  const params = new URLSearchParams();
-  params.set('page', String(state.companyPage || 1));
-  params.set('per_page', String(state.companyPerPage || 100));
-  return `/api/platform/companies?${params.toString()}`;
+  const filters = new FormData(els.clientFilterForm || document.createElement('form'));
+  const query = globalThis.PlatformClientList.buildCompanyFilterQuery({
+    creationSource: filters.get('creation_source'),
+    creationPurpose: filters.get('creation_purpose'),
+    createdByAdminId: filters.get('created_by_admin_id'),
+    customerAccess: filters.get('customer_access'),
+    page: state.companyPage || 1,
+    perPage: state.companyPerPage || 100
+  });
+  return `/api/platform/companies?${query}`;
 }
 
 async function loadMoreCompanies() {
@@ -1887,6 +1900,16 @@ function renderSelects() {
     els.clientPlanFilter.innerHTML = `<option value="">Todos planos</option>${planOptions}`;
     els.clientPlanFilter.value = selected;
   }
+  if (els.clientCreatorFilter) {
+    const selected = els.clientCreatorFilter.value;
+    const creators = new Map();
+    for (const company of state.companies) {
+      const provenance = company.provenance || {};
+      if (provenance.created_by_admin_id) creators.set(provenance.created_by_admin_id, provenance.created_by_name || provenance.created_by_admin_id);
+    }
+    els.clientCreatorFilter.innerHTML = `<option value="">Todos os criadores</option>${[...creators].map(([id, name]) => `<option value="${escapeAttribute(id)}">${escapeHtml(name)}</option>`).join('')}`;
+    els.clientCreatorFilter.value = selected;
+  }
   if (els.billingPlanFilter) {
     const selected = els.billingPlanFilter.value;
     els.billingPlanFilter.innerHTML = `<option value="">Todos planos</option>${planOptions}`;
@@ -2579,6 +2602,8 @@ function renderCompanies() {
     const metrics = companyMetrics(company.id);
     const detail = state.companyDetails[company.id];
     const attention = clientAlertsForCompany(company, metrics);
+    const provenanceLabel = globalThis.PlatformClientList.registrationProvenanceLabel(company.provenance);
+    const customerAccessLabel = globalThis.PlatformClientList.customerAccessLabel(metrics.last_access_at);
     const summary = globalThis.PlatformClientList.compactClientSummary({
       company,
       responsible,
@@ -2604,6 +2629,8 @@ function renderCompanies() {
             `).join('')}
           </div>
           <div class="platform-company-summary-status">
+            <span class="pill pill-muted">${escapeHtml(provenanceLabel)}</span>
+            <small>${escapeHtml(customerAccessLabel)}</small>
             ${attention.length ? `<span class="pill pill-muted">${attention.length} atenção</span>` : ''}
             <span class="pill ${company.status === 'active' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(summary.find((item) => item.key === 'status')?.value || statusLabel(company.status))}</span>
           </div>
@@ -2845,8 +2872,18 @@ function renderCompanyDetail(detail) {
   const usageCounters = detail.usage_counters || [];
   const score = detail.score || {};
   const internalStatus = detail.internal_status || {};
+  const provenance = detail.company?.provenance || detail.provenance;
   return `
     <section class="platform-detail-section">
+      <div class="platform-provenance-card">
+        <div><span>Origem e finalidade</span><strong>${escapeHtml(globalThis.PlatformClientList.registrationProvenanceLabel(provenance))}</strong></div>
+        <div><span>Responsável pela criação</span><strong>${escapeHtml(provenance?.created_by_name || 'Não identificado')}</strong></div>
+        <div><span>Acesso do cliente</span><strong>${escapeHtml(globalThis.PlatformClientList.customerAccessLabel(metrics.last_access_at))}</strong></div>
+        <div><span>Criado em</span><strong>${provenance?.created_at ? escapeHtml(new Date(provenance.created_at).toLocaleString('pt-BR')) : 'Data não rastreada'}</strong></div>
+        <div><span>Canal declarado</span><strong>${escapeHtml(provenance?.metadata?.declared_source || 'Não informado')}</strong></div>
+        <div><span>Código de atendimento</span><strong>${escapeHtml(provenance?.metadata?.tracking_code || 'Não informado')}</strong></div>
+        ${provenance?.note ? `<p>${escapeHtml(provenance.note)}</p>` : ''}
+      </div>
       <div class="platform-score-panel score-${escapeAttribute(score.tone || 'neutral')}">
         <div>
           <p class="eyebrow">Score do cliente</p>
@@ -2989,6 +3026,32 @@ async function submitCompanyNote(event) {
   });
   toast('Acompanhamento interno registrado.');
   await loadCompanyDetail(companyId);
+}
+
+async function submitPlatformCompanyCreate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  if (values.creation_purpose === 'lead_capture' && !String(values.declared_source || '').trim() && !String(values.tracking_code || '').trim()) {
+    els.platformCompanyCreateStatus.textContent = 'Informe o canal de origem para uma captação de lead.';
+    return;
+  }
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await request('/api/platform/companies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values)
+    });
+    form.reset();
+    els.platformCompanyCreateStatus.textContent = 'Empresa criada com rastreabilidade.';
+    await loadPlatform({ force: true });
+  } catch (error) {
+    els.platformCompanyCreateStatus.textContent = error.message || 'Não foi possível criar a empresa.';
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderAudit() {
