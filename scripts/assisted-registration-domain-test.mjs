@@ -36,6 +36,7 @@ const answers = sanitizeAssistedAnswers({
   operation: { fulfillment: ['delivery', 'pickup', 'invalid'], payment_methods: ['Pix', 'Dinheiro'], hours: '18h às 23h', neighborhoods: 'Centro', average_orders: '30' },
   diagnosis: { biggest_pain: 'Pedidos errados', wrong_items: true, updated_prices: false, order_tracking: 'Papel' },
   branding: { notes: 'Usar vermelho', theme_color: '#ff0000', secret: 'não pode' },
+  provenance: { purpose: 'lead_capture', note: 'Contato pelo Instagram.' },
   password: 'nunca', token: 'nunca'
 });
 assert.deepEqual(answers.contact, { name: 'Ana Silva', email: 'ana@example.com', phone: '55999990000' });
@@ -45,6 +46,7 @@ assert.equal(answers.password, undefined);
 assert.equal(answers.token, undefined);
 assert.equal(answers.contact.ignored, undefined);
 assert.equal(answers.branding.secret, undefined);
+assert.deepEqual(answers.provenance, { purpose: 'lead_capture', note: 'Contato pelo Instagram.' });
 
 const dto = publicAssistedRegistration({
   id: '00000000-0000-4000-8000-000000000001',

@@ -34,6 +34,7 @@ import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
 import { publishAssistedRegistration } from './src/lib/assisted-registration-publish.js';
+import { normalizeRegistrationProvenance } from './src/lib/registration-provenance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -913,7 +914,7 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
     const body = await readJson(req);
     if (body.confirm !== true) return json(res, 422, { error: 'Confirme a revisão antes de publicar.' });
-    const result = await publishAssistedRegistration(getLocalPool(), cleanUuid(assistedPublishMatch[1], 'cadastro'), admin);
+    const result = await publishAssistedRegistration(getLocalPool(), cleanUuid(assistedPublishMatch[1], 'cadastro'), admin, { audit_meta: requestAuditMeta(req) });
     let emailStatus = result.registration.email_status;
     if (result.activation.token) {
       try {
@@ -1083,7 +1084,7 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/platform/companies') {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
-    json(res, 201, { company: await createPlatformCompany(await readJson(req), admin) });
+    json(res, 201, { company: await createPlatformCompany(req, await readJson(req), admin) });
     return;
   }
 
@@ -5331,20 +5332,38 @@ function startOfLocalDay(date) {
   return value;
 }
 
-async function createPlatformCompany(data, admin) {
+async function createPlatformCompany(req, data, admin) {
   const name = cleanText(data.name || data.company?.name || '');
   if (!name) throw httpError(422, 'Informe o nome da empresa.');
+  const provenance = normalizeRegistrationProvenance({
+    source: 'platform_admin',
+    purpose: data.purpose || data.creation_purpose,
+    note: data.note || data.creation_note
+  }, {
+    actorAdmin: admin,
+    attribution: data.attribution || {
+      declared_source: data.declared_source,
+      tracking_code: data.tracking_code,
+      referral_code: data.referral_code
+    }
+  });
   const payload = {
     name,
     document: cleanText(data.document || '') || null,
     billing_email: cleanEmail(data.billing_email || data.email || '') || null,
     phone: onlyDigits(data.phone || ''),
-    status: ['active', 'trial', 'past_due', 'suspended', 'cancelled', 'archived'].includes(data.status) ? data.status : 'trial'
+    status: ['active', 'trial', 'past_due', 'suspended', 'cancelled', 'archived'].includes(data.status) ? data.status : 'trial',
+    ...provenance.companyFields
   };
   const [company] = await dbRequest('POST', 'companies', {}, payload, ['Prefer: return=representation']);
-  await createDefaultSubscription(company.id, data.plan_code || 'essential');
-  await audit('platform.company.create', { company_id: company.id, actor_admin_id: admin.id, after_data: payload });
-  return company;
+  try {
+    await createDefaultSubscription(company.id, data.plan_code || 'essential');
+    await audit('company.created', { required: true, req, company_id: company.id, actor_admin_id: admin.id, entity_type: 'company', entity_id: company.id, after_data: provenance.auditData });
+    return company;
+  } catch (error) {
+    await dbRequest('DELETE', 'companies', { id: `eq.${company.id}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+    throw error;
+  }
 }
 
 async function createPlatformStore(data, admin) {
@@ -5495,6 +5514,7 @@ async function checkPortalSlug(value) {
 
 async function createPortalSignup(req, data = {}) {
   const parsed = sanitizePortalSignup(data, req);
+  const provenance = normalizeRegistrationProvenance({ source: 'self_service' }, { attribution: parsed.attribution });
   const slugStatus = await checkPortalSlug(parsed.store.slug);
   if (!slugStatus.available) throw httpError(409, slugStatus.reason || 'Endereço público indisponível.');
 
@@ -5519,7 +5539,8 @@ async function createPortalSignup(req, data = {}) {
       marketing_first_touch: attributionJourney.first,
       marketing_last_touch: attributionJourney.last,
       marketing_opt_in: parsed.marketingOptIn,
-      status: 'trial'
+      status: 'trial',
+      ...provenance.companyFields
     }, ['Prefer: return=representation']);
     created.company = company;
 
@@ -5574,7 +5595,8 @@ async function createPortalSignup(req, data = {}) {
       console.warn('Não foi possível registrar indicação:', error.message || error);
     });
 
-    await audit('portal.signup.create', {
+    await audit('company.created', {
+      required: true,
       req,
       actor_admin_id: admin.id,
       company_id: company.id,
@@ -5583,6 +5605,7 @@ async function createPortalSignup(req, data = {}) {
       entity_id: company.id,
       severity: 'info',
       after_data: {
+        ...provenance.auditData,
         plan_code: parsed.planCode,
         business_type: parsed.businessType,
         slug: parsed.store.slug,
@@ -14414,7 +14437,7 @@ async function createDefaultSubscription(companyId, planCode, options = {}) {
 
 async function audit(action, data = {}) {
   const reqMeta = data.req ? requestAuditMeta(data.req) : {};
-  await dbRequest('POST', 'audit_logs', {}, {
+  const request = dbRequest('POST', 'audit_logs', {}, {
     company_id: data.company_id || null,
     store_id: data.store_id || null,
     actor_admin_id: data.actor_admin_id || null,
@@ -14427,7 +14450,9 @@ async function audit(action, data = {}) {
     user_agent: data.user_agent || reqMeta.user_agent || null,
     before_data: sanitizeAuditPayload(data.before_data),
     after_data: sanitizeAuditPayload(data.after_data)
-  }, ['Prefer: return=minimal']).catch((error) => {
+  }, ['Prefer: return=minimal']);
+  if (data.required) await request;
+  else await request.catch((error) => {
     console.warn('Falha ao registrar auditoria:', error.message || error);
   });
 }

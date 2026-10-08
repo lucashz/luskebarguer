@@ -17,6 +17,7 @@ let companyId;
 let platformAdminId;
 let regularAdminId;
 let publishedCompanyId;
+let platformCreatedCompanyId;
 
 try {
   await client.connect();
@@ -28,6 +29,17 @@ try {
   const platformCookie = await login(fixture.platformEmail);
   const regularCookie = await login(fixture.regularEmail);
 
+  const manual = await request('/api/platform/companies', {
+    method: 'POST', cookie: platformCookie,
+    body: { name: `Manual ${suffix}`, email: `manual-${suffix}@example.test`, purpose: 'internal_test', note: 'Fixture da Central.', declared_source: 'internal', created_by_admin_id: regularAdminId }
+  });
+  platformCreatedCompanyId = manual.data.company.id;
+  const manualStored = (await client.query('select creation_source,creation_purpose,created_by_admin_id,created_by_name_snapshot from companies where id=$1', [platformCreatedCompanyId])).rows[0];
+  assert.equal(manualStored.creation_source, 'platform_admin');
+  assert.equal(manualStored.creation_purpose, 'internal_test');
+  assert.equal(manualStored.created_by_admin_id, platformAdminId, 'Operador precisa vir da sessao autenticada.');
+  assert.equal(manualStored.created_by_name_snapshot, 'Platform');
+
   const denied = await request('/api/platform/assisted-registrations', { cookie: regularCookie, allowFailure: true });
   assert.equal(denied.status, 403, 'Administrador comum nao pode acessar cadastros assistidos.');
 
@@ -37,9 +49,16 @@ try {
     email: `lead-${suffix}@example.test`,
     establishment_name: 'Lancheria Smoke',
     document: formatCpf(generateCpf()),
-    answers: { establishment: { city: 'Horizontina' } },
-    attribution: { utm_source: 'instagram', utm_campaign: 'smoke' }
+    answers: { establishment: { city: 'Horizontina' }, provenance: { purpose: 'lead_capture', note: 'Cardapio criado para prospeccao.' } },
+    attribution: { declared_source: 'instagram', utm_source: 'instagram', utm_campaign: 'smoke' }
   };
+  const invalidLeadEmail = `invalid-lead-${suffix}@example.test`;
+  const invalidLead = await request('/api/platform/assisted-registrations', {
+    method: 'POST', cookie: platformCookie, allowFailure: true,
+    body: { ...payload, phone: `558${String(Math.floor(Math.random()*100000000)).padStart(8,'0')}`, email: invalidLeadEmail, document: formatCpf(generateCpf()), attribution: {}, answers: { ...payload.answers, provenance: { purpose: 'lead_capture', note: 'Sem canal.' } } }
+  });
+  assert.equal(invalidLead.status, 422, 'Lead sem canal rastreavel precisa ser rejeitado.');
+  assert.equal((await client.query('select count(*)::int count from companies where billing_email=$1', [invalidLeadEmail])).rows[0].count, 0);
   const documentDigits = payload.document.replace(/\D/g, '');
   const created = await request('/api/platform/assisted-registrations', { method: 'POST', cookie: platformCookie, body: payload });
   assert.equal(created.status, 201);
@@ -86,6 +105,15 @@ try {
   assert.ok(!('token' in published.data.activation), 'Token de ativação não pode vazar na API.');
   const repeatedPublish = await request(`/api/platform/assisted-registrations/${registrationId}/publish`, { method: 'POST', cookie: platformCookie, body: { confirm: true } });
   assert.equal(repeatedPublish.data.company.id, published.data.company.id, 'Publicação repetida precisa ser idempotente.');
+  const traced = (await client.query('select creation_source,creation_purpose,created_by_admin_id,created_by_name_snapshot,creation_note,creation_metadata from companies where id=$1', [publishedCompanyId])).rows[0];
+  assert.equal(traced.creation_source, 'assisted');
+  assert.equal(traced.creation_purpose, 'lead_capture');
+  assert.equal(traced.created_by_admin_id, platformAdminId);
+  assert.equal(traced.created_by_name_snapshot, 'Platform');
+  assert.equal(traced.creation_note, 'Cardapio criado para prospeccao.');
+  assert.equal(traced.creation_metadata.declared_source, 'instagram');
+  const assistedAudit = await client.query("select count(*)::int count from audit_logs where company_id=$1 and action='company.created'", [publishedCompanyId]);
+  assert.equal(assistedAudit.rows[0].count, 1, 'Publicacao repetida nao pode duplicar company.created.');
 
   console.log('Assisted registration API smoke: OK');
 } finally {
@@ -95,6 +123,7 @@ try {
     await client.query('delete from public.admin_user_store_access where admin_user_id = any($1::uuid[])', [[platformAdminId, regularAdminId].filter(Boolean)]).catch(() => {});
     await client.query('delete from public.admin_users where id = any($1::uuid[])', [[platformAdminId, regularAdminId].filter(Boolean)]).catch(() => {});
     if (publishedCompanyId) await client.query('delete from public.companies where id = $1', [publishedCompanyId]).catch(() => {});
+    if (platformCreatedCompanyId) await client.query('delete from public.companies where id = $1', [platformCreatedCompanyId]).catch(() => {});
     if (companyId) await client.query('delete from public.companies where id = $1', [companyId]).catch(() => {});
     await client.end();
   }
@@ -116,7 +145,7 @@ async function login(email) {
 }
 
 async function startServer() {
-  const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', TRUSTED_PROXY_HOPS: '1', APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl }, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   child.stdout.on('data', (chunk) => { logs += chunk; });
   child.stderr.on('data', (chunk) => { logs += chunk; });

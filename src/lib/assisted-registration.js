@@ -62,6 +62,7 @@ export function sanitizeAssistedAnswers(value = {}) {
   const operation = isObject(data.operation) ? data.operation : {};
   const diagnosis = isObject(data.diagnosis) ? data.diagnosis : {};
   const branding = isObject(data.branding) ? data.branding : {};
+  const provenance = isObject(data.provenance) ? data.provenance : {};
   return {
     discovery: {
       business_story: cleanText(discovery.business_story, 1000),
@@ -100,6 +101,10 @@ export function sanitizeAssistedAnswers(value = {}) {
     branding: {
       notes: cleanText(branding.notes, 2000),
       theme_color: /^#[0-9a-f]{6}$/i.test(String(branding.theme_color || '')) ? String(branding.theme_color).toLowerCase() : ''
+    },
+    provenance: {
+      purpose: ['customer_request', 'lead_capture', 'demo', 'migration', 'internal_test'].includes(provenance.purpose) ? provenance.purpose : '',
+      note: cleanText(provenance.note, 500)
     }
   };
 }

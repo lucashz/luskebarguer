@@ -1,4 +1,5 @@
 import { publicAssistedRegistration, sanitizeAssistedAnswers, validateDocument } from './assisted-registration.js';
+import { normalizeRegistrationProvenance } from './registration-provenance.js';
 
 export async function findAssistedDuplicates(pool, identity = {}) {
   const document = identity.document ? validateDocument(identity.document) : '';
@@ -41,6 +42,11 @@ export async function createAssistedRegistration(pool, data = {}, actor = {}) {
   const email = cleanEmail(data.email);
   const duplicates = await findAssistedDuplicates(pool, { document, phone, email });
   if (duplicates.length) throw conflictError('Já existe um cadastro com estes dados.', duplicates);
+  const answers = sanitizeAssistedAnswers(data.answers);
+  const attribution = sanitizeObject(data.attribution);
+  normalizeRegistrationProvenance({
+    source: 'assisted', purpose: answers.provenance?.purpose, note: answers.provenance?.note
+  }, { actorAdmin: actor, attribution });
   try {
     const result = await pool.query(`
       insert into assisted_registrations
@@ -48,7 +54,7 @@ export async function createAssistedRegistration(pool, data = {}, actor = {}) {
       values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)
       returning *
     `, [cleanText(data.responsible_name, 120), phone, email, cleanText(data.establishment_name, 160), document,
-      JSON.stringify(sanitizeAssistedAnswers(data.answers)), JSON.stringify(sanitizeObject(data.attribution)), actor.id || null]);
+      JSON.stringify(answers), JSON.stringify(attribution), actor.id || null]);
     return publicAssistedRegistration(result.rows[0]);
   } catch (error) {
     if (error?.code === '23505') throw conflictError('Já existe um cadastro com estes dados.', await findAssistedDuplicates(pool, { document, phone, email }));
@@ -100,6 +106,9 @@ export async function updateAssistedRegistration(pool, id, patch = {}, actor = {
     answers: patch.answers === undefined ? row.answers : sanitizeAssistedAnswers(patch.answers),
     attribution: patch.attribution === undefined ? row.attribution : sanitizeObject(patch.attribution)
   };
+  normalizeRegistrationProvenance({
+    source: 'assisted', purpose: values.answers.provenance?.purpose, note: values.answers.provenance?.note
+  }, { actorAdmin: actor, attribution: values.attribution });
   const duplicates = await findAssistedDuplicates(pool, { document: values.document_normalized, phone: values.phone, email: values.email });
   const conflicts = duplicates.filter((duplicate) => duplicate.id !== id);
   if (conflicts.length) throw conflictError('Já existe um cadastro ou conta com estes dados.', conflicts);
