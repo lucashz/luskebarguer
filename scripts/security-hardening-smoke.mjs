@@ -81,6 +81,8 @@ try {
   const sessionB = await adminLogin(syntheticAdmin.email, syntheticAdmin.password, '192.0.2.6');
   assert.equal(sessionA.response.status, 200);
   assert.equal(sessionB.response.status, 200);
+  const timestampAfterSuccess = await customerLoginTimestamp(syntheticAdmin.companyId);
+  assert(timestampAfterSuccess, 'Login direto bem-sucedido precisa atualizar a empresa.');
   assertSafePublicPayload(sessionA.body.admin);
   assertSafePublicPayload(sessionB.body.admin);
   const redacted = redactSensitive({
@@ -126,6 +128,8 @@ try {
   assert.equal(unknown.result.response.status, 401);
   assert.equal(wrong.result.response.status, 401);
   assert.equal(unknown.result.body.error, wrong.result.body.error);
+  const timestampAfterFailures = await customerLoginTimestamp(syntheticAdmin.companyId);
+  assert.equal(new Date(timestampAfterFailures).getTime(), new Date(timestampAfterSuccess).getTime(), 'Falhas de login nao podem alterar o ultimo acesso valido.');
   assert.ok(Math.abs(unknown.durationMs - wrong.durationMs) < 250, 'tempo permite distinguir conta existente');
   for (let index = 0; index < 8; index += 1) {
     await loginAttempt(`network-${suffix}-${index}@example.invalid`, `198.51.100.${10 + index * 0}`);
@@ -184,6 +188,13 @@ async function deleteSyntheticCompany(companyId) {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try { await client.query('delete from companies where id = $1', [companyId]); } finally { await client.end(); }
+}
+
+async function customerLoginTimestamp(companyId) {
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try { return (await client.query('select last_customer_login_at from companies where id=$1', [companyId])).rows[0]?.last_customer_login_at || null; }
+  finally { await client.end(); }
 }
 
 function loginAttempt(email, forwardedFor) {

@@ -2718,15 +2718,23 @@ async function loginAdmin(data) {
     return { requiresTwoFactor: true, adminId: admin.id, email: admin.email, ...challenge };
   }
 
-  await markAdminLogin(admin.id);
+  await markDirectCustomerLogin(admin.id);
 
   return createAdminSession(admin);
 }
 
-async function markAdminLogin(adminId) {
-  await dbRequest('PATCH', 'admin_users', { id: `eq.${cleanUuid(adminId)}` }, {
-    last_login_at: new Date().toISOString()
+async function markDirectCustomerLogin(adminId, occurredAt = new Date()) {
+  const id = cleanUuid(adminId);
+  const timestamp = occurredAt instanceof Date ? occurredAt.toISOString() : new Date(occurredAt).toISOString();
+  const [admin] = await dbRequest('GET', 'admin_users', { select: 'id,company_id', id: `eq.${id}`, limit: '1' });
+  await dbRequest('PATCH', 'admin_users', { id: `eq.${id}` }, {
+    last_login_at: timestamp
   }, ['Prefer: return=minimal']);
+  if (admin?.company_id) {
+    await dbRequest('PATCH', 'companies', { id: `eq.${admin.company_id}` }, {
+      last_customer_login_at: timestamp
+    }, ['Prefer: return=minimal']);
+  }
 }
 
 async function createAdminTwoFactorChallenge(admin) {
@@ -2769,7 +2777,7 @@ async function verifyAdminTwoFactorLogin(data = {}) {
   const [admin] = await dbRequest('GET', 'admin_users', { select: '*', id: `eq.${challenge.admin_user_id}`, is_active: 'eq.true', limit: '1' });
   if (!admin || normalizeAdminRole(admin.role) !== 'superadmin') throw httpError(403, 'Conta Admin Master indisponível.');
   await dbRequest('PATCH', 'admin_2fa_challenges', { id: `eq.${challenge.id}` }, { consumed_at: new Date().toISOString() }, ['Prefer: return=minimal']);
-  await markAdminLogin(admin.id);
+  await markDirectCustomerLogin(admin.id);
   return createAdminSession(admin);
 }
 

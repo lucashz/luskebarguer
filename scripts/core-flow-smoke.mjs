@@ -114,6 +114,7 @@ try {
   });
   assert(inactiveLogin.status === 403, `Login sem ativacao deveria retornar 403, recebeu ${inactiveLogin.status}.`);
   assert(/ativ/i.test(inactiveLogin.data.error || ''), 'Login sem ativacao deveria orientar ativacao por e-mail.');
+  assert((await client.query('select last_customer_login_at from companies where id=$1', [companyId])).rows[0].last_customer_login_at === null, 'Login recusado nao pode contar como acesso do cliente.');
   const activationToken = await replaceSignupActivationToken(signup.data.admin?.id);
   const activationInfo = await request(`/api/portal/activate/${activationToken}`);
   assert(activationInfo.data.activation?.email === email, 'Link de ativacao nao validou o e-mail criado.');
@@ -129,6 +130,7 @@ try {
   });
   adminCookie = login.cookie;
   assert(adminCookie, 'Login nao retornou cookie de admin.');
+  assert((await client.query('select last_customer_login_at from companies where id=$1', [companyId])).rows[0].last_customer_login_at, 'Login direto precisa atualizar o acesso real do cliente.');
 
   const onboarding = await request('/api/admin/onboarding', { cookie: adminCookie });
   assert(onboarding.data.can_publish === false, 'Onboarding novo nao deveria estar publicado automaticamente.');
