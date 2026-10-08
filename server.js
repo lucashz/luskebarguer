@@ -34,7 +34,7 @@ import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
 import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
 import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
 import { publishAssistedRegistration } from './src/lib/assisted-registration-publish.js';
-import { normalizeRegistrationProvenance } from './src/lib/registration-provenance.js';
+import { normalizeRegistrationProvenance, REGISTRATION_PURPOSES, REGISTRATION_SOURCES } from './src/lib/registration-provenance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -3452,6 +3452,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
   const page = Math.max(1, Number.parseInt(params.get?.('page') || '1', 10) || 1);
   const perPage = clampNumber(Number(params.get?.('per_page') || 200), 25, 300);
   const offset = (page - 1) * perPage;
+  const filters = platformCompanyQueryFilters(params);
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const [companies, features] = await Promise.all([
@@ -3459,7 +3460,11 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
       select: '*',
       order: 'name.asc',
       limit: String(perPage),
-      offset: String(offset)
+      offset: String(offset),
+      ...(filters.creationSource ? { creation_source: `eq.${filters.creationSource}` } : {}),
+      ...(filters.creationPurpose ? { creation_purpose: `eq.${filters.creationPurpose}` } : {}),
+      ...(filters.createdByAdminId ? { created_by_admin_id: `eq.${filters.createdByAdminId}` } : {}),
+      ...(filters.customerAccess ? { last_customer_login_at: filters.customerAccess === 'never' ? 'is.null' : 'not.is.null' } : {})
     }),
     dbRequest('GET', 'platform_features', {
       select: '*',
@@ -3594,12 +3599,10 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
       const billableOrders = companyOrders.filter((order) => order.status !== 'cancelled');
       const companyProducts = productsByCompany.get(company.id) || [];
       const lastOrder = companyOrders[0] || null;
-      const lastAccessAt = companyAdmins
-        .map((admin) => admin.last_login_at)
-        .filter(Boolean)
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
       return {
         ...company,
+        provenance: platformCompanyProvenance(company),
+        customer_access_state: company.last_customer_login_at ? 'accessed' : 'never',
         stores: companyStores,
         admins: companyAdmins,
         subscription: subscriptionByCompany.get(company.id) || null,
@@ -3611,7 +3614,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
           revenue_month: roundMoney(billableOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
           revenue_month_cents: moneyToCents(billableOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
           last_order_at: lastOrder?.created_at || null,
-          last_access_at: lastAccessAt,
+          last_access_at: company.last_customer_login_at || null,
           products_count: companyProducts.length,
           active_products_count: companyProducts.filter((item) => item.is_available !== false).length,
           stores_without_whatsapp_count: companyStores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number).length,
@@ -3619,6 +3622,36 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
         }
       };
     })
+  };
+}
+
+function platformCompanyQueryFilters(params) {
+  const creationSource = String(params.get?.('creation_source') || '').trim().toLowerCase();
+  const creationPurpose = String(params.get?.('creation_purpose') || '').trim().toLowerCase();
+  const createdByValue = String(params.get?.('created_by_admin_id') || '').trim();
+  const customerAccess = String(params.get?.('customer_access') || '').trim().toLowerCase();
+  if (creationSource && !REGISTRATION_SOURCES.includes(creationSource)) throw httpError(422, 'Origem de cadastro inválida.');
+  if (creationPurpose && !REGISTRATION_PURPOSES.includes(creationPurpose)) throw httpError(422, 'Finalidade de cadastro inválida.');
+  if (customerAccess && !['never', 'accessed'].includes(customerAccess)) throw httpError(422, 'Estado de acesso do cliente inválido.');
+  return {
+    creationSource,
+    creationPurpose,
+    createdByAdminId: createdByValue ? cleanUuid(createdByValue, 'responsável') : '',
+    customerAccess
+  };
+}
+
+function platformCompanyProvenance(company = {}) {
+  if (!company.creation_source || !company.creation_purpose) return { state: 'legacy_untracked' };
+  return {
+    state: 'tracked',
+    source: company.creation_source,
+    purpose: company.creation_purpose,
+    created_by_admin_id: company.created_by_admin_id || null,
+    created_by_name: company.created_by_name_snapshot || null,
+    note: company.creation_note || null,
+    metadata: company.creation_metadata || {},
+    created_at: company.created_at || null
   };
 }
 
@@ -3710,7 +3743,11 @@ async function getPlatformCompanyDetail(companyId) {
   const attention = platformCompanyAttention({ company, stores, settingsByStore, orders, subscription, products });
 
   return {
-    company,
+    company: {
+      ...company,
+      provenance: platformCompanyProvenance(company),
+      customer_access_state: company.last_customer_login_at ? 'accessed' : 'never'
+    },
     stores: stores.map((store) => ({
       ...publicStoreRef(store),
       domains: domainsByStore.get(store.id) || [],
@@ -3743,7 +3780,7 @@ async function getPlatformCompanyDetail(companyId) {
       revenue_30d: roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0)),
       average_ticket_30d: orders30.length ? roundMoney(orders30.reduce((sum, order) => sum + moneyNumber(order.total), 0) / orders30.length) : 0,
       last_order_at: lastOrder?.created_at || null,
-      last_access_at: admins.map((admin) => admin.last_login_at).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0] || null,
+      last_access_at: company.last_customer_login_at || null,
       mrr: moneyNumber(plan?.monthly_price || 0),
       mrr_cents: moneyToCents(plan?.monthly_price || 0)
     },
@@ -5301,6 +5338,7 @@ function subscriptionEventLabel(type) {
 
 function auditActionLabel(action) {
   const labels = {
+    'company.created': 'Cadastro criado',
     'platform.client.note': 'Nota interna',
     'platform.client.internal_status': 'Acompanhamento atualizado',
     'platform.support.impersonate.start': 'Acesso suporte iniciado',
@@ -5319,6 +5357,10 @@ function auditActionLabel(action) {
 }
 
 function platformTimelineDescription(log) {
+  if (log?.action === 'company.created') {
+    const data = log.after_data || {};
+    return [data.source, data.purpose, data.actor_name, data.note].filter(Boolean).join(' · ').slice(0, 500) || 'Origem do cadastro registrada.';
+  }
   if (log?.action === 'platform.client.note') {
     return cleanText(log.after_data?.note || 'Nota registrada.');
   }

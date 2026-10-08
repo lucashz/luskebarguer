@@ -10,6 +10,15 @@ assert.match(implementation, /dbRequest\('GET', 'company_subscriptions',[\s\S]*?
 assert.match(implementation, /dbRequest\('GET', 'company_feature_overrides',[\s\S]*?order: 'created_at\.desc'/);
 assert.match(implementation, /dbRequest\('GET', 'menu_items',[\s\S]*?select: 'id,store_id,is_available'/);
 assert.match(implementation, /active_products_count: companyProducts\.filter\(\(item\) => item\.is_available !== false\)\.length/);
+assert.match(implementation, /creation_source: `eq\.\$\{filters\.creationSource\}`/);
+assert.match(implementation, /creation_purpose: `eq\.\$\{filters\.creationPurpose\}`/);
+assert.match(implementation, /created_by_admin_id: `eq\.\$\{filters\.createdByAdminId\}`/);
+assert.match(implementation, /last_customer_login_at: filters\.customerAccess === 'never' \? 'is\.null' : 'not\.is\.null'/);
+assert.match(implementation, /last_access_at: company\.last_customer_login_at \|\| null/);
+assert.match(implementation, /customer_access_state: company\.last_customer_login_at \? 'accessed' : 'never'/);
+assert.match(implementation, /provenance: platformCompanyProvenance\(company\)/);
+assert.match(source, /legacy_untracked/);
+assert.match(source, /'company\.created': 'Cadastro criado'/);
 
 const loginStart = source.indexOf('async function loginAdmin(');
 const twoFactorEnd = source.indexOf('\nasync function ', source.indexOf('async function verifyAdminTwoFactorLogin(') + 1);

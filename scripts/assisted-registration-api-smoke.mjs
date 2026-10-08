@@ -39,6 +39,15 @@ try {
   assert.equal(manualStored.creation_purpose, 'internal_test');
   assert.equal(manualStored.created_by_admin_id, platformAdminId, 'Operador precisa vir da sessao autenticada.');
   assert.equal(manualStored.created_by_name_snapshot, 'Platform');
+  const filteredManual = await request('/api/platform/companies?creation_source=platform_admin&creation_purpose=internal_test&customer_access=never&page=1&per_page=25', { cookie: platformCookie });
+  assert(filteredManual.data.companies.some((company) => company.id === platformCreatedCompanyId), 'Filtros combinados precisam preservar o cadastro manual esperado.');
+  assert(filteredManual.data.companies.every((company) => company.creation_source === 'platform_admin' && company.creation_purpose === 'internal_test' && company.customer_access_state === 'never'));
+  assert.equal(filteredManual.data.pagination.page, 1);
+  const invalidFilter = await request('/api/platform/companies?creation_source=not-real', { cookie: platformCookie, allowFailure: true });
+  assert.equal(invalidFilter.status, 422, 'Filtro de origem desconhecido precisa ser rejeitado.');
+  const legacyList = await request('/api/platform/companies?customer_access=accessed', { cookie: platformCookie });
+  const legacyFixture = legacyList.data.companies.find((company) => company.id === companyId);
+  assert.equal(legacyFixture?.provenance?.state, 'legacy_untracked');
 
   const denied = await request('/api/platform/assisted-registrations', { cookie: regularCookie, allowFailure: true });
   assert.equal(denied.status, 403, 'Administrador comum nao pode acessar cadastros assistidos.');

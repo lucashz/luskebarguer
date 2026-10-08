@@ -9,8 +9,8 @@ assert.equal(typeof filterPlatformMetricsData, 'function', 'A Central precisa de
 
 const demoCompanyId = 'demo-company';
 const result = filterPlatformMetricsData({
-  companies: [{ id: demoCompanyId }, { id: 'real-company' }],
-  stores: [{ id: 'demo-store', company_id: demoCompanyId }, { id: 'real-store', company_id: 'real-company' }],
+  companies: [{ id: demoCompanyId }, { id: 'internal-company', creation_purpose: 'internal_test' }, { id: 'real-company' }],
+  stores: [{ id: 'demo-store', company_id: demoCompanyId }, { id: 'internal-store', company_id: 'internal-company' }, { id: 'real-store', company_id: 'real-company' }],
   subscriptions: [{ id: 'demo-sub', company_id: demoCompanyId }, { id: 'real-sub', company_id: 'real-company' }],
   subscriptionEvents: [{ id: 'demo-event', company_id: demoCompanyId }, { id: 'real-event', company_id: 'real-company' }],
   orders: [{ id: 'demo-order', store_id: 'demo-store' }, { id: 'real-order', store_id: 'real-store' }],
