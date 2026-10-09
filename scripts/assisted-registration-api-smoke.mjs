@@ -46,9 +46,11 @@ try {
   assert.ok(filteredManual.data.creation_creators.some((creator) => creator.id === platformAdminId), 'Criadores precisam ser listados fora da pagina filtrada.');
   const filteredSecondPage = await request(`/api/platform/companies?creation_source=platform_admin&creation_purpose=internal_test&created_by_admin_id=${platformAdminId}&customer_access=never&page=2&per_page=25`, { cookie: platformCookie });
   assert.equal(filteredSecondPage.data.pagination.page, 2, 'Filtros combinados precisam preservar a pagina solicitada.');
-  await client.query(`insert into audit_logs (company_id,action,entity_type,entity_id,after_data,created_at) select $1::uuid,'platform.client.note','company',$1::uuid,jsonb_build_object('note','Nota ' || value),now() + (value || ' seconds')::interval from generate_series(1,35) value`, [platformCreatedCompanyId]);
+  await client.query(`insert into audit_logs (company_id,action,entity_type,entity_id,after_data,created_at) select $1::uuid,'platform.client.note','company',$1::uuid,jsonb_build_object('note','Nota ' || value),now() + (value || ' seconds')::interval from generate_series(1,65) value`, [platformCreatedCompanyId]);
   const manualDetail = await request(`/api/platform/companies/${platformCreatedCompanyId}/detail`, { cookie: platformCookie });
   assert.ok(manualDetail.data.timeline.some((event) => event.title === 'Cadastro criado'), 'Timeline longa precisa preservar o evento original de criacao.');
+  const advancedTimeline = await request(`/api/platform/companies/${platformCreatedCompanyId}/timeline`, { cookie: platformCookie });
+  assert.ok(advancedTimeline.data.timeline.some((event) => event.title === 'Cadastro criado'), 'Timeline avançada precisa preservar a criação após o limite de eventos.');
   const invalidFilter = await request('/api/platform/companies?creation_source=not-real', { cookie: platformCookie, allowFailure: true });
   assert.equal(invalidFilter.status, 422, 'Filtro de origem desconhecido precisa ser rejeitado.');
   const legacyList = await request('/api/platform/companies?customer_access=accessed', { cookie: platformCookie });
@@ -163,6 +165,7 @@ try {
   if (server) server.kill();
   if (client._connected) {
     await client.query("delete from public.assisted_registrations where establishment_name = 'Lancheria Smoke'").catch(() => {});
+    await client.query('delete from public.assisted_registrations where establishment_name = $1', [`Assisted rollback ${suffix}`]).catch(() => {});
     await client.query('delete from public.admin_user_store_access where admin_user_id = any($1::uuid[])', [[platformAdminId, regularAdminId].filter(Boolean)]).catch(() => {});
     await client.query('delete from public.admin_users where id = any($1::uuid[])', [[platformAdminId, regularAdminId].filter(Boolean)]).catch(() => {});
     if (publishedCompanyId) await client.query('delete from public.companies where id = $1', [publishedCompanyId]).catch(() => {});

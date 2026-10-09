@@ -33,7 +33,7 @@ try {
   console.log('Customer access 2FA smoke: OK');
 } finally {
   server?.kill();
-  if (client._connected) { await client.query('delete from companies where id=$1', [companyId]).catch(()=>{}); await client.end(); }
+  if (client._connected) { await client.query('delete from admin_users where id=$1', [adminId]).catch(()=>{}); await client.query('delete from companies where id=$1', [companyId]).catch(()=>{}); await client.end(); }
 }
 async function post(path, body) { const response=await fetch(baseUrl+path,{method:'POST',headers:{'Content-Type':'application/json','X-Forwarded-For':'192.0.2.77'},body:JSON.stringify(body)}); return {status:response.status,data:await response.json().catch(()=>({}))}; }
 async function lastAccess() { return (await client.query('select last_customer_login_at from companies where id=$1',[companyId])).rows[0]?.last_customer_login_at || null; }

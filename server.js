@@ -4134,7 +4134,7 @@ async function getPlatformCompanyTimelineAdvanced(companyId) {
 
 function uniqueTimelineEvents(events = []) {
   const seen = new Set();
-  return events
+  const unique = events
     .filter((event) => event.created_at)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .filter((event) => {
@@ -4142,8 +4142,11 @@ function uniqueTimelineEvents(events = []) {
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .slice(0, 60);
+    });
+  const creationEvent = unique.find((event) => event.title === 'Cadastro criado');
+  if (!creationEvent) return unique.slice(0, 60);
+  return [...unique.filter((event) => event !== creationEvent).slice(0, 59), creationEvent]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 async function platformCommercialSummary() {
