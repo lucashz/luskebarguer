@@ -395,6 +395,8 @@ Verification completed successfully:
 - `npm run test:all` — the complete project suite passed with exit code 0.
 - `git diff --check HEAD~6..HEAD` — no whitespace errors.
 
+Final review fixes preserve creator-filter choices independently of pagination, retain `company.created` through long timelines and log cleanup, trace the default-store bootstrap path, pin Central timestamps to `America/Sao_Paulo`, and add runtime coverage for 2FA, impersonation, multi-page filters, and forced audit rollback in public/manual/assisted creation.
+
 Deviation: Docker Desktop was unavailable, so the migration and database smoke tests used the already configured PostgreSQL service on `localhost:5432`. The same schema/migration path was exercised; only Docker-specific startup was not revalidated. The plan's “existing Central manual-company flow” did not exist in the UI, so a compact native form was added on the Clients screen and wired to the already existing authenticated API.
 
 Production remains untouched. Operational release steps still pending explicit authorization: apply the migration in production, deploy the application assets/server, then run post-deploy read-only smoke checks.

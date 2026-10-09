@@ -25,6 +25,7 @@ for (const purpose of ['customer_request', 'lead_capture', 'internal_test', 'mig
 }
 assert.equal(helpers.registrationProvenanceLabel({ state: 'legacy_untracked' }), 'Legado sem rastreamento');
 assert.equal(helpers.customerAccessLabel(null), 'Cliente nunca acessou');
+assert.match(helpers.customerAccessLabel('2026-01-15T12:00:00.000Z'), /09:00/, 'Datas precisam usar o fuso de São Paulo.');
 assert.equal(
   helpers.buildCompanyFilterQuery({ creationSource: 'sales_automation', creationPurpose: 'lead_capture', createdByAdminId: '00000000-0000-4000-8000-000000000001', customerAccess: 'never', page: 2, perPage: 25 }),
   'creation_source=sales_automation&creation_purpose=lead_capture&created_by_admin_id=00000000-0000-4000-8000-000000000001&customer_access=never&page=2&per_page=25'
@@ -32,5 +33,7 @@ assert.equal(
 assert.ok(platformJs.includes('registrationProvenanceLabel') && platformJs.includes('customerAccessLabel'), 'Lista e detalhe devem exibir rastreabilidade e último acesso.');
 assert.match(html, /platform-client-list\.js\?v=20261008-registration-provenance/);
 assert.match(html, /platform\.js\?v=20261008-registration-provenance/);
+assert.match(html, /platform\.css\?v=20261008-registration-provenance/);
+assert.ok(platformJs.includes('state.creationCreators') && platformJs.includes('Criado por'), 'Filtro e card precisam preservar e exibir o criador.');
 
 console.log('Registration provenance UI smoke: OK');

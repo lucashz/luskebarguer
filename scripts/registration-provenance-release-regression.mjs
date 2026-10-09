@@ -8,6 +8,8 @@ const checks = [
   ['Filtros, detalhe e timeline', 'node', ['scripts/platform-client-query-regression.mjs']],
   ['Exclusões das métricas', 'node', ['scripts/platform-metrics-exclusions-smoke.mjs']],
   ['Login direto e impersonação', 'node', ['scripts/security-hardening-smoke.mjs']],
+  ['Autenticação 2FA e acesso direto', 'node', ['scripts/customer-access-2fa-smoke.mjs']],
+  ['Impersonação real e auditoria operacional', 'node', ['scripts/platform-health-smoke.mjs']],
   ['Interface de rastreabilidade', 'node', ['scripts/registration-provenance-ui-smoke.mjs']]
 ];
 

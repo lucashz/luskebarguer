@@ -19,6 +19,12 @@ assert.match(implementation, /customer_access_state: company\.last_customer_logi
 assert.match(implementation, /provenance: platformCompanyProvenance\(company\)/);
 assert.match(source, /legacy_untracked/);
 assert.match(source, /'company\.created': 'Cadastro criado'/);
+assert.match(implementation, /creation_creators:/, 'Lista precisa expor criadores independentemente da pagina filtrada.');
+assert.match(source, /action: 'eq\.company\.created'[\s\S]*limit: '1'/, 'Detalhe precisa buscar o evento original separadamente.');
+assert.match(source, /source: 'api'[\s\S]*systemActor: 'default-store-bootstrap'/, 'Bootstrap de empresa precisa usar a proveniencia compartilhada.');
+
+const cleanupSource = await readFile(new URL('./cleanup-logs.mjs', import.meta.url), 'utf8');
+assert.match(cleanupSource, /action <> 'company\.created'/, 'Limpeza de logs precisa preservar o evento canonico de criacao.');
 
 const loginStart = source.indexOf('async function loginAdmin(');
 const twoFactorEnd = source.indexOf('\nasync function ', source.indexOf('async function verifyAdminTwoFactorLogin(') + 1);

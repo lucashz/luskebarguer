@@ -11,7 +11,7 @@
     return `${registrationSourceLabel(provenance.source)} · ${registrationPurposeLabel(provenance.purpose)}`;
   }
   function customerAccessLabel(lastCustomerLoginAt) {
-    return lastCustomerLoginAt ? `Último acesso: ${new Date(lastCustomerLoginAt).toLocaleString('pt-BR')}` : 'Cliente nunca acessou';
+    return lastCustomerLoginAt ? `Último acesso: ${new Date(lastCustomerLoginAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : 'Cliente nunca acessou';
   }
   function buildCompanyFilterQuery({ creationSource, creationPurpose, createdByAdminId, customerAccess, page = 1, perPage = 100 } = {}) {
     const params = new URLSearchParams();

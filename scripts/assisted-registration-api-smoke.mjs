@@ -43,6 +43,12 @@ try {
   assert(filteredManual.data.companies.some((company) => company.id === platformCreatedCompanyId), 'Filtros combinados precisam preservar o cadastro manual esperado.');
   assert(filteredManual.data.companies.every((company) => company.creation_source === 'platform_admin' && company.creation_purpose === 'internal_test' && company.customer_access_state === 'never'));
   assert.equal(filteredManual.data.pagination.page, 1);
+  assert.ok(filteredManual.data.creation_creators.some((creator) => creator.id === platformAdminId), 'Criadores precisam ser listados fora da pagina filtrada.');
+  const filteredSecondPage = await request(`/api/platform/companies?creation_source=platform_admin&creation_purpose=internal_test&created_by_admin_id=${platformAdminId}&customer_access=never&page=2&per_page=25`, { cookie: platformCookie });
+  assert.equal(filteredSecondPage.data.pagination.page, 2, 'Filtros combinados precisam preservar a pagina solicitada.');
+  await client.query(`insert into audit_logs (company_id,action,entity_type,entity_id,after_data,created_at) select $1::uuid,'platform.client.note','company',$1::uuid,jsonb_build_object('note','Nota ' || value),now() + (value || ' seconds')::interval from generate_series(1,35) value`, [platformCreatedCompanyId]);
+  const manualDetail = await request(`/api/platform/companies/${platformCreatedCompanyId}/detail`, { cookie: platformCookie });
+  assert.ok(manualDetail.data.timeline.some((event) => event.title === 'Cadastro criado'), 'Timeline longa precisa preservar o evento original de criacao.');
   const invalidFilter = await request('/api/platform/companies?creation_source=not-real', { cookie: platformCookie, allowFailure: true });
   assert.equal(invalidFilter.status, 422, 'Filtro de origem desconhecido precisa ser rejeitado.');
   const legacyList = await request('/api/platform/companies?customer_access=accessed', { cookie: platformCookie });
@@ -124,6 +130,34 @@ try {
   const assistedAudit = await client.query("select count(*)::int count from audit_logs where company_id=$1 and action='company.created'", [publishedCompanyId]);
   assert.equal(assistedAudit.rows[0].count, 1, 'Publicacao repetida nao pode duplicar company.created.');
 
+  server.kill();
+  await new Promise((resolve) => server.once('exit', resolve));
+  server = await startServer({ TEST_FORCE_REQUIRED_AUDIT_FAILURE_ACTION: 'company.created' });
+  const failureCookie = await login(fixture.platformEmail);
+  const rollbackName = `Rollback ${suffix}`;
+  const failedManual = await request('/api/platform/companies', {
+    method: 'POST', cookie: failureCookie, allowFailure: true,
+    body: { name: rollbackName, email: `rollback-${suffix}@example.test`, purpose: 'internal_test', note: 'Teste de rollback obrigatório.', declared_source: 'test' }
+  });
+  assert.equal(failedManual.status, 500, `Falha da auditoria obrigatoria precisa impedir a criacao manual: ${JSON.stringify(failedManual.data)}`);
+  assert.equal((await client.query('select count(*)::int count from companies where name=$1', [rollbackName])).rows[0].count, 0, 'Falha da auditoria precisa reverter a empresa manual.');
+  const publicRollbackName = `Public rollback ${suffix}`;
+  const publicRollback = await request('/api/portal/signup', {
+    method: 'POST', allowFailure: true,
+    body: { plan_code: 'essential', accept_terms: true, owner: { name: 'Rollback Publico', email: `public-rollback-${suffix}@example.test`, phone: '5511999999999', document: formatCpf(generateCpf()), password, confirm_password: password }, business: { name: publicRollbackName, display_name: publicRollbackName, type: 'restaurante', city: 'Horizontina', state: 'RS', slug: `rollback-${suffix}`.slice(0, 50) } }
+  });
+  assert.equal(publicRollback.status, 500, 'Falha da auditoria obrigatoria precisa impedir o cadastro publico.');
+  assert.equal((await client.query('select count(*)::int count from companies where name=$1', [publicRollbackName])).rows[0].count, 0, 'Falha da auditoria precisa reverter a empresa publica.');
+
+  const assistedRollbackName = `Assisted rollback ${suffix}`;
+  const rollbackDraft = await request('/api/platform/assisted-registrations', { method: 'POST', cookie: failureCookie, body: { ...payload, establishment_name: assistedRollbackName, email: `assisted-rollback-${suffix}@example.test`, phone: `557${String(Math.floor(Math.random()*100000000)).padStart(8,'0')}`, document: formatCpf(generateCpf()) } });
+  const rollbackRegistrationId = rollbackDraft.data.registration.id;
+  const rollbackImport = await request(`/api/platform/assisted-registrations/${rollbackRegistrationId}/import`, { method: 'POST', cookie: failureCookie, body: { text: 'Lanches\nXis - R$ 25,00' } });
+  await request(`/api/platform/assisted-registrations/${rollbackRegistrationId}/menu-draft/review`, { method: 'POST', cookie: failureCookie, body: { expected_version: rollbackImport.data.menu_draft.version } });
+  const failedAssisted = await request(`/api/platform/assisted-registrations/${rollbackRegistrationId}/publish`, { method: 'POST', cookie: failureCookie, allowFailure: true, body: { confirm: true } });
+  assert.equal(failedAssisted.status, 500, 'Falha da auditoria obrigatoria precisa impedir a publicacao assistida.');
+  assert.equal((await client.query('select count(*)::int count from companies where name=$1', [assistedRollbackName])).rows[0].count, 0, 'Transacao assistida precisa reverter a empresa sem auditoria.');
+
   console.log('Assisted registration API smoke: OK');
 } finally {
   if (server) server.kill();
@@ -153,8 +187,8 @@ async function login(email) {
   return result.cookie;
 }
 
-async function startServer() {
-  const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', TRUSTED_PROXY_HOPS: '1', APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl }, stdio: ['ignore', 'pipe', 'pipe'] });
+async function startServer(extraEnv = {}) {
+  const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), COOKIE_SECURE: 'false', ADMIN_2FA_REQUIRED: 'false', TRUSTED_PROXY_HOPS: '1', APP_URL: baseUrl, PUBLIC_APP_URL: baseUrl, NODE_ENV: 'test', ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   child.stdout.on('data', (chunk) => { logs += chunk; });
   child.stderr.on('data', (chunk) => { logs += chunk; });

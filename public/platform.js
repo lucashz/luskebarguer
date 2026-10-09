@@ -3,6 +3,7 @@
   companies: [],
   plans: [],
   features: [],
+  creationCreators: [],
   logs: [],
   backup: null,
   health: null,
@@ -642,6 +643,7 @@ async function loadPlatform(options = {}) {
     state.companies = companies.companies || [];
     state.companyPagination = companies.pagination || null;
     state.features = companies.features || [];
+    state.creationCreators = companies.creation_creators || state.creationCreators;
     state.plans = plans.plans || [];
     state.baseLoaded = true;
     render();
@@ -1902,11 +1904,8 @@ function renderSelects() {
   }
   if (els.clientCreatorFilter) {
     const selected = els.clientCreatorFilter.value;
-    const creators = new Map();
-    for (const company of state.companies) {
-      const provenance = company.provenance || {};
-      if (provenance.created_by_admin_id) creators.set(provenance.created_by_admin_id, provenance.created_by_name || provenance.created_by_admin_id);
-    }
+    const creators = new Map(state.creationCreators.map((creator) => [creator.id, creator.name || creator.id]));
+    if (selected && !creators.has(selected)) creators.set(selected, selected);
     els.clientCreatorFilter.innerHTML = `<option value="">Todos os criadores</option>${[...creators].map(([id, name]) => `<option value="${escapeAttribute(id)}">${escapeHtml(name)}</option>`).join('')}`;
     els.clientCreatorFilter.value = selected;
   }
@@ -2630,6 +2629,7 @@ function renderCompanies() {
           </div>
           <div class="platform-company-summary-status">
             <span class="pill pill-muted">${escapeHtml(provenanceLabel)}</span>
+            ${company.provenance?.created_by_name ? `<small>Criado por ${escapeHtml(company.provenance.created_by_name)}</small>` : ''}
             <small>${escapeHtml(customerAccessLabel)}</small>
             ${attention.length ? `<span class="pill pill-muted">${attention.length} atenção</span>` : ''}
             <span class="pill ${company.status === 'active' ? 'pill-ok' : 'pill-muted'}">${escapeHtml(summary.find((item) => item.key === 'status')?.value || statusLabel(company.status))}</span>
@@ -2879,7 +2879,7 @@ function renderCompanyDetail(detail) {
         <div><span>Origem e finalidade</span><strong>${escapeHtml(globalThis.PlatformClientList.registrationProvenanceLabel(provenance))}</strong></div>
         <div><span>Responsável pela criação</span><strong>${escapeHtml(provenance?.created_by_name || 'Não identificado')}</strong></div>
         <div><span>Acesso do cliente</span><strong>${escapeHtml(globalThis.PlatformClientList.customerAccessLabel(metrics.last_access_at))}</strong></div>
-        <div><span>Criado em</span><strong>${provenance?.created_at ? escapeHtml(new Date(provenance.created_at).toLocaleString('pt-BR')) : 'Data não rastreada'}</strong></div>
+        <div><span>Criado em</span><strong>${provenance?.created_at ? escapeHtml(new Date(provenance.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })) : 'Data não rastreada'}</strong></div>
         <div><span>Canal declarado</span><strong>${escapeHtml(provenance?.metadata?.declared_source || 'Não informado')}</strong></div>
         <div><span>Código de atendimento</span><strong>${escapeHtml(provenance?.metadata?.tracking_code || 'Não informado')}</strong></div>
         ${provenance?.note ? `<p>${escapeHtml(provenance.note)}</p>` : ''}

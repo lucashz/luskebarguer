@@ -2740,7 +2740,8 @@ async function markDirectCustomerLogin(adminId, occurredAt = new Date()) {
 async function createAdminTwoFactorChallenge(admin) {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = createHash('sha256').update(token).digest('hex');
-  const code = String(randomInt(0, 1000000)).padStart(6, '0');
+  const testCode = process.env.NODE_ENV === 'test' ? String(process.env.TEST_ADMIN_2FA_CODE || '') : '';
+  const code = /^\d{6}$/.test(testCode) ? testCode : String(randomInt(0, 1000000)).padStart(6, '0');
   const codeHash = createHash('sha256').update(`${tokenHash}:${code}`).digest('hex');
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   await dbRequest('DELETE', 'admin_2fa_challenges', { admin_user_id: `eq.${admin.id}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
@@ -2748,6 +2749,7 @@ async function createAdminTwoFactorChallenge(admin) {
     admin_user_id: admin.id, token_hash: tokenHash, code_hash: codeHash, expires_at: expiresAt
   }, ['Prefer: return=minimal']);
   try {
+    if (/^\d{6}$/.test(testCode)) return { challenge: token };
     await sendPlatformEmail({
       to: admin.email,
       templateKey: 'admin_2fa_code',
@@ -3455,7 +3457,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
   const filters = platformCompanyQueryFilters(params);
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const [companies, features] = await Promise.all([
+  const [companies, features, creatorRows] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
       order: 'name.asc',
@@ -3470,7 +3472,13 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
       select: '*',
       order: 'sort_order.asc',
       limit: '300'
-    })
+    }),
+    dbRequest('GET', 'companies', {
+      select: 'created_by_admin_id,created_by_name_snapshot',
+      created_by_admin_id: 'not.is.null',
+      order: 'created_by_name_snapshot.asc',
+      limit: '10000'
+    }).catch(() => [])
   ]);
   const companyIds = companies.map((company) => company.id);
   const companyFilter = `in.(${companyIds.join(',')})`;
@@ -3592,6 +3600,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
       has_more: companies.length === perPage
     },
     features,
+    creation_creators: [...new Map(creatorRows.map((row) => [row.created_by_admin_id, { id: row.created_by_admin_id, name: row.created_by_name_snapshot || row.created_by_admin_id }])).values()],
     companies: companies.map((company) => {
       const companyStores = storesByCompany.get(company.id) || [];
       const companyAdmins = adminsByCompany.get(company.id) || [];
@@ -3664,7 +3673,7 @@ async function getPlatformCompanyDetail(companyId) {
   });
   if (!company) throw httpError(404, 'Cliente não encontrado.');
 
-  const [stores, admins, subscriptions, plans, billingHistory, auditLogs, usageCounters] = await Promise.all([
+  const [stores, admins, subscriptions, plans, billingHistory, auditLogs, creationLogs, usageCounters] = await Promise.all([
     dbRequest('GET', 'stores', {
       select: 'id,company_id,name,slug,public_url,is_active,created_at,updated_at',
       company_id: `eq.${resolvedCompanyId}`,
@@ -3685,6 +3694,13 @@ async function getPlatformCompanyDetail(companyId) {
       company_id: `eq.${resolvedCompanyId}`,
       order: 'created_at.desc',
       limit: '80'
+    }).catch(() => []),
+    dbRequest('GET', 'audit_logs', {
+      select: 'id,action,severity,entity_type,entity_id,store_id,actor_admin_id,after_data,created_at',
+      company_id: `eq.${resolvedCompanyId}`,
+      action: 'eq.company.created',
+      order: 'created_at.asc',
+      limit: '1'
     }).catch(() => []),
     dbRequest('GET', 'company_usage_counters', {
       select: '*',
@@ -3739,7 +3755,8 @@ async function getPlatformCompanyDetail(companyId) {
   const orders30 = billableOrders.filter((order) => new Date(order.created_at) >= thirtyDaysAgo);
   const orders7 = billableOrders.filter((order) => new Date(order.created_at) >= sevenDaysAgo);
   const lastOrder = orders[0] || null;
-  const timeline = buildPlatformCompanyTimeline({ company, stores, orders, billingHistory, auditLogs, subscription });
+  const timelineLogs = [...creationLogs, ...auditLogs.filter((log) => !creationLogs.some((creation) => creation.id === log.id))];
+  const timeline = buildPlatformCompanyTimeline({ company, stores, orders, billingHistory, auditLogs: timelineLogs, subscription });
   const attention = platformCompanyAttention({ company, stores, settingsByStore, orders, subscription, products });
 
   return {
@@ -5324,10 +5341,13 @@ function buildPlatformCompanyTimeline({ company, stores, orders, billingHistory,
       created_at: log.created_at
     });
   }
-  return events
+  const sorted = events
     .filter((event) => event.created_at)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    .slice(0, 30);
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const creationEvent = sorted.find((event) => event.title === 'Cadastro criado');
+  if (!creationEvent) return sorted.slice(0, 30);
+  return [...sorted.filter((event) => event !== creationEvent).slice(0, 29), creationEvent]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 function subscriptionEventLabel(type) {
@@ -5400,7 +5420,7 @@ async function createPlatformCompany(req, data, admin) {
   const payload = {
     name,
     document: cleanText(data.document || '') || null,
-    billing_email: cleanEmail(data.billing_email || data.email || '') || null,
+    billing_email: (data.billing_email || data.email) ? cleanEmail(data.billing_email || data.email) : null,
     phone: onlyDigits(data.phone || ''),
     status: ['active', 'trial', 'past_due', 'suspended', 'cancelled', 'archived'].includes(data.status) ? data.status : 'trial',
     ...provenance.companyFields
@@ -14486,6 +14506,9 @@ async function createDefaultSubscription(companyId, planCode, options = {}) {
 }
 
 async function audit(action, data = {}) {
+  if (data.required && process.env.NODE_ENV === 'test' && process.env.TEST_FORCE_REQUIRED_AUDIT_FAILURE_ACTION === action) {
+    throw new Error(`Falha de auditoria injetada para ${action}.`);
+  }
   const reqMeta = data.req ? requestAuditMeta(data.req) : {};
   const request = dbRequest('POST', 'audit_logs', {}, {
     company_id: data.company_id || null,
@@ -15543,10 +15566,27 @@ async function ensureDefaultStoreStructure() {
     name: 'eq.Luske Alimentacao',
     limit: '1'
   }).catch(() => []);
-  const company = existingCompany || (await dbRequest('POST', 'companies', {}, {
-    name: 'Luske Alimentacao',
-    status: 'trial'
-  }, ['Prefer: return=representation']).catch(() => []))[0];
+  let company = existingCompany;
+  if (!company) {
+    const provenance = normalizeRegistrationProvenance({
+      source: 'api',
+      purpose: 'migration',
+      note: 'Criação automática da estrutura padrão do ambiente.'
+    }, { systemActor: 'default-store-bootstrap', attribution: { declared_source: 'system_bootstrap' } });
+    [company] = await dbRequest('POST', 'companies', {}, {
+      name: 'Luske Alimentacao',
+      status: 'trial',
+      ...provenance.companyFields
+    }, ['Prefer: return=representation']).catch(() => []);
+    if (company?.id) {
+      try {
+        await audit('company.created', { required: true, company_id: company.id, entity_type: 'company', entity_id: company.id, after_data: provenance.auditData });
+      } catch (error) {
+        await dbRequest('DELETE', 'companies', { id: `eq.${company.id}` }, undefined, ['Prefer: return=minimal']).catch(() => {});
+        throw error;
+      }
+    }
+  }
   if (!company?.id) return null;
   const [store] = await dbRequest('POST', 'stores', {}, {
     company_id: company.id,
