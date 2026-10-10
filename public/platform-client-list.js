@@ -1,6 +1,28 @@
 (function exposePlatformClientList(root) {
   const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
   const demoCompanyId = '2f11b078-bf31-40e6-8328-1e1200a02b07';
+  const sourceLabels = Object.freeze({ self_service: 'Autoatendimento', platform_admin: 'Central administrativa', assisted: 'Cadastro assistido', sales_automation: 'Automação de vendas', import: 'Importação', api: 'API' });
+  const purposeLabels = Object.freeze({ customer_request: 'Solicitação do cliente', lead_capture: 'Captação de lead', internal_test: 'Teste interno', migration: 'Migração', demo: 'Demonstração' });
+
+  function registrationSourceLabel(value) { return sourceLabels[value] || value || 'Não informado'; }
+  function registrationPurposeLabel(value) { return purposeLabels[value] || value || 'Não informado'; }
+  function registrationProvenanceLabel(provenance) {
+    if (!provenance || provenance.state === 'legacy_untracked') return 'Legado sem rastreamento';
+    return `${registrationSourceLabel(provenance.source)} · ${registrationPurposeLabel(provenance.purpose)}`;
+  }
+  function customerAccessLabel(lastCustomerLoginAt) {
+    return lastCustomerLoginAt ? `Último acesso: ${new Date(lastCustomerLoginAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : 'Cliente nunca acessou';
+  }
+  function buildCompanyFilterQuery({ creationSource, creationPurpose, createdByAdminId, customerAccess, page = 1, perPage = 100 } = {}) {
+    const params = new URLSearchParams();
+    if (creationSource) params.set('creation_source', creationSource);
+    if (creationPurpose) params.set('creation_purpose', creationPurpose);
+    if (createdByAdminId) params.set('created_by_admin_id', createdByAdminId);
+    if (customerAccess) params.set('customer_access', customerAccess);
+    params.set('page', String(page));
+    params.set('per_page', String(perPage));
+    return params.toString();
+  }
 
   function sortCompaniesAlphabetically(companies = []) {
     return [...companies].sort((left, right) => collator.compare(String(left?.name || ''), String(right?.name || '')));
@@ -26,5 +48,5 @@
     ];
   }
 
-  root.PlatformClientList = Object.freeze({ sortCompaniesAlphabetically, companiesEligibleForAttention, compactClientSummary });
+  root.PlatformClientList = Object.freeze({ sortCompaniesAlphabetically, companiesEligibleForAttention, compactClientSummary, registrationSourceLabel, registrationPurposeLabel, registrationProvenanceLabel, customerAccessLabel, buildCompanyFilterQuery });
 })(globalThis);

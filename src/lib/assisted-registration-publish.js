@@ -1,6 +1,7 @@
 import { createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { assertMenuDraftPublishable } from './assisted-menu-review.js';
 import { assertAssistedIdentityComplete, publicAssistedRegistration } from './assisted-registration.js';
+import { normalizeRegistrationProvenance } from './registration-provenance.js';
 
 export async function publishAssistedRegistration(pool, id, actor = {}, options = {}) {
   const client = await pool.connect();
@@ -13,6 +14,10 @@ export async function publishAssistedRegistration(pool, id, actor = {}, options 
     }
     if (registration.status !== 'ready_to_publish') throw statusError(422, 'Revise o cardápio antes de publicar.');
     assertAssistedIdentityComplete(registration);
+    const answers = registration.answers || {};
+    const provenance = normalizeRegistrationProvenance({
+      source: 'assisted', purpose: answers.provenance?.purpose, note: answers.provenance?.note
+    }, { actorAdmin: actor, attribution: registration.attribution || {} });
     const menu = (await client.query('select * from assisted_menu_drafts where registration_id=$1 for update', [id])).rows[0];
     if (!menu?.reviewed_at || !menu.reviewed_hash) throw statusError(422, 'A revisão obrigatória do cardápio está pendente.');
     const content = { ...menu.content, version: menu.version };
@@ -22,10 +27,9 @@ export async function publishAssistedRegistration(pool, id, actor = {}, options 
     const duplicate = await client.query(`select c.id from companies c left join admin_users au on au.company_id=c.id where regexp_replace(coalesce(c.document,''), '\\D', '', 'g')=$1 or regexp_replace(coalesce(c.phone,''), '\\D', '', 'g')=$2 or lower(coalesce(c.billing_email,''))=$3 or lower(coalesce(au.email,''))=$3 limit 1`, [registration.document_normalized, registration.phone, registration.email]);
     if (duplicate.rows[0]) throw statusError(409, 'Já existe uma empresa com este CPF ou CNPJ.');
 
-    const company = (await client.query(`insert into companies (name,document,billing_email,phone,status,marketing_attribution) values ($1,$2,$3,$4,'onboarding',$5::jsonb) returning *`, [registration.establishment_name, registration.document_normalized, registration.email || null, registration.phone || null, JSON.stringify(registration.attribution || {})])).rows[0];
+    const company = (await client.query(`insert into companies (name,document,billing_email,phone,status,marketing_attribution,creation_source,creation_purpose,created_by_admin_id,created_by_name_snapshot,creation_note,creation_metadata) values ($1,$2,$3,$4,'onboarding',$5::jsonb,$6,$7,$8,$9,$10,$11::jsonb) returning *`, [registration.establishment_name, registration.document_normalized, registration.email || null, registration.phone || null, JSON.stringify(registration.attribution || {}), provenance.companyFields.creation_source, provenance.companyFields.creation_purpose, provenance.companyFields.created_by_admin_id, provenance.companyFields.created_by_name_snapshot, provenance.companyFields.creation_note, JSON.stringify(provenance.companyFields.creation_metadata)])).rows[0];
     const slug = `${slugify(registration.establishment_name)}-${id.slice(0, 6)}`;
     const store = (await client.query(`insert into stores (company_id,name,slug,description,public_url,is_active) values ($1,$2,$3,$4,$5,true) returning *`, [company.id, registration.establishment_name, slug, 'Cardápio criado com a ajuda da equipe TáPronto.', `/${slug}`])).rows[0];
-    const answers = registration.answers || {};
     await client.query(`insert into store_settings (store_id,name,slug,description,whatsapp_number,address,payment_methods,business_hours,onboarding_completed) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,true)`, [store.id, store.name, slug, store.description, answers.establishment?.whatsapp || registration.phone || null, answers.establishment?.address || null, answers.operation?.payment_methods || [], JSON.stringify(parseBusinessHours(answers.operation?.hours))]);
     const admin = (await client.query(`insert into admin_users (company_id,name,email,password_hash,role,is_active) values ($1,$2,$3,$4,'owner',false) returning id,name,email,is_active`, [company.id, registration.responsible_name, registration.email, `pending_activation$${randomBytes(32).toString('hex')}`])).rows[0];
     await client.query(`insert into admin_user_store_access (admin_user_id,company_id,store_id,role,permissions,is_active) values ($1,$2,$3,'owner',array[]::text[],true)`, [admin.id, company.id, store.id]);
@@ -45,6 +49,8 @@ export async function publishAssistedRegistration(pool, id, actor = {}, options 
     const rawToken = randomBytes(32).toString('hex');
     await client.query(`insert into admin_activation_tokens (admin_user_id,token_hash,status,expires_at) values ($1,$2,'pending',now()+interval '7 days')`, [admin.id, activationTokenHash(rawToken)]);
     const published = (await client.query(`update assisted_registrations set status='published',publish_key=coalesce(publish_key,$2),company_id=$3,store_id=$4,admin_id=$5,subscription_id=$6,published_at=now(),updated_at=now() where id=$1 returning *`, [id, `assisted:${id}`, company.id, store.id, admin.id, subscription.id])).rows[0];
+    if (process.env.NODE_ENV === 'test' && process.env.TEST_FORCE_REQUIRED_AUDIT_FAILURE_ACTION === 'company.created') throw new Error('Falha de auditoria injetada para company.created.');
+    await client.query(`insert into audit_logs (company_id,store_id,actor_admin_id,action,entity_type,entity_id,severity,request_id,ip_address,user_agent,after_data) values ($1,$2,$3,'company.created','company',$8,'info',$4,$5,$6,$7::jsonb)`, [company.id, store.id, actor.id || null, options.audit_meta?.request_id || null, options.audit_meta?.ip_address || null, options.audit_meta?.user_agent || null, JSON.stringify({ ...provenance.auditData, store_id: store.id, registration_id: id }), company.id]);
     await client.query('commit');
     return { registration: publicAssistedRegistration(published), company: safeCompany(company), store: safeStore(store), activation: { token: rawToken, admin_id: admin.id, name: registration.responsible_name, email: admin.email, expires_at: new Date(Date.now() + 7 * 86400000).toISOString() }, subscription: safeSubscription(subscription) };
   } catch (error) { await client.query('rollback').catch(() => {}); throw error; }

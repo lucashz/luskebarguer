@@ -382,3 +382,21 @@ Append a concise implementation outcome to this plan: completed behavior, exact 
 git add scripts/registration-provenance-release-regression.mjs package.json docs/superpowers/plans/2026-10-08-registration-provenance.md
 git commit -m "test: verify registration provenance end to end"
 ```
+
+## Implementation outcome — 2026-10-08
+
+Implemented provenance for every new company path, immutable `company.created` audit events, direct-customer-login tracking separated from support impersonation, Central API filters/detail/timeline, and required assisted/manual Central inputs. Legacy companies remain readable as `legacy_untracked`; no historical backfill was performed.
+
+Database migration: `20261008180000_registration_provenance`. It is additive: nullable provenance/access columns, constraints, indexes, and a `SET NULL` creator foreign key. The migration was applied and verified against the configured local PostgreSQL instance.
+
+Verification completed successfully:
+
+- `npm run test:registration-provenance-release` — all focused database, API, authentication, audit, filter, metric, and UI checks passed.
+- `npm run test:all` — the complete project suite passed with exit code 0.
+- `git diff --check HEAD~6..HEAD` — no whitespace errors.
+
+Final review fixes preserve creator-filter choices independently of pagination, retain `company.created` through long timelines and log cleanup, trace the default-store bootstrap path, pin Central timestamps to `America/Sao_Paulo`, and add runtime coverage for 2FA, impersonation, multi-page filters, and forced audit rollback in public/manual/assisted creation.
+
+Deviation: Docker Desktop was unavailable, so the migration and database smoke tests used the already configured PostgreSQL service on `localhost:5432`. The same schema/migration path was exercised; only Docker-specific startup was not revalidated. The plan's “existing Central manual-company flow” did not exist in the UI, so a compact native form was added on the Clients screen and wired to the already existing authenticated API.
+
+Production remains untouched. Operational release steps still pending explicit authorization: apply the migration in production, deploy the application assets/server, then run post-deploy read-only smoke checks.

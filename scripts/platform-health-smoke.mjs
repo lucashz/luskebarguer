@@ -297,6 +297,7 @@ try {
   });
   assert(supportBadConfirmation.status === 422, 'Modo suporte com confirmacao invalida nao falhou.');
 
+  const accessBeforeImpersonation = (await client.query('select last_customer_login_at from companies where id=$1', [fixture.companyId])).rows[0].last_customer_login_at;
   const supportStart = await request('/api/platform/support/impersonate', {
     method: 'POST',
     cookie: superLogin.cookie,
@@ -309,6 +310,8 @@ try {
   assert(supportMe.data.admin.store_id === fixture.storeId, 'Modo suporte nao fixou a loja alvo.');
   const supportSensitive = await request('/api/admin/users', { cookie: supportStart.cookie, allowFailure: true });
   assert(supportSensitive.status === 403, 'Modo suporte acessou area sensivel de usuarios.');
+  const accessDuringImpersonation = (await client.query('select last_customer_login_at from companies where id=$1', [fixture.companyId])).rows[0].last_customer_login_at;
+  assert((accessDuringImpersonation?.toISOString?.() || accessDuringImpersonation) === (accessBeforeImpersonation?.toISOString?.() || accessBeforeImpersonation), 'Impersonação não pode alterar o último acesso real do cliente.');
   const supportEnd = await request('/api/platform/support/impersonate/end', {
     method: 'POST',
     cookie: supportStart.cookie

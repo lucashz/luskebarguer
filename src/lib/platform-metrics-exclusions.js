@@ -9,7 +9,10 @@ export function platformMetricsExcludedCompanyIds(env = process.env) {
 }
 
 export function filterPlatformMetricsData(data = {}, options = {}) {
-  const excludedCompanyIds = options.excludedCompanyIds || platformMetricsExcludedCompanyIds(options.env);
+  const excludedCompanyIds = new Set(options.excludedCompanyIds || platformMetricsExcludedCompanyIds(options.env));
+  for (const company of data.companies || []) {
+    if (company?.creation_purpose === 'internal_test') excludedCompanyIds.add(company.id);
+  }
   const stores = Array.isArray(data.stores) ? data.stores : [];
   const excludedStoreIds = new Set(stores
     .filter((store) => excludedCompanyIds.has(store.company_id))

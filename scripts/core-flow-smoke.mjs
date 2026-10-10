@@ -85,8 +85,16 @@ try {
   });
   assert(duplicateCpf.status === 409, 'CPF duplicado deveria ser rejeitado no cadastro da plataforma.');
   assert(companyId && storeId, 'Cadastro nao retornou empresa/loja.');
-  const attribution = await client.query('select marketing_attribution from public.companies where id = $1', [companyId]);
+  const attribution = await client.query('select marketing_attribution, creation_source, creation_purpose, created_by_admin_id, creation_metadata from public.companies where id = $1', [companyId]);
   assert(attribution.rows[0]?.marketing_attribution?.utm_source === 'instagram', 'Origem de marketing nao foi persistida na empresa.');
+  assert(attribution.rows[0]?.creation_source === 'self_service', 'Cadastro publico precisa registrar origem self_service.');
+  assert(attribution.rows[0]?.creation_purpose === 'customer_request', 'Cadastro publico precisa registrar finalidade customer_request.');
+  assert(attribution.rows[0]?.created_by_admin_id === null, 'Cadastro publico nao pode registrar operador interno.');
+  assert(attribution.rows[0]?.creation_metadata?.declared_source === 'unknown', 'Origem declarada ausente precisa ser explicitamente unknown.');
+  const creationAudit = await client.query(`select action, after_data, request_id, ip_address, user_agent from audit_logs where company_id=$1 and action='company.created'`, [companyId]);
+  assert(creationAudit.rowCount === 1, `Cadastro publico deveria gerar um company.created, recebeu ${creationAudit.rowCount}.`);
+  assert(creationAudit.rows[0].after_data?.attribution?.utm_source === 'instagram', 'Evento de criacao perdeu a atribuicao sanitizada.');
+  assert(creationAudit.rows[0].request_id || creationAudit.rows[0].ip_address || creationAudit.rows[0].user_agent, 'Evento de criacao precisa guardar metadados da requisicao.');
   const promotionalTrial = await client.query(`
     select trial_ends_at, current_period_starts_at, metadata
       from public.company_subscriptions
@@ -106,6 +114,7 @@ try {
   });
   assert(inactiveLogin.status === 403, `Login sem ativacao deveria retornar 403, recebeu ${inactiveLogin.status}.`);
   assert(/ativ/i.test(inactiveLogin.data.error || ''), 'Login sem ativacao deveria orientar ativacao por e-mail.');
+  assert((await client.query('select last_customer_login_at from companies where id=$1', [companyId])).rows[0].last_customer_login_at === null, 'Login recusado nao pode contar como acesso do cliente.');
   const activationToken = await replaceSignupActivationToken(signup.data.admin?.id);
   const activationInfo = await request(`/api/portal/activate/${activationToken}`);
   assert(activationInfo.data.activation?.email === email, 'Link de ativacao nao validou o e-mail criado.');
@@ -121,6 +130,7 @@ try {
   });
   adminCookie = login.cookie;
   assert(adminCookie, 'Login nao retornou cookie de admin.');
+  assert((await client.query('select last_customer_login_at from companies where id=$1', [companyId])).rows[0].last_customer_login_at, 'Login direto precisa atualizar o acesso real do cliente.');
 
   const onboarding = await request('/api/admin/onboarding', { cookie: adminCookie });
   assert(onboarding.data.can_publish === false, 'Onboarding novo nao deveria estar publicado automaticamente.');

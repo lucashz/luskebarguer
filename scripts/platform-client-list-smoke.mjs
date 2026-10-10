@@ -10,8 +10,8 @@ try {
 } catch {}
 
 assert.ok(helpers, 'A lista compacta de clientes precisa expor seus comportamentos reutilizáveis.');
-assert.match(html, /platform-client-list\.js\?v=20260930-attention-filter/, 'A Central precisa invalidar o cache do filtro de clientes com atenção.');
-assert.match(html, /platform\.js\?v=20260930-attention-filter/, 'A Central precisa invalidar o cache da renderização dos alertas.');
+assert.match(html, /platform-client-list\.js\?v=20261008-registration-provenance/, 'A Central precisa invalidar o cache da lista com rastreabilidade.');
+assert.match(html, /platform\.js\?v=20261008-registration-provenance/, 'A Central precisa invalidar o cache da Central com rastreabilidade.');
 
 const ordered = helpers.sortCompaniesAlphabetically([
   { id: '3', name: 'Xis do João' },

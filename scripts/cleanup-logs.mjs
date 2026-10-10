@@ -115,7 +115,7 @@ async function cleanupDatabase(result) {
   await cleanupQuery(result, {
     table: 'audit_logs',
     label: 'Auditoria antiga',
-    where: 'created_at < $1',
+    where: "created_at < $1 and action <> 'company.created'",
     params: [auditCutoff]
   });
 
