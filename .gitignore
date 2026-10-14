@@ -14,3 +14,14 @@ backup-*.tar.gz
 thai/
 .DS_Store
 Thumbs.db
+.worktrees/
+.superpowers/sdd/
+.deploy/
+.deploy-backups/
+.chrome-*/
+private-uploads/
+artifacts/
+*.bundle
+*.key
+*.pem
+*recovery-key*
