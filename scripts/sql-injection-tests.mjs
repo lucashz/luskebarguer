@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
 loadEnv(new URL('../.env', import.meta.url));
@@ -8,12 +8,19 @@ const shouldManageServer = !process.env.BASE_URL;
 const port = Number(process.env.SECURITY_SMOKE_PORT || 3707 + Math.floor(Math.random() * 400));
 const BASE_URL = process.env.BASE_URL || `http://127.0.0.1:${port}`;
 let serverProcess = null;
+const paymentCookieSecret = randomBytes(32).toString('hex');
 
 try {
   if (shouldManageServer) serverProcess = await startServer();
   await ensureDefaultStoreCanReceiveOrders();
 
   const payloads = [
+    {
+      name: 'GET /api/payments/order rejeita codigo e paginacao malformados',
+      path: `/api/payments/order?code=${encodeURIComponent("x' OR '1'='1")}&limit=${encodeURIComponent('1;drop table orders')}`,
+      options: { method: 'GET' },
+      allowedStatuses: [400, 403, 404, 422]
+    },
     {
       name: 'POST /api/orders rejeita id de item malformado',
       path: '/api/orders',
@@ -72,6 +79,12 @@ try {
         })
       },
       allowedStatuses: [400, 401, 404, 422]
+    },
+    {
+      name: 'GET autenticado obrigatorio nao interpreta filtro SQL em URL',
+      path: `/api/admin/support/tickets?search=${encodeURIComponent("%' OR 1=1 --")}&order=${encodeURIComponent('created_at;drop table support_tickets')}`,
+      options: { method: 'GET' },
+      allowedStatuses: [400, 401, 403, 404, 422]
     }
   ];
 
@@ -105,7 +118,9 @@ async function testPrivatePaymentAccess() {
   const client = new pg.default.Client({ connectionString: process.env.DATABASE_URL });
   const token = randomBytes(32).toString('base64url');
   const code = `SEC${randomBytes(4).toString('hex')}`.toUpperCase();
+  const otherCode = `SEC${randomBytes(4).toString('hex')}`.toUpperCase();
   let orderId = '';
+  let otherOrderId = '';
   try {
     await client.connect();
     const created = await client.query(`
@@ -116,17 +131,26 @@ async function testPrivatePaymentAccess() {
     `, [code, createHash('sha256').update(token).digest('hex')]);
     orderId = created.rows[0]?.id || '';
     if (!orderId) throw new Error('Loja de teste não encontrada.');
+    const other = await client.query(`
+      insert into orders (store_id, public_code, payment_method, customer_snapshot, subtotal, total, financial_status, payment_access_token_hash, payment_access_expires_at)
+      select id, $1, 'Pix Online', '{}'::jsonb, 1, 1, 'pending', $2, now() + interval '1 hour'
+      from stores where slug = 'luske-burguer' limit 1
+      returning id
+    `, [otherCode, createHash('sha256').update(randomBytes(32).toString('base64url')).digest('hex')]);
+    otherOrderId = other.rows[0]?.id || '';
     const missing = await fetch(`${BASE_URL}/api/payments/order?code=${code}`);
-    const wrong = await fetch(`${BASE_URL}/api/payments/order?code=${code}&token=incorreto`);
-    const correct = await fetch(`${BASE_URL}/api/payments/order?code=${code}&token=${encodeURIComponent(token)}`);
-    const ok = missing.status === 403 && wrong.status === 403 && correct.status === 200;
-    console.log(`${ok ? 'OK' : 'FAIL'} acesso privado ao pagamento: sem=${missing.status} errado=${wrong.status} correto=${correct.status}`);
+    const queryToken = await fetch(`${BASE_URL}/api/payments/order?code=${code}&token=${encodeURIComponent(token)}`);
+    const correct = await fetch(`${BASE_URL}/api/payments/order?code=${code}`, { headers: { Cookie: signedPaymentCookie(code, token) } });
+    const wrongCode = await fetch(`${BASE_URL}/api/payments/order?code=${otherCode}`, { headers: { Cookie: signedPaymentCookie(code, token) } });
+    const ok = missing.status === 403 && queryToken.status === 403 && correct.status === 200 && wrongCode.status === 403;
+    console.log(`${ok ? 'OK' : 'FAIL'} acesso privado ao pagamento: sem=${missing.status} query=${queryToken.status} cookie=${correct.status} cruzado=${wrongCode.status}`);
     return ok ? 0 : 1;
   } catch (error) {
     console.error(`FAIL acesso privado ao pagamento: ${error.message}`);
     return 1;
   } finally {
     if (orderId) await client.query('delete from orders where id = $1', [orderId]).catch(() => {});
+    if (otherOrderId) await client.query('delete from orders where id = $1', [otherOrderId]).catch(() => {});
     await client.end().catch(() => {});
   }
 }
@@ -203,7 +227,8 @@ async function startServer() {
       HOST: '127.0.0.1',
       PORT: String(port),
       APP_URL: BASE_URL,
-      PUBLIC_APP_URL: BASE_URL
+      PUBLIC_APP_URL: BASE_URL,
+      PAYMENT_COOKIE_SECRET: paymentCookieSecret
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -226,6 +251,12 @@ async function startServer() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function signedPaymentCookie(code, token) {
+  const payload = Buffer.from(JSON.stringify({ code, token })).toString('base64url');
+  const signature = createHmac('sha256', paymentCookieSecret).update(payload).digest('base64url');
+  return `payment_access=${payload}.${signature}`;
 }
 
 function shouldUseSsl(databaseUrl) {

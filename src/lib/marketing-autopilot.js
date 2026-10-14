@@ -218,14 +218,15 @@ async function directorySize(directory) {
   return bytes;
 }
 
-async function requestOpenAiImage(reference, fileName, prompt, config, quality, aspect = '1:1') {
+export async function requestOpenAiImage(reference, fileName, prompt, config, quality, aspect = '1:1') {
   const form = new FormData();
   form.append('model', config.model);
   form.append('prompt', prompt);
   form.append('size', aspect === '9:16' || aspect === '4:5' ? '1024x1536' : '1024x1024');
   form.append('quality', quality);
   form.append('output_format', 'png');
-  form.append('image[]', new Blob([reference], { type: fileName.endsWith('.png') ? 'image/png' : 'image/jpeg' }), fileName);
+  const images = Array.isArray(reference) ? reference : [reference];
+  images.forEach((bytes, index) => form.append('image[]', new Blob([bytes], { type: fileName.endsWith('.png') ? 'image/png' : 'image/jpeg' }), index ? `reference-${index + 1}.png` : fileName));
   const response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form, signal: AbortSignal.timeout(180000) });
   const payload = await response.json();
   if (!response.ok || !payload.data?.[0]?.b64_json) throw new Error(`OpenAI Image: ${payload.error?.message || `HTTP ${response.status}`}`);

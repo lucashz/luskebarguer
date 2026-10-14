@@ -101,13 +101,18 @@ function applySignupTrialOffer() {
   const isFirstCustomersOffer = window.location.pathname === '/21dias' || (normalized('utm_source') === 'instagram'
     && normalized('utm_medium') === 'direct'
     && normalized('utm_campaign') === 'primeiros_clientes');
-  if (!isFirstCustomersOffer) return;
+  const isRegionalPartnersOffer = normalized('utm_source') === 'whatsapp'
+    && normalized('utm_medium') === 'outbound'
+    && normalized('utm_campaign') === 'parceiros_regiao';
+  if (!isFirstCustomersOffer && !isRegionalPartnersOffer) return;
 
   const eyebrow = document.querySelector('#signupTrialEyebrow');
   const description = document.querySelector('#signupTrialDescription');
-  if (eyebrow) eyebrow.textContent = '21 Dias Grátis';
+  if (eyebrow) eyebrow.textContent = isRegionalPartnersOffer ? 'Premium Grátis por 30 Dias' : '21 Dias Grátis';
   if (description) {
-    description.textContent = 'Você recebeu 21 dias grátis para testar o TáPronto. Cadastre o responsável, os dados da loja e o endereço público do cardápio. Você poderá escolher um plano depois, dentro do painel.';
+    description.textContent = isRegionalPartnersOffer
+      ? 'Como parceiro inicial da região, você recebeu 30 dias grátis do plano Premium do TáPronto. Cadastre sua loja para liberar o benefício.'
+      : 'Você recebeu 21 dias grátis para testar o TáPronto. Cadastre o responsável, os dados da loja e o endereço público do cardápio. Você poderá escolher um plano depois, dentro do painel.';
   }
 }
 
@@ -427,6 +432,9 @@ async function initAccountActivation() {
       const email = data.activation?.email ? ` para ${data.activation.email}` : '';
       intro.textContent = `Link válido${email}. Clique no botão abaixo para liberar o painel.`;
     }
+    const passwordFields = document.querySelector('#assistedActivationPassword');
+    if (passwordFields) passwordFields.hidden = !data.activation?.requires_password;
+    portalActivationButton.dataset.requiresPassword = data.activation?.requires_password ? 'true' : 'false';
     portalActivationButton.disabled = false;
   } catch (error) {
     if (intro) intro.textContent = error.message || 'Link inválido ou expirado.';
@@ -438,7 +446,15 @@ async function initAccountActivation() {
     portalActivationButton.textContent = 'Ativando...';
     if (message) message.textContent = '';
     try {
-      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, { method: 'POST' });
+      const requiresPassword = portalActivationButton.dataset.requiresPassword === 'true';
+      const password = document.querySelector('#activationPassword')?.value || '';
+      const confirmation = document.querySelector('#activationPasswordConfirm')?.value || '';
+      if (requiresPassword && password !== confirmation) throw new Error('A confirmação da senha não confere.');
+      const data = await request(`/api/portal/activate/${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requiresPassword ? { password } : {}),
+      });
       if (message) message.textContent = data.message || 'Conta ativada com sucesso.';
       setTimeout(() => {
         location.href = canonicalPanelRedirect(data.redirect);

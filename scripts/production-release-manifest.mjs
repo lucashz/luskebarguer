@@ -32,6 +32,8 @@ const SENSITIVE_PATHS = [
   /(^|\/)private-uploads?(?:\/|$)/i,
   /(^|\/)uploads?(?:\/|$)/i,
   /recovery[-_]?key/i,
+  /\.before[-_.]/i,
+  /\.backup(?:[-_.]|$)/i,
   /\.(?:bundle|dump|key|pem|p12|pfx|tar\.gz)$/i
 ];
 

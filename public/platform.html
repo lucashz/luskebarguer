@@ -4,15 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Central - TáPronto</title>
-    <link rel="icon" href="/assets/tapronto-favicon.svg">
+    <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921">
     <link rel="stylesheet" href="/styles.css?v=20260730-desktop-fit">
-    <link rel="stylesheet" href="/platform.css?v=20260813-today-post-flow">
+    <link rel="stylesheet" href="/platform.css?v=20260922-metrics-clear">
   </head>
   <body class="admin-page platform-page platform-redesign platform-guest">
     <main class="platform-shell">
       <aside class="platform-sidebar" aria-label="Menu do Admin Master">
         <div class="platform-sidebar-brand">
-          <img class="platform-sidebar-logo" src="/assets/tapronto-favicon.svg" alt="" width="32" height="32" aria-hidden="true">
+          <img class="platform-sidebar-logo" src="/assets/tapronto-mark-2026.png?v=20260921" alt="" width="32" height="32" aria-hidden="true">
           <div>
             <strong>Central TáPronto</strong>
             <small id="platformSidebarEmail">administrador.local</small>
@@ -24,6 +24,7 @@
           <button data-platform-view="commercial" type="button"><span aria-hidden="true">▥</span>Métricas Comerciais</button>
           <button data-platform-view="marketing" type="button"><span aria-hidden="true">◎</span>Marketing</button>
           <button data-platform-view="clients" type="button"><span aria-hidden="true">◎</span>Clientes</button>
+          <button data-platform-view="assisted" type="button"><span aria-hidden="true">✎</span>Cadastros assistidos</button>
           <button data-platform-view="billing" type="button"><span aria-hidden="true">□</span>Billing</button>
           <button data-platform-view="support" type="button"><span aria-hidden="true">☏</span>Atendimentos</button>
           <button data-platform-view="health" type="button"><span aria-hidden="true">⌁</span>Operação Técnica</button>
@@ -60,7 +61,7 @@
       <section class="platform-login-panel" id="platformLoginPanel">
         <div class="platform-login-card">
           <div class="platform-login-brand">
-            <img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100">
+            <img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100">
           </div>
           <div>
             <p class="eyebrow">Central TáPronto</p>
@@ -209,6 +210,13 @@
                 <p class="muted">Da demonstração ao primeiro pedido, com origem dos cadastros.</p>
               </div>
               <div id="platformMarketingFunnel"></div>
+            </article>
+            <article class="platform-chart-card platform-outreach-card">
+              <div>
+                <h3>Prospecção automática</h3>
+                <p class="muted">Da busca no Google à resposta, com qualidade, cotas gratuitas e resultado comercial.</p>
+              </div>
+              <div id="platformOutreachMetrics"></div>
             </article>
           </section>
         </section>
@@ -882,6 +890,95 @@
           <div class="audit-list" id="auditList"></div>
         </section>
 
+        <section class="panel assisted-workspace" data-platform-section="assisted" hidden>
+          <div class="section-actions">
+            <div><p class="eyebrow">Atendimento humano</p><h2>Cadastros assistidos</h2><p class="muted">O cliente responde. A equipe TáPronto monta, revisa e publica.</p></div>
+            <button class="primary-button compact" id="assistedNewButton" type="button">Novo cadastro</button>
+          </div>
+          <div class="assisted-toolbar"><label>Pesquisar <input id="assistedSearch" type="search" placeholder="Nome, telefone ou CPF/CNPJ"></label><button class="ghost-button compact" id="assistedRefresh" type="button">Atualizar</button></div>
+          <div class="assisted-list" id="assistedList" aria-live="polite"></div>
+
+          <section class="assisted-editor" id="assistedEditor" hidden>
+            <header class="assisted-workflow-header"><div><p class="eyebrow">Cadastro em andamento</p><strong id="assistedWorkflowTitle">Novo atendimento</strong></div><span id="assistedWorkflowStatus" role="status" aria-live="polite">Preencha as informações iniciais.</span></header>
+            <ol class="assisted-question-progress" aria-label="Progresso do cadastro assistido">
+              <li data-assisted-progress="discovery"><b>1</b><span>Conhecer o negócio</span></li>
+              <li data-assisted-progress="identity"><b>2</b><span>Responsável e estabelecimento</span></li>
+              <li data-assisted-progress="operation"><b>3</b><span>Como funciona</span></li>
+              <li data-assisted-progress="menu"><b>4</b><span>Montar o cardápio</span></li>
+            </ol>
+            <form id="assistedWizard">
+              <input name="registration_id" type="hidden"><input name="expected_version" type="hidden" value="1">
+              <section class="assisted-discovery" data-assisted-panel="discovery">
+                <p class="eyebrow">Antes do cadastro</p>
+                <h3>Vamos conhecer seu negócio</h3>
+                <p class="muted">São quatro perguntas rápidas. O cliente só responde; a equipe TáPronto monta tudo.</p>
+                <div class="assisted-form-grid">
+                  <label class="assisted-wide">O que vocês vendem?<textarea name="business_story" placeholder="Ex.: pizzas, xis, porções e bebidas"></textarea></label>
+                  <label>Por onde recebem os pedidos hoje?<input name="order_channels" placeholder="WhatsApp, Instagram, telefone..."></label>
+                  <label>Qual é a maior dificuldade com os pedidos?<input name="order_pain" placeholder="Erros, demora, mensagens acumuladas..."></label>
+                  <label class="assisted-wide">Se a TáPronto montar tudo, gostaria de testar grátis por 7 dias?<select name="trial_interest"><option value="">Selecione</option><option value="yes">Sim, quero testar</option><option value="maybe">Talvez, quero entender melhor</option><option value="no">Agora não</option></select></label>
+                  <input name="organized_orders_value" type="hidden">
+                </div>
+                <div class="assisted-wizard-actions"><button class="primary-button compact" id="assistedStartRegistration" data-assisted-next="identity" type="button" hidden>Vamos deixar tudo pronto</button></div>
+              </section>
+              <section id="assistedRegistrationFields" data-assisted-panel="identity" hidden>
+                <p class="eyebrow">Etapa 2 de 4</p><h3>Responsável e estabelecimento</h3><p class="muted">Agora registre quem cuida do negócio e os dados básicos da loja.</p>
+                <div class="assisted-form-grid">
+                <label>Responsável<input name="responsible_name" required></label><label>WhatsApp<input name="phone" inputmode="tel" required></label>
+                <label>E-mail<input name="email" type="email" required></label><label>Estabelecimento<input name="establishment_name" required></label>
+                <label>CPF ou CNPJ<input name="document" inputmode="numeric" required></label><label>Cidade<input name="city"></label>
+                <label>Nicho<input name="niche" placeholder="Pizzaria, hamburgueria..."></label><label>Origem informada pelo lead<input name="declared_source" placeholder="Instagram, indicação..."></label>
+                <label>Código de atendimento<input name="tracking_code" placeholder="TP-ABC123" autocomplete="off"></label>
+                <label>WhatsApp dos pedidos<input name="whatsapp" inputmode="tel"></label><label>Endereço<input name="address"></label>
+                </div>
+                <div class="assisted-wizard-actions"><button class="ghost-button compact" data-assisted-back="discovery" type="button">Voltar</button><button class="primary-button compact" data-assisted-next="operation" type="button">Continuar</button></div>
+              </section>
+              <section data-assisted-panel="operation" hidden>
+                <p class="eyebrow">Etapa 3 de 4</p><h3>Como o negócio funciona</h3><p class="muted">Marque as opções com o cliente. Isso já deixa a loja configurada.</p>
+                <div class="assisted-form-grid">
+                <fieldset class="assisted-wide assisted-choice-group"><legend>Como atende?</legend><div class="assisted-fulfillment-options"><label class="assisted-choice"><input name="fulfillment" type="checkbox" value="delivery"><span>Delivery</span></label><label class="assisted-choice"><input name="fulfillment" type="checkbox" value="pickup"><span>Retirada</span></label><label class="assisted-choice"><input name="fulfillment" type="checkbox" value="counter"><span>Balcão</span></label></div></fieldset>
+                <fieldset class="assisted-wide assisted-choice-group"><legend>Formas de pagamento</legend><div class="assisted-payment-options"><label class="assisted-choice"><input name="payment_methods" type="checkbox" value="Pix"><span>Pix</span></label><label class="assisted-choice"><input name="payment_methods" type="checkbox" value="Dinheiro"><span>Dinheiro</span></label><label class="assisted-choice"><input name="payment_methods" type="checkbox" value="Cartão de débito"><span>Cartão de débito</span></label><label class="assisted-choice"><input name="payment_methods" type="checkbox" value="Cartão de crédito"><span>Cartão de crédito</span></label><label class="assisted-choice"><input name="payment_methods" type="checkbox" value="Pagamento online"><span>Pagamento online</span></label><label class="assisted-choice"><input name="payment_methods" type="checkbox" value="Vale refeição"><span>Vale refeição</span></label></div><label class="assisted-extra-payment">Outras formas<input name="payment_methods_extra" placeholder="PicPay, Alelo, Sodexo"></label></fieldset>
+                <fieldset class="assisted-wide assisted-hours"><legend>Funcionamento</legend><div class="assisted-business-hours-grid">
+                  <label data-day="monday"><span>Segunda</span><input name="monday_open" type="time"><input name="monday_close" type="time"><small><input name="monday_closed" type="checkbox"> Fechado</small></label>
+                  <label data-day="tuesday"><span>Terça</span><input name="tuesday_open" type="time"><input name="tuesday_close" type="time"><small><input name="tuesday_closed" type="checkbox"> Fechado</small></label>
+                  <label data-day="wednesday"><span>Quarta</span><input name="wednesday_open" type="time"><input name="wednesday_close" type="time"><small><input name="wednesday_closed" type="checkbox"> Fechado</small></label>
+                  <label data-day="thursday"><span>Quinta</span><input name="thursday_open" type="time"><input name="thursday_close" type="time"><small><input name="thursday_closed" type="checkbox"> Fechado</small></label>
+                  <label data-day="friday"><span>Sexta</span><input name="friday_open" type="time"><input name="friday_close" type="time"><small><input name="friday_closed" type="checkbox"> Fechado</small></label>
+                  <label data-day="saturday"><span>Sábado</span><input name="saturday_open" type="time"><input name="saturday_close" type="time"><small><input name="saturday_closed" type="checkbox"> Fechado</small></label>
+                  <label data-day="sunday"><span>Domingo</span><input name="sunday_open" type="time"><input name="sunday_close" type="time"><small><input name="sunday_closed" type="checkbox"> Fechado</small></label>
+                </div></fieldset>
+                <label class="assisted-wide">Bairros e taxas de entrega<textarea name="neighborhoods"></textarea></label>
+                <label class="assisted-wide">Maior dificuldade<textarea name="biggest_pain"></textarea></label>
+                </div>
+                <p class="form-message" id="assistedSaveStatus" role="status"></p>
+                <div class="assisted-wizard-actions"><button class="ghost-button compact" data-assisted-back="identity" type="button">Voltar</button><button class="primary-button compact" type="submit">Salvar e ir ao cardápio</button><button class="ghost-button compact" id="assistedClose" type="button">Fechar</button></div>
+              </section>
+            </form>
+            <section class="assisted-menu-area" data-assisted-panel="menu" hidden>
+              <div><p class="eyebrow">Etapa 4 de 4</p><h3>Montar o cardápio</h3><p class="muted">Peça o material atual. A TáPronto interpreta e você revisa antes de publicar.</p></div>
+              <label>Como o cardápio é apresentado hoje?<input name="current_menu" form="assistedWizard" placeholder="Fotos, PDF, mensagens ou outro cardápio digital"></label>
+              <div class="assisted-wizard-actions"><button class="ghost-button compact" data-assisted-back="operation" type="button">Voltar</button></div>
+              <label>Enviar cardápio atual<input id="assistedFileInput" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple></label>
+              <div id="assistedUploadProgress" class="assisted-upload-progress" aria-live="polite"></div>
+              <div class="assisted-media-zones">
+                <label>Fotos dos produtos<input id="assistedProductPhotoInput" data-file-purpose="product_photo" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+                <label>Logo da loja<input id="assistedStoreLogoInput" data-file-purpose="store_logo" type="file" accept="image/jpeg,image/png,image/webp"></label>
+                <label>Capa da loja<input id="assistedStoreCoverInput" data-file-purpose="store_cover" type="file" accept="image/jpeg,image/png,image/webp"></label>
+              </div>
+              <div id="assistedMediaReview" class="assisted-media-review" aria-live="polite"></div>
+              <label>Ou cole uma lista<textarea id="assistedMenuText" placeholder="Categoria, produto e preço"></textarea></label>
+              <label>Como combinar com o rascunho atual?<select id="assistedImportMode"><option value="replace">Substituir pelo novo cardápio</option><option value="append">Acrescentar sem apagar correções</option></select></label>
+              <div class="assisted-import-actions"><button class="ghost-button compact" id="assistedImport" type="button" disabled>Interpretar cardápio</button><button class="ghost-button compact" id="assistedImportRetry" type="button" hidden>Tentar novamente</button></div>
+              <div id="assistedImportStatus" class="assisted-import-status" role="status" aria-live="polite">Envie um arquivo ou cole uma lista para começar.</div>
+              <div class="assisted-review-tabs"><button type="button" data-assisted-review-tab="original">Original</button><button type="button" data-assisted-review-tab="interpreted">Interpretado</button></div>
+              <div class="assisted-review-grid"><article id="assistedOriginalPanel"><h3>Material original</h3><div id="assistedOriginalFiles"></div></article><article id="assistedInterpretedPanel"><h3>Cardápio interpretado</h3><div id="assistedMenuDraft"></div></article></div>
+              <p class="form-message" id="assistedReviewAlert" role="alert"></p>
+              <button class="primary-button compact" id="assistedReviewButton" type="button">Confirmar revisão obrigatória</button>
+            </section>
+            <section class="assisted-publish-box"><label><input id="assistedPublishConfirm" type="checkbox"> Revisei o cardápio e confirmo a criação da prévia</label><button class="primary-button" id="assistedPublishButton" type="button" disabled>Criar prévia para revisão</button><div id="assistedPublishResult" aria-live="polite"></div><div class="row-actions" id="assistedPreviewActions" hidden><button class="primary-button compact" id="assistedOpenPreview" type="button">Revisar no painel</button><a class="ghost-button compact" id="assistedOpenMenu" target="_blank" rel="noopener">Ver cardápio</a><button class="ghost-button compact" id="assistedConfirmPreview" type="button">Confirmar revisão da prévia</button><button class="primary-button compact" id="assistedCompleteButton" type="button" hidden>Concluir cadastro e enviar acesso</button></div><button class="ghost-button compact" id="assistedResendButton" type="button" hidden>Reenviar e-mail</button></section>
+          </section>
+        </section>
+
         <section class="panel" data-platform-section="backups" hidden>
           <div class="section-actions">
             <div>
@@ -921,7 +1018,10 @@
       </div>
     </div>
     <div class="toast" id="toast"></div>
-    <script src="/platform.js?v=20260816-approval-preview-fix"></script>
+    <script src="/platform-client-list.js?v=20260930-attention-filter"></script>
+    <script src="/platform-outreach.js?v=20261013-outreach-metrics"></script>
+    <script src="/platform.js?v=20261013-outreach-metrics"></script>
+    <script src="/platform-assisted-registration.js?v=20261001-guided-questions"></script>
   </body>
 </html>
 

@@ -25,3 +25,5 @@ artifacts/
 *.key
 *.pem
 *recovery-key*
+*.before-*
+*.backup-*

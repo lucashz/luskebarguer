@@ -77,6 +77,8 @@
   billingCheckoutPollTimer: null
 };
 
+import { changeableBillingPlans } from './plan-options.js';
+
 const ADMIN_CACHE_KEY = 'admin_profile_cache_v2';
 const ONBOARDING_COMPLETED_KEY = 'admin_onboarding_completed_v1';
 const ONBOARDING_SKIPPED_KEY = 'admin_onboarding_skipped_v1';
@@ -842,6 +844,8 @@ async function init() {
   els.reportDate.value = localDateInputValue();
   showAdminLoading();
 
+  if (await consumeSupportHandoff()) return;
+
   const cached = loadAdminCache();
   if (cached?.admin) {
     state.admin = cached.admin;
@@ -864,6 +868,27 @@ async function init() {
     els.loginCard.hidden = !setup.has_admin;
     showAuth();
   }
+}
+
+async function consumeSupportHandoff() {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const token = hash.get('support_handoff');
+  if (!token) return false;
+  try {
+    await request('/api/admin/support/handoff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+    window.location.reload();
+  } catch (error) {
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+    clearAdminCache();
+    showAuth();
+    toast(error.message || 'O acesso de suporte expirou. Volte à Central e tente novamente.');
+  }
+  return true;
 }
 
 function handleBillingReturn() {
@@ -1076,7 +1101,7 @@ async function endSupportMode() {
     clearAdminCache();
     stopOrderPolling();
     toast('Modo suporte encerrado.');
-    window.location.href = result.restored ? externalUrl(PLATFORM_BASE_URL, '/') : externalUrl(PANEL_BASE_URL, '/');
+    window.location.href = result.return_url || externalUrl(PLATFORM_BASE_URL, '/');
   } catch (error) {
     toast(error.message || 'Não foi possível encerrar o modo suporte.');
   } finally {
@@ -5856,7 +5881,7 @@ function renderPlan() {
   const plan = data.plan || {};
   const subscription = data.subscription || {};
   const pendingSubscription = data.pending_subscription || {};
-  const availablePlans = Array.isArray(data.available_plans) ? data.available_plans : [];
+  const availablePlans = changeableBillingPlans(Array.isArray(data.available_plans) ? data.available_plans : []);
   const company = data.company || {};
   const usage = data.usage || {};
   const features = data.features || [];
@@ -5864,7 +5889,7 @@ function renderPlan() {
   const availablePlanCodes = new Set(availablePlans.map((entry) => entry.code));
   const selectedPlanCode = availablePlanCodes.has(state.planSelectedCode)
     ? state.planSelectedCode
-    : (plan.code || availablePlans[0]?.code || '');
+    : (availablePlanCodes.has(plan.code) ? plan.code : availablePlans[0]?.code || '');
   const billingCycle = normalizePlanBillingCycle(state.planBillingCycle);
   const rawStatus = subscription.status || company.status || 'indefinido';
   const status = isTrialExpired(subscription) ? 'trial_expired' : rawStatus;

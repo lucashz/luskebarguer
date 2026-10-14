@@ -19,7 +19,9 @@ try {
     'backups/database.dump': 'backup',
     'artifacts/backup-email-recovery-key.txt': 'recovery-key',
     'private-uploads/customer/menu.txt': 'private',
-    '.chrome-preview/Default/History': 'browser-state'
+    '.chrome-preview/Default/History': 'browser-state',
+    'public/app.js.before-deploy': 'backup',
+    'src/lib/example.js.backup-': 'backup'
   };
 
   for (const [relativePath, content] of Object.entries(files)) {
@@ -44,7 +46,9 @@ try {
     '.env',
     'artifacts/backup-email-recovery-key.txt',
     'backups/database.dump',
-    'private-uploads/customer/menu.txt'
+    'private-uploads/customer/menu.txt',
+    'public/app.js.before-deploy',
+    'src/lib/example.js.backup-'
   ]);
   console.log('Production release manifest smoke: OK');
 } finally {

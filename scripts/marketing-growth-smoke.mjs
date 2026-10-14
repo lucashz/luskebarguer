@@ -34,7 +34,11 @@ try {
 
   const content = await pool.query(`
     select
-      count(*) filter (where channel <> 'blog' and script <> '' and caption <> '' and jsonb_array_length(scenes) > 0 and cardinality(hashtags) > 0 and jsonb_array_length(assets) > 0 and utm_url <> '') complete,
+      count(*) filter (where channel <> 'blog' and script <> '' and caption <> ''
+        and jsonb_array_length(case when jsonb_typeof(scenes) = 'array' then scenes else '[]'::jsonb end) > 0
+        and cardinality(hashtags) > 0
+        and jsonb_array_length(case when jsonb_typeof(assets) = 'array' then assets else '[]'::jsonb end) > 0
+        and utm_url <> '') complete,
       count(*) filter (where is_pinned) pinned,
       count(*) filter (where channel = 'blog' and status = 'idea') seo
     from marketing_content_items

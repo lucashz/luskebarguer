@@ -304,27 +304,49 @@ try {
   });
   assert(supportStart.data.admin?.support_mode?.active === true, 'Modo suporte nao retornou sessao ativa.');
   assert(!JSON.stringify(supportStart.data).includes('original_session_token'), 'Token original vazou no modo suporte.');
-  const supportMe = await request('/api/admin/me', { cookie: supportStart.cookie });
+  const handoffUrl = new URL(supportStart.data.redirect_url);
+  const handoffToken = new URLSearchParams(handoffUrl.hash.slice(1)).get('support_handoff');
+  assert(handoffToken, 'Modo suporte nao retornou handoff para o painel.');
+  const platformDuringSupport = await request('/api/platform/health', { cookie: superLogin.cookie });
+  assert(Array.isArray(platformDuringSupport.data.statuses), 'Inicio do suporte substituiu a sessao da Central.');
+  const supportRedeem = await request('/api/admin/support/handoff', {
+    method: 'POST',
+    body: { token: handoffToken }
+  });
+  assert(supportRedeem.cookie && supportRedeem.cookie !== superLogin.cookie, 'Handoff nao criou uma sessao separada no painel.');
+  const supportReplay = await request('/api/admin/support/handoff', {
+    method: 'POST',
+    body: { token: handoffToken },
+    allowFailure: true
+  });
+  assert(supportReplay.status === 401, 'Handoff de suporte permitiu reutilizacao.');
+  const supportMe = await request('/api/admin/me', { cookie: supportRedeem.cookie });
   assert(supportMe.data.admin?.support_mode?.active === true, 'Admin nao exibiu banner/dados do modo suporte.');
   assert(supportMe.data.admin.store_id === fixture.storeId, 'Modo suporte nao fixou a loja alvo.');
-  const supportSensitive = await request('/api/admin/users', { cookie: supportStart.cookie, allowFailure: true });
-  assert(supportSensitive.status === 403, 'Modo suporte acessou area sensivel de usuarios.');
+  const supportSensitive = await request('/api/admin/users', { cookie: supportRedeem.cookie, allowFailure: true });
+  assert(supportSensitive.status === 403, `Modo suporte acessou area sensivel de usuarios (${supportSensitive.status}).`);
   const supportEnd = await request('/api/platform/support/impersonate/end', {
     method: 'POST',
-    cookie: supportStart.cookie
+    cookie: supportRedeem.cookie
   });
-  assert(supportEnd.data.ok === true && supportEnd.data.restored === true, 'Encerrar modo suporte nao restaurou a sessao original.');
-  const restoredPlatform = await request('/api/platform/health', { cookie: supportEnd.cookie });
-  assert(Array.isArray(restoredPlatform.data.statuses), 'Sessao original nao voltou ao platform apos encerrar suporte.');
+  assert(supportEnd.data.ok === true && supportEnd.data.return_url, 'Encerrar modo suporte nao retornou para a Central.');
+  const preservedPlatform = await request('/api/platform/health', { cookie: superLogin.cookie });
+  assert(Array.isArray(preservedPlatform.data.statuses), 'Encerrar suporte invalidou a sessao original da Central.');
 
   const supportShort = await request('/api/platform/support/impersonate', {
     method: 'POST',
     cookie: superLogin.cookie,
     body: { store_id: fixture.storeId, confirmation: 'CONFIRMAR', password, ttl_seconds: 1 }
   });
+  const shortHandoffUrl = new URL(supportShort.data.redirect_url);
+  const shortHandoffToken = new URLSearchParams(shortHandoffUrl.hash.slice(1)).get('support_handoff');
   await delay(1200);
-  const expiredSupport = await request('/api/admin/me', { cookie: supportShort.cookie, allowFailure: true });
-  assert(expiredSupport.status === 401, 'Sessao de suporte expirada continuou valida.');
+  const expiredSupport = await request('/api/admin/support/handoff', {
+    method: 'POST',
+    body: { token: shortHandoffToken },
+    allowFailure: true
+  });
+  assert(expiredSupport.status === 401, 'Handoff de suporte expirado continuou valido.');
 
   const suspendNoPassword = await request(`/api/platform/companies/${fixture.companyId}/suspend`, {
     method: 'POST',

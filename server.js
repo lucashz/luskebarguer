@@ -1,4 +1,4 @@
-﻿import { createServer } from 'node:http';
+import { createServer } from 'node:http';
 import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,9 +20,25 @@ import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, syncPublicationMetrics, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
+import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, shouldAutomaticallyReplyToLead, TERMINAL_SALES_STAGES } from './src/lib/sales-automation.js';
+import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, sendEvolutionV2SalesText, setEvolutionV2SalesWebhook } from './src/lib/evolution-v2-sales.js';
+import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions.js';
+import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
+import { loadPlatformOutreachMetrics } from './src/lib/platform-outreach.js';
+import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
+import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
+import { redactSensitive } from './src/lib/security-redaction.js';
+import { assertAuthenticatedOrigin, securityHeaders } from './src/lib/security-http.js';
+import { createAssistedRegistration, getAssistedRegistration, listAssistedRegistrations, updateAssistedRegistration } from './src/lib/assisted-registration-store.js';
+import { publicAssistedRegistration } from './src/lib/assisted-registration.js';
+import { extractAssistedMenu } from './src/lib/assisted-menu-import.js';
+import { storeAssistedFile } from './src/lib/assisted-registration-files.js';
+import { applyMenuDraftPatch, reviewMenuDraft } from './src/lib/assisted-menu-review.js';
+import { publishAssistedRegistration } from './src/lib/assisted-registration-publish.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
+const IS_MAIN_MODULE = process.argv[1] ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false;
 
 loadEnv(path.join(__dirname, '.env'));
 
@@ -30,6 +46,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const UPLOAD_DIR = path.resolve(__dirname, process.env.UPLOAD_DIR || 'uploads');
+const ASSISTED_UPLOAD_DIR = path.resolve(__dirname, process.env.ASSISTED_UPLOAD_DIR || 'private-uploads/assisted');
 const MARKETING_MEDIA_DIR = path.resolve(process.env.MARKETING_MEDIA_DIR || path.join(__dirname, '..', 'tapronto-marketing'));
 const MARKETING_MEDIA_MAX_BYTES = Math.max(100 * 1024 * 1024, Number(process.env.MARKETING_MEDIA_MAX_BYTES || 2 * 1024 * 1024 * 1024));
 const BACKUP_DIR = path.resolve(__dirname, process.env.BACKUP_DIR || 'backups');
@@ -43,12 +60,15 @@ const CUSTOMER_COOKIE = 'customer_session';
 const MARKETING_ATTRIBUTION_COOKIE = 'tapronto_attribution';
 const INSTAGRAM_PROFILE_DESTINATION = 'https://taprontomenu.com.br/?utm_source=instagram&utm_medium=organic&utm_campaign=bio&utm_content=profile_link';
 const FIRST_CUSTOMERS_TRIAL_CAMPAIGN = 'primeiros_clientes';
+const REGIONAL_PARTNERS_TRIAL_CAMPAIGN = 'parceiros_regiao';
 const DEFAULT_TRIAL_DAYS = 14;
 const FIRST_CUSTOMERS_TRIAL_DAYS = 21;
+const REGIONAL_PARTNERS_TRIAL_DAYS = 30;
 const SESSION_MAX_AGE_DAYS = clampNumber(Number(process.env.SESSION_MAX_AGE_DAYS || 30), 1, 90);
 const SESSION_MAX_AGE = 60 * 60 * 24 * SESSION_MAX_AGE_DAYS;
 const SESSION_RENEW_MS = 1000 * 60 * 60 * 24 * 30;
 const COOKIE_SECURE = parseBoolean(process.env.COOKIE_SECURE, false);
+const APP_ENV = cleanText(process.env.APP_ENV || process.env.NODE_ENV || '').toLowerCase();
 const PASSWORD_MIN_LENGTH = clampNumber(Number(process.env.PASSWORD_MIN_LENGTH || 8), 8, 72);
 const ADMIN_SETUP_ENABLED = parseBoolean(process.env.ADMIN_SETUP_ENABLED, false);
 const ADMIN_2FA_REQUIRED = parseBoolean(process.env.ADMIN_2FA_REQUIRED, true);
@@ -118,6 +138,9 @@ const server = createServer(async (req, res) => {
   let pathname = '/';
   const originalWriteHead = res.writeHead.bind(res);
   res.writeHead = (...args) => {
+    for (const [key, value] of Object.entries(securityHeaders({ production: APP_ENV === 'production' }))) {
+      if (!res.hasHeader(key)) res.setHeader(key, value);
+    }
     if (!res.headersSent && !res.hasHeader('Server-Timing')) {
       res.setHeader('Server-Timing', `app;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`);
     }
@@ -145,6 +168,36 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/lemangiare\/?$/i.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=lemangiare',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/garden\/?$/i.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=garden_hamburgueria',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
+    if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/bavarium\/?$/i.test(url.pathname)) {
+      res.writeHead(302, {
+        Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=bavarium',
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);
       return;
@@ -158,6 +211,7 @@ const server = createServer(async (req, res) => {
     await serveStatic(req, res, url.pathname, req.headers['x-forwarded-host'] || req.headers.host, url.search);
   } catch (error) {
     logServerError(error, req);
+    if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
     const detail = error.detail && typeof error.detail === 'object' ? error.detail : null;
     json(res, error.status || 500, {
       error: error.message || 'Erro interno do servidor.',
@@ -173,14 +227,14 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
+if (IS_MAIN_MODULE) server.listen(PORT, HOST, () => {
   console.log(`Servidor Node iniciado em http://${HOST}:${PORT}`);
 });
 
-setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
-setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
+if (IS_MAIN_MODULE) setInterval(cleanExpiredSessions, 1000 * 60 * 60 * 6).unref?.();
+if (IS_MAIN_MODULE) setTimeout(cleanExpiredSessions, 1000 * 20).unref?.();
 const MARKETING_AUTOMATION_ENABLED = parseBoolean(process.env.MARKETING_AUTOMATION_ENABLED, true);
-if (MARKETING_AUTOMATION_ENABLED) {
+if (IS_MAIN_MODULE && MARKETING_AUTOMATION_ENABLED) {
   setInterval(runMarketingLifecycleAutomations, 1000 * 60 * 60 * 6).unref?.();
   setTimeout(runMarketingLifecycleAutomations, 1000 * 60).unref?.();
   setInterval(runMarketingWeeklyReportAutomation, 1000 * 60 * 60 * 6).unref?.();
@@ -203,7 +257,13 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  enforceRateLimit(req, method, url.pathname);
+  const persistentRateRule = securityRateRule(method, url.pathname);
+  if (persistentRateRule) {
+    const body = await readJson(req);
+    await enforceSecurityRateLimit({ req, rule: persistentRateRule, identity: securityRateIdentity(persistentRateRule, body) });
+  } else {
+    enforceRateLimit(req, method, url.pathname);
+  }
   enforceAuthenticatedRequestOrigin(req, method);
 
   if (method === 'GET' && url.pathname === '/api/portal/plans') {
@@ -258,7 +318,7 @@ async function handleApi(req, res, url) {
       return;
     }
     if (method === 'POST') {
-      const result = await activateAdminAccount(req, portalActivationMatch[1]);
+      const result = await activateAdminAccount(req, portalActivationMatch[1], await readJson(req));
       json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
       return;
     }
@@ -298,19 +358,23 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && (url.pathname === '/api/orders' || url.pathname === '/api/orders/checkout')) {
     const context = await resolveTenant(req, url);
-    json(res, 201, await createOrder(req, await readJson(req), { storeId: context.store.id, db: context.db, tenant: context.tenant }));
+    const result = await createOrder(req, await readJson(req), { storeId: context.store.id, db: context.db, tenant: context.tenant });
+    const { paymentAccess, ...body } = result;
+    json(res, 201, body, paymentAccess ? { 'Set-Cookie': paymentAccessCookie(paymentAccess.code, paymentAccess.token) } : {});
     return;
   }
 
   if (method === 'GET' && url.pathname === '/api/payments/order') {
     const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
-    json(res, 200, await publicPaymentStatus(url.searchParams.get('code') || url.searchParams.get('order'), { db: context.db, tenant: context.tenant, accessToken: url.searchParams.get('token') || '' }));
+    const code = url.searchParams.get('code') || url.searchParams.get('order');
+    json(res, 200, await publicPaymentStatus(code, { db: context.db, tenant: context.tenant, accessToken: paymentAccessFromRequest(req, code) }));
     return;
   }
 
   if (method === 'POST' && url.pathname === '/api/payments/regenerate-pix') {
     const context = await resolveTenant(req, url).catch(() => ({ db: dbRequest, tenant: null }));
-    json(res, 200, await regeneratePixPayment(await readJson(req), { db: context.db, tenant: context.tenant }));
+    const data = await readJson(req);
+    json(res, 200, await regeneratePixPayment(data, { db: context.db, tenant: context.tenant, accessToken: paymentAccessFromRequest(req, data.code || data.order) }));
     return;
   }
 
@@ -457,6 +521,12 @@ async function handleApi(req, res, url) {
       after_data: { email: result.body?.admin?.email || null }
     });
     json(res, 200, result.body, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.sessionId) });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/admin/support/handoff') {
+    const result = await consumePlatformSupportHandoff(await readJson(req));
+    json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.token) });
     return;
   }
 
@@ -706,6 +776,204 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, await listPlatformCompanies(url.searchParams));
+    return;
+  }
+
+  if (url.pathname === '/api/platform/assisted-registrations' && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    const registrations = await listAssistedRegistrations(getLocalPool(), Object.fromEntries(url.searchParams));
+    json(res, 200, { registrations });
+    return;
+  }
+
+  if (url.pathname === '/api/platform/assisted-registrations-metrics' && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    const [registrations, events, subscriptions] = await Promise.all([
+      getLocalPool().query("select id,status,answers,attribution,email_status,published_at,activated_at,company_id from assisted_registrations where status <> 'cancelled'"),
+      getLocalPool().query("select id,event_name,visitor_key,company_id,attribution from marketing_events where event_name='whatsapp_click' order by created_at desc limit 10000"),
+      getLocalPool().query("select company_id,status,current_period_starts_at as trial_started_at,created_at from company_subscriptions where company_id in (select company_id from assisted_registrations where company_id is not null)")
+    ]);
+    json(res, 200, { metrics: assistedRegistrationMetrics(registrations.rows, events.rows, subscriptions.rows) });
+    return;
+  }
+
+  if (url.pathname === '/api/platform/assisted-registrations' && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    try {
+      const registration = await createAssistedRegistration(getLocalPool(), await readJson(req), admin);
+      await audit('platform.assisted_registration.create', { req, actor_admin_id: admin.id, entity_type: 'assisted_registration', entity_id: registration.id, after_data: { status: registration.status } });
+      json(res, 201, { registration });
+    } catch (error) {
+      if (error.status === 409) return json(res, 409, { error: error.message, duplicates: error.duplicates || [] });
+      throw error;
+    }
+    return;
+  }
+
+  const assistedRegistrationMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})$/i);
+  const assistedFilesMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/files$/i);
+  const assistedFileMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/files\/([0-9a-f-]{36})$/i);
+  if (assistedFilesMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFilesMatch[1], 'cadastro');
+    const result = await getLocalPool().query('select id,original_name,mime_type,size_bytes,status,created_at from assisted_registration_files where registration_id=$1 order by created_at', [id]);
+    json(res, 200, { files: result.rows }); return;
+  }
+  if (assistedFileMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFileMatch[1], 'cadastro'); const fileId = cleanUuid(assistedFileMatch[2], 'arquivo');
+    const file = (await getLocalPool().query('select original_name,mime_type,storage_key from assisted_registration_files where id=$1 and registration_id=$2 limit 1', [fileId,id])).rows[0];
+    if (!file) return json(res, 404, { error: 'Arquivo não encontrado.' });
+    const content = await readFile(path.join(ASSISTED_UPLOAD_DIR, file.storage_key));
+    res.writeHead(200, { 'Content-Type': file.mime_type, 'Content-Length': content.length, 'Content-Disposition': `inline; filename="${String(file.original_name).replace(/["\r\n]/g,'_')}"`, 'Cache-Control': 'private, no-store' }); res.end(content); return;
+  }
+  if (assistedFileMatch && method === 'DELETE') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFileMatch[1], 'cadastro'); const fileId = cleanUuid(assistedFileMatch[2], 'arquivo');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Arquivo de cadastro publicado não pode ser removido.' });
+    const file = (await getLocalPool().query('delete from assisted_registration_files where id=$1 and registration_id=$2 returning storage_key', [fileId,id])).rows[0];
+    if (!file) return json(res, 404, { error: 'Arquivo não encontrado.' });
+    await unlink(path.join(ASSISTED_UPLOAD_DIR, file.storage_key)).catch(()=>{}); json(res, 200, { ok:true }); return;
+  }
+  if (assistedFilesMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedFilesMatch[1], 'cadastro');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Este cadastro não aceita novos arquivos.' });
+    const body = await readJson(req);
+    const stored = await storeAssistedFile({ directory: ASSISTED_UPLOAD_DIR, name: body.name, mime_type: body.mime_type, buffer: Buffer.from(String(body.data_base64 || ''), 'base64') });
+    const result = await getLocalPool().query(`insert into assisted_registration_files (registration_id,original_name,safe_name,mime_type,size_bytes,storage_key,checksum_sha256) values ($1,$2,$3,$4,$5,$6,$7) returning id,original_name,mime_type,size_bytes,status,created_at`, [id, stored.original_name, stored.safe_name, stored.mime_type, stored.size_bytes, stored.storage_key, stored.checksum_sha256]);
+    json(res, 201, { file: result.rows[0] }); return;
+  }
+
+  const assistedImportMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/import$/i);
+  if (assistedImportMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedImportMatch[1], 'cadastro');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Cadastro publicado não pode ser reimportado.' });
+    const body = await readJson(req);
+    const storedFiles = await getLocalPool().query('select * from assisted_registration_files where registration_id=$1 and status=$2 order by created_at', [id, 'uploaded']);
+    const files = await Promise.all(storedFiles.rows.map(async (file) => ({ ...file, buffer: await readFile(path.join(ASSISTED_UPLOAD_DIR, file.storage_key)) })));
+    const pastedText = String(body.text || '').trim();
+    if (pastedText.length > 100000) return json(res, 413, { error: 'A lista colada excede 100 mil caracteres.' });
+    const draft = await extractAssistedMenu({ files, text: pastedText, aiRequest: requestAssistedMenuVision, normalizeImage: normalizeAssistedMenuImage });
+    const saved = await getLocalPool().query(`insert into assisted_menu_drafts (registration_id,content,validation) values ($1,$2::jsonb,$3::jsonb) on conflict (registration_id) do update set content=excluded.content,validation=excluded.validation,version=assisted_menu_drafts.version+1,reviewed_at=null,reviewed_by=null,reviewed_hash=null,updated_at=now() returning id,registration_id,content,validation,version,reviewed_at,updated_at`, [id, JSON.stringify(draft), JSON.stringify({ needs_review: draft.categories.some((group) => group.items.some((item) => item.needs_review)) })]);
+    const updated = (await getLocalPool().query("update assisted_registrations set status='reviewing_menu',updated_at=now(),version=version+1 where id=$1 returning *", [id])).rows[0];
+    json(res, 200, { menu_draft: saved.rows[0], registration: publicAssistedRegistration(updated) }); return;
+  }
+
+  const assistedDraftMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/menu-draft$/i);
+  if (assistedDraftMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedDraftMatch[1], 'cadastro');
+    if (!(await getAssistedRegistration(getLocalPool(), id))) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    const result = await getLocalPool().query('select id,registration_id,content,validation,version,reviewed_at,updated_at from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
+    json(res, 200, { menu_draft: result.rows[0] || null }); return;
+  }
+  if (assistedDraftMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedDraftMatch[1], 'cadastro');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (['published', 'activated', 'cancelled'].includes(registration.status)) return json(res, 409, { error: 'Cadastro publicado não pode ser editado.' });
+    const current = await getLocalPool().query('select * from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
+    if (!current.rows[0]) return json(res, 404, { error: 'Rascunho de cardápio não encontrado.' });
+    const body = await readJson(req);
+    let content;
+    try { content = applyMenuDraftPatch({ ...current.rows[0].content, version: current.rows[0].version }, body); }
+    catch (error) { if (error.status === 409) return json(res, 409, { error: error.message }); throw error; }
+    const saved = await getLocalPool().query(`update assisted_menu_drafts set content=$3::jsonb,version=version+1,reviewed_at=null,reviewed_by=null,reviewed_hash=null,updated_at=now() where registration_id=$1 and version=$2 returning id,registration_id,content,validation,version,reviewed_at,updated_at`, [id, body.expected_version, JSON.stringify({ ...content, version: undefined })]);
+    if (!saved.rows[0]) return json(res, 409, { error: 'Este cardápio foi alterado em outra tela.' });
+    json(res, 200, { menu_draft: saved.rows[0] }); return;
+  }
+
+  const assistedReviewMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/menu-draft\/review$/i);
+  if (assistedReviewMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedReviewMatch[1], 'cadastro');
+    const registration = await getAssistedRegistration(getLocalPool(), id);
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    if (!['reviewing_menu', 'ready_to_publish'].includes(registration.status)) return json(res, 409, { error: 'Este cadastro não está em revisão.' });
+    const body = await readJson(req);
+    const current = await getLocalPool().query('select * from assisted_menu_drafts where registration_id=$1 limit 1', [id]);
+    if (!current.rows[0]) return json(res, 404, { error: 'Rascunho de cardápio não encontrado.' });
+    if (Number(body.expected_version) !== Number(current.rows[0].version)) return json(res, 409, { error: 'Este cardápio foi alterado em outra tela.' });
+    const reviewed = reviewMenuDraft({ ...current.rows[0].content, version: current.rows[0].version }, admin);
+    const saved = await withLocalTransaction(async (db) => {
+      const [menu] = await db('PATCH', 'assisted_menu_drafts', { registration_id: `eq.${id}`, version: `eq.${current.rows[0].version}` }, { reviewed_at: reviewed.reviewed_at, reviewed_by: reviewed.reviewed_by, reviewed_hash: reviewed.reviewed_hash, updated_at: reviewed.reviewed_at });
+      if (!menu) throw Object.assign(new Error('Este cardápio foi alterado em outra tela.'), { status: 409 });
+      await db('PATCH', 'assisted_registrations', { id: `eq.${id}` }, { status: 'ready_to_publish', updated_at: reviewed.reviewed_at });
+      return menu;
+    });
+    json(res, 200, { menu_draft: { id: saved.id, registration_id: saved.registration_id, content: saved.content, version: saved.version, reviewed_at: saved.reviewed_at, reviewed_hash: saved.reviewed_hash }, status: 'ready_to_publish' }); return;
+  }
+  const assistedPublishMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/publish$/i);
+  if (assistedPublishMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const body = await readJson(req);
+    if (body.confirm !== true) return json(res, 422, { error: 'Confirme a revisão antes de publicar.' });
+    const result = await publishAssistedRegistration(getLocalPool(), cleanUuid(assistedPublishMatch[1], 'cadastro'), admin);
+    let emailStatus = result.registration.email_status;
+    if (result.activation.token) {
+      try {
+        await sendAssistedActivationEmail(req, { admin: { id: result.activation.admin_id, name: result.activation.name, email: result.activation.email }, company: result.company, store: result.store, token: result.activation.token, expiresAt: result.activation.expires_at });
+        emailStatus = 'sent';
+      } catch (error) { emailStatus = 'failed'; }
+      await getLocalPool().query('update assisted_registrations set email_status=$2,updated_at=now() where id=$1', [result.registration.id, emailStatus]);
+    }
+    json(res, 200, { ...result, activation: { admin_id: result.activation.admin_id, email: result.activation.email }, registration: { ...result.registration, email_status: emailStatus } }); return;
+  }
+  const assistedResendMatch = url.pathname.match(/^\/api\/platform\/assisted-registrations\/([0-9a-f-]{36})\/resend-activation$/i);
+  if (assistedResendMatch && method === 'POST') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage'); if (!admin) return;
+    const id = cleanUuid(assistedResendMatch[1], 'cadastro');
+    const token = randomBytes(32).toString('hex'); const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    const client = await getLocalPool().connect(); let registration;
+    try {
+      await client.query('begin');
+      registration = (await client.query(`select ar.*,au.name admin_name,au.email admin_email,c.name company_name,s.name store_name,s.slug store_slug,s.public_url from assisted_registrations ar join admin_users au on au.id=ar.admin_id join companies c on c.id=ar.company_id join stores s on s.id=ar.store_id where ar.id=$1 for update`, [id])).rows[0];
+      if (!registration) throw httpError(404, 'Cadastro assistido não encontrado.');
+      if (registration.status !== 'published') throw httpError(409, 'Esta conta já foi ativada ou não está pronta para reenvio.');
+      await client.query("update admin_activation_tokens set status='cancelled' where admin_user_id=$1 and status='pending'", [registration.admin_id]);
+      await client.query("insert into admin_activation_tokens (admin_user_id,token_hash,status,expires_at) values ($1,$2,'pending',$3)", [registration.admin_id, hashAdminActivationToken(token), expiresAt]);
+      await client.query('commit');
+    } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+    finally { client.release(); }
+    let emailStatus = 'sent';
+    try { await sendAssistedActivationEmail(req, { admin: { id: registration.admin_id, name: registration.admin_name, email: registration.admin_email }, company: { id: registration.company_id, name: registration.company_name }, store: { id: registration.store_id, name: registration.store_name, slug: registration.store_slug, public_url: registration.public_url }, token, expiresAt }); }
+    catch { emailStatus = 'failed'; }
+    await getLocalPool().query('update assisted_registrations set email_status=$2,updated_at=now() where id=$1', [id, emailStatus]);
+    json(res, 200, { ok: true, email_status: emailStatus }); return;
+  }
+  if (assistedRegistrationMatch && method === 'GET') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    const registration = await getAssistedRegistration(getLocalPool(), cleanUuid(assistedRegistrationMatch[1], 'cadastro'));
+    if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+    json(res, 200, { registration });
+    return;
+  }
+
+  if (assistedRegistrationMatch && method === 'PATCH') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.companies.manage');
+    if (!admin) return;
+    try {
+      const registration = await updateAssistedRegistration(getLocalPool(), cleanUuid(assistedRegistrationMatch[1], 'cadastro'), await readJson(req), admin);
+      if (!registration) return json(res, 404, { error: 'Cadastro assistido não encontrado.' });
+      await audit('platform.assisted_registration.update', { req, actor_admin_id: admin.id, entity_type: 'assisted_registration', entity_id: registration.id, after_data: { status: registration.status, version: registration.version } });
+      json(res, 200, { registration });
+    } catch (error) {
+      if (error.status === 409) return json(res, 409, { error: error.message, duplicates: error.duplicates || [] });
+      throw error;
+    }
     return;
   }
 
@@ -1350,7 +1618,12 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.services.manage');
     if (!admin) return;
     const result = await startPlatformSupportImpersonation(req, admin, await readJson(req));
-    json(res, 200, { ok: true, admin: publicAdmin(result.admin), expires_at: result.expires_at }, { 'Set-Cookie': sessionCookie(ADMIN_COOKIE, result.token) });
+    json(res, 200, {
+      ok: true,
+      admin: publicAdmin(result.admin),
+      expires_at: result.expires_at,
+      redirect_url: `${absolutePanelUrl('/')}#support_handoff=${encodeURIComponent(result.token)}`
+    });
     return;
   }
 
@@ -1358,8 +1631,7 @@ async function handleApi(req, res, url) {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
     const result = await endPlatformSupportImpersonation(req, admin);
-    const headers = { 'Set-Cookie': result.restore_token ? sessionCookie(ADMIN_COOKIE, result.restore_token) : clearCookie(ADMIN_COOKIE) };
-    json(res, 200, { ok: true, restored: Boolean(result.restore_token) }, headers);
+    json(res, 200, { ok: true, return_url: absolutePlatformUrl('/') }, { 'Set-Cookie': clearCookie(ADMIN_COOKIE) });
     return;
   }
 
@@ -2443,19 +2715,14 @@ async function loginAdmin(data) {
   });
 
   const admin = rows[0];
-  if (!admin) {
-    throw httpError(404, 'Não existe uma conta administrativa com este e-mail.');
-  }
+  const passwordValid = verifyPassword(password, passwordHashForVerification(admin));
+  if (!admin || !passwordValid) throw invalidCredentialError(httpError);
   if (admin.is_active === false) {
     const pendingActivation = await hasPendingAdminActivation(admin.id).catch(() => false);
     throw httpError(403, pendingActivation
       ? 'Sua conta ainda não foi ativada. Confira seu e-mail e clique no link de ativação. Verifique também spam, lixo eletrônico e a aba Promoções.'
       : 'Esta conta administrativa está desativada.');
   }
-  if (!verifyPassword(password, admin.password_hash)) {
-    throw httpError(401, 'Senha incorreta.');
-  }
-
   if (ADMIN_2FA_REQUIRED && normalizeAdminRole(admin.role) === 'superadmin') {
     const challenge = await createAdminTwoFactorChallenge(admin);
     return { requiresTwoFactor: true, adminId: admin.id, email: admin.email, ...challenge };
@@ -2561,7 +2828,7 @@ async function requestAdminPasswordRecovery(req, data = {}) {
         severity: 'warning',
         after_data: { email: maskEmailOrToken(email), message: error.message || 'Falha ao enviar recuperação.' }
       });
-      throw httpError(502, 'Não foi possível enviar o e-mail de recuperação. Verifique a configuração SMTP.');
+      return null;
     });
     await audit('admin.password_recovery.request', {
       req,
@@ -2632,7 +2899,7 @@ async function resetAdminPassword(req, token, data = {}) {
   }, {
     status: 'cancelled'
   }, ['Prefer: return=minimal']).catch(() => {});
-  clearSessionCacheByOwner('admin', admin.id);
+  await deleteOwnerSessions('admin', admin.id);
   await audit('admin.password_recovery.reset', {
     req,
     actor_admin_id: admin.id,
@@ -2931,7 +3198,8 @@ async function updateAdminUser(id, data, session) {
 
   const [updated] = await dbRequest('PATCH', 'admin_users', { id: `eq.${id}` }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Conta admin não encontrada.');
-  clearSessionCacheByOwner('admin', id);
+  if (payload.password_hash || payload.is_active === false) await deleteOwnerSessions('admin', id);
+  else clearSessionCacheByOwner('admin', id);
   clearAdminStoreAccessCache(id);
   clearAdminUsersCache();
   return publicAdmin(updated);
@@ -3006,7 +3274,7 @@ async function changeAdminPassword(session, data) {
   await dbRequest('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=representation']);
-  clearSessionCacheByOwner('admin', session.id);
+  await deleteOwnerSessions('admin', session.id);
   clearAdminUsersCache();
 }
 
@@ -3191,7 +3459,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
   const [companies, features] = await Promise.all([
     dbRequest('GET', 'companies', {
       select: '*',
-      order: 'created_at.desc',
+      order: 'name.asc',
       limit: String(perPage),
       offset: String(offset)
     }),
@@ -3246,7 +3514,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
       limit: '10000'
     }).catch(() => []),
     dbRequest('GET', 'menu_items', {
-      select: 'id,store_id,is_active',
+      select: 'id,store_id,is_available',
       store_id: storeFilter,
       limit: '10000'
     }).catch(() => []),
@@ -3347,7 +3615,7 @@ async function listPlatformCompanies(params = new URLSearchParams()) {
           last_order_at: lastOrder?.created_at || null,
           last_access_at: lastAccessAt,
           products_count: companyProducts.length,
-          active_products_count: companyProducts.filter((item) => item.is_active !== false).length,
+          active_products_count: companyProducts.filter((item) => item.is_available !== false).length,
           stores_without_whatsapp_count: companyStores.filter((store) => !settingsByStore.get(store.id)?.whatsapp_number).length,
           incomplete_onboarding_count: companyStores.filter((store) => settingsByStore.get(store.id)?.onboarding_completed === false).length
         }
@@ -3857,27 +4125,28 @@ async function platformCommercialSummary() {
     platformBackupStatus().catch(() => ({ status: 'unknown' })),
     listOperationalLogs(thirtyDaysAgo).catch(() => [])
   ]);
-  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
-  const todayOrders = orders.filter((order) => new Date(order.created_at) >= todayStart && order.status !== 'cancelled');
-  const monthOrders = orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
+  const metricData = filterPlatformMetricsData({ companies, stores, subscriptions, subscriptionEvents, orders, settings, products });
+  const context = platformAnalyticsContext({ ...metricData, plans });
+  const todayOrders = metricData.orders.filter((order) => new Date(order.created_at) >= todayStart && order.status !== 'cancelled');
+  const monthOrders = metricData.orders.filter((order) => new Date(order.created_at) >= monthStart && order.status !== 'cancelled');
   const activeStatuses = new Set(['active']);
   const trialStatuses = new Set(['trial']);
   const delinquentStatuses = new Set(['payment_pending', 'grace_period', 'past_due']);
   const churnStatuses = new Set(['cancelled', 'archived']);
   const suspendedStatuses = new Set(['suspended']);
-  const alerts = platformCommercialAlerts(companies, stores, context, { backup, operationalLogs });
+  const alerts = platformCommercialAlerts(metricData.companies, metricData.stores, context, { backup, operationalLogs });
   const delayedBackups = alerts.filter((alert) => alert.type === 'backup').length;
   const webhookErrors = alerts.filter((alert) => alert.type === 'webhook').length;
   const trialsEnding = alerts.filter((alert) => alert.type === 'trial').length;
   const revenueToday = roundMoney(todayOrders.reduce((sum, order) => sum + moneyNumber(order.total), 0));
-  const mrrEstimated = platformEstimatedMrr(companies, context.subscriptionByCompany, context.planById);
+  const mrrEstimated = platformEstimatedMrr(metricData.companies, context.subscriptionByCompany, context.planById);
   const cards = {
-    active_clients: companies.filter((company) => activeStatuses.has(company.status)).length,
-    trial_clients: companies.filter((company) => trialStatuses.has(company.status)).length,
-    delinquent_clients: companies.filter((company) => delinquentStatuses.has(company.status)).length,
-    suspended_clients: companies.filter((company) => suspendedStatuses.has(company.status)).length,
-    published_stores: stores.filter((store) => store.is_active !== false).length,
-    unpublished_stores: stores.filter((store) => store.is_active === false).length,
+    active_clients: metricData.companies.filter((company) => activeStatuses.has(company.status)).length,
+    trial_clients: metricData.companies.filter((company) => trialStatuses.has(company.status)).length,
+    delinquent_clients: metricData.companies.filter((company) => delinquentStatuses.has(company.status)).length,
+    suspended_clients: metricData.companies.filter((company) => suspendedStatuses.has(company.status)).length,
+    published_stores: metricData.stores.filter((store) => store.is_active !== false).length,
+    unpublished_stores: metricData.stores.filter((store) => store.is_active === false).length,
     orders_today: todayOrders.length,
     revenue_today: revenueToday,
     revenue_today_cents: moneyToCents(revenueToday),
@@ -3886,20 +4155,20 @@ async function platformCommercialSummary() {
     trials_ending: trialsEnding,
     webhook_errors: webhookErrors,
     delayed_backups: delayedBackups,
-    churn_clients: companies.filter((company) => churnStatuses.has(company.status)).length,
+    churn_clients: metricData.companies.filter((company) => churnStatuses.has(company.status)).length,
     generated_without_nan: true
   };
   return {
     generated_at: new Date().toISOString(),
     cards,
-    billing: platformBillingMetrics({ companies, subscriptions, plans, subscriptionEvents, monthOrders }),
+    billing: platformBillingMetrics({ companies: metricData.companies, subscriptions: metricData.subscriptions, plans, subscriptionEvents: metricData.subscriptionEvents, monthOrders }),
     alerts
   };
 }
 
 async function platformCommercialAnalytics(params = new URLSearchParams()) {
   const period = platformAnalyticsPeriod(params.get?.('period') || '30d');
-  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents] = await Promise.all([
+  const [companies, stores, subscriptions, plans, orders, settings, subscriptionEvents, products, accessEvents, marketingEvents, assistedRegistrations, outreach] = await Promise.all([
     dbRequest('GET', 'companies', { select: '*', limit: '1000' }),
     dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
     dbRequest('GET', 'company_subscriptions', { select: '*', order: 'created_at.desc', limit: '1000' }),
@@ -3931,30 +4200,41 @@ async function platformCommercialAnalytics(params = new URLSearchParams()) {
       select: 'id,company_id,store_id,event_name,visitor_key,attribution,properties,created_at',
       created_at: `gte.${period.since.toISOString()}`,
       limit: '10000'
-    }).catch(() => [])
+    }).catch(() => []),
+    dbRequest('GET', 'assisted_registrations', {
+      select: 'id,status,company_id,attribution,created_at',
+      created_at: `gte.${period.since.toISOString()}`,
+      limit: '2000'
+    }).catch(() => []),
+    loadPlatformOutreachMetrics({ dbRequest, period: { ...period, until: period.end } })
   ]);
-  const context = platformAnalyticsContext({ companies, stores, subscriptions, plans, orders, settings, products });
-  const revenue = platformRevenueSnapshot({ companies, subscriptions, plans, orders, period });
-  const conversion = platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period });
+  const metricData = filterPlatformMetricsData({ companies, stores, subscriptions, subscriptionEvents, orders, settings, products, accessEvents, marketingEvents });
+  const context = platformAnalyticsContext({ ...metricData, plans });
+  const revenue = platformRevenueSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, plans, orders: metricData.orders, period });
+  const conversion = platformConversionSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, subscriptionEvents: metricData.subscriptionEvents, period });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
-    daily: platformDailySeries(orders, period),
-    ranking: platformStoreRanking(orders, context.storeById).slice(0, 8),
-    by_payment: platformGroupOrders(orders.filter((order) => order.status !== 'cancelled'), 'payment_method'),
-    by_status: platformGroupOrders(orders, 'status'),
-    company_metrics: platformCompanyMetrics(companies, context),
-    comparison: platformAnalyticsComparison(orders, period),
+    daily: platformDailySeries(metricData.orders, period),
+    ranking: platformStoreRanking(metricData.orders, context.storeById).slice(0, 8),
+    by_payment: platformGroupOrders(metricData.orders.filter((order) => order.status !== 'cancelled'), 'payment_method'),
+    by_status: platformGroupOrders(metricData.orders, 'status'),
+    company_metrics: platformCompanyMetrics(metricData.companies, context),
+    comparison: platformAnalyticsComparison(metricData.orders, period),
     revenue,
     conversion,
-    new_clients_daily: platformNewClientsDaily(companies, period),
+    new_clients_daily: platformNewClientsDaily(metricData.companies, period),
     mrr_by_plan: revenue.mrr_by_plan,
-    marketing: platformMarketingFunnelSnapshot(marketingEvents, subscriptionEvents),
-    access: platformAccessSnapshot(accessEvents, period, context.storeById)
+    marketing: platformMarketingFunnelSnapshot(metricData.marketingEvents, metricData.subscriptionEvents, {
+      assistedRegistrations,
+      subscriptions: metricData.subscriptions
+    }),
+    access: platformAccessSnapshot(metricData.accessEvents, period, context.storeById),
+    outreach
   };
 }
 
-function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
+function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = [], options = {}) {
   const names = ['demo_started', 'signup_started', 'signup_completed', 'first_product_created', 'menu_published', 'first_order_received'];
   const eventCompanies = (name) => new Set(events.filter((event) => event.event_name === name).map((event) => event.company_id || event.visitor_key || event.id));
   const counts = Object.fromEntries(names.map((name) => [name, eventCompanies(name).size]));
@@ -3969,6 +4249,7 @@ function platformMarketingFunnelSnapshot(events = [], subscriptionEvents = []) {
   const rate = (part, total) => total ? Number(((part / total) * 100).toFixed(1)) : 0;
   return {
     stages: counts,
+    instagram_paid: instagramPaidFunnel(events, options),
     rates: {
       signup_to_publish: rate(counts.menu_published, counts.signup_completed),
       publish_to_first_order: rate(counts.first_order_received, counts.menu_published),
@@ -4044,10 +4325,11 @@ async function platformExecutiveRevenue(params = new URLSearchParams()) {
       limit: '8000'
     }).catch(() => [])
   ]);
+  const metricData = filterPlatformMetricsData({ companies, subscriptions, orders });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
-    ...platformRevenueSnapshot({ companies, subscriptions, plans, orders, period })
+    ...platformRevenueSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, plans, orders: metricData.orders, period })
   };
 }
 
@@ -4062,10 +4344,11 @@ async function platformExecutiveConversion(params = new URLSearchParams()) {
       limit: '2000'
     }).catch(() => [])
   ]);
+  const metricData = filterPlatformMetricsData({ companies, subscriptions, subscriptionEvents });
   return {
     period: period.label,
     generated_at: new Date().toISOString(),
-    ...platformConversionSnapshot({ companies, subscriptions, subscriptionEvents, period })
+    ...platformConversionSnapshot({ companies: metricData.companies, subscriptions: metricData.subscriptions, subscriptionEvents: metricData.subscriptionEvents, period })
   };
 }
 
@@ -4089,24 +4372,25 @@ async function platformBillingDataset(params = new URLSearchParams()) {
       limit: '10000'
     }).catch(() => [])
   ]);
+  const metricData = filterPlatformMetricsData({ companies, subscriptions, subscriptionEvents: events, stores, orders });
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
-  const companyById = new Map(companies.map((company) => [company.id, company]));
+  const companyById = new Map(metricData.companies.map((company) => [company.id, company]));
   const subscriptionsByCompany = new Map();
-  for (const subscription of subscriptions) {
+  for (const subscription of metricData.subscriptions) {
     if (!subscriptionsByCompany.has(subscription.company_id)) subscriptionsByCompany.set(subscription.company_id, []);
     subscriptionsByCompany.get(subscription.company_id).push(subscription);
   }
-  const subscriptionById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]));
-  const storeCompanyById = new Map(stores.map((store) => [store.id, store.company_id]));
-  const billableOrders = orders.filter((order) => order.status !== 'cancelled');
+  const subscriptionById = new Map(metricData.subscriptions.map((subscription) => [subscription.id, subscription]));
+  const storeCompanyById = new Map(metricData.stores.map((store) => [store.id, store.company_id]));
+  const billableOrders = metricData.orders.filter((order) => order.status !== 'cancelled');
   return {
     period,
-    companies,
-    subscriptions,
+    companies: metricData.companies,
+    subscriptions: metricData.subscriptions,
     plans,
-    events,
-    stores,
-    orders,
+    events: metricData.subscriptionEvents,
+    stores: metricData.stores,
+    orders: metricData.orders,
     billableOrders,
     planById,
     companyById,
@@ -4495,7 +4779,7 @@ async function recordAccessEvent(req, data = {}) {
 
 async function recordPublicMarketingEvent(req, data = {}) {
   const eventName = cleanMarketingEventName(data.event_name || data.eventName || '');
-  const allowed = new Set(['content_view', 'landing_view', 'demo_started', 'signup_started']);
+  const allowed = new Set(['content_view', 'landing_view', 'whatsapp_click', 'demo_started', 'signup_started']);
   if (!allowed.has(eventName)) throw httpError(422, 'Evento de marketing inválido.');
   const attribution = marketingAttributionFromRequest(req, data.attribution);
   await recordMarketingMilestone(eventName, {
@@ -4504,9 +4788,14 @@ async function recordPublicMarketingEvent(req, data = {}) {
     properties: {
       path: cleanPublicPath(data.path || '/'),
       content_id: cleanText(data.content_id || '').slice(0, 100),
-      placement: cleanText(data.placement || '').slice(0, 80)
+      placement: cleanText(data.placement || '').slice(0, 80),
+      tracking_code: cleanText(data.properties?.tracking_code || data.tracking_code || '').toUpperCase().slice(0, 24)
     }
   });
+}
+
+async function recordTrustedMarketingEvent(eventName, options = {}) {
+  return recordMarketingMilestone(eventName, options);
 }
 
 async function recordMarketingMilestone(eventName, options = {}) {
@@ -4587,7 +4876,7 @@ function marketingAttributionFromRequest(req, explicit = {}) {
   return sanitizeMarketingAttribution({ ...stored, ...(isPlainObject(explicit) ? explicit : {}) });
 }
 
-function signupTrialOffer(attribution = {}) {
+export function signupTrialOffer(attribution = {}) {
   const normalized = (value) => String(value || '').trim().toLowerCase();
   const source = normalized(attribution.utm_source);
   const medium = normalized(attribution.utm_medium);
@@ -4595,9 +4884,13 @@ function signupTrialOffer(attribution = {}) {
   const isFirstCustomersCampaign = source === 'instagram'
     && medium === 'direct'
     && campaign === FIRST_CUSTOMERS_TRIAL_CAMPAIGN;
+  const isRegionalPartnersCampaign = source === 'whatsapp'
+    && medium === 'outbound'
+    && campaign === REGIONAL_PARTNERS_TRIAL_CAMPAIGN;
   return {
-    trialDays: isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_DAYS : DEFAULT_TRIAL_DAYS,
-    campaign: isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_CAMPAIGN : ''
+    trialDays: isRegionalPartnersCampaign ? REGIONAL_PARTNERS_TRIAL_DAYS : isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_DAYS : DEFAULT_TRIAL_DAYS,
+    campaign: isRegionalPartnersCampaign ? REGIONAL_PARTNERS_TRIAL_CAMPAIGN : isFirstCustomersCampaign ? FIRST_CUSTOMERS_TRIAL_CAMPAIGN : '',
+    planCode: isRegionalPartnersCampaign ? 'premium' : 'trial'
   };
 }
 
@@ -5051,18 +5344,41 @@ function startOfLocalDay(date) {
   return value;
 }
 
+async function resolveOutreachAttribution(phone) {
+  const normalizedPhone = normalizeSalesPhone(phone || '');
+  if (!normalizedPhone) return null;
+  const [lead] = await dbRequest('GET', 'sales_leads', {
+    normalized_phone: `eq.${normalizedPhone}`,
+    source: 'eq.google_outreach',
+    order: 'created_at.asc',
+    limit: '1'
+  }).catch(() => []);
+  if (!lead) return null;
+  const sent = await dbRequest('GET', 'sales_messages', {
+    lead_id: `eq.${lead.id}`,
+    direction: 'eq.outbound',
+    status: 'eq.sent',
+    limit: '1'
+  }).catch(() => []);
+  return sent.length ? lead : null;
+}
+
 async function createPlatformCompany(data, admin) {
   const name = cleanText(data.name || data.company?.name || '');
   if (!name) throw httpError(422, 'Informe o nome da empresa.');
+  const attributionLead = await resolveOutreachAttribution(data.phone || '');
   const payload = {
     name,
     document: cleanText(data.document || '') || null,
     billing_email: cleanEmail(data.billing_email || data.email || '') || null,
     phone: onlyDigits(data.phone || ''),
-    status: ['active', 'trial', 'past_due', 'suspended', 'cancelled', 'archived'].includes(data.status) ? data.status : 'trial'
+    status: ['active', 'trial', 'past_due', 'suspended', 'cancelled', 'archived'].includes(data.status) ? data.status : 'trial',
+    acquisition_source: attributionLead ? 'outreach' : null,
+    outreach_lead_id: attributionLead?.id || null
   };
   const [company] = await dbRequest('POST', 'companies', {}, payload, ['Prefer: return=representation']);
   await createDefaultSubscription(company.id, data.plan_code || 'essential');
+  if (attributionLead) await createOutreachEvent(attributionLead, 'conversion_attributed', { company_id: company.id }, 'won');
   await audit('platform.company.create', { company_id: company.id, actor_admin_id: admin.id, after_data: payload });
   return company;
 }
@@ -5230,6 +5546,7 @@ async function createPortalSignup(req, data = {}) {
   const created = { company: null, admin: null, store: null };
   try {
     const attributionJourney = await marketingAttributionJourney(parsed.attribution);
+    const attributionLead = await resolveOutreachAttribution(parsed.owner.phone);
     const [company] = await dbRequest('POST', 'companies', {}, {
       name: parsed.company.name,
       document: parsed.company.document || null,
@@ -5239,7 +5556,9 @@ async function createPortalSignup(req, data = {}) {
       marketing_first_touch: attributionJourney.first,
       marketing_last_touch: attributionJourney.last,
       marketing_opt_in: parsed.marketingOptIn,
-      status: 'trial'
+      status: 'trial',
+      acquisition_source: attributionLead ? 'outreach' : null,
+      outreach_lead_id: attributionLead?.id || null
     }, ['Prefer: return=representation']);
     created.company = company;
 
@@ -5329,6 +5648,7 @@ async function createPortalSignup(req, data = {}) {
         throw httpError(502, 'Não foi possível enviar o e-mail de ativação. Verifique a configuração SMTP.');
       });
     }
+    if (attributionLead) await createOutreachEvent(attributionLead, 'conversion_attributed', { company_id: company.id }, 'won');
     return {
       body: {
         ok: true,
@@ -5478,16 +5798,20 @@ async function getPublicAdminActivation(token) {
     limit: '1'
   });
   if (!admin) throw httpError(404, 'Link de ativação inválido.');
+  const assisted = await getLocalPool().query('select id from assisted_registrations where admin_id=$1 limit 1', [activation.admin_user_id]);
   return {
     email: admin.email,
     name: admin.name || '',
     is_active: admin.is_active === true,
-    expires_at: activation.expires_at
+    expires_at: activation.expires_at,
+    requires_password: Boolean(assisted.rows[0])
   };
 }
 
-async function activateAdminAccount(req, token) {
+async function activateAdminAccount(req, token, data = {}) {
   const activation = await findAdminActivationByToken(token);
+  const assisted = await getLocalPool().query('select id from assisted_registrations where admin_id=$1 limit 1', [activation.admin_user_id]);
+  if (assisted.rows[0]) return activateAssistedAdminAccount(req, activation, data);
   const [admin] = await dbRequest('PATCH', 'admin_users', { id: `eq.${activation.admin_user_id}` }, {
     is_active: true,
     updated_at: new Date().toISOString()
@@ -5522,6 +5846,59 @@ async function activateAdminAccount(req, token) {
   return createAdminSession(admin);
 }
 
+async function activateAssistedAdminAccount(req, activation, data = {}) {
+  const password = validatePassword(data.password || '');
+  const client = await getLocalPool().connect();
+  let admin;
+  try {
+    await client.query('begin');
+    const lockedToken = (await client.query("select * from admin_activation_tokens where id=$1 and status='pending' for update", [activation.id])).rows[0];
+    if (!lockedToken || new Date(lockedToken.expires_at).getTime() < Date.now()) throw httpError(410, 'Este link de ativação expirou ou já foi utilizado.');
+    const registration = (await client.query('select * from assisted_registrations where admin_id=$1 for update', [activation.admin_user_id])).rows[0];
+    if (!registration) throw httpError(404, 'Cadastro assistido não encontrado.');
+    if (registration.status !== 'published') throw httpError(409, 'Esta conta já foi ativada ou não está pronta para ativação.');
+    admin = (await client.query('update admin_users set password_hash=$2,is_active=true,updated_at=now() where id=$1 returning *', [activation.admin_user_id, hashPassword(password)])).rows[0];
+    await client.query("update admin_activation_tokens set status=case when id=$2 then 'used' else 'cancelled' end,used_at=case when id=$2 then now() else used_at end where admin_user_id=$1 and status='pending'", [admin.id, activation.id]);
+    await client.query("update companies set status='trial',updated_at=now() where id=$1", [registration.company_id]);
+    await client.query('update stores set is_active=true,updated_at=now() where id=$1', [registration.store_id]);
+    await client.query(`update company_subscriptions set status='trial',trial_ends_at=coalesce(trial_ends_at,now()+interval '7 days'),current_period_starts_at=coalesce(current_period_starts_at,now()),current_period_ends_at=coalesce(current_period_ends_at,now()+interval '7 days'),next_renewal_at=coalesce(next_renewal_at,now()+interval '7 days'),updated_at=now() where id=$1 and status='pending_activation'`, [registration.subscription_id]);
+    await client.query("update assisted_registrations set status='activated',activated_at=coalesce(activated_at,now()),updated_at=now() where id=$1", [registration.id]);
+    await client.query('commit');
+  } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+  finally { client.release(); }
+  clearAdminUsersCache();
+  await recordTrustedMarketingEvent('signup_completed', { companyId: admin.company_id, idempotencyKey: `assisted-activation:${activation.admin_user_id}`, properties: { placement: 'assisted_activation' } }).catch(() => {});
+  return createAdminSession(admin);
+}
+
+async function normalizeAssistedMenuImage(buffer) {
+  return sharp(Buffer.from(buffer), { limitInputPixels: 24_000_000 }).rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+}
+
+async function requestAssistedMenuVision({ mime_type, buffer }) {
+  const apiKey = process.env.OPENAI_API_KEY || '';
+  if (!apiKey) throw httpError(503, 'Extração visual indisponível. Configure o provedor ou cole a lista em texto.');
+  const content = [{ type: 'input_text', text: 'Extraia este cardápio. Responda somente JSON: {"schema_version":1,"categories":[{"name":"...","items":[{"name":"...","description":"","price_cents":1234,"needs_review":false}]}]}. Use null e needs_review=true quando o preço estiver ilegível. Não invente dados.' }];
+  if (mime_type === 'application/pdf') content.push({ type: 'input_file', filename: 'cardapio.pdf', file_data: `data:application/pdf;base64,${Buffer.from(buffer).toString('base64')}` });
+  else content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${Buffer.from(buffer).toString('base64')}`, detail: 'high' });
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(120000), body: JSON.stringify({ model: process.env.OPENAI_VISION_MODEL || 'gpt-4.1-mini', store: false, max_output_tokens: 5000, input: [{ role: 'user', content }] }) });
+  const payload = await response.json().catch(() => ({}));
+  const output = payload.output?.flatMap((item) => item.content || []).filter((item) => item.type === 'output_text').map((item) => item.text).join('\n').trim();
+  if (!response.ok || !output) throw httpError(502, 'Não foi possível interpretar o cardápio visual. Tente outra imagem ou cole a lista.');
+  try { return JSON.parse(output.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
+  catch { throw httpError(502, 'O cardápio visual retornou um formato inválido. Tente novamente.'); }
+}
+
+async function sendAssistedActivationEmail(req, { admin, company, store, token, expiresAt }) {
+  const activationUrl = absoluteAppUrl(req, `/ativar-conta?token=${token}`);
+  await sendPlatformTemplateEmail({
+    to: admin.email,
+    templateKey: 'assisted_account_ready',
+    variables: { customer_name: admin.name || admin.email, company_name: company.name, store_name: store.name, cardapio_url: absolutePublicUrl(store.public_url || `/${store.slug}`), activation_url: activationUrl, dashboard_url: activationUrl, due_date: formatDateTimePt(expiresAt), support_url: absolutePanelUrl('/') },
+    requireActive: true
+  });
+}
+
 async function findAdminActivationByToken(token) {
   const value = String(token || '').trim();
   if (!/^[a-f0-9]{32,128}$/i.test(value)) throw httpError(404, 'Link de ativação inválido.');
@@ -5546,7 +5923,8 @@ function sanitizePortalSignup(data = {}, req = null) {
   const owner = data.owner || {};
   const business = data.business || {};
   const signupUrl = req?.url ? new URL(req.url, `http://${req.headers?.host || HOST}`) : null;
-  const planCode = 'trial';
+  const attribution = marketingAttributionFromRequest(req, data.attribution);
+  const planCode = signupTrialOffer(attribution).planCode;
   const ownerName = cleanText(owner.name || data.name || '');
   const ownerEmail = cleanEmail(owner.email || data.email || '');
   const ownerPhone = onlyDigits(owner.phone || data.phone || '');
@@ -5571,7 +5949,7 @@ function sanitizePortalSignup(data = {}, req = null) {
     referralCode: cleanReferralCode(data.referral_code || data.referralCode || data.ref || signupUrl?.searchParams.get('ref') || ''),
     businessType: cleanSlug(business.type || 'outro') || 'outro',
     marketingOptIn: Boolean(data.marketing_opt_in || data.marketingOptIn),
-    attribution: marketingAttributionFromRequest(req, data.attribution),
+    attribution,
     owner: {
       name: ownerName,
       email: ownerEmail,
@@ -6436,6 +6814,7 @@ function reservedPublicSlugs() {
     'recursos',
     'demonstracao',
     'demo',
+    'delivery',
     'suporte',
     'dashboard',
     'platform',
@@ -10547,6 +10926,41 @@ async function connectAdminWhatsappIntegration(req, admin) {
   return publicStoreWhatsappIntegration(saved);
 }
 
+// CLI/operational entry point for the TáPronto-owned sales number. It deliberately
+// reuses the platform Evolution Go settings and the existing store integration.
+export async function connectSalesWhatsappIntegration(storeId) {
+  const resolvedStoreId = cleanUuid(storeId);
+  if (!resolvedStoreId) throw httpError(422, 'Informe uma loja comercial válida.');
+  const config = await privatePlatformWhatsappSettings();
+  if (!config.is_active || !config.base_url || !config.api_key) throw httpError(503, 'WhatsApp global ainda não foi configurado pela Central.');
+  const store = await getStoreSettings(resolvedStoreId);
+  if (!store?.store_id || store.store_id !== resolvedStoreId) throw httpError(404, 'Loja comercial não encontrada.');
+  const existing = await getStoreWhatsappIntegration(resolvedStoreId);
+  const instanceName = existing?.instance_name || buildEvolutionInstanceName(store);
+  const providerData = existing?.instance_id
+    ? await evolutionRestartOrConnectInstance(instanceName, config, { store, instanceId: existing.instance_id, instanceToken: existing.instance_token || null })
+    : await evolutionCreateInstance(instanceName, store, config);
+  await setEvolutionWebhook(instanceName, config, {
+    store,
+    instanceId: providerData.instance_id || existing?.instance_id || null,
+    instanceToken: providerData.instance_token || existing?.instance_token || null
+  }).catch(() => null);
+  const status = normalizeWhatsappIntegrationStatus(providerData.status || 'connecting');
+  const saved = await upsertStoreWhatsappIntegration({
+    current: existing,
+    store,
+    instance_name: instanceName,
+    instance_id: providerData.instance_id || existing?.instance_id || null,
+    instance_token: providerData.instance_token || existing?.instance_token || null,
+    status,
+    qr_code_base64: status === 'connecting' ? (providerData.qr_code_base64 || existing?.qr_code_base64 || null) : null,
+    last_qr_at: status === 'connecting' && (providerData.qr_code_base64 || existing?.qr_code_base64) ? new Date().toISOString() : null,
+    last_error: null,
+    billing_status: 'internal'
+  });
+  return publicStoreWhatsappIntegration(saved);
+}
+
 async function refreshAdminWhatsappQrCode(admin) {
   await assertAutomaticWhatsappAccess(admin);
   const config = await privatePlatformWhatsappSettings();
@@ -11172,6 +11586,23 @@ function maskPhone(value = '') {
 }
 
 async function receiveEvolutionWebhook(req, payload = {}) {
+  const salesProvider = salesConfig();
+  const salesEvolution = evolutionV2SalesConfig();
+  const payloadInstance = cleanText(payload?.instance || payload?.instanceName || payload?.instance_name || '');
+  if (salesProvider.provider === 'evolution_v2' && payloadInstance === salesEvolution.instance) {
+    const receivedSecret = req.headers['x-evolution-webhook-secret'] || req.headers['x-webhook-secret'] || '';
+    if (!salesEvolution.webhookSecret || receivedSecret !== salesEvolution.webhookSecret) throw httpError(401, 'Webhook comercial Evolution não autorizado.');
+    const event = String(payload?.event || payload?.type || '').toUpperCase();
+    if (event.includes('CONNECTION')) {
+      const state = String(payload?.data?.state || payload?.data?.status || payload?.state || '').toLowerCase();
+      if (!['open', 'connected'].includes(state)) {
+        await dbRequest('PATCH', 'sales_automation_settings', { id: 'eq.global' }, { paused: true, metadata: { reason: 'provider_disconnected', state }, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+      }
+      return { ok: true, connection_state: state || 'unknown' };
+    }
+    const sales = await receiveSalesEvolutionMessage({ id: null, store_id: null, company_id: null, instance_name: salesEvolution.instance, provider: 'evolution_v2' }, payload);
+    return { ok: true, ...(sales?.accepted ? { sales_accepted: true } : {}) };
+  }
   const config = await privatePlatformWhatsappSettings();
   const expectedSecret = config.webhook_secret;
   const receivedSecret = req.headers['x-evolution-webhook-secret'] || req.headers['x-webhook-secret'] || '';
@@ -11187,7 +11618,7 @@ async function receiveEvolutionWebhook(req, payload = {}) {
   const qrData = normalizeEvolutionQrResponse(payload);
   const status = event.includes('QRCODE') || qrData.qr_code_base64
     ? 'connecting'
-    : event.includes('CONNECTION') || state
+    : event.includes('CONNECTION')
       ? normalizeWhatsappIntegrationStatus(state)
       : integration.status;
   const resolvedStatus = normalizeWhatsappIntegrationStatus(status);
@@ -11203,7 +11634,11 @@ async function receiveEvolutionWebhook(req, payload = {}) {
     last_error: resolvedStatus === 'error' ? cleanText(payload?.data?.message || payload?.message || 'Erro recebido no webhook.').slice(0, 500) : null,
     updated_at: new Date().toISOString()
   });
-  return { ok: true };
+  const sales = await receiveSalesEvolutionMessage(integration, payload).catch((error) => {
+    console.error(JSON.stringify({ scope: 'sales-evolution-webhook', integration_id: integration.id, message: error.message }));
+    return { accepted: false, error: true };
+  });
+  return { ok: true, ...(sales?.accepted ? { sales_accepted: true } : {}) };
 }
 
 async function findWhatsappIntegrationByEvolutionIdentity({ instanceName = '', instanceId = '', instanceToken = '' } = {}) {
@@ -11230,6 +11665,384 @@ async function findWhatsappIntegrationByEvolutionIdentity({ instanceName = '', i
   return null;
 }
 
+async function receiveSalesEvolutionMessage(integration, payload = {}) {
+  const config = salesConfig();
+  if (config.provider === 'evolution_v2') {
+    if (integration.instance_name !== evolutionV2SalesConfig().instance) return { accepted: false };
+  } else if (!config.storeId || integration.store_id !== config.storeId) return { accepted: false };
+  const inbound = parseEvolutionInbound(payload);
+  if (!inbound) return { accepted: false };
+  inbound.providerMessageId = salesInboundEventKey(payload, inbound);
+  const [outreachSettings] = await dbRequest('GET', 'sales_automation_settings', { id: 'eq.global', limit: '1' }).catch(() => []);
+  if (outreachSettings) {
+    await dbRequest('PATCH', 'sales_automation_settings', { id: 'eq.global' }, {
+      metadata: { ...(outreachSettings.metadata || {}), outreach_last_webhook_at: new Date().toISOString() },
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']).catch(() => {});
+  }
+  const [lead] = await dbRequest('GET', 'sales_leads', { normalized_phone: `eq.${inbound.phone}`, limit: '1' });
+  if (!lead) return { accepted: false };
+  await dbRequest('PATCH', 'sales_automation_jobs', { lead_id: `eq.${lead.id}`, job_type: 'eq.followup', status: 'in.(pending,retry,claimed)' }, { status: 'cancelled', lock_expires_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { next_followup_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  let [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  if (!conversation) [conversation] = await dbRequest('POST', 'sales_conversations', {}, { lead_id: lead.id, whatsapp_integration_id: integration.id || null }, ['Prefer: return=representation']);
+  if (inbound.providerMessageId) {
+    const [existing] = await dbRequest('GET', 'sales_messages', { provider_message_id: `eq.${inbound.providerMessageId}`, limit: '1' });
+    if (existing) return { accepted: true, duplicate: true };
+  }
+  const whatsappLog = await createWhatsappMessageLog({
+    company_id: integration.company_id || null,
+    store_id: integration.store_id,
+    provider: integration.provider || 'evolution_go',
+    instance_name: integration.instance_name,
+    destination_phone: inbound.phone,
+    message_type: 'sales_inbound',
+    status: 'received',
+    provider_message_id: inbound.providerMessageId || null
+  });
+  const [message] = await dbRequest('POST', 'sales_messages', {}, {
+    lead_id: lead.id,
+    conversation_id: conversation.id,
+    whatsapp_message_log_id: whatsappLog.id,
+    provider_message_id: inbound.providerMessageId || null,
+    direction: 'inbound',
+    body: inbound.body || `[${inbound.messageType || 'mídia não suportada'}]`,
+    status: 'received',
+    requires_approval: false,
+    received_at: new Date().toISOString(),
+    metadata: { message_type: inbound.messageType, instance_name: integration.instance_name }
+  }, ['Prefer: return=representation']);
+  await createSalesEvent(lead.id, 'message_received', lead.stage, lead.stage, { message_id: message.id, provider_message_id: inbound.providerMessageId || null });
+  if (isAutomatedOutreachLead(lead)) {
+    await createOutreachEvent(lead, 'inbound_received', { message_id: message.id, provider_message_id: inbound.providerMessageId || null });
+  }
+  if (inbound.body && inbound.messageType === 'text' && isOptOutMessage(inbound.body)) {
+    await optOutSalesLead(lead.id, 'Solicitação recebida pelo WhatsApp.');
+    await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { intent: 'opt_out', confidence: 1 });
+    return { accepted: true, opted_out: true };
+  }
+  if (lead.automation_status !== 'active' || TERMINAL_SALES_STAGES.has(lead.stage) || lead.stage === 'human_handoff') {
+    return { accepted: true, human_handoff: lead.stage === 'human_handoff', stopped: lead.automation_status !== 'active' || TERMINAL_SALES_STAGES.has(lead.stage) };
+  }
+  if (!inbound.body || inbound.messageType !== 'text') {
+    await updateSalesLeadStage(lead, 'human_handoff', { stop_reason: 'Mídia recebida requer atendimento humano.' });
+    return { accepted: true, human_handoff: true };
+  }
+  await enqueueSalesJob('classify_inbound', lead.id, message.id, `inbound:${inbound.providerMessageId || message.id}`, { integration_id: integration.id });
+  return { accepted: true };
+}
+
+async function createSalesLead(data = {}) {
+  const normalizedPhone = normalizeSalesPhone(data.normalized_phone || data.phone || '');
+  if (!cleanText(data.business_name || data.businessName || '')) throw httpError(422, 'Informe o nome do estabelecimento.');
+  if (normalizedPhone) {
+    const [existing] = await dbRequest('GET', 'sales_leads', { normalized_phone: `eq.${normalizedPhone}`, limit: '1' });
+    if (existing) throw httpError(409, 'Já existe um lead com este telefone.');
+  }
+  const [lead] = await dbRequest('POST', 'sales_leads', {}, {
+    business_name: cleanText(data.business_name || data.businessName).slice(0, 200),
+    contact_name: cleanText(data.contact_name || data.contactName || '').slice(0, 160) || null,
+    phone: cleanText(data.phone || '') || null,
+    normalized_phone: normalizedPhone || null,
+    city: cleanText(data.city || '').slice(0, 120) || null,
+    state: cleanText(data.state || 'RS').slice(0, 2).toUpperCase(),
+    segment: cleanText(data.segment || '').slice(0, 120) || null,
+    instagram: cleanText(data.instagram || '').slice(0, 160) || null,
+    source: cleanText(data.source || 'manual').slice(0, 80),
+    current_platform: cleanText(data.current_platform || data.currentPlatform || '').slice(0, 160) || null,
+    apparent_activity: cleanText(data.apparent_activity || data.apparentActivity || '').slice(0, 80) || null,
+    score: clampNumber(Number(data.score || 0), 0, 100),
+    stage: Number(data.score || 0) >= 55 ? 'qualified' : 'discovered',
+    metadata: isPlainObject(data.metadata) ? data.metadata : {}
+  }, ['Prefer: return=representation']);
+  await createSalesEvent(lead.id, 'lead_created', null, lead.stage, { source: lead.source });
+  return lead;
+}
+
+async function createSalesDraft(leadId, options = {}) {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${cleanUuid(leadId)}`, limit: '1' });
+  if (!lead) throw httpError(404, 'Lead não encontrado.');
+  if (TERMINAL_SALES_STAGES.has(lead.stage) || lead.automation_status !== 'active') throw httpError(409, 'Lead não está disponível para contato.');
+  if (lead.normalized_phone) {
+    const [suppression] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+    if (suppression) throw httpError(409, 'Lead está na lista de supressão.');
+  }
+  let [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  if (!conversation) [conversation] = await dbRequest('POST', 'sales_conversations', {}, { lead_id: lead.id }, ['Prefer: return=representation']);
+  const body = cleanText(options.body || initialSalesMessage(lead)).slice(0, 1200);
+  const autonomous = salesConfig().enabled && salesConfig().mode === 'autonomous';
+  const [message] = await dbRequest('POST', 'sales_messages', {}, {
+    lead_id: lead.id, conversation_id: conversation.id, direction: 'outbound', body,
+    status: autonomous ? 'approved' : 'draft', requires_approval: !autonomous,
+    approved_at: autonomous ? new Date().toISOString() : null,
+    metadata: { kind: options.kind || 'first_contact' }
+  }, ['Prefer: return=representation']);
+  const nextStage = lead.stage === 'discovered' ? 'qualified' : 'awaiting_first_message_approval';
+  const current = lead.stage === 'discovered' ? await updateSalesLeadStage(lead, 'qualified') : lead;
+  if (current.stage !== 'awaiting_first_message_approval') await updateSalesLeadStage(current, 'awaiting_first_message_approval');
+  await createSalesEvent(lead.id, 'message_drafted', lead.stage, 'awaiting_first_message_approval', { message_id: message.id });
+  if (autonomous) await enqueueSalesJob('send_message', lead.id, message.id, `send:${message.id}`);
+  return message;
+}
+
+async function queueAutonomousSalesOutreach({ limit = 10, dryRun = false } = {}) {
+  const config = salesConfig();
+  if (!config.enabled || config.mode !== 'autonomous') throw httpError(409, 'Ative o modo autônomo antes de enfileirar contatos.');
+  const capped = Math.min(config.dailyLimit, Math.max(1, Number(limit) || 10));
+  const leads = await dbRequest('GET', 'sales_leads', { stage: 'eq.qualified', automation_status: 'eq.active', order: 'score.desc,created_at.asc', limit: String(capped * 3) });
+  const selected = [];
+  for (const lead of leads) {
+    if (!lead.normalized_phone || selected.length >= capped) continue;
+    const [suppressed] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+    const prior = await dbRequest('GET', 'sales_messages', { lead_id: `eq.${lead.id}`, direction: 'eq.outbound', limit: '1' });
+    if (suppressed || prior.length) continue;
+    selected.push(dryRun ? { lead_id: lead.id, business_name: lead.business_name, phone: maskPhone(lead.normalized_phone) } : await createSalesDraft(lead.id, { kind: 'first_contact' }));
+  }
+  return { dry_run: dryRun, queued: selected.length, items: selected };
+}
+
+async function approveSalesMessage(messageId) {
+  const [message] = await dbRequest('GET', 'sales_messages', { id: `eq.${cleanUuid(messageId)}`, limit: '1' });
+  if (!message) throw httpError(404, 'Mensagem não encontrada.');
+  if (message.direction !== 'outbound' || message.status !== 'draft') throw httpError(409, 'Somente rascunhos de saída podem ser aprovados.');
+  const [updated] = await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { status: 'approved', approved_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await createSalesEvent(message.lead_id, 'message_approved', null, null, { message_id: message.id });
+  return updated;
+}
+
+async function sendApprovedSalesMessage(messageId, options = {}) {
+  const config = salesConfig();
+  const [message] = await dbRequest('GET', 'sales_messages', { id: `eq.${cleanUuid(messageId)}`, limit: '1' });
+  if (!message) throw httpError(404, 'Mensagem não encontrada.');
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${message.lead_id}`, limit: '1' });
+  if (!lead?.normalized_phone) throw httpError(422, 'Lead não possui telefone válido.');
+  const [settings] = await dbRequest('GET', 'sales_automation_settings', { id: 'eq.global', limit: '1' });
+  const [suppression] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+  const gate = canAutomaticallySend({ config, lead, message, paused: Boolean(settings?.paused), suppressed: Boolean(suppression) });
+  if (!gate.allowed) throw httpError(409, gate.reason);
+  if (!config.enabled) throw httpError(409, 'SALES_AUTOMATION_ENABLED precisa estar ativo para qualquer envio real.');
+  if (config.provider !== 'evolution_v2' && !config.storeId) throw httpError(409, 'SALES_WHATSAPP_STORE_ID não configurado.');
+  if (config.mode === 'draft') throw httpError(409, 'Modo draft nunca envia mensagens.');
+  const evolutionV2 = config.provider === 'evolution_v2' ? evolutionV2SalesConfig() : null;
+  const integration = config.provider === 'evolution_v2'
+    ? { id: null, store_id: null, company_id: null, instance_name: evolutionV2.instance, provider: 'evolution_v2', status: 'connected' }
+    : await requireStoreWhatsappIntegration(config.storeId);
+  if (config.provider !== 'evolution_v2' && integration.store_id !== config.storeId) throw httpError(403, 'Instância não pertence à loja comercial configurada.');
+  const store = config.provider === 'evolution_v2' ? null : await getStoreSettings(config.storeId);
+  await assertSalesSendLimits(config, integration);
+  const [sending] = await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}`, status: 'eq.approved' }, { status: 'sending' }, ['Prefer: return=representation']);
+  if (!sending) throw httpError(409, 'Mensagem já foi processada por outro worker.');
+  try {
+    let result;
+    if (config.provider === 'evolution_v2') {
+      const live = await getEvolutionV2ConnectionState(evolutionV2);
+      if (!live.connected) throw httpError(409, 'Instância comercial Evolution v2 não está conectada.');
+      const sentProvider = await sendEvolutionV2SalesText({ phone: lead.normalized_phone, text: message.body }, evolutionV2);
+      const log = await createWhatsappMessageLog({ provider: 'evolution_v2', instance_name: evolutionV2.instance, destination_phone: lead.normalized_phone, message_type: 'sales_outreach', status: 'sent', provider_message_id: sentProvider.id });
+      result = { id: sentProvider.id, log };
+    } else {
+      result = await sendEvolutionStoreMessage(store, integration, lead.normalized_phone, message.body, { messageType: 'sales_outreach' });
+    }
+    const [sent] = await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, {
+      status: 'sent', sent_at: new Date().toISOString(), provider_message_id: result.id,
+      whatsapp_message_log_id: result.log?.id || null, requires_approval: false
+    }, ['Prefer: return=representation']);
+    const messageKind = message.metadata?.kind || '';
+    const firstContact = messageKind === 'first_contact';
+    let nextLead = lead;
+    if (firstContact) {
+      nextLead = await updateSalesLeadStage(lead, 'first_message_sent', {
+        attempt_count: Number(lead.attempt_count || 0) + 1,
+        last_contact_at: new Date().toISOString(),
+        next_followup_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+      });
+      nextLead = await updateSalesLeadStage(nextLead, 'awaiting_reply');
+    } else {
+      [nextLead] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { attempt_count: Number(lead.attempt_count || 0) + 1, last_contact_at: new Date().toISOString(), next_followup_at: null, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+    }
+    await createSalesEvent(lead.id, 'message_sent', lead.stage, nextLead.stage, { message_id: message.id, whatsapp_log_id: result.log?.id || null, kind: messageKind });
+    return sent;
+  } catch (error) {
+    await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { status: 'failed', error_message: cleanText(error.message).slice(0, 500) });
+    throw error;
+  }
+}
+
+async function assertSalesSendLimits(config, integration) {
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  const providerFilter = config.provider === 'evolution_v2' ? { instance_name: `eq.${integration.instance_name}` } : { store_id: `eq.${config.storeId}` };
+  const logs = await dbRequest('GET', 'whatsapp_message_logs', { ...providerFilter, message_type: 'eq.sales_outreach', created_at: `gte.${today.toISOString()}`, order: 'created_at.desc', limit: String(config.dailyLimit + 1) });
+  if (logs.length >= Math.min(config.dailyLimit, config.instanceDailyLimit)) throw httpError(429, 'Limite diário de prospecção atingido.');
+  const last = logs[0];
+  if (last && Date.now() - new Date(last.created_at).getTime() < config.minIntervalSeconds * 1000) throw httpError(429, 'Intervalo mínimo entre contatos ainda não foi atingido.');
+  if (config.provider !== 'evolution_v2' && normalizeWhatsappIntegrationStatus(integration.status) !== 'connected') throw httpError(409, 'Instância comercial não está conectada.');
+}
+
+async function updateSalesLeadStage(lead, nextStage, extra = {}) {
+  assertSalesTransition(lead.stage, nextStage);
+  const [updated] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { stage: nextStage, ...extra, updated_at: new Date().toISOString() }, ['Prefer: return=representation']);
+  await createSalesEvent(lead.id, 'stage_changed', lead.stage, nextStage, {});
+  return updated;
+}
+
+async function optOutSalesLead(leadId, reason = 'Solicitação de não contato.') {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${cleanUuid(leadId)}`, limit: '1' });
+  if (!lead) throw httpError(404, 'Lead não encontrado.');
+  if (lead.normalized_phone) {
+    const [existing] = await dbRequest('GET', 'sales_suppressions', { normalized_phone: `eq.${lead.normalized_phone}`, limit: '1' });
+    if (!existing) await dbRequest('POST', 'sales_suppressions', {}, { normalized_phone: lead.normalized_phone, reason, source: 'lead_opt_out' }, ['Prefer: return=minimal']);
+  }
+  const [updated] = await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, {
+    stage: 'opted_out', automation_status: 'stopped', opted_out_at: new Date().toISOString(), stop_reason: reason, next_followup_at: null, updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  await dbRequest('PATCH', 'sales_automation_jobs', { lead_id: `eq.${lead.id}`, status: 'in.(pending,retry)' }, { status: 'cancelled', updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
+  await createSalesEvent(lead.id, 'opt_out', lead.stage, 'opted_out', { reason });
+  if (isAutomatedOutreachLead(lead)) await createOutreachEvent(lead, 'opt_out', { reason }, 'opted_out');
+  return updated;
+}
+
+async function createSalesEvent(leadId, eventType, previousStage, nextStage, details = {}) {
+  const [event] = await dbRequest('POST', 'sales_automation_events', {}, { lead_id: leadId || null, event_type: eventType, previous_stage: previousStage || null, next_stage: nextStage || null, details }, ['Prefer: return=representation']);
+  return event;
+}
+
+function isAutomatedOutreachLead(lead = {}) {
+  return lead.source === 'google_outreach' || Boolean(lead.metadata?.outreach_run_id);
+}
+
+async function createOutreachEvent(lead, eventType, details = {}, stage = null) {
+  const [event] = await dbRequest('POST', 'sales_automation_events', {}, {
+    lead_id: lead.id,
+    run_id: cleanText(lead.metadata?.outreach_run_id || `lead:${lead.id}`),
+    place_id: lead.google_place_id || null,
+    event_type: eventType,
+    stage,
+    attempt: Number(lead.attempt_count || 0),
+    result: 'success',
+    details
+  }, ['Prefer: return=representation']);
+  return event;
+}
+
+async function enqueueSalesJob(jobType, leadId, messageId, idempotency, payload = {}, runAt = null) {
+  const key = salesIdempotencyKey(jobType, idempotency);
+  const [existing] = await dbRequest('GET', 'sales_automation_jobs', { idempotency_key: `eq.${key}`, limit: '1' });
+  if (existing) return existing;
+  const [job] = await dbRequest('POST', 'sales_automation_jobs', {}, {
+    lead_id: leadId || null, message_id: messageId || null, job_type: jobType, idempotency_key: key,
+    payload, run_at: runAt || new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  return job;
+}
+
+async function claimNextSalesJob() {
+  const pool = getLocalPool();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const result = await client.query(`select * from sales_automation_jobs where job_type in ('classify_inbound','send_message','followup') and status in ('pending','retry') and run_at<=now() and (lock_expires_at is null or lock_expires_at<now()) order by run_at,created_at for update skip locked limit 1`);
+    const job = result.rows[0];
+    if (!job) { await client.query('commit'); return null; }
+    const claimed = (await client.query(`update sales_automation_jobs set status='claimed',attempt_count=attempt_count+1,lock_expires_at=now()+interval '5 minutes',updated_at=now() where id=$1 returning *`, [job.id])).rows[0];
+    await client.query('commit');
+    return claimed;
+  } catch (error) { await client.query('rollback').catch(() => {}); throw error; }
+  finally { client.release(); }
+}
+
+async function processNextSalesJob() {
+  const job = await claimNextSalesJob();
+  if (!job) return null;
+  try {
+    if (job.job_type === 'classify_inbound') await processSalesInboundJob(job);
+    else if (job.job_type === 'send_message') await sendApprovedSalesMessage(job.message_id);
+    else if (job.job_type === 'followup') await processSalesFollowupJob(job);
+    await dbRequest('PATCH', 'sales_automation_jobs', { id: `eq.${job.id}` }, { status: 'completed', lock_expires_at: null, last_error: null, updated_at: new Date().toISOString() });
+    return { ...job, result: 'completed' };
+  } catch (error) {
+    const retry = Number(job.attempt_count || 0) < Number(job.max_attempts || 3);
+    await dbRequest('PATCH', 'sales_automation_jobs', { id: `eq.${job.id}` }, {
+      status: retry ? 'retry' : 'failed', lock_expires_at: null,
+      run_at: retry ? new Date(Date.now() + Math.min(30, 2 ** Number(job.attempt_count || 1)) * 60_000).toISOString() : job.run_at,
+      last_error: cleanText(error.message || 'Falha no job comercial.').slice(0, 1000), updated_at: new Date().toISOString()
+    });
+    if (!retry && job.lead_id) {
+      const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${job.lead_id}`, limit: '1' });
+      if (lead && !TERMINAL_SALES_STAGES.has(lead.stage)) await updateSalesLeadStage(lead, 'human_handoff', { stop_reason: 'Falha permanente na automação.' }).catch(() => {});
+    }
+    throw error;
+  }
+}
+
+async function processSalesInboundJob(job) {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${job.lead_id}`, limit: '1' });
+  const [message] = await dbRequest('GET', 'sales_messages', { id: `eq.${job.message_id}`, limit: '1' });
+  if (!lead || !message || TERMINAL_SALES_STAGES.has(lead.stage)) return;
+  const messages = await dbRequest('GET', 'sales_messages', { lead_id: `eq.${lead.id}`, order: 'created_at.asc', limit: '30' });
+  const [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  let decision;
+  try { decision = await requestSalesDecision({ lead, messages, summary: conversation?.summary || '', config: salesConfig() }); }
+  catch (error) { decision = { ...fallbackSalesDecision(message.body), requires_human: true, human_reason: `Falha ao classificar: ${cleanText(error.message).slice(0, 250)}` }; }
+  await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { intent: decision.intent, confidence: decision.confidence });
+  if (isAutomatedOutreachLead(lead) && ['interested', 'demo_request', 'price_question'].includes(decision.intent)) {
+    await createOutreachEvent(lead, 'interest_detected', { message_id: message.id, intent: decision.intent, confidence: decision.confidence });
+  }
+  if (decision.intent === 'opt_out' || decision.should_stop_automation) return optOutSalesLead(lead.id, decision.stop_reason || 'Solicitação de não contato.');
+  const belowConfidence = decision.confidence < salesConfig().minConfidence;
+  let nextStage = belowConfidence || decision.requires_human ? 'human_handoff' : decision.next_stage;
+  try { assertSalesTransition(lead.stage, nextStage); } catch { nextStage = 'human_handoff'; }
+  const updated = await updateSalesLeadStage(lead, nextStage, { stop_reason: decision.requires_human || belowConfidence ? (decision.human_reason || 'Revisão humana necessária.') : null });
+  if (conversation) await dbRequest('PATCH', 'sales_conversations', { id: `eq.${conversation.id}` }, { summary: decision.summary, updated_at: new Date().toISOString() });
+  if (nextStage === 'human_handoff') {
+    await sendPlatformTemplateEmail({
+      to: PLATFORM_SYSTEM_EMAIL_RECIPIENT,
+      templateKey: 'sales_handoff_required',
+      variables: {
+        business_name: lead.business_name,
+        phone: maskPhone(lead.normalized_phone),
+        question: cleanText(message.body).slice(0, 500),
+        summary: cleanText(decision.summary || conversation?.summary || '').slice(0, 800),
+        reason: cleanText(decision.human_reason || 'Revisão humana necessária.').slice(0, 500)
+      }
+    }).catch((error) => console.error(JSON.stringify({ scope: 'sales-handoff-email', lead_id: lead.id, message: cleanText(error.message).slice(0, 250) })));
+  }
+  if (!shouldAutomaticallyReplyToLead(lead)) return updated;
+  const maySendContainment = decision.intent === 'unknown' && decision.reply;
+  if (!decision.should_reply || !decision.reply || (decision.requires_human && !maySendContainment) || (belowConfidence && !maySendContainment)) return;
+  const autonomous = autonomousSalesMessageAllowed(decision, salesConfig()) || maySendContainment && salesConfig().mode === 'autonomous';
+  const [draft] = await dbRequest('POST', 'sales_messages', {}, {
+    lead_id: lead.id, conversation_id: conversation?.id || null, direction: 'outbound', body: decision.reply,
+    intent: decision.intent, confidence: decision.confidence, status: autonomous ? 'approved' : 'draft', requires_approval: !autonomous,
+    approved_at: autonomous ? new Date().toISOString() : null,
+    metadata: { kind: maySendContainment ? 'handoff_containment' : 'agent_reply', source_message_id: message.id }
+  }, ['Prefer: return=representation']);
+  if (salesConfig().enabled && autonomous) await enqueueSalesJob('send_message', lead.id, draft.id, `send:${draft.id}`);
+  return updated;
+}
+
+async function processSalesFollowupJob(job) {
+  const [lead] = await dbRequest('GET', 'sales_leads', { id: `eq.${job.lead_id}`, limit: '1' });
+  if (!lead || TERMINAL_SALES_STAGES.has(lead.stage) || Number(lead.followup_count || 0) >= 1) return;
+  const inbound = await dbRequest('GET', 'sales_messages', { lead_id: `eq.${lead.id}`, direction: 'eq.inbound', created_at: `gt.${lead.last_contact_at}`, limit: '1' });
+  if (inbound.length) return;
+  const count = Number(lead.followup_count || 0) + 1;
+  const body = `Oi, ${cleanText(lead.contact_name || lead.business_name).split(/\s+/)[0]}. Passando apenas para saber se faz sentido eu te enviar uma demonstração do cardápio. Se não for o momento, sem problema.`;
+  const [conversation] = await dbRequest('GET', 'sales_conversations', { lead_id: `eq.${lead.id}`, status: 'eq.active', limit: '1' });
+  const autonomous = salesConfig().enabled && salesConfig().mode === 'autonomous';
+  const [message] = await dbRequest('POST', 'sales_messages', {}, { lead_id: lead.id, conversation_id: conversation?.id || null, direction: 'outbound', body, status: autonomous ? 'approved' : 'draft', requires_approval: !autonomous, approved_at: autonomous ? new Date().toISOString() : null, metadata: { kind: 'followup', number: count } }, ['Prefer: return=representation']);
+  if (autonomous) await enqueueSalesJob('send_message', lead.id, message.id, `send:${message.id}`);
+  await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, { followup_count: count, next_followup_at: null, stage: 'followup_scheduled', updated_at: new Date().toISOString() });
+}
+
+async function scheduleDueSalesFollowups() {
+  const leads = await dbRequest('GET', 'sales_leads', { automation_status: 'eq.active', next_followup_at: `lte.${new Date().toISOString()}`, order: 'next_followup_at.asc', limit: '100' });
+  const jobs = [];
+  for (const lead of leads.filter((item) => !TERMINAL_SALES_STAGES.has(item.stage) && Number(item.followup_count || 0) < 1)) {
+    jobs.push(await enqueueSalesJob('followup', lead.id, null, `followup:${lead.id}:${lead.followup_count}`, {}, lead.next_followup_at));
+  }
+  return jobs;
+}
+
 const PLATFORM_SYSTEM_EMAIL_RECIPIENT = 'lucasbulow@hotmail.com';
 const PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS = new Set([
   'backup_failed',
@@ -11246,7 +12059,8 @@ const PLATFORM_SYSTEM_EMAIL_TEMPLATE_KEYS = new Set([
   'internal_account_suspended',
   'internal_trial_expiring',
   'internal_trial_expired',
-  'internal_plan_changed'
+  'internal_plan_changed',
+  'sales_handoff_required'
 ]);
 
 function platformEmailRecipient(templateKey, fallbackTo) {
@@ -11518,7 +12332,7 @@ async function runMarketingLifecycleAutomations() {
       dbRequest('GET', 'companies', { select: 'id,name,billing_email,created_at,marketing_opt_in,marketing_unsubscribed_at', marketing_opt_in: 'eq.true', marketing_unsubscribed_at: 'is.null', limit: '1000' }),
       dbRequest('GET', 'stores', { select: 'id,company_id,name,slug,is_active,created_at', limit: '2000' }),
       dbRequest('GET', 'store_settings', { select: 'store_id,onboarding_completed', limit: '2000' }),
-      dbRequest('GET', 'admin_users', { select: 'id,company_id,email,name,role,is_active', is_active: 'eq.true', limit: '2000' }),
+      dbRequest('GET', 'admin_users', { select: 'id,company_id,email,name,role,is_active,last_login_at', is_active: 'eq.true', limit: '2000' }),
       dbRequest('GET', 'company_subscriptions', { select: 'id,company_id,plan_id,status,trial_ends_at,created_at', status: 'eq.trial', limit: '1000' }),
       dbRequest('GET', 'subscription_plans', { select: 'id,name', limit: '100' }),
       dbRequest('GET', 'menu_items', { select: 'id,store_id,created_at', limit: '10000' }),
@@ -11549,15 +12363,18 @@ async function runMarketingLifecycleAutomations() {
       if (storeSettings?.onboarding_completed === true && !storeOrders.length && ageHours >= 72) candidates.push({ key: 'first_order_d3', template: 'first_order_reminder', company, store, recipient });
       const lastOrderAt = storeOrders[0]?.created_at ? new Date(storeOrders[0].created_at).getTime() : 0;
       if (storeOrders.length && lastOrderAt < now - (7 * 864e5)) candidates.push({ key: `inactive_store:${new Date().toISOString().slice(0, 7)}`, template: 'inactive_store_checkin', company, store, recipient });
+      const admin = adminByCompany.get(company.id);
+      const lastLoginAt = admin?.last_login_at ? new Date(admin.last_login_at).getTime() : 0;
+      if (ageHours >= 72 && lastLoginAt && (now - lastLoginAt) >= 72 * 36e5) candidates.push({ key: `reengagement_no_login:${new Date().toISOString().slice(0, 7)}`, template: 'reengagement_no_login', company, store, recipient });
     }
     for (const subscription of subscriptions) {
       if (!subscription.trial_ends_at) continue;
       const days = Math.ceil((new Date(subscription.trial_ends_at).getTime() - now) / 864e5);
-      if (![5, 2].includes(days)) continue;
+      if (![5, 2, 1].includes(days)) continue;
       const company = companies.find((item) => item.id === subscription.company_id);
       if (!company) continue;
       const recipient = cleanEmail(company.billing_email || adminByCompany.get(company.id)?.email || '');
-      if (recipient) candidates.push({ key: `trial_ending_d${days}`, template: 'trial_ending', company, store: storeByCompany.get(company.id), recipient, due: String(days), subscription });
+      if (recipient) candidates.push({ key: `trial_ending_d${days}`, template: days === 1 ? 'trial_last_chance' : 'trial_ending', company, store: storeByCompany.get(company.id), recipient, due: String(days), subscription });
     }
     for (const candidate of candidates) {
       const idempotencyKey = `${candidate.key}:${candidate.company.id}`;
@@ -12302,50 +13119,53 @@ async function recordPublicExperimentEvent(req, data = {}) {
 }
 
 const EMAIL_TEMPLATE_DEFINITIONS = [
-  { key: 'account_activation', name: 'Ativação de conta', subject: 'Ative sua conta no TáPronto', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada no TáPronto.\n\nPara liberar o acesso ao painel, ative sua conta pelo link abaixo:\n{{activation_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não criou essa conta, ignore este e-mail.' },
-  { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao {{store_name}}', body: 'Olá {{customer_name}},\n\nSua loja {{store_name}} foi criada com sucesso.\n\nAcesse o painel para concluir a configuração, cadastrar produtos e publicar seu cardápio:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
-  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para recuperar o acesso ao painel da sua loja.\n\nClique no link abaixo para criar uma nova senha:\n{{reset_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não solicitou isso, ignore este e-mail.' },
-  { key: 'onboarding_incomplete', name: 'Onboarding incompleto', subject: 'Finalize a configuração da sua loja', body: 'Olá {{company_name}},\n\nSua loja {{store_name}} ainda não está totalmente configurada.\n\nFinalize o onboarding para ajustar horários, pagamentos, entrega e cardápio inicial:\n{{dashboard_url}}\n\nIsso ajuda sua loja a ficar pronta para receber pedidos sem retrabalho.' },
-  { key: 'first_product_reminder', name: 'Primeiro produto pendente', subject: 'Cadastre os primeiros produtos da {{store_name}}', body: 'Olá {{company_name}},\n\nComece pelos três produtos mais vendidos da sua loja. Depois você pode completar o restante com calma.\n\nContinue pelo painel:\n{{dashboard_url}}\n\nSe alguma etapa travar, fale com nosso suporte.' },
-  { key: 'publish_menu_reminder', name: 'Cardápio pronto para publicar', subject: 'Seu cardápio está quase pronto', body: 'Olá {{company_name}},\n\nVocê já começou o cardápio da {{store_name}}. Revise horários, entrega e pagamento para publicar o link.\n\nContinuar configuração:\n{{dashboard_url}}' },
-  { key: 'first_order_reminder', name: 'Primeiro pedido teste', subject: 'Teste o pedido da {{store_name}} pelo celular', body: 'Olá {{company_name}},\n\nSeu cardápio está publicado. Abra o link pelo celular e faça um pedido teste para conferir produtos, adicionais, entrega e pagamento.\n\nCardápio:\n{{cardapio_url}}\n\nAcompanhe pelo painel:\n{{dashboard_url}}' },
-  { key: 'inactive_store_checkin', name: 'Loja sem pedidos recentes', subject: 'Podemos ajudar com a {{store_name}}?', body: 'Olá {{company_name}},\n\nPercebemos que a {{store_name}} está há alguns dias sem novos pedidos no painel. Alguma configuração está dificultando o uso?\n\nRevise a loja pelo painel:\n{{dashboard_url}}\n\nSe precisar, abra um chamado e conte o que aconteceu:\n{{support_url}}' },
-  { key: 'store_published', name: 'Loja publicada', subject: 'Seu cardápio já está publicado', body: 'Olá {{company_name}},\n\nBoa notícia: o cardápio da {{store_name}} foi publicado com sucesso.\n\nVocê já pode compartilhar o link com seus clientes:\n{{cardapio_url}}\n\nAcompanhe os pedidos pelo painel:\n{{dashboard_url}}' },
-  { key: 'first_order_received', name: 'Primeiro pedido recebido', subject: 'Seu primeiro pedido chegou', body: 'Olá {{company_name}},\n\nA loja {{store_name}} recebeu o primeiro pedido pelo cardápio digital.\n\nPedido: {{order_id}}\nValor: {{order_total}}\n\nAcesse o painel para acompanhar o preparo, entrega e conclusão:\n{{dashboard_url}}' },
-  { key: 'trial_ending', name: 'Trial acabando', subject: 'Seu teste grátis termina em breve', body: 'Olá {{company_name}},\n\nSeu período de teste do plano {{plan_name}} termina em {{due_date}}.\n\nPara manter o cardápio ativo e continuar recebendo pedidos, escolha um plano no painel:\n{{payment_url}}' },
-  { key: 'trial_expired', name: 'Trial encerrado', subject: 'Seu teste grátis terminou', body: 'Olá {{company_name}},\n\nO período de teste da loja {{store_name}} terminou.\n\nPara continuar usando o cardápio, pedidos e recursos do painel, contrate um plano mensal:\n{{payment_url}}\n\nSe precisar de ajuda para escolher o melhor plano, fale com o suporte.' },
-  { key: 'payment_pending', name: 'Pagamento pendente', subject: 'Pagamento pendente do plano {{plan_name}}', body: 'Olá {{company_name}},\n\nIdentificamos uma pendência no pagamento do plano {{plan_name}}.\n\nRegularize pelo painel para evitar bloqueios no cardápio e nos recursos da loja:\n{{payment_url}}' },
-  { key: 'payment_approved', name: 'Pagamento aprovado', subject: 'Pagamento aprovado', body: 'Olá {{company_name}},\n\nO pagamento do plano {{plan_name}} foi aprovado.\n\nSua assinatura está ativa e os recursos do plano já podem ser usados no painel:\n{{dashboard_url}}' },
-  { key: 'payment_refused', name: 'Pagamento recusado', subject: 'Não foi possível aprovar seu pagamento', body: 'Olá {{company_name}},\n\nO pagamento do plano {{plan_name}} não foi aprovado.\n\nConfira os dados de pagamento ou tente novamente pelo painel:\n{{payment_url}}\n\nSua assinatura pode entrar em período de tolerância até a regularização.' },
-  { key: 'account_suspended', name: 'Conta suspensa', subject: 'Sua conta foi suspensa', body: 'Olá {{company_name}},\n\nSua conta foi suspensa temporariamente.\n\nAcesse o painel para regularizar a assinatura ou fale com o suporte:\n{{payment_url}}' },
-  { key: 'account_reactivated', name: 'Conta reativada', subject: 'Sua conta foi reativada', body: 'Olá {{company_name}},\n\nSua conta foi reativada e a loja {{store_name}} já pode voltar a operar.\n\nAcesse o painel para conferir o status da assinatura e continuar recebendo pedidos:\n{{dashboard_url}}' },
-  { key: 'support_replied', name: 'Suporte respondeu', subject: 'O suporte respondeu seu chamado', body: 'Olá {{customer_name}},\n\nA equipe de suporte respondeu seu chamado.\n\nAcompanhe a conversa e envie uma nova mensagem pelo painel:\n{{support_url}}\n\nSe o problema já foi resolvido, você pode encerrar o atendimento por lá.' },
-  { key: 'support_ticket_closed', name: 'Chamado encerrado', subject: 'Seu chamado foi encerrado', body: 'Olá {{customer_name}},\n\nO chamado "{{ticket_subject}}" foi encerrado pela equipe de suporte.\n\nSe precisar continuar o atendimento, acesse o histórico e envie uma nova mensagem:\n{{support_url}}\n\nObrigado pelo retorno.' },
-  { key: 'account_created_not_published', name: 'Conta sem publicação', subject: 'Sua loja ainda não foi publicada', body: 'Olá {{company_name}},\n\nPercebemos que sua conta foi criada, mas o cardápio da {{store_name}} ainda não está publicado.\n\nPublique sua loja para começar a divulgar o link e receber pedidos:\n{{dashboard_url}}\n\nSe quiser, podemos ajudar nos primeiros ajustes.' },
-  { key: 'store_published_no_orders', name: 'Loja publicada sem pedidos', subject: 'Vamos ajudar sua loja a receber pedidos', body: 'Olá {{company_name}},\n\nSeu cardápio já está publicado, mas ainda não encontramos pedidos recentes na {{store_name}}.\n\nConfira produtos, formas de pagamento, WhatsApp e compartilhe o link com seus clientes:\n{{cardapio_url}}\n\nAcesse o painel para revisar tudo:\n{{dashboard_url}}' },
-  { key: 'plan_limit_warning', name: 'Limite do plano próximo', subject: 'Sua loja está perto do limite do plano', body: 'Olá {{company_name}},\n\nA loja {{store_name}} está perto do limite de {{limit_name}} do plano {{plan_name}}.\n\nUso atual: {{usage_count}}\nLimite: {{limit_value}}\n\nPara continuar crescendo sem bloqueios, avalie um upgrade:\n{{payment_url}}' },
-  { key: 'plan_upgrade_suggestion', name: 'Sugestão de upgrade', subject: 'Existe um plano melhor para sua operação', body: 'Olá {{company_name}},\n\nPelo uso recente da loja {{store_name}}, o plano {{plan_name}} pode estar limitando sua operação.\n\nUm plano superior pode liberar mais produtos, pedidos, mesas, relatórios e recursos avançados.\n\nConfira as opções no painel:\n{{payment_url}}' },
-  { key: 'plan_changed', name: 'Plano alterado', subject: 'Seu plano foi alterado para {{plan_name}}', body: 'Olá {{company_name}},\n\nO plano da loja {{store_name}} foi alterado para {{plan_name}}.\n\nOs recursos e limites já foram atualizados no painel:\n{{dashboard_url}}\n\nConsulte o histórico de cobrança para acompanhar os detalhes.' },
-  { key: 'cancellation_received', name: 'Cancelamento recebido', subject: 'Recebemos sua solicitação de cancelamento', body: 'Olá {{company_name}},\n\nRecebemos a solicitação de cancelamento da loja {{store_name}}.\n\nNossa equipe vai revisar a assinatura e confirmar os próximos passos.\n\nSe o cancelamento foi um engano ou se podemos ajudar com algum ajuste, responda este e-mail ou abra um chamado:\n{{support_url}}' },
-  { key: 'satisfaction_survey', name: 'Pesquisa de satisfação', subject: 'Como foi sua experiência com o suporte?', body: 'Olá {{customer_name}},\n\nQueremos saber como foi sua experiência com o atendimento.\n\nSe puder, avalie rapidamente o suporte recebido:\n{{rating_url}}\n\nSua opinião ajuda a melhorar o sistema e o atendimento.' },
-  { key: 'referral_invite', name: 'Convite de indicação', subject: '{{customer_name}} indicou o TáPronto para você', body: 'Olá,\n\n{{customer_name}} usa o TáPronto para organizar cardápio digital e pedidos da loja.\n\nVocê também pode criar sua loja online em poucos minutos pelo link abaixo:\n{{referral_url}}\n\nAo contratar um plano, a indicação pode liberar {{referral_reward}} de crédito para quem indicou.\n\nTáPronto\nCardápio digital, pedidos organizados.' },
-  { key: 'referral_received', name: 'Indicação cadastrada', subject: 'Sua indicação criou uma conta no TáPronto', body: 'Olá {{customer_name}},\n\nUma indicação sua criou uma conta no TáPronto.\n\nIndicação: {{company_name}}\nCódigo usado: {{referral_code}}\n\nA recompensa será liberada quando essa loja pagar o primeiro plano.' },
-  { key: 'referral_reward_unlocked', name: 'Recompensa de indicação liberada', subject: 'Você ganhou {{referral_reward}} em indicação', body: 'Olá {{customer_name}},\n\nBoa notícia: a indicação {{company_name}} pagou o primeiro plano.\n\nLiberamos {{referral_reward}} de crédito para sua conta.\n\nVocê pode acompanhar suas indicações no painel:\n{{dashboard_url}}' },
-  { key: 'smtp_test', name: 'Teste SMTP', subject: 'Teste de envio SMTP do TáPronto', body: 'Olá {{customer_name}},\n\nEste é um teste de entrega do TáPronto.\n\nSe este e-mail chegou corretamente, a configuração SMTP está autenticando e preservando acentos.\n\nAcesse a Central para revisar a comunicação:\n{{platform_url}}' },
-  { key: 'backup_failed', name: 'Backup falhou', subject: 'Alerta: falha no backup da plataforma', body: 'Alerta operacional do TáPronto.\n\nA rotina de backup falhou ou está atrasada.\n\nResumo: {{error_summary}}\nPeríodo: {{period}}\n\nAcesse o Platform para verificar Saúde e Serviços:\n{{platform_url}}' },
-  { key: 'webhook_failed', name: 'Webhook falhou', subject: 'Alerta: webhook com falha', body: 'Alerta operacional do TáPronto.\n\nUm webhook apresentou falha de processamento.\n\nProvedor: {{provider}}\nEvento: {{event_id}}\nResumo: {{error_summary}}\n\nVerifique logs, assinatura do webhook e eventos financeiros no Platform:\n{{platform_url}}' },
-  { key: 'smtp_failed', name: 'SMTP com erro', subject: 'Alerta: envio de e-mail com falha', body: 'Alerta operacional do TáPronto.\n\nO SMTP apresentou falha no envio ou teste de entrega.\n\nResumo: {{error_summary}}\n\nAcesse Comunicação no Platform para revisar host, porta, TLS, usuário e senha de app:\n{{platform_url}}' },
-  { key: 'internal_support_ticket_opened', name: 'Interno: novo chamado', subject: 'Novo chamado recebido: {{ticket_subject}}', body: 'Novo chamado recebido na Central TáPronto.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nCategoria: {{ticket_category}}\nPrioridade: {{ticket_priority}}\nAssunto: {{ticket_subject}}\nResumo: {{message_preview}}\n\nAcesse a fila de atendimentos para responder rapidamente:\n{{support_url}}' },
-  { key: 'internal_support_ticket_replied', name: 'Interno: cliente respondeu chamado', subject: 'Cliente respondeu chamado: {{ticket_subject}}', body: 'Um cliente respondeu um chamado na Central TáPronto.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nCategoria: {{ticket_category}}\nPrioridade: {{ticket_priority}}\nAssunto: {{ticket_subject}}\nResumo: {{message_preview}}\n\nAcesse a fila de atendimentos:\n{{support_url}}' },
-  { key: 'critical_support_ticket', name: 'Chamado crítico aberto', subject: 'Chamado crítico aberto no suporte', body: 'Um chamado crítico foi aberto no Platform.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nAssunto: {{ticket_subject}}\n\nAcesse a central de atendimentos para responder com prioridade:\n{{support_url}}' },
-  { key: 'delinquent_support_ticket', name: 'Inadimplente abriu chamado', subject: 'Cliente inadimplente abriu chamado', body: 'Um cliente com pendência financeira abriu chamado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nAssunto: {{ticket_subject}}\n\nVerifique cobrança, assinatura e atendimento:\n{{support_url}}' },
-  { key: 'internal_payment_refused', name: 'Interno: pagamento recusado', subject: 'Alerta interno: pagamento recusado', body: 'Alerta comercial do TáPronto.\n\nUm pagamento foi recusado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nVerifique a assinatura, cobrança e eventos do provedor no Platform:\n{{platform_url}}' },
-  { key: 'internal_account_suspended', name: 'Interno: conta suspensa', subject: 'Alerta interno: conta suspensa', body: 'Alerta comercial do TáPronto.\n\nUma conta foi suspensa.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nConfira o motivo, cobrança e histórico do cliente no Platform:\n{{platform_url}}' },
-  { key: 'internal_trial_expiring', name: 'Interno: trial vencendo', subject: 'Alerta interno: trial perto do fim', body: 'Alerta comercial do TáPronto.\n\nUm trial está perto do fim.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nVencimento: {{due_date}}\n\nEntre em contato para orientar a contratação:\n{{platform_url}}' },
-  { key: 'internal_trial_expired', name: 'Interno: trial encerrado', subject: 'Alerta interno: trial encerrado', body: 'Alerta comercial do TáPronto.\n\nUm trial terminou.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nVencimento: {{due_date}}\n\nVerifique se o cliente deve ser acionado, bloqueado ou convertido:\n{{platform_url}}' },
-  { key: 'internal_plan_changed', name: 'Interno: plano alterado', subject: 'Alerta interno: plano alterado', body: 'Alerta comercial do TáPronto.\n\nUm plano foi alterado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nNovo plano: {{plan_name}}\nResumo: {{error_summary}}\n\nConfira assinatura, MRR e auditoria no Platform:\n{{platform_url}}' }
+  { key: 'assisted_account_ready', name: 'Cardápio assistido pronto', subject: 'Seu cardápio digital está pronto no TáPronto', body: 'Olá {{customer_name}},\n\nFinalizamos a montagem do cardápio da sua loja no TáPronto.\n\nConfira seu cardápio publicado:\n{{cardapio_url}}\n\nDefina sua senha para acessar o painel:\n{{activation_url}}\n\nSeu período de teste começa após a ativação da conta. Se precisar de ajuda, fale com nosso suporte:\n{{support_url}}' },
+  { key: 'account_activation', name: 'Ativação de conta', subject: 'Ative sua conta no TáPronto', body: 'Olá {{customer_name}},\n\nSua conta no TáPronto foi criada com sucesso.\n\nPara liberar o acesso ao painel da sua loja, ative sua conta pelo link abaixo:\n{{activation_url}}\n\nEste link expira em {{due_date}}.\n\nSe você não solicitou esta conta, desconsidere este e-mail.' },
+  { key: 'welcome', name: 'Boas-vindas', subject: 'Bem-vindo ao TáPronto', body: 'Olá {{customer_name}},\n\nSua loja foi cadastrada com sucesso no TáPronto.\n\nAcesse o painel para gerenciar produtos, pedidos e configurações:\n{{dashboard_url}}\n\nConte com o suporte TáPronto sempre que precisar.' },
+  { key: 'password_recovery', name: 'Recuperação de senha', subject: 'Recupere sua senha de acesso', body: 'Olá {{customer_name}},\n\nRecebemos uma solicitação para redefinir a senha de acesso da sua conta.\n\nPara cadastrar uma nova senha, clique no link abaixo:\n{{reset_url}}\n\nEste link é válido até {{due_date}}.\n\nSe você não realizou esta solicitação, nenhuma ação é necessária.' },
+  { key: 'onboarding_incomplete', name: 'Onboarding incompleto', subject: 'Conclua a configuração da sua loja no TáPronto', body: 'Olá {{customer_name}},\n\nA configuração da sua loja ainda não foi finalizada no TáPronto.\n\nConclua as etapas de horários, entrega e formas de pagamento para começar a receber pedidos:\n{{dashboard_url}}\n\nIsso ajuda sua operação a ficar pronta para receber clientes sem retrabalho.' },
+  { key: 'first_product_reminder', name: 'Primeiro produto pendente', subject: 'Cadastre os primeiros produtos da sua loja', body: 'Olá {{customer_name}},\n\nSua loja está quase pronta para operar. O próximo passo é cadastrar seus produtos no cardápio.\n\nRecomendamos começar pelos itens mais vendidos do seu estabelecimento:\n{{dashboard_url}}\n\nSe precisar de ajuda nessa etapa, nosso suporte está à disposição.' },
+  { key: 'publish_menu_reminder', name: 'Cardápio pronto para publicar', subject: 'Publique seu cardápio para começar a vender', body: 'Olá {{customer_name}},\n\nSeus produtos já foram cadastrados no TáPronto. Revise horários, entrega e pagamento para colocar o cardápio no ar:\n{{dashboard_url}}\n\nApós a publicação, você já poderá divulgar o link e receber pedidos.' },
+  { key: 'first_order_reminder', name: 'Primeiro pedido teste', subject: 'Faça um pedido de teste no seu cardápio', body: 'Olá {{customer_name}},\n\nSeu cardápio digital já está publicado. Faça um pedido de teste pelo celular para conferir itens, entrega e opções de pagamento:\n{{cardapio_url}}\n\nAcompanhe a chegada do pedido em tempo real pelo painel:\n{{dashboard_url}}' },
+  { key: 'inactive_store_checkin', name: 'Loja sem pedidos recentes', subject: 'Acompanhamento da sua operação no TáPronto', body: 'Olá {{customer_name}},\n\nNotamos que sua loja não registrou novos pedidos nos últimos dias no painel.\n\nSe você encontrou alguma dificuldade ou precisa de auxílio para divulgar o link, nossa equipe está à disposição:\n{{support_url}}\n\nAcesse seu painel para acompanhar a operação:\n{{dashboard_url}}' },
+  { key: 'reengagement_no_login', name: 'Reengajamento sem acesso', subject: 'Seu cardápio digital está pronto para vender', body: 'Olá {{customer_name}},\n\nFaz alguns dias que você não acessa o painel da sua loja no TáPronto.\n\nSeu cardápio digital já está disponível. Acesse o painel para atualizar produtos, horários ou colocar sua operação no ar:\n{{dashboard_url}}\n\nSe precisar de ajuda com a configuração, fale com nosso suporte:\n{{support_url}}' },
+  { key: 'store_published', name: 'Loja publicada', subject: 'Seu cardápio foi publicado com sucesso', body: 'Olá {{customer_name}},\n\nO cardápio digital da sua loja foi publicado com sucesso no TáPronto.\n\nVocê já pode compartilhar o link direto com seus clientes:\n{{cardapio_url}}\n\nAcompanhe a chegada dos pedidos em tempo real pelo painel:\n{{dashboard_url}}' },
+  { key: 'first_order_received', name: 'Primeiro pedido recebido', subject: 'Você recebeu seu primeiro pedido no TáPronto', body: 'Olá {{customer_name}},\n\nSua loja acabou de receber o primeiro pedido pelo cardápio digital.\n\nPedido: {{order_id}}\nValor: {{order_total}}\n\nAcesse o painel para acompanhar o preparo e o despacho:\n{{dashboard_url}}' },
+  { key: 'trial_ending', name: 'Trial acabando', subject: 'Seu período de teste no TáPronto termina em breve', body: 'Olá {{customer_name}},\n\nO período de teste do plano {{plan_name}} da sua loja termina em {{due_date}}.\n\nPara manter seu cardápio ativo e continuar recebendo pedidos sem interrupção, confirme sua assinatura no painel:\n{{payment_url}}\n\nSe precisar de orientações sobre planos, fale com nosso suporte:\n{{support_url}}' },
+  { key: 'trial_last_chance', name: 'Última chance do trial', subject: 'Amanhã é o último dia do seu teste grátis', body: 'Olá {{customer_name}},\n\nSeu período de teste grátis do plano {{plan_name}} termina amanhã ({{due_date}}).\n\nApós essa data, o link do cardápio sairá do ar e o recebimento de pedidos será pausado. Para continuar atendendo sem interrupções, confirme seu plano no painel:\n{{payment_url}}\n\nSe tiver dúvidas sobre os planos, fale com nosso suporte:\n{{support_url}}' },
+  { key: 'trial_expired', name: 'Trial encerrado', subject: 'Seu período de teste foi encerrado', body: 'Olá {{customer_name}},\n\nO período de teste da sua loja no TáPronto terminou.\n\nPara reativar seu cardápio, continuar recebendo pedidos e utilizar todos os recursos do painel, escolha um plano mensal:\n{{payment_url}}\n\nNossa equipe de suporte está à disposição para tirar qualquer dúvida.' },
+  { key: 'payment_pending', name: 'Pagamento pendente', subject: 'Pagamento pendente do plano {{plan_name}}', body: 'Olá {{customer_name}},\n\nIdentificamos uma pendência no pagamento da assinatura do plano {{plan_name}}.\n\nRegularize a cobrança pelo painel para evitar o bloqueio do cardápio e dos recursos da sua loja:\n{{payment_url}}' },
+  { key: 'payment_approved', name: 'Pagamento aprovado', subject: 'Pagamento aprovado do plano {{plan_name}}', body: 'Olá {{customer_name}},\n\nO pagamento do plano {{plan_name}} foi aprovado com sucesso.\n\nSua assinatura está ativa e todos os recursos já estão liberados no painel:\n{{dashboard_url}}' },
+  { key: 'payment_refused', name: 'Pagamento recusado', subject: 'Não foi possível aprovar o pagamento do seu plano', body: 'Olá {{customer_name}},\n\nO pagamento da assinatura do plano {{plan_name}} não foi aprovado pela instituição financeira.\n\nConfira os dados informados ou escolha outra forma de pagamento pelo painel:\n{{payment_url}}\n\nRegularize a cobrança para evitar interrupções no funcionamento da sua loja.' },
+  { key: 'account_suspended', name: 'Conta suspensa', subject: 'Sua conta no TáPronto foi suspensa', body: 'Olá {{customer_name}},\n\nA conta da sua loja foi suspensa temporariamente por pendência na assinatura.\n\nAcesse o painel para regularizar sua situação ou entre em contato com nosso suporte:\n{{payment_url}}' },
+  { key: 'account_reactivated', name: 'Conta reativada', subject: 'Sua conta no TáPronto foi reativada', body: 'Olá {{customer_name}},\n\nSua conta foi reativada com sucesso e sua loja já pode voltar a operar normalmente.\n\nAcesse o painel para conferir o status da sua assinatura:\n{{dashboard_url}}' },
+  { key: 'support_replied', name: 'Suporte respondeu', subject: 'Resposta ao seu chamado de suporte', body: 'Olá {{customer_name}},\n\nA equipe de suporte respondeu ao seu chamado.\n\nAcompanhe a mensagem e dê continuidade ao atendimento pelo painel:\n{{support_url}}' },
+  { key: 'support_ticket_closed', name: 'Chamado encerrado', subject: 'Chamado encerrado: {{ticket_subject}}', body: 'Olá {{customer_name}},\n\nO chamado "{{ticket_subject}}" foi concluído pela nossa equipe de suporte.\n\nSe ainda precisar de ajuda sobre este assunto, basta enviar uma nova mensagem pela central:\n{{support_url}}' },
+  { key: 'account_created_not_published', name: 'Conta sem publicação', subject: 'Seu cardápio digital ainda não está publicado', body: 'Olá {{customer_name}},\n\nSua conta no TáPronto foi criada, mas seu cardápio digital ainda não está visível para os clientes.\n\nPublique sua loja para começar a divulgar o link e receber pedidos online:\n{{dashboard_url}}\n\nSe precisar de ajuda com os últimos detalhes, fale com nosso suporte:\n{{support_url}}' },
+  { key: 'store_published_no_orders', name: 'Loja publicada sem pedidos', subject: 'Dicas para começar a receber pedidos no TáPronto', body: 'Olá {{customer_name}},\n\nSeu cardápio já está publicado, mas ainda não registramos pedidos recentes na sua loja.\n\nCompartilhe o link nas redes sociais e no WhatsApp do seu estabelecimento:\n{{cardapio_url}}\n\nAcesse o painel para conferir horários e produtos cadastrados:\n{{dashboard_url}}' },
+  { key: 'plan_limit_warning', name: 'Limite do plano próximo', subject: 'Sua loja está próxima do limite do plano {{plan_name}}', body: 'Olá {{customer_name}},\n\nSua loja está próxima do limite de {{limit_name}} do plano {{plan_name}}.\n\nUso atual: {{usage_count}}\nLimite do plano: {{limit_value}}\n\nPara continuar recebendo clientes sem interrupção na operação, conheça os planos superiores:\n{{payment_url}}' },
+  { key: 'plan_upgrade_suggestion', name: 'Sugestão de upgrade', subject: 'Opções de planos para o seu negócio', body: 'Olá {{customer_name}},\n\nPelo volume recente da sua operação, o plano {{plan_name}} pode estar limitando o crescimento do seu negócio.\n\nPlanos superiores oferecem limites maiores de produtos, pedidos, mesas e relatórios avançados.\n\nConheça as opções disponíveis no painel:\n{{payment_url}}' },
+  { key: 'plan_changed', name: 'Plano alterado', subject: 'Plano alterado para {{plan_name}}', body: 'Olá {{customer_name}},\n\nO plano da sua loja foi alterado para {{plan_name}} com sucesso.\n\nOs limites e recursos contratados já estão disponíveis em sua conta:\n{{dashboard_url}}\n\nConsulte os detalhes da assinatura no painel financeiro.' },
+  { key: 'cancellation_received', name: 'Cancelamento recebido', subject: 'Solicitação de cancelamento recebida', body: 'Olá {{customer_name}},\n\nRecebemos a solicitação de cancelamento da assinatura da sua loja.\n\nNossa equipe processará o pedido conforme os termos de serviço.\n\nSe a solicitação foi feita por engano ou se pudermos ajudar com algum ajuste operacional, fale conosco:\n{{support_url}}' },
+  { key: 'satisfaction_survey', name: 'Pesquisa de satisfação', subject: 'Como foi sua experiência com o suporte TáPronto?', body: 'Olá {{customer_name}},\n\nQueremos saber como foi sua experiência com nosso atendimento recente.\n\nSe puder, avalie o suporte recebido em menos de um minuto:\n{{rating_url}}\n\nSua opinião nos ajuda a aprimorar nossos serviços constantemente.' },
+  { key: 'referral_invite', name: 'Convite de indicação', subject: '{{customer_name}} indicou o TáPronto para você', body: 'Olá,\n\n{{customer_name}} recomendou o TáPronto para organizar o cardápio digital e os pedidos da sua loja.\n\nCrie sua conta em poucos minutos pelo link abaixo:\n{{referral_url}}\n\nAo contratar um plano, a indicação concede {{referral_reward}} em créditos para quem indicou.\n\nTáPronto - Cardápio digital e gestão de pedidos.' },
+  { key: 'referral_received', name: 'Indicação cadastrada', subject: 'Nova indicação cadastrada no TáPronto', body: 'Olá {{customer_name}},\n\nUm novo estabelecimento se cadastrou no TáPronto através da sua indicação.\n\nIndicação: {{company_name}}\nCódigo utilizado: {{referral_code}}\n\nA recompensa será liberada assim que o primeiro pagamento de plano dessa loja for confirmado.' },
+  { key: 'referral_reward_unlocked', name: 'Recompensa de indicação liberada', subject: 'Crédito de indicação liberado em sua conta', body: 'Olá {{customer_name}},\n\nA indicação da empresa {{company_name}} confirmou o primeiro pagamento de plano.\n\nLiberamos {{referral_reward}} de crédito para a sua conta.\n\nAcompanhe suas indicações e saldo de créditos pelo painel:\n{{dashboard_url}}' },
+  { key: 'smtp_test', name: 'Teste SMTP', subject: 'Teste de envio SMTP do TáPronto', body: 'Olá {{customer_name}},\n\nEste é um disparo de validação do envio de e-mails da plataforma TáPronto.\n\nSe esta mensagem foi entregue corretamente, o serviço SMTP está operando normalmente.\n\nAcesse a central administrativa:\n{{platform_url}}' },
+  { key: 'backup_failed', name: 'Backup falhou', subject: 'Alerta: falha na rotina de backup da plataforma', body: 'Alerta operacional do TáPronto.\n\nA rotina de backup do banco de dados falhou ou está atrasada.\n\nResumo da ocorrência: {{error_summary}}\nPeríodo: {{period}}\n\nAcesse a plataforma para verificar os diagnósticos de Saúde e Serviços:\n{{platform_url}}' },
+  { key: 'webhook_failed', name: 'Webhook falhou', subject: 'Alerta: falha no processamento de webhook', body: 'Alerta operacional do TáPronto.\n\nOcorreu uma falha no processamento de webhook de integração.\n\nProvedor: {{provider}}\nEvento: {{event_id}}\nResumo: {{error_summary}}\n\nVerifique os logs e eventos financeiros na plataforma:\n{{platform_url}}' },
+  { key: 'smtp_failed', name: 'SMTP com erro', subject: 'Alerta: erro no serviço de envio de e-mails', body: 'Alerta operacional do TáPronto.\n\nO serviço SMTP apresentou falha no envio ou no teste de entrega.\n\nResumo: {{error_summary}}\n\nAcesse o menu de Comunicação na plataforma para revisar as configurações:\n{{platform_url}}' },
+  { key: 'internal_support_ticket_opened', name: 'Interno: novo chamado', subject: 'Novo chamado recebido: {{ticket_subject}}', body: 'Novo chamado registrado na Central TáPronto.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nCategoria: {{ticket_category}}\nPrioridade: {{ticket_priority}}\nAssunto: {{ticket_subject}}\nResumo: {{message_preview}}\n\nAcesse a fila de atendimento para responder ao cliente:\n{{support_url}}' },
+  { key: 'internal_support_ticket_replied', name: 'Interno: cliente respondeu chamado', subject: 'Cliente respondeu chamado: {{ticket_subject}}', body: 'O cliente enviou uma resposta no chamado registrado na Central TáPronto.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nCategoria: {{ticket_category}}\nPrioridade: {{ticket_priority}}\nAssunto: {{ticket_subject}}\nResumo: {{message_preview}}\n\nAcesse a fila de atendimento:\n{{support_url}}' },
+  { key: 'critical_support_ticket', name: 'Chamado crítico aberto', subject: 'Alerta: chamado crítico aberto no suporte', body: 'Um chamado com prioridade crítica foi registrado na plataforma.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nAssunto: {{ticket_subject}}\n\nAcesse a central de atendimento para tratar com prioridade:\n{{support_url}}' },
+  { key: 'delinquent_support_ticket', name: 'Inadimplente abriu chamado', subject: 'Chamado aberto por cliente com pendência financeira', body: 'Um cliente com pendência financeira ativa abriu chamado de atendimento.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nAssunto: {{ticket_subject}}\n\nConsulte o histórico de cobrança e o atendimento na plataforma:\n{{support_url}}' },
+  { key: 'internal_payment_refused', name: 'Interno: pagamento recusado', subject: 'Alerta comercial: pagamento de assinatura recusado', body: 'Alerta comercial do TáPronto.\n\nUm pagamento de assinatura foi recusado pela instituição financeira.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nVerifique a assinatura e os eventos do provedor na plataforma:\n{{platform_url}}' },
+  { key: 'internal_account_suspended', name: 'Interno: conta suspensa', subject: 'Alerta comercial: conta de cliente suspensa', body: 'Alerta comercial do TáPronto.\n\nUma conta de cliente foi suspensa no sistema.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nResumo: {{error_summary}}\n\nConsulte os detalhes e o histórico do cliente na plataforma:\n{{platform_url}}' },
+  { key: 'internal_trial_expiring', name: 'Interno: trial vencendo', subject: 'Alerta comercial: período de teste próximo do fim', body: 'Alerta comercial do TáPronto.\n\nO período de teste de um cliente está próximo do vencimento.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nVencimento: {{due_date}}\n\nAcesse a plataforma para orientar a contratação do plano:\n{{platform_url}}' },
+  { key: 'internal_trial_expired', name: 'Interno: trial encerrado', subject: 'Alerta comercial: período de teste encerrado', body: 'Alerta comercial do TáPronto.\n\nO período de teste de um cliente terminou.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nPlano: {{plan_name}}\nVencimento: {{due_date}}\n\nVerifique se o cliente deve ser acionado ou convertido:\n{{platform_url}}' },
+  { key: 'internal_plan_changed', name: 'Interno: plano alterado', subject: 'Alerta comercial: plano de cliente alterado', body: 'Alerta comercial do TáPronto.\n\nO plano de um cliente foi alterado.\n\nCliente: {{company_name}}\nLoja: {{store_name}}\nNovo plano: {{plan_name}}\nResumo: {{error_summary}}\n\nConfira os detalhes da assinatura e auditoria na plataforma:\n{{platform_url}}' },
+  { key: 'sales_handoff_required', name: 'Vendas: intervenção humana necessária', subject: 'Alerta comercial: lead requer atendimento humano', body: 'A automação de vendas identificou uma conversa que requer intervenção de atendente.\n\nEstabelecimento: {{business_name}}\nTelefone: {{phone}}\nMensagem: {{question}}\nResumo: {{summary}}\nMotivo: {{reason}}\n\nAcesse a central de vendas para dar andamento ao contato:\n{{platform_url}}' }
 ];
-
 const EMAIL_TEMPLATE_VARIABLES = [
   'store_name',
   'company_name',
@@ -13652,7 +14472,7 @@ async function createDefaultSubscription(companyId, planCode, options = {}) {
     limit: '1'
   }))[0];
   if (!plan) return null;
-  const trialDays = clampInteger(Number(options.trialDays || DEFAULT_TRIAL_DAYS), DEFAULT_TRIAL_DAYS, FIRST_CUSTOMERS_TRIAL_DAYS);
+  const trialDays = clampInteger(Number(options.trialDays || DEFAULT_TRIAL_DAYS), DEFAULT_TRIAL_DAYS, REGIONAL_PARTNERS_TRIAL_DAYS);
   const startsAt = new Date();
   const endsAt = new Date(startsAt.getTime() + trialDays * 86400000);
   const [subscription] = await dbRequest('POST', 'company_subscriptions', {}, {
@@ -13708,35 +14528,7 @@ function sanitizeAuditSeverity(value) {
 }
 
 function sanitizeAuditPayload(value, depth = 0) {
-  if (value === undefined || value === null) return null;
-  if (depth > 5) return '[truncated]';
-  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => sanitizeAuditPayload(entry, depth + 1));
-  if (typeof value !== 'object') return value;
-  const blocked = new Set([
-    'password',
-    'password_hash',
-    'current_password',
-    'new_password',
-    'token',
-    'access_token',
-    'refresh_token',
-    'api_key',
-    'apikey',
-    'secret',
-    'webhook_secret',
-    'service_role',
-    'authorization'
-  ]);
-  const output = {};
-  for (const [key, entry] of Object.entries(value)) {
-    const normalizedKey = key.toLowerCase();
-    if ([...blocked].some((blockedKey) => normalizedKey.includes(blockedKey))) {
-      output[key] = '[redacted]';
-      continue;
-    }
-    output[key] = sanitizeAuditPayload(entry, depth + 1);
-  }
-  return output;
+  return redactSensitive(value, depth) ?? null;
 }
 
 async function requireAdmin(req, res) {
@@ -13896,7 +14688,7 @@ async function requirePlatformAdmin(req, res, permission = 'platform.view') {
 const PLATFORM_PERMISSION_GROUPS = Object.freeze({
   view: ['platform.view', 'platform.audit.view', 'platform.services.view'],
   billing: ['platform.billing.manage'],
-  customer: ['platform.customer.suspend'],
+  customer: ['platform.customer.suspend', 'platform.companies.manage'],
   services: ['platform.services.manage']
 });
 
@@ -13907,6 +14699,7 @@ function platformPermissions(admin) {
     'platform.audit.view',
     'platform.billing.manage',
     'platform.customer.suspend',
+    'platform.companies.manage',
     'platform.services.view',
     'platform.services.manage'
   ];
@@ -14425,6 +15218,7 @@ async function resetCustomerPassword(data, storeId = null, options = {}) {
   await db('PATCH', 'customers', { id: `eq.${customer.id}` }, {
     password_hash: hashPassword(newPassword)
   }, ['Prefer: return=minimal']);
+  await deleteOwnerSessions('customer', customer.id);
 }
 
 async function createCustomerSession(customer) {
@@ -14532,7 +15326,8 @@ async function updateCustomerProfile(customerId, data, storeId = null, options =
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
   }, payload, ['Prefer: return=representation']);
   if (!updated) throw httpError(404, 'Cliente não encontrado nesta loja.');
-  clearSessionCacheByOwner('customer', customerId);
+  if (payload.password_hash) await deleteOwnerSessions('customer', customerId);
+  else clearSessionCacheByOwner('customer', customerId);
   if (data.address?.street) {
     await upsertAddress(customerId, sanitizeAddress(data.address), updated.store_id, options);
   }
@@ -14615,11 +15410,12 @@ async function deleteCustomerAddressByAdmin(customerId, addressId, storeId = nul
   const db = options.db || dbRequest;
   const resolvedStoreId = cleanUuid(storeId);
   await assertCustomerBelongsToStore(customerId, resolvedStoreId, options);
-  await db('DELETE', 'customer_addresses', {
+  const deleted = await db('DELETE', 'customer_addresses', {
     id: `eq.${addressId}`,
     customer_id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
-  }, undefined, ['Prefer: return=minimal']);
+  }, undefined, ['Prefer: return=representation']);
+  if (!deleted[0]) throw httpError(404, 'Endereço não encontrado nesta loja.');
   const addresses = await listCustomerAddresses(customerId, resolvedStoreId, options);
   if (addresses.length && !addresses.some((address) => address.is_default)) {
     await db('PATCH', 'customer_addresses', { id: `eq.${addresses[0].id}` }, {
@@ -15529,8 +16325,9 @@ async function createOrder(req, data, options = {}) {
   }
 
   return {
-    order: { ...stripPaymentAccessSecrets(finalOrder), items: itemsWithOrder, ...(paymentAccessToken ? { payment_access_token: paymentAccessToken } : {}) },
+    order: { ...stripPaymentAccessSecrets(finalOrder), items: itemsWithOrder },
     payment,
+    ...(paymentAccessToken ? { paymentAccess: { code: finalOrder.public_code, token: paymentAccessToken } } : {}),
     whatsapp_url: null,
     whatsapp_message: whatsappMessage
   };
@@ -15800,6 +16597,16 @@ async function deleteSession(token) {
   await dbRequest('DELETE', 'app_sessions', { token: `eq.${sessionTokenHash(token)}` }, undefined, ['Prefer: return=minimal']);
 }
 
+async function deleteOwnerSessions(type, ownerId, exceptTokenHash = '') {
+  const filters = {
+    type: `eq.${type}`,
+    owner_id: `eq.${cleanUuid(ownerId)}`,
+    ...(exceptTokenHash ? { token: `neq.${exceptTokenHash}` } : {})
+  };
+  await dbRequest('DELETE', 'app_sessions', filters, undefined, ['Prefer: return=minimal']);
+  clearSessionCacheByOwner(type, ownerId);
+}
+
 function sessionTokenHash(token) {
   return createHash('sha256').update(String(token || '')).digest('hex');
 }
@@ -15816,7 +16623,6 @@ async function startPlatformSupportImpersonation(req, admin, data = {}) {
   const company = await getCompanyById(store.company_id);
   const ttlSeconds = clampNumber(Number(data.ttl_seconds || data.ttlSeconds || 30 * 60), 1, 60 * 60);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
-  const originalToken = parseCookies(req)[ADMIN_COOKIE] || '';
   const accessStore = publicStoreRef(store);
   const supportSession = {
     id: admin.id,
@@ -15835,7 +16641,6 @@ async function startPlatformSupportImpersonation(req, admin, data = {}) {
       expires_at: expiresAt,
       original_admin_id: admin.id,
       original_admin_email: admin.email,
-      original_session_token: originalToken,
       target_company_id: company.id,
       target_company_name: company.name,
       target_store_id: store.id,
@@ -15843,7 +16648,7 @@ async function startPlatformSupportImpersonation(req, admin, data = {}) {
       target_store_slug: store.slug
     }
   };
-  const token = await createPersistentSession('admin', admin.id, supportSession);
+  const token = await createPersistentSession('support_handoff', admin.id, supportSession);
   await audit('platform.support.impersonate.start', {
     req,
     actor_admin_id: admin.id,
@@ -15862,14 +16667,33 @@ async function startPlatformSupportImpersonation(req, admin, data = {}) {
   return { token, admin: supportSession, expires_at: expiresAt };
 }
 
+async function consumePlatformSupportHandoff(data = {}) {
+  const token = String(data.token || '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(token)) throw httpError(401, 'Acesso de suporte inválido ou expirado.');
+  const handoff = await readPersistentSession(token, 'support_handoff');
+  if (!handoff || isSupportModeExpired(handoff.data)) {
+    if (handoff) await deleteSession(token);
+    throw httpError(401, 'Acesso de suporte inválido ou expirado.');
+  }
+  const [converted] = await dbRequest('PATCH', 'app_sessions', {
+    token: `eq.${sessionTokenHash(token)}`,
+    type: 'eq.support_handoff'
+  }, {
+    type: 'admin',
+    expires_at: handoff.data.support_mode.expires_at,
+    updated_at: new Date().toISOString()
+  }, ['Prefer: return=representation']);
+  clearSessionCacheToken(token);
+  if (!converted) throw httpError(401, 'Acesso de suporte já utilizado ou expirado.');
+  return { token };
+}
+
 async function endPlatformSupportImpersonation(req, admin) {
   if (!isSupportModeAdmin(admin)) {
     throw httpError(422, 'Nenhum modo suporte ativo nesta sessão.');
   }
   const cookies = parseCookies(req);
   const supportToken = cookies[ADMIN_COOKIE] || '';
-  const restoreToken = admin.support_mode?.original_session_token || '';
-  const restoreSession = restoreToken ? await readPersistentSession(restoreToken, 'admin').catch(() => null) : null;
   await audit('platform.support.impersonate.end', {
     req,
     actor_admin_id: admin.support_mode?.original_admin_id || admin.id,
@@ -15885,7 +16709,7 @@ async function endPlatformSupportImpersonation(req, admin) {
     }
   });
   await deleteSession(supportToken);
-  return { restore_token: restoreSession ? restoreToken : '' };
+  return { ended: true };
 }
 
 function clearSessionCacheToken(token) {
@@ -15954,38 +16778,11 @@ function enforceRateLimit(req, method, pathname) {
 }
 
 function enforceAuthenticatedRequestOrigin(req, method) {
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return;
   const cookies = parseCookies(req);
-  if (!cookies[ADMIN_COOKIE] && !cookies[CUSTOMER_COOKIE]) return;
-
-  const fetchSite = cleanText(req.headers['sec-fetch-site'] || '').toLowerCase();
-  if (fetchSite === 'cross-site') throw httpError(403, 'Origem da requisição não autorizada.');
-
-  const source = cleanText(req.headers.origin || req.headers.referer || '');
-  if (!source) return; // Clientes não-browser continuam suportados; cookies HttpOnly não ficam expostos a eles.
-  let sourceOrigin = '';
-  try {
-    sourceOrigin = new URL(source).origin.toLowerCase();
-  } catch {
-    throw httpError(403, 'Origem da requisição inválida.');
-  }
-  const trusted = trustedRequestOrigins(req);
-  if (!trusted.has(sourceOrigin)) throw httpError(403, 'Origem da requisição não autorizada.');
-}
-
-function trustedRequestOrigins(req) {
-  const origins = new Set();
-  const add = (value) => {
-    const text = String(value || '').trim();
-    if (!text) return;
-    try { origins.add(new URL(text).origin.toLowerCase()); } catch {}
-  };
-  add(requestOrigin(req));
-  add(process.env.APP_URL);
-  add(process.env.PUBLIC_APP_URL);
-  add(process.env.PANEL_BASE_URL);
-  add(process.env.PLATFORM_BASE_URL);
-  return origins;
+  assertAuthenticatedOrigin(req, {
+    authenticated: Boolean(cookies[ADMIN_COOKIE] || cookies[CUSTOMER_COOKIE]),
+    env: process.env
+  });
 }
 
 function rateLimitRule(method, pathname) {
@@ -16721,7 +17518,6 @@ async function createAbacateOrderCheckout({ store, order, token, amount, methods
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   const storeSlug = cleanSlug(store.slug || '');
   const paymentQuery = new URLSearchParams({ pedido: order.public_code });
-  if (paymentAccessToken) paymentQuery.set('token', paymentAccessToken);
   const paymentPath = `${storeSlug ? `/${storeSlug}` : ''}/pagamento?${paymentQuery.toString()}`;
   const fallbackUrl = origin ? `${origin}${paymentPath}` : '';
   const externalSuffix = idempotencyKey
@@ -16806,7 +17602,7 @@ async function createMercadoPagoPayment({ store, order, type, integrations, idem
   if (isMaskedSecretValue(token)) throw httpError(422, 'O Access Token do Mercado Pago está salvo apenas como máscara. Reconfigure a credencial real em Integrações.');
   const origin = cleanText(process.env.PUBLIC_APP_URL || process.env.APP_URL || '').replace(/\/+$/, '');
   const storeSlug = cleanSlug(store?.slug || '');
-  const query = new URLSearchParams({ pedido: order.public_code }); if (paymentAccessToken) query.set('token', paymentAccessToken);
+  const query = new URLSearchParams({ pedido: order.public_code });
   const returnUrl = origin ? `${origin}${storeSlug ? `/${storeSlug}` : ''}/pagamento?${query}` : '';
   const notificationUrl = origin ? `${origin}/api/payments/webhook?provider=mercadopago` : undefined;
   if (type === 'pix') {
@@ -17067,6 +17863,32 @@ function assertPaymentAccessToken(order, token) {
   if (!safeSecretEquals(actual, expected)) throw httpError(403, 'Acesso ao pagamento não autorizado.');
   if (order.payment_access_expires_at && new Date(order.payment_access_expires_at).getTime() <= Date.now()) {
     throw httpError(410, 'O acesso a este pagamento expirou.');
+  }
+}
+
+function paymentCookieSecret() {
+  return process.env.PAYMENT_COOKIE_SECRET || process.env.COOKIE_SECRET || process.env.SESSION_SECRET || 'local-payment-cookie-secret';
+}
+
+function paymentAccessCookie(code, token) {
+  const payload = Buffer.from(JSON.stringify({ code: cleanPublicCode(code), token: String(token || '') })).toString('base64url');
+  const signature = createHmac('sha256', paymentCookieSecret()).update(payload).digest('base64url');
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
+  return `payment_access=${payload}.${signature}; Path=/api/payments; HttpOnly; SameSite=Lax; Max-Age=3600${secure}`;
+}
+
+function paymentAccessFromRequest(req, code) {
+  const value = String(parseCookies(req).payment_access || '');
+  const [payload, suppliedSignature] = value.split('.');
+  if (!payload || !suppliedSignature) return '';
+  const expectedSignature = createHmac('sha256', paymentCookieSecret()).update(payload).digest('base64url');
+  if (!safeSecretEquals(suppliedSignature, expectedSignature)) return '';
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (cleanPublicCode(parsed.code) !== cleanPublicCode(code)) return '';
+    return String(parsed.token || '');
+  } catch {
+    return '';
   }
 }
 
@@ -18938,6 +19760,10 @@ async function localDbRequest(config, method, table, query = {}, payload, extraH
   }
 }
 async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch = '') {
+  if (requestPath.startsWith('/.') && !requestPath.startsWith('/.well-known/')) {
+    await sendFile(req, res, path.join(publicDir, '404.html'), { status: 404, headers: { 'X-Robots-Tag': 'noindex, nofollow' } });
+    return;
+  }
   const guidesRedirectUrl = guidesHostRedirectUrl(requestPath, hostHeader, requestSearch);
   if (guidesRedirectUrl) {
     res.writeHead(301, { Location: guidesRedirectUrl, 'Cache-Control': 'public, max-age=3600' });
@@ -19121,12 +19947,12 @@ function sendSeoLandingPage(req, res, page) {
   <meta property="og:type" content="website"><meta property="og:title" content="${emailEscapeAttribute(page.title)}">
   <meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}">
   <meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css">
+  <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921"><link rel="stylesheet" href="/home.css">
   <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>.seo-main{color:#172033}.seo-hero{padding:72px 0 52px;display:grid;grid-template-columns:1.1fr .9fr;gap:42px;align-items:center}.seo-hero h1{font-size:clamp(2.3rem,5vw,4.6rem);line-height:1.02;margin:14px 0}.seo-hero p,.seo-copy p{font-size:1.08rem;line-height:1.7;color:#596277}.seo-shot{width:100%;border-radius:24px;box-shadow:0 24px 70px #17203324}.seo-section{padding:56px 0}.seo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.seo-card{padding:24px;border:1px solid #e5e7eb;border-radius:18px;background:#fff}.seo-card strong{display:block;font-size:1.08rem;margin-bottom:8px}.seo-faq details{padding:18px 0;border-bottom:1px solid #e5e7eb}.seo-faq summary{font-weight:750;cursor:pointer}.seo-related{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.seo-related a{padding:16px;border:1px solid #e5e7eb;border-radius:14px;text-decoration:none;color:#172033;font-weight:700}@media(max-width:800px){.seo-hero,.seo-grid{grid-template-columns:1fr}.seo-related{grid-template-columns:1fr}}</style>
   <style>.seo-main img{max-width:100%;height:auto!important;aspect-ratio:auto!important;object-fit:contain!important;object-position:center}.seo-main .seo-shot{display:block;width:100%;height:auto!important;aspect-ratio:auto!important}</style>
 </head><body class="seo-main">
-  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="${guidesBaseUrl()}/">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header"><div class="home-container home-nav-shell"><a class="home-brand" href="/" aria-label="TáPronto"><img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="/#recursos">Recursos</a><a href="${guidesBaseUrl()}/">Guias</a><a href="/planos">Planos</a><a href="/#comparativo">Comparativo</a><a href="/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container seo-hero"><div><p class="home-badge">TáPronto para vender</p><h1>${emailEscapeHtml(page.heading)}</h1><p>${emailEscapeHtml(page.intro)}</p><div class="home-actions"><a class="home-button" href="/cadastro">Criar meu cardápio</a><a class="home-button ghost" href="/cardapio">Ver demonstração</a></div><ul class="home-trust"><li>Teste grátis</li><li>Sem taxa por pedido</li><li>Cancele quando quiser</li></ul></div><img class="seo-shot" src="/assets/sistema-cardapio-preview.png" alt="Exemplo do cardápio digital TáPronto no celular" width="1440" height="980"></section>
     <section class="seo-section" style="background:#f7f8fb"><div class="home-container"><p class="home-badge">Benefícios</p><h2>Menos Atrito para o Cliente. Mais Controle para Sua Equipe.</h2><div class="seo-grid">${page.benefits.map((benefit) => `<article class="seo-card"><strong>${emailEscapeHtml(benefit)}</strong><p>Configure pelo painel e publique as mudanças sem depender de aplicativo ou material impresso.</p></article>`).join('')}</div></div></section>
@@ -19174,7 +20000,7 @@ function sendSeoGuideArticlePage(req, res, page) {
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${emailEscapeHtml(page.title)}</title>
   <meta name="description" content="${emailEscapeAttribute(page.description)}"><link rel="canonical" href="${emailEscapeAttribute(canonical)}">
   <meta property="og:type" content="article"><meta property="og:title" content="${emailEscapeAttribute(page.title)}"><meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}"><meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css"><script type="application/ld+json">${safeJsonForHtml(structured)}</script>
+  <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921"><link rel="stylesheet" href="/home.css"><script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>
     .article-page{color:#172033;background:#fff}.article-page *{box-sizing:border-box}.article-nav{border-bottom:1px solid #edf0f3;background:#fff}.article-breadcrumb{display:flex;gap:8px;align-items:center;padding-top:30px;color:#858c9b;font-size:.86rem}.article-breadcrumb a{color:#667085;text-decoration:none}.article-hero{max-width:900px;padding:52px 0 38px}.article-category{display:inline-flex;padding:7px 11px;border-radius:999px;background:#fff1f1;color:#d31820;font-size:.74rem;font-weight:850;letter-spacing:.07em;text-transform:uppercase}.article-hero h1{font-size:clamp(2.5rem,6vw,5rem);line-height:1.02;letter-spacing:-.045em;margin:17px 0 20px}.article-lead{font-size:1.18rem;line-height:1.72;color:#596277;max-width:760px}.article-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:#858c9b;font-size:.86rem;margin-top:24px}.article-visual{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:30px;border-radius:26px;background:linear-gradient(140deg,#ed1c24,#a8070d);color:#fff;box-shadow:0 24px 60px #9c08152b}.article-visual-card{padding:22px;border-radius:18px;background:#fff;color:#172033;box-shadow:0 12px 30px #59000622}.article-visual-card>span{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#fff0f1;color:#d31820;font-weight:900}.article-visual-card strong{display:block;margin:14px 0 6px}.article-visual-card small{color:#667085;line-height:1.45}.article-layout{display:grid;grid-template-columns:240px minmax(0,720px);gap:70px;align-items:start;padding:68px 0}.article-toc{position:sticky;top:24px;padding:20px;border:1px solid #e7e9ee;border-radius:17px}.article-toc strong{display:block;margin-bottom:13px}.article-toc a{display:block;padding:8px 0;color:#667085;text-decoration:none;font-size:.86rem;line-height:1.35;border-bottom:1px solid #f0f1f3}.article-toc a:last-child{border:0}.article-summary{padding:24px;border-left:4px solid #ed1c24;border-radius:0 15px 15px 0;background:#fff5f5;margin-bottom:52px}.article-summary strong{display:block;margin-bottom:8px}.article-summary p{margin:0;color:#596277;line-height:1.65}.article-section{scroll-margin-top:25px;margin-bottom:56px}.article-step{font-size:.75rem;font-weight:900;letter-spacing:.1em;color:#d31820}.article-section h2{font-size:clamp(1.7rem,3vw,2.35rem);line-height:1.15;margin:8px 0 18px}.article-section>p{font-size:1.03rem;line-height:1.78;color:#4f596d;margin:0 0 15px}.article-list{display:grid;gap:9px;padding:0;margin:22px 0;list-style:none}.article-list li{display:flex;gap:10px;align-items:flex-start;padding:13px 15px;border-radius:12px;background:#f7f8fa}.article-list li span{color:#159455;font-weight:900}.article-checklist{display:grid;gap:10px;padding:22px;border-radius:16px;background:#f7f8fa;margin-top:22px}.article-checklist strong{margin-bottom:4px}.article-checklist span{display:flex;gap:10px;color:#4f596d}.article-checklist i{width:18px;height:18px;border:2px solid #c8cdd7;border-radius:5px;background:#fff}.article-example{display:grid;gap:12px;padding:22px;border:1px solid #e7e9ee;border-radius:16px;margin-top:22px}.article-example>strong{font-size:1.05rem}.article-example>div{display:grid;grid-template-columns:60px 1fr;gap:10px;align-items:start}.article-example p{margin:0;color:#4f596d}.example-bad,.example-good{font-size:.7rem;font-weight:850;text-transform:uppercase}.example-bad{color:#c73b42}.example-good{color:#15834d}.article-inline-cta{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px;border-radius:17px;background:#1d2433;color:#fff;margin:-15px 0 55px}.article-inline-cta div{display:grid;gap:5px}.article-inline-cta small{color:#c9ced8}.article-inline-cta a{white-space:nowrap;color:#fff;text-decoration:none;font-weight:850}.article-faq{padding:55px 0;border-top:1px solid #edf0f3}.article-faq h2,.article-related h2{font-size:2rem}.article-faq details{padding:18px 0;border-bottom:1px solid #e7e9ee}.article-faq summary{font-weight:800;cursor:pointer}.article-faq p{color:#596277;line-height:1.65}.article-related{padding:55px 0;background:#f7f8fa}.article-related-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.article-related a{display:flex;flex-direction:column;gap:10px;padding:22px;border:1px solid #e3e6eb;border-radius:16px;background:#fff;color:#172033;text-decoration:none}.article-related small{color:#d31820;font-weight:800;text-transform:uppercase}.article-final{padding:70px 0}.article-final-box{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:42px;border-radius:24px;background:#fff1f1}.article-final h2{margin:0 0 8px;font-size:2rem}.article-final p{margin:0;color:#596277}.article-footer{border-top:1px solid #edf0f3;padding:34px 0}.article-footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.article-footer a{color:#667085;text-decoration:none;margin-left:15px}
     @media(max-width:850px){.article-layout{grid-template-columns:1fr;gap:30px}.article-toc{position:static}.article-visual{grid-template-columns:1fr}.article-related-grid{grid-template-columns:1fr}.article-final-box{display:block}.article-final .home-button{margin-top:22px}.home-nav{display:none}}
@@ -19182,7 +20008,7 @@ function sendSeoGuideArticlePage(req, res, page) {
   </style>
   <style>.article-page img{max-width:100%;height:auto!important;aspect-ratio:auto!important;object-fit:contain!important;object-position:center}</style>
 </head><body class="article-page">
-  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header article-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <div class="home-container article-breadcrumb"><a href="${origin}/">Início</a><span>/</span><a href="${guideOrigin}/">Guias</a><span>/</span><span>${emailEscapeHtml(article.category)}</span></div>
     <section class="home-container article-hero"><span class="article-category">${emailEscapeHtml(article.category)}</span><h1>${emailEscapeHtml(page.heading)}</h1><p class="article-lead">${emailEscapeHtml(page.intro)}</p><div class="article-meta"><span>${emailEscapeHtml(article.author)}</span><span>•</span><span>Atualizado em ${emailEscapeHtml(article.updatedAt)}</span><span>•</span><span>${emailEscapeHtml(article.readTime)} de leitura</span></div></section>
@@ -19235,7 +20061,7 @@ function sendSeoGuidesHubPage(req, res, page) {
   <link rel="canonical" href="${emailEscapeAttribute(canonical)}"><meta property="og:type" content="website">
   <meta property="og:title" content="${emailEscapeAttribute(page.title)}"><meta property="og:description" content="${emailEscapeAttribute(page.description)}"><meta property="og:url" content="${emailEscapeAttribute(canonical)}">
   <meta property="og:image" content="${origin}/assets/sistema-cardapio-preview.png"><meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="/assets/tapronto-favicon.svg"><link rel="stylesheet" href="/home.css">
+  <link rel="icon" href="/assets/tapronto-mark-2026.png?v=20260921"><link rel="stylesheet" href="/home.css">
   <script type="application/ld+json">${safeJsonForHtml(structured)}</script>
   <style>
     .guides-page{color:#172033;background:#fff}.guides-page *{box-sizing:border-box}.guides-nav{border-bottom:1px solid #edf0f3;background:#fff}.guides-hero{padding:72px 0 48px;text-align:center;max-width:820px}.guides-hero h1{font-size:clamp(2.45rem,6vw,4.8rem);line-height:1.02;letter-spacing:-.045em;margin:15px 0 20px}.guides-hero>p{font-size:1.16rem;line-height:1.7;color:#667085;max-width:680px;margin:0 auto}.guides-eyebrow{display:inline-flex;padding:8px 13px;border-radius:999px;background:#fff1f1;color:#d31820;font-size:.78rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.guides-topics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding-bottom:64px}.guides-topic{padding:20px;border:1px solid #e7e9ee;border-radius:18px;text-decoration:none;color:#172033;background:#fff;transition:.2s ease}.guides-topic:hover{transform:translateY(-3px);border-color:#efb1b4;box-shadow:0 12px 34px #1720330d}.guides-topic b{display:block;margin:10px 0 6px}.guides-topic span:last-child{display:block;color:#667085;font-size:.9rem;line-height:1.45}.guides-topic-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:#fff1f1;color:#d31820;font-size:1.25rem}.guides-feature-wrap{background:#f7f8fa;padding:64px 0}.guides-section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:24px}.guides-section-head h2{font-size:clamp(1.8rem,3vw,2.6rem);margin:6px 0}.guides-section-head p{margin:0;color:#667085}.guides-feature{display:grid;grid-template-columns:.9fr 1.1fr;min-height:350px;border-radius:26px;overflow:hidden;background:#fff;box-shadow:0 20px 60px #17203310;border:1px solid #e7e9ee}.guides-feature-art{display:grid;place-items:center;background:linear-gradient(145deg,#ef2029,#a9070e);padding:50px;position:relative}.guides-feature-phone{width:190px;padding:13px;border-radius:29px;background:#1b1f2a;box-shadow:0 25px 55px #47000455;transform:rotate(-5deg)}.guides-feature-phone img{width:100%;display:block;border-radius:19px}.guides-feature-copy{padding:48px;display:flex;flex-direction:column;justify-content:center}.guides-category{font-size:.75rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase;color:#d31820}.guides-feature-copy h2{font-size:clamp(2rem,4vw,3rem);line-height:1.08;margin:12px 0 16px}.guides-feature-copy p{color:#667085;line-height:1.65}.guides-read{display:flex;gap:10px;align-items:center;color:#858c9b;font-size:.86rem;margin:4px 0 24px}.guides-link{font-weight:800;color:#d31820;text-decoration:none}.guides-library{padding:70px 0}.guides-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.guide-card{display:flex;flex-direction:column;border:1px solid #e7e9ee;border-radius:20px;overflow:hidden;text-decoration:none;color:#172033;background:#fff;transition:.2s ease}.guide-card:hover{transform:translateY(-4px);box-shadow:0 18px 44px #17203312;border-color:#d9dce3}.guide-card-art{height:128px;display:grid;place-items:center;font-size:2.4rem}.guide-card-art.coral{background:#fff0ee;color:#e23a32}.guide-card-art.violet{background:#f4efff;color:#7556c9}.guide-card-art.blue{background:#edf6ff;color:#2672bb}.guide-card-art.amber{background:#fff7e7;color:#c87a12}.guide-card-art.green{background:#edf9f2;color:#228957}.guide-card-art.red{background:#fff0f1;color:#d31820}.guide-card-copy{padding:22px;display:flex;flex-direction:column;flex:1}.guide-card h3{font-size:1.22rem;line-height:1.28;margin:9px 0}.guide-card p{color:#667085;line-height:1.55;font-size:.94rem;margin:0 0 18px}.guide-card .guides-read{margin-top:auto;margin-bottom:0}.guides-cta{padding:0 0 72px}.guides-cta-box{display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:30px;padding:48px;border-radius:26px;background:#1d2433;color:#fff;overflow:hidden}.guides-cta h2{font-size:clamp(1.8rem,4vw,3rem);margin:8px 0 13px}.guides-cta p{color:#c9ced8;line-height:1.6}.guides-cta-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}.guides-cta .home-button.ghost{color:#fff;border-color:#ffffff55}.guides-footer{border-top:1px solid #edf0f3;padding:35px 0 48px}.guides-footer-row{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.guides-footer a{color:#667085;text-decoration:none;margin-left:18px}
@@ -19245,7 +20071,7 @@ function sendSeoGuidesHubPage(req, res, page) {
   </style>
   <style>.guides-page img{display:block;max-width:100%;height:auto!important;aspect-ratio:auto!important;object-fit:contain!important;object-position:center}.guides-feature-phone img{width:100%;height:auto!important}</style>
 </head><body class="guides-page">
-  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-horizontal.png" alt="TáPronto" width="300" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
+  <header class="home-header guides-nav"><div class="home-container home-nav-shell"><a class="home-brand" href="${origin}/" aria-label="TáPronto"><img src="/assets/tapronto-logo-2026.png?v=20260921" alt="TáPronto" width="420" height="100"></a><nav class="home-nav" aria-label="Navegação principal"><a href="${origin}/#recursos">Recursos</a><a href="${guideOrigin}/" aria-current="page">Guias</a><a href="${origin}/planos">Planos</a><a href="${origin}/#comparativo">Comparativo</a><a href="${origin}/#faq">FAQ</a><a href="https://ajuda.taprontomenu.com.br/">Ajuda</a></nav><div class="home-nav-actions"><a class="home-login" href="https://app.taprontomenu.com.br/">Entrar</a><a class="home-button small" href="${origin}/cadastro">Criar meu Cardápio</a></div></div></header>
   <main>
     <section class="home-container guides-hero"><span class="guides-eyebrow">Conteúdo prático para sua loja</span><h1>Menos bagunça.<br>Mais pedidos organizados.</h1><p>Guias diretos para montar seu cardápio, divulgar a loja e melhorar o atendimento sem complicação.</p></section>
     <section class="home-container guides-topics" aria-label="Navegue por assunto">${topics.map(([title, description, icon]) => `<a class="guides-topic" href="#todos"><span class="guides-topic-icon" aria-hidden="true">${icon}</span><b>${emailEscapeHtml(title)}</b><span>${emailEscapeHtml(description)}</span></a>`).join('')}</section>
@@ -19284,7 +20110,7 @@ async function sendSeoStorePage(req, res, store) {
   const name = cleanText(settings?.name || store.name || 'Cardápio');
   const description = cleanText(settings?.description || store.description || `Confira o cardápio online de ${name} e faça seu pedido.`).slice(0, 240);
   const title = cleanText(settings?.page_title || `Cardápio de ${name} | TáPronto`).slice(0, 90);
-  const image = absoluteSeoAssetUrl(settings?.cover_url || settings?.logo_url || '/assets/tapronto-logo-horizontal.png', origin);
+  const image = absoluteSeoAssetUrl(settings?.cover_url || settings?.logo_url || '/assets/tapronto-logo-2026.png?v=20260921', origin);
   const structured = {
     '@context': 'https://schema.org',
     '@type': 'Restaurant',
@@ -19317,7 +20143,7 @@ function seoEscapeXml(value = '') {
 function absoluteSeoAssetUrl(value = '', origin = '') {
   const text = String(value || '');
   if (/^https?:\/\//i.test(text)) return text;
-  return absoluteFromBase(origin, text || '/assets/tapronto-logo-horizontal.png');
+  return absoluteFromBase(origin, text || '/assets/tapronto-logo-2026.png?v=20260921');
 }
 
 function safeJsonForHtml(value) {
@@ -19402,7 +20228,7 @@ function helpHostRedirectUrl(requestPath, hostHeader = '') {
     '/ajuda.html',
     '/ajuda.css',
     '/ajuda.js',
-    '/assets/tapronto-favicon.svg',
+    '/assets/tapronto-mark-2026.png',
     '/favicon.ico',
     '/robots.txt',
     '/sitemap.xml'
@@ -19477,6 +20303,7 @@ function routePath(requestPath, hostHeader = '') {
   if (requestPath === '/' && isPlatformHost) return '/platform.html';
   if (requestPath === '/' && isHelpHost) return '/ajuda.html';
   if (requestPath === '/') return '/home.html';
+  if (requestPath === '/delivery') return '/delivery.html';
   if (requestPath === '/ajuda' || requestPath === '/help') return '/ajuda.html';
   if (requestPath === '/cardapio') return '/app.html';
   if (requestPath === '/planos') return '/plans.html';
@@ -19536,7 +20363,7 @@ async function sendFile(req, res, filePath, options = {}) {
       ? 'public, max-age=300, stale-while-revalidate=60'
       : 'public, max-age=86400, stale-while-revalidate=3600';
   const baseHeaders = {
-    ...securityHeaders({ allowSameOriginFrame: ext === '.html' }),
+    ...securityHeaders({ allowSameOriginFrame: ext === '.html' && !shouldNoIndexResponse(req, filePath), production: APP_ENV === 'production' }),
     'Cache-Control': cacheControl,
     ETag: entry.etag,
     Vary: 'Accept-Encoding',
@@ -19588,15 +20415,20 @@ async function sendFile(req, res, filePath, options = {}) {
   if (req.method === 'HEAD') res.end(); else res.end(body);
 }
 
-async function readJson(req) {
-  const body = await readRequestBody(req, MAX_JSON_BYTES);
+const parsedJsonBodies = new WeakMap();
 
-  if (!body) return {};
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw httpError(400, 'JSON inválido.');
-  }
+async function readJson(req) {
+  if (parsedJsonBodies.has(req)) return parsedJsonBodies.get(req);
+  const pending = readRequestBody(req, MAX_JSON_BYTES).then((body) => {
+    if (!body) return {};
+    try {
+      return JSON.parse(body);
+    } catch {
+      throw httpError(400, 'JSON inválido.');
+    }
+  });
+  parsedJsonBodies.set(req, pending);
+  return pending;
 }
 
 async function readRequestBody(req, maxBytes = MAX_JSON_BYTES) {
@@ -20139,12 +20971,12 @@ function parseCookies(req) {
 }
 
 function sessionCookie(name, value) {
-  const secure = COOKIE_SECURE ? '; Secure' : '';
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
   return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}${secure}`;
 }
 
 function clearCookie(name) {
-  const secure = COOKIE_SECURE ? '; Secure' : '';
+  const secure = APP_ENV === 'production' || COOKIE_SECURE ? '; Secure' : '';
   return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
@@ -20237,31 +21069,6 @@ function json(res, status, data, headers = {}) {
   res.end(JSON.stringify(data));
 }
 
-function securityHeaders(options = {}) {
-  const frameAncestors = options.allowSameOriginFrame ? "frame-ancestors 'self'" : "frame-ancestors 'none'";
-  return {
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': options.allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY',
-    'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-    'Content-Security-Policy': [
-      "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
-      "media-src 'self' blob: https://taprontomenu.com.br https://*.taprontomenu.com.br",
-      "font-src 'self' data:",
-      "connect-src 'self'",
-      "frame-src 'self'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      frameAncestors,
-      "object-src 'none'"
-    ].join('; ')
-  };
-}
-
 async function safeResponse(response) {
   const text = await response.text();
   if (!text) return [];
@@ -20303,17 +21110,18 @@ function logServerError(error, req) {
     method: req?.method,
     url: req?.url,
     status,
-    message: error.message,
+    error_type: cleanText(error?.name || 'Error'),
+    error_code: cleanText(error?.code || error?.detail?.code || ''),
     detail: sanitizeErrorDetailForLog(error.detail)
   }));
 }
 
 function sanitizeErrorDetailForLog(detail) {
   if (!detail) return undefined;
-  if (typeof detail === 'string') return detail.slice(0, 500);
+  if (typeof detail === 'string') return '[redacted]';
   if (isPlainObject(detail)) {
-    const { message, code, details, hint, error } = detail;
-    return { message, code, details, hint, error };
+    const { code } = detail;
+    return redactSensitive({ code });
   }
   return undefined;
 }
@@ -20558,6 +21366,20 @@ function loadEnv(filePath) {
     if (!process.env[key.trim()]) process.env[key.trim()] = value;
   }
 }
+
+export {
+  approveSalesMessage,
+  createSalesDraft,
+  createSalesLead,
+  dbRequest,
+  getStoreWhatsappIntegration,
+  optOutSalesLead,
+  processNextSalesJob,
+  queueAutonomousSalesOutreach,
+  receiveSalesEvolutionMessage,
+  scheduleDueSalesFollowups,
+  sendApprovedSalesMessage
+};
 
 
 
