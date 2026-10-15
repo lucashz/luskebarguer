@@ -105,6 +105,7 @@ const chromeArguments = createGoogleChromeArguments({
   virtualTimeBudgetMs: 8000
 });
 assert(chromeArguments.includes('--virtual-time-budget=8000'));
+assert(!chromeArguments.some((argument) => argument.startsWith('--user-data-dir=')), 'Chromium não deve persistir perfil durante a busca descartável.');
 
 const limited = createGoogleBrowserOutreachClient({ maxQueries: 1, minIntervalMs: 0, renderSearch: async () => searchHtml });
 await limited.searchPlaces({ query: 'padaria em Horizontina RS' });

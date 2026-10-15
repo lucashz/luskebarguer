@@ -193,7 +193,7 @@ export function createGoogleChromeArguments({ profile, url, virtualTimeBudgetMs 
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     '--disable-crash-reporter', '--disable-breakpad',
     '--disable-background-networking', '--no-first-run', '--no-default-browser-check',
-    '--lang=pt-BR', `--user-data-dir=${profile}`,
+    '--lang=pt-BR',
     '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
     `--virtual-time-budget=${Math.max(1000, Number(virtualTimeBudgetMs) || 8000)}`,
     '--dump-dom', url
