@@ -1,6 +1,6 @@
 # Prospecção automática por WhatsApp
 
-Este fluxo encontra estabelecimentos no Google, descarta quem já possui cardápio online, valida atividade recente e WhatsApp, monta duas prévias do cardápio TáPronto e envia uma única abordagem. Um contato equivale ao conjunto texto + prévia no computador + prévia no celular. Não existe follow-up automático.
+Este fluxo encontra estabelecimentos no Google, descarta quem já possui cardápio online, valida WhatsApp e atividade pública de até 90 dias, monta duas prévias do cardápio TáPronto e envia uma única abordagem. Um contato equivale ao conjunto texto + prévia no computador + prévia no celular. Não existe follow-up automático. Cidades pequenas têm prioridade, mas não há teto populacional para completar a meta diária.
 
 ## Proteções obrigatórias
 
@@ -21,7 +21,8 @@ Execute a migração `20261013120000_zero_cost_outreach` e configure no `.env`, 
 
 ```dotenv
 OUTREACH_AUTOMATION_ENABLED=false
-OUTREACH_DAILY_LIMIT=3
+OUTREACH_DAILY_LIMIT=10
+OUTREACH_ACTIVITY_MAX_DAYS=90
 OUTREACH_WORKER_INTERVAL_SECONDS=60
 OUTREACH_ARTIFACT_DIR=artifacts/outreach/automated
 
@@ -29,8 +30,8 @@ GOOGLE_OUTREACH_API_KEY=
 GOOGLE_OUTREACH_TIMEOUT_MS=10000
 GOOGLE_OUTREACH_BROWSER_ENABLED=true
 GOOGLE_OUTREACH_BROWSER_TIMEOUT_MS=15000
-GOOGLE_OUTREACH_BROWSER_MAX_QUERIES=30
-GOOGLE_OUTREACH_BROWSER_CANDIDATE_LIMIT=12
+GOOGLE_OUTREACH_BROWSER_MAX_QUERIES=90
+GOOGLE_OUTREACH_BROWSER_CANDIDATE_LIMIT=30
 GOOGLE_OUTREACH_BROWSER_MIN_INTERVAL_MS=1500
 GOOGLE_OUTREACH_PLACES_PRO_LIMIT=4000
 GOOGLE_OUTREACH_PLACES_ADVANCED_LIMIT=800
@@ -79,14 +80,14 @@ Revise na Central os descartes, nomes, cidades, segmentos, fotos usadas, prévia
 ## Liberação gradual
 
 1. Mantenha `OUTREACH_AUTOMATION_ENABLED=false` e envie a sequência ao número pessoal pelo procedimento de teste já existente.
-2. Defina `OUTREACH_DAILY_LIMIT=3`, ative `OUTREACH_AUTOMATION_ENABLED=true` e inicie o canário:
+2. Defina `OUTREACH_DAILY_LIMIT=10`, ative `OUTREACH_AUTOMATION_ENABLED=true` e inicie a operação:
 
    ```powershell
    docker compose --profile outreach up -d outreach-worker
    node scripts/outreach-worker.mjs status
    ```
 
-3. Confira os três contatos na Central: somente um disparo por lead, texto antes das imagens, acentos corretos, link exato, duas prévias 1080 × 1350 e nenhuma tarefa de follow-up.
+3. Confira os contatos na Central: somente um disparo por lead, texto antes das imagens, acentos corretos, link exato, duas prévias 1080 × 1350 e nenhuma tarefa de follow-up.
 4. Observe por um dia completo respostas, opt-outs, falhas, saúde do webhook e cotas.
 5. Sem falhas técnicas, altere `OUTREACH_DAILY_LIMIT=15` e recrie somente o worker.
 
@@ -108,7 +109,7 @@ node scripts/outreach-worker.mjs pause --reason manutencao
 node scripts/outreach-worker.mjs resume
 ```
 
-Contatos não enviados no mesmo dia não são compensados fora da janela. No dia seguinte, o estabelecimento precisa passar novamente pela validação de atividade, cardápio e fotos.
+Contatos não enviados no mesmo dia não são compensados fora da janela. No dia seguinte, o estabelecimento precisa passar novamente pela validação de atividade, cardápio e fotos. Na falta de fotos públicas, a prévia usa cards ilustrativos identificados como demonstrativos e compatíveis com o segmento; não são fotos aleatórias do estabelecimento.
 
 ## Rollback
 
@@ -127,7 +128,7 @@ Mantenha leads, eventos, mensagens, supressões e artefatos para investigação.
 - `connected: false`: confirme instância e conectividade da Evolution antes de retomar.
 - `quota_blocked`: não aumente a cota automaticamente. Aguarde a renovação ou revise as franquias no Google Cloud.
 - muitos `online_menu`: o descarte está funcionando; nunca reduza esse critério para atingir 15.
-- `insufficient_photos`: envie menos contatos. Não use imagens aleatórias nem gere fotos avulsas.
+- `insufficient_photos`: não bloqueia mais o contato; a prévia usa cards ilustrativos de segmento, marcados como demonstrativos.
 - `send_failed`: confira o passo salvo no job. A retomada continua da imagem pendente e não repete o texto já enviado.
 - pausa após três falhas: corrija o provedor, valide com o número pessoal e só então use `resume`.
 

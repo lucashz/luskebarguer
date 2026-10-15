@@ -17,11 +17,32 @@ const targets = selectSearchTargets({
 });
 
 assert.equal(targets.length, 3);
-assert(targets.every((target) => target.population <= 55000));
-assert(!targets.some((target) => target.city === 'Cidade Grande'));
+assert(targets.every((target) => target.population > 0));
+assert(targets.some((target) => target.city === 'Cidade Grande'));
 assert.equal(targets[0].city, 'Cidade Nova');
 assert.equal(targets[0].population, 18000);
 assert.equal(targets[0].search_count, 0);
+
+const expandedTargets = selectSearchTargets({
+  cities: [
+    { city: 'Cidade Pequena', state: 'RS', population: 12000 },
+    { city: 'Cidade Grande', state: 'SC', population: 420000 }
+  ],
+  segments: ['padaria'],
+  count: 2
+});
+assert.deepEqual(expandedTargets.map((target) => target.city), ['Cidade Pequena', 'Cidade Grande'], 'Cidades maiores devem entrar como reserva, sem teto populacional.');
+
+const smallCityPriority = selectSearchTargets({
+  cities: [
+    { city: 'Cidade Pequena', state: 'RS', population: 12000 },
+    { city: 'Cidade Grande', state: 'SC', population: 420000 }
+  ],
+  segments: ['padaria'],
+  history: [{ city: 'Cidade Pequena', state: 'RS', segment: 'padaria', search_count: 9 }],
+  count: 2
+});
+assert.equal(smallCityPriority[0].city, 'Cidade Pequena', 'Cidades pequenas devem ter prioridade mesmo quando as maiores ainda não foram pesquisadas.');
 assert.equal(new Set(targets.slice(0, 2).map((target) => target.segment)).size, 2, 'A seleção não alternou segmentos.');
 
 assert.deepEqual(resolveSearchTargetOverride({
@@ -29,11 +50,14 @@ assert.deepEqual(resolveSearchTargetOverride({
   cities: [{ city: 'Cidade Nova', state: 'PR', population: 18000 }],
   segments: ['padaria', 'lanchonete']
 }), { city: 'Cidade Nova', state: 'PR', population: 18000, segment: 'padaria' });
-assert.throws(() => resolveSearchTargetOverride({ city: 'Cidade Grande', state: 'SC', segment: 'padaria', cities: [{ city: 'Cidade Grande', state: 'SC', population: 55001 }], segments: ['padaria'] }), /cidade pequena/i);
+assert.deepEqual(resolveSearchTargetOverride({
+  city: 'Cidade Grande', state: 'SC', segment: 'padaria',
+  cities: [{ city: 'Cidade Grande', state: 'SC', population: 420000 }], segments: ['padaria']
+}), { city: 'Cidade Grande', state: 'SC', population: 420000, segment: 'padaria' });
 
 const now = new Date('2026-10-13T12:00:00.000Z');
-const activeAtBoundary = new Date(now.getTime() - 30 * 86400000).toISOString();
-const inactivePastBoundary = new Date(now.getTime() - 31 * 86400000).toISOString();
+const activeAtBoundary = new Date(now.getTime() - 90 * 86400000).toISOString();
+const inactivePastBoundary = new Date(now.getTime() - 91 * 86400000).toISOString();
 
 const baseCandidate = {
   id: 'place-1',
@@ -96,7 +120,14 @@ assert.equal(emptyAggregator.qualified, true, 'Página agregadora vazia foi trat
 const insufficientPhotos = await qualifyOutreachCandidate(baseCandidate, dependencies({
   validatePhoto: async (photo) => ({ usable: photo.name === 'photo-food-1', kind: photo.name === 'photo-food-1' ? 'food' : 'exterior' })
 }));
-assert.equal(insufficientPhotos.code, 'insufficient_photos');
+assert.equal(insufficientPhotos.qualified, true);
+assert.equal(insufficientPhotos.photos.length, 1);
+assert.equal(insufficientPhotos.evidence.preview_source, 'business_photos');
+
+const noPhotos = await qualifyOutreachCandidate({ ...baseCandidate, photos: [] }, dependencies());
+assert.equal(noPhotos.qualified, true);
+assert.equal(noPhotos.photos.length, 0);
+assert.equal(noPhotos.evidence.preview_source, 'segment_inferred');
 
 const inconclusive = await qualifyOutreachCandidate(baseCandidate, dependencies({
   searchMenu: async () => { throw new Error('Google indisponível'); }

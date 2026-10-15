@@ -17,7 +17,7 @@ export function createOutreachDiscoveryClient({ env = process.env, apiFactory, b
 export function outreachCandidateLimit({ mode, requested, env = process.env } = {}) {
   const target = Math.max(1, Math.floor(Number(requested) || 1));
   if (mode !== 'browser') return target;
-  const configured = Math.max(1, Math.floor(Number(env.GOOGLE_OUTREACH_BROWSER_CANDIDATE_LIMIT) || 12));
+  const configured = Math.max(1, Math.floor(Number(env.GOOGLE_OUTREACH_BROWSER_CANDIDATE_LIMIT) || 30));
   return Math.min(target, configured);
 }
 

@@ -180,6 +180,7 @@ function productionDependencies({ dryRun, targetOverride = null }) {
       }
       const qualification = await qualifyOutreachCandidate(enriched, {
         now: context.now,
+        activityMaxDays: Number(process.env.OUTREACH_ACTIVITY_MAX_DAYS || 90),
         hasPriorContact: async ({ placeId, phone }) => {
           const prior = await pool.query(`select l.id,l.stage,l.automation_status,(exists(select 1 from sales_messages m where m.lead_id=l.id and m.direction='outbound' and m.status='sent') or exists(select 1 from sales_automation_jobs j where j.lead_id=l.id and j.job_type='send_sequence' and j.status<>'cancelled')) contacted from sales_leads l where l.google_place_id=$1 or l.normalized_phone=$2 limit 1`, [placeId, phone]);
           const row = prior.rows[0];

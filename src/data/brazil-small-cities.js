@@ -16,8 +16,15 @@ export const BRAZIL_SMALL_CITY_TARGETS = Object.freeze([
   { city: 'Braço do Norte', state: 'SC', population: 33773 },
   { city: 'Pomerode', state: 'SC', population: 34846 },
   { city: 'Maravilha', state: 'SC', population: 28620 },
-  { city: 'Pinhalzinho', state: 'SC', population: 21217 }
-].filter((row) => !row.disabled && row.population <= 55000));
+  { city: 'Pinhalzinho', state: 'SC', population: 21217 },
+  { city: 'Santa Rosa', state: 'RS', population: 73300 },
+  { city: 'Ijuí', state: 'RS', population: 84900 },
+  { city: 'Erechim', state: 'RS', population: 107400 },
+  { city: 'Passo Fundo', state: 'RS', population: 206100 },
+  { city: 'Cascavel', state: 'PR', population: 364100 },
+  { city: 'Bauru', state: 'SP', population: 390000 },
+  { city: 'Blumenau', state: 'SC', population: 380600 }
+].filter((row) => !row.disabled));
 
 export const OUTREACH_SEGMENTS = Object.freeze([
   'restaurante',

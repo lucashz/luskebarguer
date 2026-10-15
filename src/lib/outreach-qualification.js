@@ -9,6 +9,7 @@ export async function qualifyOutreachCandidate(candidate = {}, dependencies = {}
   const placeId = clean(candidate.id || candidate.place_id || candidate.google_place_id);
   const businessName = clean(candidate.displayName?.text || candidate.business_name || candidate.name);
   const phone = normalizeSalesPhone(candidate.nationalPhoneNumber || candidate.phone);
+  const activityMaxDays = positiveDays(dependencies.activityMaxDays, 90);
   const evidence = { place_id: placeId, checked_at: now.toISOString() };
 
   if (!placeId || !businessName || !phone) return discarded('invalid_contact', evidence, now, placeId);
@@ -26,7 +27,7 @@ export async function qualifyOutreachCandidate(candidate = {}, dependencies = {}
   }
 
   const activity = latestActivity(candidate);
-  if (!activity || now.getTime() - activity.getTime() > 30 * 86400000) {
+  if (!activity || now.getTime() - activity.getTime() > activityMaxDays * 86400000) {
     return discarded('inactive', { ...evidence, latest_activity_at: activity?.toISOString() || null }, now, placeId);
   }
   evidence.latest_activity_at = activity.toISOString();
@@ -63,13 +64,14 @@ export async function qualifyOutreachCandidate(candidate = {}, dependencies = {}
   } catch (error) {
     return discarded('inconclusive', { ...evidence, failed_step: 'photo_validation', error: safeError(error) }, now, placeId);
   }
-  if (photos.length < 2) return discarded('insufficient_photos', { ...evidence, usable_photos: photos.length }, now, placeId);
+  evidence.usable_photos = photos.length;
+  evidence.preview_source = photos.length ? 'business_photos' : 'segment_inferred';
 
   return {
     qualified: true,
     stage: 'photos_ready',
     code: null,
-    evidence: { ...evidence, usable_photos: photos.length, menu_search_results: menuResults.length },
+    evidence: { ...evidence, menu_search_results: menuResults.length },
     photos,
     leadPatch: {
       business_name: businessName,
@@ -138,5 +140,6 @@ function discarded(code, evidence, now, placeId) {
 
 function requiredFunction(value) { return typeof value === 'function'; }
 function validDate(value) { const date = value instanceof Date ? value : new Date(value); return Number.isNaN(date.getTime()) ? null : date; }
+function positiveDays(value, fallback) { const days = Number(value); return Number.isFinite(days) && days > 0 ? days : fallback; }
 function clean(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
 function safeError(error) { return clean(error?.message || 'Falha não identificada.').slice(0, 180); }

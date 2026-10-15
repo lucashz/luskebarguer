@@ -1,4 +1,4 @@
-export function selectSearchTargets({ cities = [], segments = [], history = [], count = 6, maxPopulation = 55000 } = {}) {
+export function selectSearchTargets({ cities = [], segments = [], history = [], count = 6, maxPopulation = Infinity } = {}) {
   const historyByTarget = new Map(history.map((row) => [targetKey(row), row]));
   const eligibleCities = cities.filter((row) => {
     const population = Number(row.population);
@@ -22,7 +22,8 @@ export function selectSearchTargets({ cities = [], segments = [], history = [], 
   }
 
   candidates.sort((a, b) => (
-    a.search_count - b.search_count
+    cityTier(a.population) - cityTier(b.population)
+    || a.search_count - b.search_count
     || timestamp(a.last_searched_at) - timestamp(b.last_searched_at)
     || a.city.localeCompare(b.city, 'pt-BR')
     || a.segment.localeCompare(b.segment, 'pt-BR')
@@ -40,7 +41,7 @@ export function selectSearchTargets({ cities = [], segments = [], history = [], 
   return selected;
 }
 
-export function resolveSearchTargetOverride({ city, state, segment, cities = [], segments = [], maxPopulation = 55000 } = {}) {
+export function resolveSearchTargetOverride({ city, state, segment, cities = [], segments = [], maxPopulation = Infinity } = {}) {
   const supplied = [city, state, segment].filter((value) => String(value || '').trim()).length;
   if (!supplied) return null;
   if (supplied !== 3) throw new Error('Informe cidade, estado e segmento para o alvo operacional.');
@@ -62,6 +63,10 @@ function targetKey(row) {
 function timestamp(value) {
   const result = value ? new Date(value).getTime() : 0;
   return Number.isFinite(result) ? result : 0;
+}
+
+function cityTier(population) {
+  return Number(population) <= 55000 ? 0 : 1;
 }
 
 function normalize(value) {

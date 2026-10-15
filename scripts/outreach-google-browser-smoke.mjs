@@ -111,7 +111,7 @@ assert(queries.some((query) => /cardápio menu pedidos online/i.test(query)));
 
 assert.equal(outreachDiscoveryMode({ GOOGLE_OUTREACH_API_KEY: 'paid-key' }), 'api');
 assert.equal(outreachDiscoveryMode({ GOOGLE_OUTREACH_API_KEY: '', GOOGLE_OUTREACH_BROWSER_ENABLED: 'true' }), 'browser');
-assert.equal(outreachCandidateLimit({ mode: 'browser', requested: 50, env: {} }), 12);
+assert.equal(outreachCandidateLimit({ mode: 'browser', requested: 50, env: {} }), 30);
 assert.equal(outreachCandidateLimit({ mode: 'api', requested: 50, env: {} }), 50);
 assert.throws(() => outreachDiscoveryMode({ GOOGLE_OUTREACH_BROWSER_ENABLED: 'false' }), /Configure uma fonte de busca/i);
 const selected = createOutreachDiscoveryClient({

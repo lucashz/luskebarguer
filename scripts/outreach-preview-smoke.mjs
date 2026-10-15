@@ -53,6 +53,20 @@ try {
   assert.equal((html.match(/class="product-card"/g) || []).length, 4);
   assert(!/R\$|Preço\s*\d/i.test(html), 'A prévia incluiu preço.');
 
+  const fallback = await buildOutreachPreview({
+    lead: { business_name: 'Padaria sem fotos', city: 'Horizontina', state: 'RS', segment: 'Padaria' },
+    photos: [],
+    outputDir: fileURLToPath(new URL('segment-inferred/', outputDirectory)),
+    capture: async ({ outputPath }) => sharp({ create: { width: 1080, height: 1350, channels: 3, background: '#ffffff' } }).png().toFile(outputPath)
+  });
+  assert.equal(fallback.visualSource, 'segment_inferred');
+  assert.equal(fallback.productImagePaths.length, 4);
+  for (const asset of fallback.productImagePaths) {
+    const metadata = await sharp(asset).metadata();
+    assert.equal(metadata.width, 800);
+    assert.equal(metadata.height, 480);
+  }
+
   const generic = resolveOutreachProducts({ business_name: 'Padaria Sem Lista', segment: 'Padaria' }, sourcePhotos);
   assert.deepEqual(generic.map((product) => product.name), ['Destaque da casa', 'Opção da vitrine', 'Especialidade da padaria', 'Outra opção da casa']);
   assert(!generic.some((product) => /carne|frango|calabresa|presunto/i.test(product.name)), 'O construtor inventou ingredientes sem evidência.');
