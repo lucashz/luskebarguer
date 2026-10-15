@@ -3,12 +3,12 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { getLocalPool } from '../src/lib/local-postgrest-adapter.js';
 import { BRAZIL_SMALL_CITY_TARGETS, OUTREACH_SEGMENTS } from '../src/data/brazil-small-cities.js';
-import { selectSearchTargets } from '../src/lib/outreach-city-selector.js';
+import { resolveSearchTargetOverride, selectSearchTargets } from '../src/lib/outreach-city-selector.js';
 import { sendOutreachSequence } from '../src/lib/outreach-delivery.js';
 import { normalizeOutreachEvent } from '../src/lib/outreach-events.js';
 import { createGoogleOutreachClient, inspectBusinessWebsite } from '../src/lib/google-outreach-client.js';
 import { createGoogleBrowserOutreachClient } from '../src/lib/google-browser-outreach-client.js';
-import { createOutreachDiscoveryClient, outreachDiscoveryMode } from '../src/lib/outreach-discovery-client.js';
+import { createOutreachDiscoveryClient, outreachCandidateLimit, outreachDiscoveryMode } from '../src/lib/outreach-discovery-client.js';
 import { buildOutreachMessage } from '../src/lib/outreach-message.js';
 import { runDailyOutreach } from '../src/lib/outreach-orchestrator.js';
 import { buildOutreachPreview } from '../src/lib/outreach-preview.js';
@@ -46,7 +46,15 @@ try {
 async function execute(name, options) {
   if (name === 'status') return status();
   if (name === 'pause' || name === 'resume') return setPaused(name === 'pause', options.reason);
-  if (name === 'run') return run(Boolean(options['dry-run']), Number(options.limit || 15));
+  if (name === 'run') {
+    const dryRun = Boolean(options['dry-run']);
+    if (options.now && !dryRun) throw new Error('--now só pode ser usado com --dry-run.');
+    return run(dryRun, Number(options.limit || 15), options.now, {
+      city: options.city,
+      state: options.state,
+      segment: options.segment
+    });
+  }
   if (name === 'worker') return worker(Boolean(options.once));
   throw new Error('Use: status | run --dry-run | worker --once | pause | resume');
 }
@@ -71,9 +79,12 @@ async function setPaused(paused, reason = '') {
   return result.rows[0];
 }
 
-async function run(dryRun, maxContacts) {
+async function run(dryRun, maxContacts, nowValue = '', requestedTarget = {}) {
   if (!dryRun && !bool(process.env.OUTREACH_AUTOMATION_ENABLED)) throw new Error('OUTREACH_AUTOMATION_ENABLED está desativado.');
-  return runDailyOutreach({ dryRun, maxContacts, dependencies: productionDependencies({ dryRun }) });
+  const now = nowValue ? new Date(String(nowValue)) : new Date();
+  if (Number.isNaN(now.getTime())) throw new Error('Data inválida para o dry-run.');
+  const targetOverride = resolveSearchTargetOverride({ ...requestedTarget, cities: BRAZIL_SMALL_CITY_TARGETS, segments: OUTREACH_SEGMENTS });
+  return runDailyOutreach({ now, dryRun, maxContacts, dependencies: productionDependencies({ dryRun, targetOverride }) });
 }
 
 async function worker(once) {
@@ -95,7 +106,7 @@ async function worker(once) {
   return { cycles };
 }
 
-function productionDependencies({ dryRun }) {
+function productionDependencies({ dryRun, targetOverride = null }) {
   const quotaLimits = {
     ...OUTREACH_QUOTA_LIMITS,
     places_pro: Math.min(OUTREACH_QUOTA_LIMITS.places_pro, positive(process.env.GOOGLE_OUTREACH_PLACES_PRO_LIMIT, OUTREACH_QUOTA_LIMITS.places_pro)),
@@ -135,20 +146,21 @@ function productionDependencies({ dryRun }) {
     },
     async startRun({ runKey, scheduledFor, dryRun: simulated }) {
       const key = `${runKey}:${simulated ? 'dry' : 'live'}`;
-      return (await pool.query(`insert into sales_discovery_runs(run_key,scheduled_for,status,started_at,details) values($1,$2,$3,now(),jsonb_build_object('dry_run',$4::boolean)) on conflict(run_key) do update set status='running',started_at=now(),last_error=null,updated_at=now() returning *`, [key, scheduledFor, simulated ? 'dry_run' : 'running', simulated])).rows[0];
+      return (await pool.query(`insert into sales_discovery_runs(run_key,scheduled_for,status,started_at,details) values($1,$2,'running',now(),jsonb_build_object('dry_run',$3::boolean)) on conflict(run_key) do update set status='running',started_at=now(),last_error=null,updated_at=now() returning *`, [key, scheduledFor, simulated])).rows[0];
     },
     async discoverCandidates({ targetCount, runId }) {
+      const candidateLimit = outreachCandidateLimit({ mode: discoveryMode, requested: targetCount, env: process.env });
       const history = (await pool.query(`select * from sales_search_targets`)).rows;
-      const targets = selectSearchTargets({ cities: BRAZIL_SMALL_CITY_TARGETS, segments: OUTREACH_SEGMENTS, history, count: 5 });
+      const targets = targetOverride ? [targetOverride] : selectSearchTargets({ cities: BRAZIL_SMALL_CITY_TARGETS, segments: OUTREACH_SEGMENTS, history, count: 5 });
       const found = new Map();
       for (const target of targets) {
         const places = await google.searchPlaces({ query: `${target.segment} em ${target.city} ${target.state}`, runId });
         for (const place of places) {
-          if (found.size >= targetCount) break;
+          if (found.size >= candidateLimit) break;
           found.set(place.id, { ...place, city: target.city, state: target.state, segment: target.segment });
         }
         await pool.query(`insert into sales_search_targets(city,state,population,segment,last_searched_at,search_count) values($1,$2,$3,$4,now(),1) on conflict(city,state,segment) do update set last_searched_at=now(),search_count=sales_search_targets.search_count+1,updated_at=now()`, [target.city, target.state, target.population, target.segment]);
-        if (found.size >= targetCount) break;
+        if (found.size >= candidateLimit) break;
       }
       return [...found.values()];
     },
@@ -156,7 +168,7 @@ function productionDependencies({ dryRun }) {
       const details = await google.getPlaceDetails({ placeId: candidate.id, runId: context.runId });
       const enriched = { ...candidate, ...details, city: candidate.city, state: candidate.state, segment: candidate.segment };
       const normalizedPhone = normalizeSalesPhone(details.nationalPhoneNumber || '');
-      let existingLead = (await pool.query(`select * from sales_leads where google_place_id=$1 limit 1`, [candidate.id])).rows[0] || null;
+      let existingLead = (await pool.query(`select * from sales_leads where google_place_id=$1 or ($2<>'' and normalized_phone=$2) order by (google_place_id=$1) desc limit 1`, [candidate.id, normalizedPhone])).rows[0] || null;
       if (!existingLead) {
         existingLead = (await pool.query(`insert into sales_leads(business_name,phone,normalized_phone,city,state,segment,source,stage,google_place_id,metadata) values($1,$2,$3,$4,$5,$6,'google_outreach','discovered',$7,jsonb_build_object('outreach_run_id',$8::text)) on conflict(google_place_id) where google_place_id is not null do update set updated_at=now() returning *`, [details.displayName?.text || candidate.displayName?.text || 'Estabelecimento', details.nationalPhoneNumber || null, normalizedPhone || null, candidate.city, candidate.state, candidate.segment, candidate.id, context.runId])).rows[0];
       }

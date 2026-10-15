@@ -11,6 +11,7 @@ const BLOCKED_PAGE = /(tr[aá]fego incomum|unusual traffic|\/sorry\/index|captch
 
 export function createGoogleBrowserOutreachClient({
   renderSearch = renderGoogleSearchWithChrome,
+  renderMaps = renderGoogleMapsWithChrome,
   fetch: fetchImpl = globalThis.fetch,
   now = () => new Date(),
   maxQueries = 30,
@@ -28,9 +29,8 @@ export function createGoogleBrowserOutreachClient({
   return Object.freeze({
     async searchPlaces({ query }) {
       const target = parseTargetQuery(query);
-      const page = await search(query);
-      const resolvedResults = await resolveResultUrls(page.results.slice(0, 15));
-      return resolvedResults.slice(0, 10).map((result) => {
+      const page = await mapsBusinesses(query);
+      return page.results.slice(0, 10).map((result) => {
         const name = businessName(result.title, target.city);
         const id = `browser_${hash(`${name}|${target.city}|${target.state}|${result.url}`).slice(0, 32)}`;
         const candidate = {
@@ -52,13 +52,49 @@ export function createGoogleBrowserOutreachClient({
       if (!candidate) throw new Error('Lead da busca gratuita não encontrado no ciclo atual.');
       const { city, state, segment } = candidate.browserSource;
       const name = candidate.displayName.text;
-      const page = await search(`${name} ${city} ${state} telefone whatsapp`);
+      let phone = '';
+      let activity = null;
+      let images = [];
+      try {
+        const maps = await mapsPlace(`${name} ${city} ${state}`);
+        if (namesMatch(maps.name, name)) {
+          phone = maps.phone;
+          activity = maps.latestActivityAt;
+          images = maps.images;
+        }
+      } catch {
+        const page = await search(`${name} ${city} ${state} telefone whatsapp`);
+        const evidence = page.results.filter((result) => resultMatchesCandidate(result, candidate));
+        phone = evidence.flatMap((result) => result.phones || [])[0] || '';
+        activity = evidence.map((result) => result.latestActivityAt).filter(Boolean).sort().at(-1) || null;
+        images = [...new Set(evidence.flatMap((result) => result.images || []))];
+      }
+      if (phone && !recentWithinDays(activity, now(), 30)) {
+        try {
+          const socialPage = await search(`${name} ${city} ${state} instagram facebook`);
+          const socialEvidence = socialPage.results.filter((result) => resultMatchesCandidate(result, candidate));
+          const socialActivity = socialEvidence.map((result) => result.latestActivityAt).filter(Boolean).sort().at(-1) || null;
+          if (socialActivity && (!activity || socialActivity > activity)) activity = socialActivity;
+        } catch {
+          // A atividade antiga do Maps permanece como evidência conservadora.
+        }
+      }
+      if (phone && !recentWithinDays(activity, now(), 30)) {
+        try {
+          const reviewPage = await search(`${name} ${city} ${state} avaliações google`);
+          const reviewEvidence = reviewPage.results.filter((result) => resultMatchesCandidate(result, candidate));
+          const reviewActivity = reviewEvidence.map((result) => result.latestActivityAt).filter(Boolean).sort().at(-1) || null;
+          if (reviewActivity && (!activity || reviewActivity > activity)) activity = reviewActivity;
+        } catch {
+          // Sem data pública de avaliação, o lead continua inelegível.
+        }
+      }
       return {
         ...candidate,
-        nationalPhoneNumber: page.phones[0] || '',
-        recentPostAt: page.latestActivityAt,
-        reviews: page.latestActivityAt ? [{ publishTime: page.latestActivityAt }] : [],
-        photos: page.images.slice(0, 6).map((url) => ({ name: url, source: 'google_public_search' })),
+        nationalPhoneNumber: phone,
+        recentPostAt: activity,
+        reviews: activity ? [{ publishTime: activity }] : [],
+        photos: images.slice(0, 6).map((url) => ({ name: url, source: 'google_public_search' })),
         hasPublicMenuPhoto: false
       };
     },
@@ -93,11 +129,49 @@ export function createGoogleBrowserOutreachClient({
     const wait = Math.max(0, Number(minIntervalMs) || 0) - (Date.now() - lastQueryAt);
     if (wait > 0) await delay(wait);
     queryCount += 1;
-    const html = await renderSearch(String(query || '').trim(), { chromePath, timeoutMs });
+    const html = await renderReliably(renderSearch, String(query || '').trim());
     lastQueryAt = Date.now();
     const page = parseGoogleSearchPage(html, { now: now() });
     if (page.blocked) throw new Error('A busca pública do Google bloqueou a automação; ciclo interrompido sem disparos.');
     return page;
+  }
+
+  async function mapsPlace(query) {
+    if (queryCount >= Math.max(1, Number(maxQueries) || 30)) throw new Error('Limite de consultas gratuitas do Google atingido neste ciclo.');
+    const wait = Math.max(0, Number(minIntervalMs) || 0) - (Date.now() - lastQueryAt);
+    if (wait > 0) await delay(wait);
+    queryCount += 1;
+    const html = await renderReliably(renderMaps, String(query || '').trim());
+    lastQueryAt = Date.now();
+    const page = parseGoogleMapsPlacePage(html, { now: now() });
+    if (page.blocked) throw new Error('O Google Maps bloqueou a automação; ciclo interrompido sem disparos.');
+    return page;
+  }
+
+  async function mapsBusinesses(query) {
+    if (queryCount >= Math.max(1, Number(maxQueries) || 30)) throw new Error('Limite de consultas gratuitas do Google atingido neste ciclo.');
+    const wait = Math.max(0, Number(minIntervalMs) || 0) - (Date.now() - lastQueryAt);
+    if (wait > 0) await delay(wait);
+    queryCount += 1;
+    const html = await renderReliably(renderMaps, String(query || '').trim());
+    lastQueryAt = Date.now();
+    const page = parseGoogleMapsSearchPage(html);
+    if (page.blocked) throw new Error('O Google Maps bloqueou a automação; ciclo interrompido sem disparos.');
+    return page;
+  }
+
+  async function renderReliably(renderer, input) {
+    try {
+      return await renderer(input, { chromePath, timeoutMs });
+    } catch (firstError) {
+      await delay(250);
+      try {
+        return await renderer(input, { chromePath, timeoutMs });
+      } catch (secondError) {
+        secondError.cause = firstError;
+        throw secondError;
+      }
+    }
   }
 
   async function resolveResultUrls(results) {
@@ -136,8 +210,16 @@ export function parseGoogleSearchPage(html, { now = new Date() } = {}) {
     const title = htmlText(match[2]);
     if (!title || !/^https?:\/\//i.test(url) || isGoogleInternalUrl(url)) continue;
     const end = matches[index + 1]?.index ?? Math.min(source.length, (match.index || 0) + match[0].length + 4000);
-    const snippet = htmlText(source.slice((match.index || 0) + match[0].length, end)).slice(0, 1400);
-    results.push({ url, title, snippet });
+    const section = source.slice((match.index || 0) + match[0].length, end);
+    const sectionText = htmlText(section);
+    results.push({
+      url,
+      title,
+      snippet: sectionText.slice(0, 1400),
+      phones: extractPhones(sectionText),
+      latestActivityAt: latestActivity(sectionText, validDate(now)).toISOStringOrNull,
+      images: extractGoogleImages(section)
+    });
   }
   return {
     blocked,
@@ -149,19 +231,70 @@ export function parseGoogleSearchPage(html, { now = new Date() } = {}) {
   };
 }
 
+export function parseGoogleMapsPlacePage(html, { now = new Date() } = {}) {
+  const source = String(html || '');
+  const visibleText = htmlText(source
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, ' '));
+  const title = source.match(/<h1\b[^>]*class="[^"]*\bDUwDvf\b[^"]*"[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || '';
+  const phoneValue = source.match(/data-item-id="phone:tel:([^"]+)"/i)?.[1] || extractPhones(visibleText)[0] || '';
+  const phone = normalizeBrazilPhone(phoneValue);
+  const images = [];
+  for (const match of source.matchAll(/https:\/\/lh3\.googleusercontent\.com\/grass-cs\/[^"'<>&\s]+/gi)) {
+    const value = decodeUrl(match[0].replace(/\\u003d/gi, '=').replace(/\\u0026/gi, '&'));
+    if (!images.includes(value)) images.push(value);
+  }
+  return {
+    blocked: BLOCKED_PAGE.test(`${source.slice(0, 200000)} ${visibleText.slice(0, 10000)}`),
+    name: htmlText(title),
+    phone,
+    latestActivityAt: latestActivity(visibleText, validDate(now)).toISOStringOrNull,
+    images
+  };
+}
+
+export function parseGoogleMapsSearchPage(html) {
+  const source = String(html || '');
+  const visibleText = htmlText(source);
+  const results = [];
+  for (const match of source.matchAll(/<a\b[^>]*class="[^"]*\bhfpxzc\b[^"]*"[^>]*aria-label="([^"]+)"[^>]*href="([^"]+)"[^>]*>/gi)) {
+    const title = htmlText(match[1]);
+    const url = decodeUrl(match[2]);
+    if (!title || !/^https:\/\/www\.google\.com\/maps\/place\//i.test(url)) continue;
+    if (!results.some((result) => normalized(result.title) === normalized(title))) results.push({ title, url, snippet: '' });
+  }
+  return {
+    blocked: BLOCKED_PAGE.test(`${source.slice(0, 200000)} ${visibleText.slice(0, 10000)}`),
+    results
+  };
+}
+
 export async function renderGoogleSearchWithChrome(query, { chromePath, timeoutMs = 15000 } = {}) {
-  const executable = chromePath || findChrome();
-  if (!executable) throw new Error('Chromium não encontrado para a busca gratuita do Google.');
-  const profile = await mkdtemp(join(tmpdir(), 'tapronto-google-'));
   const url = new URL(GOOGLE_SEARCH_URL);
   url.searchParams.set('q', String(query || '').trim());
   url.searchParams.set('hl', 'pt-BR');
   url.searchParams.set('gl', 'br');
+  return renderGoogleUrlWithChrome(url.toString(), { chromePath, timeoutMs });
+}
+
+export async function renderGoogleMapsWithChrome(query, { chromePath, timeoutMs = 15000 } = {}) {
+  const url = new URL('https://www.google.com/maps/search/');
+  url.searchParams.set('api', '1');
+  url.searchParams.set('query', String(query || '').trim());
+  url.searchParams.set('hl', 'pt-BR');
+  return renderGoogleUrlWithChrome(url.toString(), { chromePath, timeoutMs });
+}
+
+async function renderGoogleUrlWithChrome(url, { chromePath, timeoutMs = 15000 } = {}) {
+  const executable = chromePath || findChrome();
+  if (!executable) throw new Error('Chromium não encontrado para a busca gratuita do Google.');
+  const profile = await mkdtemp(join(tmpdir(), 'tapronto-google-'));
   try {
     return await new Promise((resolve, reject) => {
       const child = spawn(executable, createGoogleChromeArguments({
         profile,
-        url: url.toString(),
+        url,
         virtualTimeBudgetMs: Math.min(8000, Math.max(3000, Number(timeoutMs) - 5000))
       }), {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -217,17 +350,28 @@ function businessName(title, city) {
 function extractPhones(text) {
   const found = [];
   for (const match of String(text || '').matchAll(/(?:\+?55[\s.-]*)?(?:\(?\d{2}\)?[\s.-]*)?(?:9[\s.-]?\d{4}|\d{4})[\s.-]?\d{4}/g)) {
-    let digits = match[0].replace(/\D/g, '');
-    if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+    const digits = normalizeBrazilPhone(match[0]);
     if (/^55\d{10,11}$/.test(digits) && !found.includes(digits)) found.push(digits);
   }
   return found;
+}
+
+function normalizeBrazilPhone(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (/^0\d{10,11}$/.test(digits)) digits = `55${digits.slice(1)}`;
+  if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+  return /^55\d{10,11}$/.test(digits) ? digits : '';
 }
 
 function latestActivity(text, now) {
   const dates = [];
   const units = { minuto: 60000, minutos: 60000, hora: 3600000, horas: 3600000, dia: 86400000, dias: 86400000, semana: 604800000, semanas: 604800000, mês: 2592000000, meses: 2592000000, ano: 31536000000, anos: 31536000000 };
   for (const match of String(text || '').matchAll(/há\s+(\d+|um|uma)\s+(minutos?|horas?|dias?|semanas?|mês|meses|anos?)/gi)) {
+    const count = /^um(a)?$/i.test(match[1]) ? 1 : Number(match[1]);
+    const unit = units[match[2].toLowerCase()];
+    if (Number.isFinite(count) && unit) dates.push(new Date(now.getTime() - count * unit));
+  }
+  for (const match of String(text || '').matchAll(/(\d+|um|uma)\s+(minutos?|horas?|dias?|semanas?|mês|meses|anos?)\s+atrás/gi)) {
     const count = /^um(a)?$/i.test(match[1]) ? 1 : Number(match[1]);
     const unit = units[match[2].toLowerCase()];
     if (Number.isFinite(count) && unit) dates.push(new Date(now.getTime() - count * unit));
@@ -240,7 +384,7 @@ function extractGoogleImages(html) {
   const values = [];
   for (const match of String(html || '').matchAll(/https?:\/\/(?:lh\d*\.googleusercontent\.com|encrypted-tbn\d*\.gstatic\.com)\/[^"'<>\s]+/gi)) {
     const value = decodeUrl(match[0].replace(/\\u003d/gi, '=').replace(/\\u0026/gi, '&'));
-    if (!values.includes(value)) values.push(value);
+    if (isProductImageUrl(value) && !values.includes(value)) values.push(value);
   }
   return values;
 }
@@ -248,8 +392,42 @@ function extractGoogleImages(html) {
 function safeGoogleImageUrl(value) {
   let url;
   try { url = new URL(String(value || '')); } catch { throw new Error('URL da foto pública do Google inválida.'); }
-  if (url.protocol !== 'https:' || !GOOGLE_IMAGE_HOST.test(url.hostname)) throw new Error('Origem da foto pública do Google não permitida.');
+  if (url.protocol !== 'https:' || !isProductImageUrl(url.toString())) throw new Error('Origem da foto pública do Google não permitida.');
   return url.toString();
+}
+
+function isProductImageUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (!GOOGLE_IMAGE_HOST.test(url.hostname) || /favicon/i.test(url.pathname)) return false;
+    if (/^encrypted-tbn\d*\.gstatic\.com$/i.test(url.hostname)) return url.pathname === '/images' && /^tbn:/i.test(url.searchParams.get('q') || '');
+    return true;
+  } catch { return false; }
+}
+
+function resultMatchesCandidate(result, candidate) {
+  const name = normalized(candidate.displayName?.text);
+  const title = normalized(result?.title);
+  if (name && title && (title.includes(name) || name.includes(title))) return true;
+  try {
+    const expected = new URL(candidate.websiteUri);
+    const actual = new URL(result.url);
+    return expected.hostname === actual.hostname
+      && expected.pathname.replace(/\/+$/, '') === actual.pathname.replace(/\/+$/, '');
+  } catch { return false; }
+}
+
+function namesMatch(left, right) {
+  const first = normalized(left);
+  const second = normalized(right);
+  return Boolean(first && second && (first.includes(second) || second.includes(first)));
+}
+
+function recentWithinDays(value, current, days) {
+  if (!value) return false;
+  const date = new Date(value);
+  const reference = validDate(current);
+  return !Number.isNaN(date.getTime()) && reference.getTime() - date.getTime() <= days * 86400000;
 }
 
 function dedupeResults(results) {

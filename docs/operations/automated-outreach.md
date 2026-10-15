@@ -30,6 +30,7 @@ GOOGLE_OUTREACH_TIMEOUT_MS=10000
 GOOGLE_OUTREACH_BROWSER_ENABLED=true
 GOOGLE_OUTREACH_BROWSER_TIMEOUT_MS=15000
 GOOGLE_OUTREACH_BROWSER_MAX_QUERIES=30
+GOOGLE_OUTREACH_BROWSER_CANDIDATE_LIMIT=12
 GOOGLE_OUTREACH_BROWSER_MIN_INTERVAL_MS=1500
 GOOGLE_OUTREACH_PLACES_PRO_LIMIT=4000
 GOOGLE_OUTREACH_PLACES_ADVANCED_LIMIT=800
@@ -140,6 +141,9 @@ O worker roda em `/opt/tapronto-outreach` num container próprio, sem compartilh
 systemctl status tapronto-outreach-tunnel.service
 systemctl status tapronto-outreach.service
 docker run --rm --network bridge --add-host host.docker.internal:host-gateway --env-file /opt/tapronto-outreach/.env tapronto/outreach-worker:2026-10-15 node scripts/outreach-worker.mjs status
+
+# Fora do horário comercial, somente o dry-run aceita um horário simulado.
+docker run --rm --network bridge --add-host host.docker.internal:host-gateway --env-file /opt/tapronto-outreach/.env tapronto/outreach-worker:2026-10-15 node scripts/outreach-worker.mjs run --dry-run --limit 3 --now 2026-10-15T12:30:00Z
 ```
 
 O serviço do worker permanece desabilitado até que banco, Google, Evolution, webhook e prévias sejam validados. Para interromper imediatamente, use `systemctl stop tapronto-outreach.service` e volte `OUTREACH_AUTOMATION_ENABLED=false` antes de qualquer nova inicialização.

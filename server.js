@@ -20,7 +20,7 @@ import { seoLandingPages } from './src/data/seo-pages.js';
 import { SOCIAL_CONTENT_STATUSES, SOCIAL_TRANSITIONS, assertSafeMediaUrl, assertTransition, assetsApprovalHash, contentApprovalHash, createOAuthState, decryptSocialSecret, encryptSocialSecret, exchangeInstagramCode, hashText, instagramAuthorizationUrl, metaRequest, publicationIdempotencyKey, socialConfig, socialConfigStatus, syncPublicationMetrics, validateContentForApproval, verifyMetaSignedRequest } from './src/lib/social-publishing.js';
 import { autopilotDashboard, generateAutopilotSchedule, generateDailyAutopilotPost, selectAutopilotVersion, updateAutopilotSettings } from './src/lib/marketing-autopilot.js';
 import { auditMarketingContent, contentFatigue, repurposeVariants } from './src/lib/marketing-content-intelligence.js';
-import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, shouldAutomaticallyReplyToLead, TERMINAL_SALES_STAGES } from './src/lib/sales-automation.js';
+import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, shouldAutomaticallyReplyToLead, shouldPauseForEvolutionConnectionState, TERMINAL_SALES_STAGES } from './src/lib/sales-automation.js';
 import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, sendEvolutionV2SalesText, setEvolutionV2SalesWebhook } from './src/lib/evolution-v2-sales.js';
 import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions.js';
 import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
@@ -11595,7 +11595,7 @@ async function receiveEvolutionWebhook(req, payload = {}) {
     const event = String(payload?.event || payload?.type || '').toUpperCase();
     if (event.includes('CONNECTION')) {
       const state = String(payload?.data?.state || payload?.data?.status || payload?.state || '').toLowerCase();
-      if (!['open', 'connected'].includes(state)) {
+      if (shouldPauseForEvolutionConnectionState(state)) {
         await dbRequest('PATCH', 'sales_automation_settings', { id: 'eq.global' }, { paused: true, metadata: { reason: 'provider_disconnected', state }, updated_at: new Date().toISOString() }, ['Prefer: return=minimal']);
       }
       return { ok: true, connection_state: state || 'unknown' };

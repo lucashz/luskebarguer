@@ -40,6 +40,21 @@ export function selectSearchTargets({ cities = [], segments = [], history = [], 
   return selected;
 }
 
+export function resolveSearchTargetOverride({ city, state, segment, cities = [], segments = [], maxPopulation = 55000 } = {}) {
+  const supplied = [city, state, segment].filter((value) => String(value || '').trim()).length;
+  if (!supplied) return null;
+  if (supplied !== 3) throw new Error('Informe cidade, estado e segmento para o alvo operacional.');
+  const normalizedCity = normalize(city);
+  const normalizedState = String(state).trim().toUpperCase();
+  const matchedCity = cities.find((item) => normalize(item.city) === normalizedCity && String(item.state).trim().toUpperCase() === normalizedState);
+  if (!matchedCity || !Number.isInteger(Number(matchedCity.population)) || Number(matchedCity.population) > maxPopulation) {
+    throw new Error('O alvo operacional precisa ser uma cidade pequena cadastrada, com até 55 mil habitantes.');
+  }
+  const matchedSegment = segments.find((item) => normalize(item) === normalize(segment));
+  if (!matchedSegment) throw new Error('Segmento inválido para o alvo operacional.');
+  return { city: String(matchedCity.city), state: normalizedState, population: Number(matchedCity.population), segment: String(matchedSegment) };
+}
+
 function targetKey(row) {
   return `${String(row.city || '').trim().toLocaleLowerCase('pt-BR')}|${String(row.state || '').trim().toUpperCase()}|${String(row.segment || '').trim().toLocaleLowerCase('pt-BR')}`;
 }
@@ -47,4 +62,8 @@ function targetKey(row) {
 function timestamp(value) {
   const result = value ? new Date(value).getTime() : 0;
   return Number.isFinite(result) ? result : 0;
+}
+
+function normalize(value) {
+  return String(value || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
 }

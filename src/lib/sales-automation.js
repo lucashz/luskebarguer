@@ -62,6 +62,11 @@ export function normalizeSalesPhone(value = '') {
   return digits;
 }
 
+export function shouldPauseForEvolutionConnectionState(value = '') {
+  const state = String(value || '').trim().toLowerCase();
+  return ['close', 'closed', 'disconnected', 'offline', 'error'].includes(state);
+}
+
 export function assertSalesTransition(from, to) {
   if (from === to) return true;
   if (!SALES_STAGES.includes(from) || !SALES_STAGES.includes(to) || !(TRANSITIONS[from] || []).includes(to)) {

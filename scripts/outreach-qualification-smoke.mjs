@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { selectSearchTargets } from '../src/lib/outreach-city-selector.js';
+import { resolveSearchTargetOverride, selectSearchTargets } from '../src/lib/outreach-city-selector.js';
 import { qualifyOutreachCandidate } from '../src/lib/outreach-qualification.js';
 
 const targets = selectSearchTargets({
@@ -23,6 +23,13 @@ assert.equal(targets[0].city, 'Cidade Nova');
 assert.equal(targets[0].population, 18000);
 assert.equal(targets[0].search_count, 0);
 assert.equal(new Set(targets.slice(0, 2).map((target) => target.segment)).size, 2, 'A seleção não alternou segmentos.');
+
+assert.deepEqual(resolveSearchTargetOverride({
+  city: 'Cidade Nova', state: 'pr', segment: 'padaria',
+  cities: [{ city: 'Cidade Nova', state: 'PR', population: 18000 }],
+  segments: ['padaria', 'lanchonete']
+}), { city: 'Cidade Nova', state: 'PR', population: 18000, segment: 'padaria' });
+assert.throws(() => resolveSearchTargetOverride({ city: 'Cidade Grande', state: 'SC', segment: 'padaria', cities: [{ city: 'Cidade Grande', state: 'SC', population: 55001 }], segments: ['padaria'] }), /cidade pequena/i);
 
 const now = new Date('2026-10-13T12:00:00.000Z');
 const activeAtBoundary = new Date(now.getTime() - 30 * 86400000).toISOString();

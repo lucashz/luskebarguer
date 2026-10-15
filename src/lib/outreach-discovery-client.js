@@ -14,6 +14,13 @@ export function createOutreachDiscoveryClient({ env = process.env, apiFactory, b
   return browserFactory(browserOptions || {});
 }
 
+export function outreachCandidateLimit({ mode, requested, env = process.env } = {}) {
+  const target = Math.max(1, Math.floor(Number(requested) || 1));
+  if (mode !== 'browser') return target;
+  const configured = Math.max(1, Math.floor(Number(env.GOOGLE_OUTREACH_BROWSER_CANDIDATE_LIMIT) || 12));
+  return Math.min(target, configured);
+}
+
 function parseBoolean(value, fallback) {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (!normalized) return fallback;

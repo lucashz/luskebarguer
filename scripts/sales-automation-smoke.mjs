@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
-import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, configuredSalesFacts, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, shouldAutomaticallyReplyToLead } from '../src/lib/sales-automation.js';
+import { assertSalesTransition, autonomousSalesMessageAllowed, canAutomaticallySend, configuredSalesFacts, fallbackSalesDecision, initialSalesMessage, isOptOutMessage, normalizeSalesPhone, parseEvolutionInbound, requestSalesDecision, salesConfig, salesIdempotencyKey, salesInboundEventKey, shouldAutomaticallyReplyToLead, shouldPauseForEvolutionConnectionState } from '../src/lib/sales-automation.js';
 
 loadEnv(new URL('../.env', import.meta.url));
 
@@ -18,6 +18,9 @@ const parsed = parseEvolutionInbound({ event: 'MESSAGE', data: { key: { id: 'msg
 assert(parsed?.phone === '5555999990000' && parsed.body === 'Olá', 'Webhook de texto não foi normalizado.');
 assert(!parseEvolutionInbound({ event: 'MESSAGE', data: { key: { id: 'msg-2', remoteJid: '5555999990000@s.whatsapp.net', fromMe: true }, message: { conversation: 'eco' } } }), 'Mensagem própria não foi ignorada.');
 assert(!parseEvolutionInbound({ event: 'MESSAGE', data: { key: { id: 'msg-3', remoteJid: '123@g.us', fromMe: false }, message: { conversation: 'grupo' } } }), 'Grupo não foi ignorado.');
+assert(!shouldPauseForEvolutionConnectionState('connecting'), 'Estado transitório connecting pausou a automação.');
+assert(!shouldPauseForEvolutionConnectionState('open'), 'Estado open pausou a automação.');
+assert(shouldPauseForEvolutionConnectionState('close'), 'Desconexão confirmada não pausou a automação.');
 const noIdPayload = { event: 'MESSAGES_UPSERT', instance: 'sales', data: { key: { remoteJid: '5555999990000@s.whatsapp.net', fromMe: false }, message: { conversation: 'Sem ID' }, messageTimestamp: 123 } };
 const noIdInbound = parseEvolutionInbound(noIdPayload);
 assert(salesInboundEventKey(noIdPayload, noIdInbound) === salesInboundEventKey(noIdPayload, noIdInbound), 'Fallback idempotente do webhook é instável.');
