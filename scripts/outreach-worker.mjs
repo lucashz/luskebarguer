@@ -7,6 +7,8 @@ import { selectSearchTargets } from '../src/lib/outreach-city-selector.js';
 import { sendOutreachSequence } from '../src/lib/outreach-delivery.js';
 import { normalizeOutreachEvent } from '../src/lib/outreach-events.js';
 import { createGoogleOutreachClient, inspectBusinessWebsite } from '../src/lib/google-outreach-client.js';
+import { createGoogleBrowserOutreachClient } from '../src/lib/google-browser-outreach-client.js';
+import { createOutreachDiscoveryClient, outreachDiscoveryMode } from '../src/lib/outreach-discovery-client.js';
 import { buildOutreachMessage } from '../src/lib/outreach-message.js';
 import { runDailyOutreach } from '../src/lib/outreach-orchestrator.js';
 import { buildOutreachPreview } from '../src/lib/outreach-preview.js';
@@ -101,10 +103,22 @@ function productionDependencies({ dryRun }) {
     place_photos: Math.min(OUTREACH_QUOTA_LIMITS.place_photos, positive(process.env.GOOGLE_OUTREACH_PHOTO_LIMIT, OUTREACH_QUOTA_LIMITS.place_photos)),
     vision_label: Math.min(OUTREACH_QUOTA_LIMITS.vision_label, positive(process.env.GOOGLE_OUTREACH_VISION_LIMIT, OUTREACH_QUOTA_LIMITS.vision_label))
   };
-  const google = createGoogleOutreachClient({
-    apiKey: process.env.GOOGLE_OUTREACH_API_KEY,
-    timeoutMs: Number(process.env.GOOGLE_OUTREACH_TIMEOUT_MS || 10000),
-    reserveQuota: (request) => reserveQuota({ ...request, client: pool, limits: quotaLimits })
+  const discoveryMode = outreachDiscoveryMode(process.env);
+  const google = createOutreachDiscoveryClient({
+    env: process.env,
+    apiFactory: createGoogleOutreachClient,
+    browserFactory: createGoogleBrowserOutreachClient,
+    apiOptions: {
+      apiKey: process.env.GOOGLE_OUTREACH_API_KEY,
+      timeoutMs: Number(process.env.GOOGLE_OUTREACH_TIMEOUT_MS || 10000),
+      reserveQuota: (request) => reserveQuota({ ...request, client: pool, limits: quotaLimits })
+    },
+    browserOptions: {
+      chromePath: process.env.CHROME_PATH,
+      timeoutMs: Number(process.env.GOOGLE_OUTREACH_BROWSER_TIMEOUT_MS || 15000),
+      maxQueries: Number(process.env.GOOGLE_OUTREACH_BROWSER_MAX_QUERIES || 30),
+      minIntervalMs: Number(process.env.GOOGLE_OUTREACH_BROWSER_MIN_INTERVAL_MS || 1500)
+    }
   });
   return {
     async getState() {
@@ -112,7 +126,7 @@ function productionDependencies({ dryRun }) {
       const quota = await pool.query(`select coalesce(bool_and(reserved_units<limit_units),true) available from sales_quota_usage where usage_month=date_trunc('month',now())::date`);
       return {
         paused: Boolean(settings.paused),
-        quotaAvailable: Boolean(quota.rows[0]?.available),
+        quotaAvailable: discoveryMode === 'browser' || Boolean(quota.rows[0]?.available),
         webhookHealthy: dryRun || await probeWebhookHealth()
       };
     },
@@ -161,7 +175,8 @@ function productionDependencies({ dryRun }) {
         },
         isSuppressed: async ({ phone }) => Boolean((await pool.query(`select 1 from sales_suppressions where normalized_phone=$1 limit 1`, [phone])).rowCount),
         checkWhatsApp,
-        searchMenu: () => {
+        searchMenu: (input) => {
+          if (typeof google.searchMenu === 'function') return google.searchMenu(input);
           if (!enriched.websiteUri) throw new Error('Sem site oficial para verificar a existência de cardápio online.');
           return inspectBusinessWebsite(enriched.websiteUri);
         },

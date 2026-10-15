@@ -21,6 +21,7 @@ assert.match(worker, /--add-host host\.docker\.internal:host-gateway/, 'Containe
 assert.match(worker, /--read-only/, 'Filesystem do worker precisa ser somente leitura.');
 assert.match(worker, /--cap-drop ALL/, 'Worker precisa remover capabilities Linux.');
 assert.match(worker, /--security-opt no-new-privileges/, 'Worker precisa bloquear novos privilégios.');
+assert.match(worker, /tapronto\/outreach-worker:2026-10-15/, 'Worker precisa usar a imagem validada nesta versão.');
 assert.doesNotMatch(worker, /evolution_(?:api|postgres|redis)|\/opt\/evolution/, 'Unidade do outreach não pode manipular a stack Evolution.');
 assert.match(envExample, /OUTREACH_AUTOMATION_ENABLED=false/, 'Automação precisa nascer desativada.');
 assert.match(envExample, /DATABASE_URL=postgresql:\/\/[^\s]+@host\.docker\.internal:6543\//, 'Banco precisa usar o túnel, não uma porta pública.');
