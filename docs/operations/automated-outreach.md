@@ -130,7 +130,7 @@ As métricas ficam em **Central > Métricas Comerciais > Prospecção automátic
 
 ## Worker na VM da Evolution
 
-O worker roda em `/opt/tapronto-outreach` num container próprio, sem compartilhar rede, volume ou ciclo de vida com os containers da Evolution. O banco é acessado somente pelo túnel local `127.0.0.1:6543`, mantido por `tapronto-outreach-tunnel.service`; nenhuma porta do PostgreSQL é publicada.
+O worker roda em `/opt/tapronto-outreach` num container próprio, sem compartilhar rede, volume ou ciclo de vida com os containers da Evolution. O túnel mantido por `tapronto-outreach-tunnel.service` escuta apenas no loopback `127.0.0.1:6543` e na bridge interna do Docker `172.17.0.1:6543`; nenhuma porta do PostgreSQL é publicada na LAN ou na internet.
 
 ```bash
 systemctl status tapronto-outreach-tunnel.service
