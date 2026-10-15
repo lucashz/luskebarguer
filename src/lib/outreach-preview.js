@@ -104,7 +104,11 @@ export async function captureWithChrome({ htmlPath, outputPath, view, chromePath
   await new Promise((resolvePromise, reject) => {
     const child = spawn(executable, [
       '--headless=new',
+      '--no-sandbox',
       '--disable-gpu',
+      '--disable-dev-shm-usage',
+      '--disable-crash-reporter',
+      '--disable-breakpad',
       '--hide-scrollbars',
       '--no-first-run',
       '--no-default-browser-check',
@@ -114,7 +118,11 @@ export async function captureWithChrome({ htmlPath, outputPath, view, chromePath
       `--user-data-dir=${profile}`,
       `--screenshot=${outputPath}`,
       url
-    ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    ], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+      env: { ...process.env, HOME: profile, XDG_CONFIG_HOME: profile, XDG_CACHE_HOME: profile }
+    });
     let errors = '';
     child.stderr.on('data', (chunk) => { errors += chunk.toString(); });
     child.on('error', reject);
