@@ -127,3 +127,15 @@ Mantenha leads, eventos, mensagens, supressões e artefatos para investigação.
 - pausa após três falhas: corrija o provedor, valide com o número pessoal e só então use `resume`.
 
 As métricas ficam em **Central > Métricas Comerciais > Prospecção automática**, com um contato contabilizado uma única vez, independentemente das três mensagens da sequência.
+
+## Publicação reproduzível do servidor
+
+Gere o arquivo de release exclusivamente com os caminhos devolvidos por `scripts/production-release-manifest.mjs`. O pacote não pode conter `.env`, uploads, backups, artefatos, estado de navegador nem `node_modules`. Gere também um arquivo de checksum SHA-256 ao lado do pacote.
+
+No servidor, execute como root:
+
+```bash
+/var/www/deploy/production-outreach-release.sh /tmp/tapronto-release.tar.gz /tmp/tapronto-release.tar.gz.sha256
+```
+
+O script valida o checksum e os caminhos do pacote, preserva o `.env`, cria backups do PostgreSQL e dos arquivos, instala dependências em staging, verifica a sintaxe, aplica as migrations, substitui a aplicação e reinicia `cardapio.service`. Se a saúde pública não confirmar `ok: true`, os arquivos anteriores são restaurados automaticamente. Os backups ficam em `/var/backups/tapronto-releases/<data-utc>`.
