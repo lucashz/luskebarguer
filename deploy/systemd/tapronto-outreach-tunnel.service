@@ -1,0 +1,20 @@
+[Unit]
+Description=TáPronto outreach PostgreSQL SSH tunnel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+# On SELinux-enforcing Fedora, systemd cannot directly transition to ssh_t;
+# launching through the shell keeps the service in its constrained domain.
+ExecStart=/usr/bin/bash -c 'exec /usr/bin/ssh -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o IdentityFile=/root/.ssh/tapronto_outreach_ed25519 -L 127.0.0.1:6543:127.0.0.1:5432 -L 172.17.0.1:6543:127.0.0.1:5432 lucas@130.51.23.180'
+Restart=always
+RestartSec=5
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/.ssh
+
+[Install]
+WantedBy=multi-user.target

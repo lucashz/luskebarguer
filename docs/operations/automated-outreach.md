@@ -128,6 +128,18 @@ Mantenha leads, eventos, mensagens, supressões e artefatos para investigação.
 
 As métricas ficam em **Central > Métricas Comerciais > Prospecção automática**, com um contato contabilizado uma única vez, independentemente das três mensagens da sequência.
 
+## Worker na VM da Evolution
+
+O worker roda em `/opt/tapronto-outreach` num container próprio, sem compartilhar rede, volume ou ciclo de vida com os containers da Evolution. O banco é acessado somente pelo túnel local `127.0.0.1:6543`, mantido por `tapronto-outreach-tunnel.service`; nenhuma porta do PostgreSQL é publicada.
+
+```bash
+systemctl status tapronto-outreach-tunnel.service
+systemctl status tapronto-outreach.service
+docker run --rm --network bridge --add-host host.docker.internal:host-gateway --env-file /opt/tapronto-outreach/.env tapronto/outreach-worker:2026-10-14 node scripts/outreach-worker.mjs status
+```
+
+O serviço do worker permanece desabilitado até que banco, Google, Evolution, webhook e prévias sejam validados. Para interromper imediatamente, use `systemctl stop tapronto-outreach.service` e volte `OUTREACH_AUTOMATION_ENABLED=false` antes de qualquer nova inicialização.
+
 ## Publicação reproduzível do servidor
 
 Gere o arquivo de release exclusivamente com os caminhos devolvidos por `scripts/production-release-manifest.mjs`. O pacote não pode conter `.env`, uploads, backups, artefatos, estado de navegador nem `node_modules`. Gere também um arquivo de checksum SHA-256 ao lado do pacote.
