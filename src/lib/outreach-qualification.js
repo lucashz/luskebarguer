@@ -26,11 +26,14 @@ export async function qualifyOutreachCandidate(candidate = {}, dependencies = {}
     return discarded('inconclusive', { ...evidence, failed_step: 'whatsapp', error: safeError(error) }, now, placeId);
   }
 
+  const requireRecentActivity = Boolean(dependencies.requireRecentActivity ?? bool(process.env.OUTREACH_REQUIRE_RECENT_ACTIVITY));
   const activity = latestActivity(candidate);
-  if (!activity || now.getTime() - activity.getTime() > activityMaxDays * 86400000) {
-    return discarded('inactive', { ...evidence, latest_activity_at: activity?.toISOString() || null }, now, placeId);
+  if (requireRecentActivity && activityMaxDays > 0) {
+    if (!activity || now.getTime() - activity.getTime() > activityMaxDays * 86400000) {
+      return discarded('inactive', { ...evidence, latest_activity_at: activity?.toISOString() || null }, now, placeId);
+    }
   }
-  evidence.latest_activity_at = activity.toISOString();
+  if (activity) evidence.latest_activity_at = activity.toISOString();
 
   if (candidate.hasPublicMenuPhoto === true || directMenuUrl(candidate.websiteUri || candidate.website_uri)) {
     return discarded('online_menu', { ...evidence, menu_source: candidate.hasPublicMenuPhoto ? 'google_menu_photo' : candidate.websiteUri || candidate.website_uri }, now, placeId);
@@ -138,6 +141,7 @@ function discarded(code, evidence, now, placeId) {
   };
 }
 
+function bool(value) { return value === true || value === 'true' || value === '1' || value === 1; }
 function requiredFunction(value) { return typeof value === 'function'; }
 function validDate(value) { const date = value instanceof Date ? value : new Date(value); return Number.isNaN(date.getTime()) ? null : date; }
 function positiveDays(value, fallback) { const days = Number(value); return Number.isFinite(days) && days > 0 ? days : fallback; }

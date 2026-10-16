@@ -92,7 +92,7 @@ assert.equal(suppressed.code, 'suppressed');
 const noWhatsapp = await qualifyOutreachCandidate(baseCandidate, dependencies({ checkWhatsApp: async () => false }));
 assert.equal(noWhatsapp.code, 'no_whatsapp');
 
-const inactive = await qualifyOutreachCandidate({ ...baseCandidate, reviews: [{ publishTime: inactivePastBoundary }] }, dependencies());
+const inactive = await qualifyOutreachCandidate({ ...baseCandidate, reviews: [{ publishTime: inactivePastBoundary }] }, dependencies({ requireRecentActivity: true }));
 assert.equal(inactive.code, 'inactive');
 
 const directMenu = await qualifyOutreachCandidate({ ...baseCandidate, websiteUri: 'https://padariacentral.example/cardapio' }, dependencies());
