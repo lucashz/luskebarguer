@@ -253,16 +253,31 @@ function recentLeads(leads, events, messages) {
   const latestByLead = new Map();
   for (const event of events) updateLatest(latestByLead, event.lead_id, event.created_at);
   for (const message of messages) updateLatest(latestByLead, message.lead_id, messageDate(message));
-  return leads.map((lead) => ({
-    id: lead.id,
-    business_name: String(lead.business_name || ''),
-    phone: maskPhone(lead.normalized_phone || lead.phone),
-    city: String(lead.city || ''),
-    state: String(lead.state || ''),
-    segment: String(lead.segment || ''),
-    stage: String(lead.stage || ''),
-    last_event_at: latestByLead.get(String(lead.id)) || lead.updated_at || lead.created_at || null
-  })).sort((a, b) => timestamp(b.last_event_at) - timestamp(a.last_event_at)).slice(0, 20);
+  return leads.map((lead) => {
+    const meta = lead.metadata || {};
+    const lastContact = lead.last_contact_at ? validDate(lead.last_contact_at) : null;
+    const expiresAt = lastContact ? new Date(lastContact.getTime() + 2 * 86400000).toISOString() : null;
+    const hoursRemaining = lastContact ? Math.round((new Date(expiresAt).getTime() - Date.now()) / 3600000) : null;
+    return {
+      id: lead.id,
+      business_name: String(lead.business_name || ''),
+      phone: maskPhone(lead.normalized_phone || lead.phone),
+      raw_phone: lead.normalized_phone || lead.phone || '',
+      city: String(lead.city || ''),
+      state: String(lead.state || ''),
+      segment: String(lead.segment || ''),
+      stage: String(lead.stage || ''),
+      menu_url: meta.menu_url || null,
+      store_id: meta.store_id || null,
+      continuity_confirmed: Boolean(meta.continuity_confirmed),
+      continuity_confirmed_at: meta.continuity_confirmed_at || null,
+      menu_status: meta.menu_status || (meta.store_id || meta.menu_url ? 'active' : null),
+      last_contact_at: lead.last_contact_at || null,
+      expires_at: expiresAt,
+      hours_remaining: hoursRemaining,
+      last_event_at: latestByLead.get(String(lead.id)) || lead.updated_at || lead.created_at || null
+    };
+  }).sort((a, b) => timestamp(b.last_event_at) - timestamp(a.last_event_at)).slice(0, 30);
 }
 
 function updateLatest(map, leadId, value) {

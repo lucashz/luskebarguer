@@ -26,6 +26,7 @@ import {
 import { isOutreachWebhookHealthy } from '../src/lib/sales-automation.js';
 import { evaluateOutreachSendGate } from '../src/lib/outreach-send-policy.js';
 import { normalizeSalesPhone } from '../src/lib/sales-automation.js';
+import { cleanupExpiredOutreachMenus } from '../src/lib/outreach-menu-lifecycle.js';
 
 try { process.loadEnvFile?.('.env'); } catch {}
 
@@ -94,6 +95,9 @@ async function worker(once) {
     try {
       await run(false, Number(process.env.OUTREACH_DAILY_LIMIT || 15));
       await processDueSequences();
+      await cleanupExpiredOutreachMenus({ pool }).catch((err) => {
+        console.error(JSON.stringify({ ok: false, scope: 'menu_cleanup_cycle', error: safe(err.message) }));
+      });
     } catch (error) {
       await recordEvent({ event_type: 'outreach_failed', result: 'failure', details: { step: 'worker_cycle', error: safe(error.message) } }).catch(() => {});
       if (once) throw error;

@@ -25,6 +25,7 @@ import { evolutionV2SalesConfig, getEvolutionV2ConnectionState, sendEvolutionV2S
 import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions.js';
 import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
 import { loadPlatformOutreachMetrics } from './src/lib/platform-outreach.js';
+import { cleanupExpiredOutreachMenus, confirmLeadContinuity, deleteOutreachMenuForLead } from './src/lib/outreach-menu-lifecycle.js';
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
 import { redactSensitive } from './src/lib/security-redaction.js';
@@ -1496,6 +1497,36 @@ async function handleApi(req, res, url) {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
     json(res, 200, { report: await generatePlatformMarketingWeeklyReport(req, admin) });
+    return;
+  }
+
+  const outreachContinuityMatch = url.pathname.match(/^\/api\/platform\/outreach\/leads\/([a-f0-9-]+)\/continuity$/i);
+  if (method === 'POST' && outreachContinuityMatch) {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    const result = await confirmLeadContinuity({ leadId: outreachContinuityMatch[1], actor: admin.email || admin.id });
+    await audit('platform.outreach.lead.continuity', { req, actor_admin_id: admin.id, entity_type: 'sales_lead', entity_id: outreachContinuityMatch[1] });
+    json(res, 200, result);
+    return;
+  }
+
+  const outreachDeleteMenuMatch = url.pathname.match(/^\/api\/platform\/outreach\/leads\/([a-f0-9-]+)\/delete-menu$/i);
+  if (method === 'POST' && outreachDeleteMenuMatch) {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    const result = await deleteOutreachMenuForLead({ leadId: outreachDeleteMenuMatch[1], reason: 'manual_admin' });
+    await audit('platform.outreach.lead.delete_menu', { req, actor_admin_id: admin.id, entity_type: 'sales_lead', entity_id: outreachDeleteMenuMatch[1] });
+    json(res, 200, result);
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/platform/outreach/cleanup-expired') {
+    const admin = await requirePlatformAdmin(req, res, 'platform.view');
+    if (!admin) return;
+    const data = await readJson(req).catch(() => ({}));
+    const result = await cleanupExpiredOutreachMenus({ dryRun: Boolean(data.dry_run), days: Number(data.days) || 2 });
+    await audit('platform.outreach.cleanup_expired', { req, actor_admin_id: admin.id, after_data: { scanned: result.scanned, processed: result.processed } });
+    json(res, 200, result);
     return;
   }
 
@@ -12434,7 +12465,7 @@ const MARKETING_ITEM_CONFIG = {
 };
 
 async function platformMarketingWorkspace() {
-  const [campaigns, leads, content, automationRuns, events, experiments, assignments, pilots, weeklyReports, attributedCompanies] = await Promise.all([
+  const [campaigns, leads, content, automationRuns, events, experiments, assignments, pilots, weeklyReports, attributedCompanies, salesLeads] = await Promise.all([
     dbRequest('GET', 'marketing_campaigns', { select: '*', order: 'created_at.desc', limit: '100' }),
     dbRequest('GET', 'marketing_leads', { select: '*', order: 'updated_at.desc', limit: '250' }),
     dbRequest('GET', 'marketing_content_items', { select: '*', order: 'scheduled_at.asc.nullslast,created_at.desc', limit: '250' }),
@@ -12444,9 +12475,26 @@ async function platformMarketingWorkspace() {
     dbRequest('GET', 'marketing_experiment_assignments', { select: 'experiment_id,variant,exposed_at,converted_at', limit: '10000' }),
     dbRequest('GET', 'marketing_pilot_stores', { select: '*', order: 'updated_at.desc', limit: '100' }),
     dbRequest('GET', 'marketing_weekly_reports', { select: '*', order: 'week_start.desc', limit: '12' }),
-    dbRequest('GET', 'companies', { select: 'id,name,marketing_first_touch,marketing_last_touch,created_at', order: 'created_at.desc', limit: '250' })
+    dbRequest('GET', 'companies', { select: 'id,name,marketing_first_touch,marketing_last_touch,created_at', order: 'created_at.desc', limit: '250' }),
+    dbRequest('GET', 'sales_leads', { select: 'id,business_name,phone,normalized_phone,city,state,stage,metadata,last_contact_at,created_at,updated_at', last_contact_at: 'not.is.null', order: 'last_contact_at.desc', limit: '250' }).catch(() => [])
   ]);
-  const leadStages = Object.fromEntries(MARKETING_ITEM_CONFIG.leads.statuses.map((stage) => [stage, leads.filter((lead) => lead.stage === stage).length]));
+  const unifiedLeads = [
+    ...leads,
+    ...salesLeads.map((sl) => ({
+      id: sl.id,
+      business_name: sl.business_name,
+      contact_name: sl.city && sl.state ? `${sl.city}/${sl.state}` : '',
+      phone: sl.normalized_phone || sl.phone,
+      stage: sl.stage === 'lost' ? 'lost' : sl.metadata?.continuity_confirmed ? 'qualified' : 'contacted',
+      next_action: sl.metadata?.menu_url ? `Cardápio: ${sl.metadata.menu_url}` : 'Prospecção WhatsApp',
+      consent: true,
+      created_at: sl.created_at,
+      updated_at: sl.updated_at,
+      menu_url: sl.metadata?.menu_url || null,
+      continuity_confirmed: Boolean(sl.metadata?.continuity_confirmed)
+    }))
+  ];
+  const leadStages = Object.fromEntries(MARKETING_ITEM_CONFIG.leads.statuses.map((stage) => [stage, unifiedLeads.filter((lead) => lead.stage === stage).length]));
   const contentStatuses = Object.fromEntries(MARKETING_ITEM_CONFIG.content.statuses.map((status) => [status, content.filter((item) => item.status === status).length]));
   const eventNames = ['landing_view', 'demo_started', 'signup_started', 'signup_completed', 'first_product_created', 'menu_published', 'first_order_received', 'subscription_activated'];
   const funnel = Object.fromEntries(eventNames.map((name) => [name, events.filter((event) => event.event_name === name).length]));
@@ -12466,9 +12514,9 @@ async function platformMarketingWorkspace() {
   return {
     summary: {
       active_campaigns: campaigns.filter((item) => item.status === 'active').length,
-      open_leads: leads.filter((item) => !['customer', 'lost'].includes(item.stage)).length,
+      open_leads: unifiedLeads.filter((item) => !['customer', 'lost'].includes(item.stage)).length,
       scheduled_content: content.filter((item) => item.status === 'scheduled').length,
-      overdue_contacts: leads.filter((item) => item.next_contact_at && new Date(item.next_contact_at) < new Date() && !['customer', 'lost'].includes(item.stage)).length,
+      overdue_contacts: unifiedLeads.filter((item) => item.next_contact_at && new Date(item.next_contact_at) < new Date() && !['customer', 'lost'].includes(item.stage)).length,
       running_experiments: experiments.filter((item) => item.status === 'running').length,
       lead_stages: leadStages,
       content_statuses: contentStatuses
@@ -12476,7 +12524,7 @@ async function platformMarketingWorkspace() {
     funnel,
     campaign_metrics: campaignMetrics,
     campaigns,
-    leads,
+    leads: unifiedLeads,
     content,
     experiments,
     experiment_metrics: experimentMetrics,

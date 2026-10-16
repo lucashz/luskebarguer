@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   admin: null,
   companies: [],
   plans: [],
@@ -365,6 +365,10 @@ els.socialAccountSelect?.addEventListener('change', renderSocialApprovalPreview)
 els.socialStatusFilter?.addEventListener('change', renderSocialPublishing);
 els.marketingTabs.forEach((button) => button.addEventListener('click', () => activateMarketingTab(button.dataset.marketingTab)));
 document.addEventListener('click', (event) => {
+  const continuityButton = event.target.closest?.('[data-outreach-continuity]');
+  if (continuityButton) handleOutreachContinuity(continuityButton);
+  const deleteMenuButton = event.target.closest?.('[data-outreach-delete-menu]');
+  if (deleteMenuButton) handleOutreachDeleteMenu(deleteMenuButton);
   const button = event.target.closest?.('[data-marketing-update]');
   if (button) updateMarketingStatus(button);
   const autopilotAction = event.target.closest?.('[data-autopilot-action]');
@@ -2324,6 +2328,49 @@ function renderOutreachMetrics() {
     loading: state.commercialLoading && !state.commercialLoaded,
     error: state.commercialError && !state.commercialLoaded ? state.commercialError : ''
   });
+}
+
+async function handleOutreachContinuity(button) {
+  const leadId = button.dataset.outreachContinuity;
+  if (!leadId) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = 'Salvando...';
+  try {
+    const result = await request(`/api/platform/outreach/leads/${encodeURIComponent(leadId)}/continuity`, {
+      method: 'POST'
+    });
+    if (result.ok) {
+      toast('Continuidade confirmada! O cardápio está seguro e não será excluído.');
+      await loadCommercialAnalytics();
+    }
+  } catch (error) {
+    toast(error.message || 'Erro ao confirmar continuidade.', 'error');
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function handleOutreachDeleteMenu(button) {
+  const leadId = button.dataset.outreachDeleteMenu;
+  if (!leadId) return;
+  if (!confirm('Deseja realmente excluir o cardápio criado para este lead agora?')) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = 'Excluindo...';
+  try {
+    const result = await request(`/api/platform/outreach/leads/${encodeURIComponent(leadId)}/delete-menu`, {
+      method: 'POST'
+    });
+    if (result.ok) {
+      toast('Cardápio excluído com sucesso.');
+      await loadCommercialAnalytics();
+    }
+  } catch (error) {
+    toast(error.message || 'Erro ao excluir cardápio.', 'error');
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
 
 function renderBillingMetrics() {

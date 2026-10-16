@@ -9,7 +9,7 @@ export async function loadPlatformOutreachMetrics({ dbRequest, period }) {
 
   const [leads, messages, events, runs, quotas, suppressions, companies] = await Promise.all([
     safe(dbRequest('GET', 'sales_leads', {
-      select: 'id,business_name,phone,normalized_phone,city,state,segment,stage,discard_code,source,created_at,updated_at',
+      select: 'id,business_name,phone,normalized_phone,city,state,segment,stage,discard_code,source,metadata,last_contact_at,created_at,updated_at',
       source: 'eq.google_outreach',
       order: 'updated_at.desc',
       limit: '5000'

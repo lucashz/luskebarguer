@@ -90,9 +90,72 @@
   }
 
   function recentTable(rows) {
-    const items = Array.isArray(rows) ? rows.slice(0, 10) : [];
+    const items = Array.isArray(rows) ? rows.slice(0, 20) : [];
     if (!items.length) return '';
-    return `<section class="outreach-panel outreach-table-wrap"><h4>Contatos recentes</h4><table><thead><tr><th>Estabelecimento</th><th>Local</th><th>Segmento</th><th>Etapa</th><th>Telefone</th></tr></thead><tbody>${items.map((row) => `<tr><td>${escapeHtml(row.business_name)}</td><td>${escapeHtml([row.city, row.state].filter(Boolean).join('/'))}</td><td>${escapeHtml(row.segment)}</td><td>${escapeHtml(stageLabel(row.stage))}</td><td>${escapeHtml(row.phone)}</td></tr>`).join('')}</tbody></table></section>`;
+    return `
+      <section class="outreach-panel outreach-table-wrap">
+        <h4>Contatos recentes e Cardápios</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Estabelecimento</th>
+              <th>Local</th>
+              <th>Telefone</th>
+              <th>Etapa</th>
+              <th>Cardápio Criado</th>
+              <th>Validade</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((row) => {
+              const hasMenu = Boolean(row.menu_url || row.store_id);
+              let menuCell = '<span class="muted">—</span>';
+              if (row.menu_url) {
+                const slug = row.menu_url.replace(/^https?:\/\/[^/]+\/?/, '/');
+                menuCell = `<a href="${escapeHtml(row.menu_url)}" target="_blank" rel="noopener noreferrer" class="outreach-menu-link" style="color:var(--primary,#0284c7);font-weight:600;text-decoration:none;">${escapeHtml(slug)} ↗</a>`;
+              }
+
+              let statusCell = '<span class="muted">—</span>';
+              let actionsCell = '<span class="muted">—</span>';
+
+              if (hasMenu) {
+                if (row.continuity_confirmed) {
+                  statusCell = `<span class="status-pill success" style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;">✓ Mantido</span>`;
+                  actionsCell = `<small style="color:#166534;font-weight:500;">Continuidade dada</small>`;
+                } else if (row.menu_status === 'deleted') {
+                  statusCell = `<span class="status-pill muted" style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:999px;font-size:12px;">Excluído</span>`;
+                  actionsCell = `<small class="muted">Prazo de 2 dias expirou</small>`;
+                } else {
+                  const hours = typeof row.hours_remaining === 'number' ? row.hours_remaining : null;
+                  const isExpiringSoon = hours !== null && hours <= 12;
+                  const expColor = isExpiringSoon ? '#991b1b' : '#854d0e';
+                  const expBg = isExpiringSoon ? '#fee2e2' : '#fef9c3';
+                  const expText = hours !== null ? (hours > 0 ? `Expira em ${hours}h` : 'Expirando hoje') : 'Ativo (2 dias)';
+                  statusCell = `<span class="status-pill" style="background:${expBg};color:${expColor};padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;">${escapeHtml(expText)}</span>`;
+                  actionsCell = `
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      <button class="primary-button compact" data-outreach-continuity="${row.id}" type="button" style="padding:4px 10px;font-size:12px;white-space:nowrap;">Dar continuidade</button>
+                      <button class="ghost-button compact" data-outreach-delete-menu="${row.id}" type="button" title="Excluir cardápio agora" style="padding:4px 8px;font-size:12px;color:#dc2626;border-color:#fecaca;">Excluir</button>
+                    </div>
+                  `;
+                }
+              }
+
+              return `<tr>
+                <td><strong>${escapeHtml(row.business_name)}</strong></td>
+                <td>${escapeHtml([row.city, row.state].filter(Boolean).join('/'))}</td>
+                <td>${escapeHtml(row.phone)}</td>
+                <td>${escapeHtml(stageLabel(row.stage))}</td>
+                <td>${menuCell}</td>
+                <td>${statusCell}</td>
+                <td>${actionsCell}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </section>
+    `;
   }
 
   function number(value) { return Number(value || 0).toLocaleString('pt-BR'); }
