@@ -119,8 +119,13 @@ export function createGoogleBrowserOutreachClient({
     },
 
     async searchMenu({ businessName: name, city, state }) {
-      const page = await search(`${name} ${city} ${state} cardápio menu pedidos online`);
-      return resolveResultUrls(page.results);
+      try {
+        const page = await search(`${name} ${city} ${state} cardápio menu pedidos online`);
+        return resolveResultUrls(page.results);
+      } catch (err) {
+        // Se a busca web do Google estiver bloqueada por captcha, não descartamos o lead
+        return [];
+      }
     }
   });
 

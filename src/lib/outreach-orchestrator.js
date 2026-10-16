@@ -17,11 +17,13 @@ export async function runDailyOutreach({ now = new Date(), dryRun = false, maxCo
   const limit = Math.min(DAILY_LIMIT, Math.max(1, Math.floor(Number(maxContacts) || DAILY_LIMIT)));
   const runKey = `${local.year}-${local.month}-${local.day}`;
   const existing = await dependencies.findExistingRun({ runKey, dryRun });
+  const alreadyScheduled = Math.max(0, Number(existing?.scheduled_count ?? existing?.sent_count ?? 0));
   if (existing?.status === 'completed' || existing?.status === 'dry_run') {
-    return { ...result('already_completed'), runId: existing.id, scheduled: Number(existing.sent_count || 0) };
+    if (alreadyScheduled >= limit || Number(existing?.sent_count || 0) > 0 || Number(existing?.scheduled_count || 0) > 0) {
+      return { ...result('already_completed'), runId: existing.id, scheduled: Number(existing.sent_count || alreadyScheduled) };
+    }
   }
 
-  const alreadyScheduled = Math.max(0, Number(existing?.scheduled_count || 0));
   const remaining = Math.max(0, limit - alreadyScheduled);
 
   const run = existing || await dependencies.startRun({ runKey, scheduledFor: runKey, dryRun, now: current });
@@ -52,12 +54,14 @@ export async function runDailyOutreach({ now = new Date(), dryRun = false, maxCo
       await dependencies.scheduleContact({ ...item, runId, scheduledAt: slots[index], idempotencyKey: `${runKey}:${item.lead.id}` });
     }
   }
+  const totalScheduled = alreadyScheduled + approved.length;
+  const isComplete = totalScheduled >= limit;
   const summary = {
     candidates: candidates.length,
     qualified: approved.length,
     discarded,
-    scheduled: alreadyScheduled + approved.length,
-    status: dryRun ? 'dry_run' : 'completed',
+    scheduled: totalScheduled,
+    status: dryRun ? 'dry_run' : (isComplete ? 'completed' : 'pending'),
     runId,
     slots
   };
