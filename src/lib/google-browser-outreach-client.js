@@ -134,11 +134,15 @@ export function createGoogleBrowserOutreachClient({
     const wait = Math.max(0, Number(minIntervalMs) || 0) - (Date.now() - lastQueryAt);
     if (wait > 0) await delay(wait);
     queryCount += 1;
-    const html = await renderReliably(renderSearch, String(query || '').trim());
-    lastQueryAt = Date.now();
-    const page = parseGoogleSearchPage(html, { now: now() });
-    if (page.blocked) throw new Error('A busca pública do Google bloqueou a automação; ciclo interrompido sem disparos.');
-    return page;
+    try {
+      const html = await renderReliably(renderSearch, String(query || '').trim());
+      lastQueryAt = Date.now();
+      const page = parseGoogleSearchPage(html, { now: now() });
+      if (page.blocked) return { blocked: true, results: [], phones: [], images: [], visibleText: '' };
+      return page;
+    } catch {
+      return { blocked: true, results: [], phones: [], images: [], visibleText: '' };
+    }
   }
 
   async function mapsPlace(query) {
