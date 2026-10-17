@@ -10,13 +10,13 @@ async function main() {
   try {
     const lead = {
       id: 'test-lead-12345678',
-      business_name: 'Restaurante Fome Mania',
-      segment: 'restaurante',
-      city: 'Horizontina',
-      state: 'RS',
+      business_name: 'Pizzaria em Dois Córregos',
+      segment: 'pizzaria',
+      city: 'Dois Córregos',
+      state: 'SP',
       metadata: {
-        menu_url: 'https://taprontomenu.com.br/fomemania',
-        menu_slug: 'fomemania'
+        menu_url: 'https://taprontomenu.com.br/pizzaria-em-dois-corregos-rodizi',
+        menu_slug: 'pizzaria-em-dois-corregos-rodizi'
       }
     };
 
@@ -53,3 +53,4 @@ main().catch((err) => {
   console.error('Falha no teste:', err);
   process.exit(1);
 });
+

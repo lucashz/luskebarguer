@@ -22,3 +22,4 @@ function testSegmentResolutions() {
 testSlugGeneration();
 testSegmentResolutions();
 console.log('✅ TESTE DE PROVISIONAMENTO DE CARDÁPIO OK!');
+

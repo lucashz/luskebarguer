@@ -118,7 +118,7 @@ export async function captureWithChrome({ htmlPath, url: targetUrl, outputPath, 
 
   const isLiveUrl = /^https?:\/\//i.test(url);
   const isMobile = view === 'mobile';
-  const windowSize = isMobile ? '412,915' : '1200,900';
+  const windowSize = isMobile ? '450,990' : '1080,1350';
 
   const chromeArgs = [
     '--headless=new',
@@ -161,15 +161,98 @@ export async function captureWithChrome({ htmlPath, url: targetUrl, outputPath, 
   });
 
   if (isLiveUrl) {
-    const image = sharp(outputPath);
-    const meta = await image.metadata();
-    if (meta.width !== 1080 || meta.height !== 1350) {
-      const buffer = await readFile(outputPath);
-      await sharp(buffer)
-        .resize(1080, 1350, { fit: 'cover', position: 'top' })
-        .png()
-        .toFile(outputPath);
+    if (isMobile) {
+      await frameMobileMockup(outputPath);
+    } else {
+      const image = sharp(outputPath);
+      const meta = await image.metadata();
+      if (meta.width !== 1080 || meta.height !== 1350) {
+        const buffer = await readFile(outputPath);
+        await sharp(buffer)
+          .resize(1080, 1350, { fit: 'contain', background: '#ffffff' })
+          .png()
+          .toFile(outputPath);
+      }
     }
+  }
+}
+
+export async function frameMobileMockup(imagePath) {
+  try {
+    const rawBuffer = await readFile(imagePath);
+    const screenW = 490;
+    const screenH = 1080;
+    const phoneW = screenW + 28;
+    const phoneH = screenH + 28;
+    const radius = 48;
+
+    const resizedScreen = await sharp(rawBuffer)
+      .resize(screenW, screenH, { fit: 'contain', background: '#ffffff' })
+      .png()
+      .toBuffer();
+
+    const svgFrame = Buffer.from(`
+      <svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+            <stop offset="0%" stop-color="#1e293b"/>
+            <stop offset="100%" stop-color="#0f172a"/>
+          </radialGradient>
+          <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="25" stdDeviation="35" flood-color="#000000" flood-opacity="0.6"/>
+          </filter>
+        </defs>
+
+        <rect width="1080" height="1350" fill="url(#bg)"/>
+
+        <text x="540" y="70" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="28" font-weight="bold" letter-spacing="0.5">CARDÁPIO DIGITAL NO CELULAR</text>
+        <text x="540" y="105" text-anchor="middle" fill="#94a3b8" font-family="Arial, sans-serif" font-size="18">Visualização rápida e pedidos direto pelo WhatsApp</text>
+
+        <rect x="${(1080 - phoneW) / 2}" y="${(1350 - phoneH) / 2 + 10}" width="${phoneW}" height="${phoneH}" rx="${radius}" ry="${radius}" fill="#334155" filter="url(#shadow)" stroke="#475569" stroke-width="3"/>
+        <rect x="${(1080 - screenW) / 2 - 4}" y="${(1350 - screenH) / 2 + 6}" width="${screenW + 8}" height="${screenH + 8}" rx="38" ry="38" fill="#020617"/>
+      </svg>
+    `);
+
+    const mask = Buffer.from(`
+      <svg width="${screenW}" height="${screenH}">
+        <rect width="${screenW}" height="${screenH}" rx="34" ry="34" fill="#fff"/>
+      </svg>
+    `);
+    const maskedScreen = await sharp(resizedScreen)
+      .composite([{ input: mask, blend: 'dest-in' }])
+      .png()
+      .toBuffer();
+
+    const notchSvg = Buffer.from(`
+      <svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg">
+        <rect x="475" y="${(1350 - screenH) / 2 + 10 + 12}" width="130" height="28" rx="14" fill="#000000"/>
+        <circle cx="585" cy="${(1350 - screenH) / 2 + 10 + 26}" r="4.5" fill="#1e293b"/>
+        <rect x="480" y="${(1350 + screenH) / 2 + 10 - 16}" width="120" height="4" rx="2" fill="#64748b" fill-opacity="0.6"/>
+        <text x="540" y="1300" text-anchor="middle" fill="#64748b" font-family="Arial, sans-serif" font-size="16">Criado com TáPronto · taprontomenu.com.br</text>
+      </svg>
+    `);
+
+    await sharp(svgFrame)
+      .composite([
+        {
+          input: maskedScreen,
+          left: Math.round((1080 - screenW) / 2),
+          top: Math.round((1350 - screenH) / 2 + 10)
+        },
+        {
+          input: notchSvg,
+          left: 0,
+          top: 0
+        }
+      ])
+      .png()
+      .toFile(imagePath);
+  } catch (err) {
+    const buffer = await readFile(imagePath);
+    await sharp(buffer)
+      .resize(1080, 1350, { fit: 'contain', background: '#0f172a' })
+      .png()
+      .toFile(imagePath);
   }
 }
 
