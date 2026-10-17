@@ -125,13 +125,13 @@
                   actionsCell = `<small style="color:#166534;font-weight:500;">Continuidade dada</small>`;
                 } else if (row.menu_status === 'deleted') {
                   statusCell = `<span class="status-pill muted" style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:999px;font-size:12px;">Excluído</span>`;
-                  actionsCell = `<small class="muted">Prazo de 2 dias expirou</small>`;
+                  actionsCell = `<small class="muted">Prazo de 15h expirou</small>`;
                 } else {
                   const hours = typeof row.hours_remaining === 'number' ? row.hours_remaining : null;
-                  const isExpiringSoon = hours !== null && hours <= 12;
+                  const isExpiringSoon = hours !== null && hours <= 4;
                   const expColor = isExpiringSoon ? '#991b1b' : '#854d0e';
                   const expBg = isExpiringSoon ? '#fee2e2' : '#fef9c3';
-                  const expText = hours !== null ? (hours > 0 ? `Expira em ${hours}h` : 'Expirando hoje') : 'Ativo (2 dias)';
+                  const expText = hours !== null ? (hours > 0 ? `Expira em ${hours}h` : 'Expirando') : 'Ativo (15h)';
                   statusCell = `<span class="status-pill" style="background:${expBg};color:${expColor};padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;">${escapeHtml(expText)}</span>`;
                   actionsCell = `
                     <div style="display:flex;gap:6px;align-items:center;">

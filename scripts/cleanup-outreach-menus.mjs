@@ -5,16 +5,17 @@ try { process.loadEnvFile?.('.env'); } catch {}
 
 const args = new Set(process.argv.slice(2));
 const apply = args.has('--apply');
+const hoursArg = process.argv.find((arg) => arg.startsWith('--hours='));
 const daysArg = process.argv.find((arg) => arg.startsWith('--days='));
-const days = daysArg ? Number(daysArg.split('=')[1]) : 2;
+const hours = hoursArg ? Number(hoursArg.split('=')[1]) : (daysArg ? Number(daysArg.split('=')[1]) * 24 : 15);
 
 const pool = getLocalPool();
 
 async function main() {
-  console.log(`[outreach-menu-cleanup] Verificando cardápios criados com mais de ${days} dias sem continuidade...`);
+  console.log(`[outreach-menu-cleanup] Verificando cardápios contatados há mais de ${hours}h sem resposta/continuidade...`);
   console.log(`[outreach-menu-cleanup] Modo: ${apply ? 'APLICAR EXCLUSÃO' : 'SIMULAÇÃO (dry-run)'}`);
 
-  const result = await cleanupExpiredOutreachMenus({ pool, dryRun: !apply, days });
+  const result = await cleanupExpiredOutreachMenus({ pool, dryRun: !apply, hours });
   console.log(JSON.stringify(result, null, 2));
 
   if (!apply && result.candidates?.length) {

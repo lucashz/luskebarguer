@@ -9,7 +9,7 @@ async function resolvePool(pool) {
   }
 }
 
-export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 'expired_no_continuity' }) {
+export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 'expired_15_hours_no_continuity' }) {
   const client = await resolvePool(pool);
   const leadRes = await client.query('SELECT * FROM sales_leads WHERE id = $1 LIMIT 1', [leadId]);
   const lead = leadRes.rows[0];
@@ -87,7 +87,7 @@ export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 
     `UPDATE sales_leads
      SET metadata = $2::jsonb,
          stage = $3,
-         stop_reason = CASE WHEN $3 = 'lost' THEN 'Cardápio temporário excluído após 2 dias sem continuidade.' ELSE stop_reason END,
+         stop_reason = CASE WHEN $3 = 'lost' THEN 'Cardápio temporário excluído após 15 horas sem continuidade.' ELSE stop_reason END,
          updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
@@ -160,15 +160,15 @@ export async function confirmLeadContinuity({ leadId, pool = null, actor = 'admi
   return { ok: true, lead: updateRes.rows[0] };
 }
 
-export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false, days = 2 }) {
+export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false, hours = 15, days = null }) {
   const client = await resolvePool(pool);
-  const cutoffDays = Math.max(1, Number(days) || 2);
+  const cutoffHours = (days !== null && days !== undefined) ? Math.max(1, Number(days) * 24) : Math.max(1, Number(hours) || 15);
 
   const query = `
     SELECT id, business_name, phone, stage, last_contact_at, metadata
     FROM sales_leads
     WHERE last_contact_at IS NOT NULL
-      AND last_contact_at <= NOW() - ($1 || ' days')::interval
+      AND last_contact_at <= NOW() - ($1 || ' hours')::interval
       AND COALESCE((metadata->>'continuity_confirmed')::boolean, false) = false
       AND COALESCE(metadata->>'menu_status', '') <> 'deleted'
       AND (metadata->>'store_id' IS NOT NULL OR metadata->>'menu_url' IS NOT NULL)
@@ -176,13 +176,14 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
     ORDER BY last_contact_at ASC
   `;
 
-  const candidatesRes = await client.query(query, [cutoffDays]);
+  const candidatesRes = await client.query(query, [cutoffHours]);
   const candidates = candidatesRes.rows;
 
   if (dryRun) {
     return {
       ok: true,
       dryRun: true,
+      cutoffHours,
       scanned: candidates.length,
       candidates: candidates.map((row) => ({
         id: row.id,
@@ -200,7 +201,7 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
       const result = await deleteOutreachMenuForLead({
         leadId: candidate.id,
         pool: client,
-        reason: 'expired_2_days_no_continuity'
+        reason: `expired_${cutoffHours}_hours_no_continuity`
       });
       results.push({ id: candidate.id, business_name: candidate.business_name, success: true, storeDeleted: result.storeDeleted });
     } catch (err) {

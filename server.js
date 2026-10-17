@@ -1523,8 +1523,8 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && url.pathname === '/api/platform/outreach/cleanup-expired') {
     const admin = await requirePlatformAdmin(req, res, 'platform.view');
     if (!admin) return;
-    const data = await readJson(req).catch(() => ({}));
-    const result = await cleanupExpiredOutreachMenus({ dryRun: Boolean(data.dry_run), days: Number(data.days) || 2 });
+    const hours = data.hours !== undefined && data.hours !== null ? Number(data.hours) : (data.days !== undefined && data.days !== null ? Number(data.days) * 24 : 15);
+    const result = await cleanupExpiredOutreachMenus({ dryRun: Boolean(data.dry_run), hours });
     await audit('platform.outreach.cleanup_expired', { req, actor_admin_id: admin.id, after_data: { scanned: result.scanned, processed: result.processed } });
     json(res, 200, result);
     return;

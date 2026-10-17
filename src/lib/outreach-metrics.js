@@ -256,7 +256,7 @@ function recentLeads(leads, events, messages) {
   return leads.map((lead) => {
     const meta = lead.metadata || {};
     const lastContact = lead.last_contact_at ? validDate(lead.last_contact_at) : null;
-    const expiresAt = lastContact ? new Date(lastContact.getTime() + 2 * 86400000).toISOString() : null;
+    const expiresAt = lastContact ? new Date(lastContact.getTime() + 15 * 3600000).toISOString() : null;
     const hoursRemaining = lastContact ? Math.round((new Date(expiresAt).getTime() - Date.now()) / 3600000) : null;
     return {
       id: lead.id,
