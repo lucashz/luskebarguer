@@ -27,6 +27,7 @@ import { isOutreachWebhookHealthy } from '../src/lib/sales-automation.js';
 import { evaluateOutreachSendGate } from '../src/lib/outreach-send-policy.js';
 import { normalizeSalesPhone } from '../src/lib/sales-automation.js';
 import { cleanupExpiredOutreachMenus } from '../src/lib/outreach-menu-lifecycle.js';
+import { provisionOutreachStore } from '../src/lib/outreach-store-provisioning.js';
 
 try { process.loadEnvFile?.('.env'); } catch {}
 
@@ -219,9 +220,24 @@ function productionDependencies({ dryRun, targetOverride = null }) {
     async buildPreview({ lead, photos, runId }) {
       const outputDir = path.resolve(process.env.OUTREACH_ARTIFACT_DIR || 'artifacts/outreach/automated', runId, `${slug(lead.business_name)}-${lead.id.slice(0, 8)}`);
       await mkdir(outputDir, { recursive: true });
+
+      try {
+        const provisioned = await provisionOutreachStore({ lead, pool, baseUrl: process.env.APP_BASE_URL || 'https://taprontomenu.com.br' });
+        lead.metadata = {
+          ...(lead.metadata || {}),
+          store_id: provisioned.storeId,
+          menu_slug: provisioned.slug,
+          menu_url: provisioned.menuUrl,
+          continuity_confirmed: false,
+          menu_status: 'active'
+        };
+      } catch (err) {
+        // Segue com fallback caso o provisionamento encontre falha transitória
+      }
+
       const preview = await buildOutreachPreview({ lead, photos, outputDir, chromePath: process.env.CHROME_PATH });
-      await pool.query(`update sales_leads set preview_desktop_path=$2,preview_mobile_path=$3,stage='preview_ready',updated_at=now() where id=$1`, [lead.id, preview.desktopPath, preview.mobilePath]);
-      await recordEvent({ event_type: 'lead_preview_ready', run_id: runId, lead_id: lead.id, place_id: lead.google_place_id, stage: 'preview_ready', result: 'success', details: { desktop: preview.desktopPath, mobile: preview.mobilePath } });
+      await pool.query(`update sales_leads set preview_desktop_path=$2,preview_mobile_path=$3,stage='preview_ready',metadata=$4::jsonb,updated_at=now() where id=$1`, [lead.id, preview.desktopPath, preview.mobilePath, JSON.stringify(lead.metadata || {})]);
+      await recordEvent({ event_type: 'lead_preview_ready', run_id: runId, lead_id: lead.id, place_id: lead.google_place_id, stage: 'preview_ready', result: 'success', details: { desktop: preview.desktopPath, mobile: preview.mobilePath, visual_source: preview.visualSource, menu_url: lead.metadata?.menu_url } });
       return preview;
     },
     async scheduleContact({ lead, preview, runId, scheduledAt, idempotencyKey }) {

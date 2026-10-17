@@ -77,12 +77,16 @@ function assertNoAmbiguousAttempt(progress, step, label) {
 
 async function sendPreview(kind, path, lead, deps, now) {
   const bytes = await deps.readFile(path);
+  const menuUrl = clean(lead.metadata?.menu_url || lead.menu_url || OUTREACH_DEMO_URL);
+  const caption = kind === 'desktop'
+    ? `Assim ficaria o cardápio de vocês no computador. Para ver e navegar no cardápio completo: ${menuUrl}`
+    : `E esta é a visualização rápida no celular, direto para o cliente fazer pedidos pelo WhatsApp. Cardápio completo: ${menuUrl}`;
   const sent = await deps.sendMedia({
     phone: lead.normalized_phone || lead.phone,
     media: Buffer.from(bytes).toString('base64'),
     mimeType: 'image/png',
     fileName: basename(path),
-    caption: CAPTIONS[kind],
+    caption,
     lead
   });
   return stepResult(sent, now);

@@ -65,12 +65,26 @@ export async function buildOutreachPreview({ lead = {}, photos = [], outputDir, 
   const desktopPath = join(directory, 'menu-preview.png');
   const mobilePath = join(directory, 'menu-preview-mobile.png');
   await writeFile(htmlPath, html, 'utf8');
-  await capture({ htmlPath, outputPath: desktopPath, view: 'desktop', chromePath });
-  await capture({ htmlPath, outputPath: mobilePath, view: 'mobile', chromePath });
+
+  const liveUrl = lead.metadata?.menu_url || lead.menu_url || lead.menuUrl;
+  let usedLivePrint = false;
+  if (liveUrl) {
+    try {
+      await capture({ url: liveUrl, outputPath: desktopPath, view: 'desktop', chromePath });
+      await capture({ url: liveUrl, outputPath: mobilePath, view: 'mobile', chromePath });
+      usedLivePrint = true;
+    } catch {
+      await capture({ htmlPath, outputPath: desktopPath, view: 'desktop', chromePath });
+      await capture({ htmlPath, outputPath: mobilePath, view: 'mobile', chromePath });
+    }
+  } else {
+    await capture({ htmlPath, outputPath: desktopPath, view: 'desktop', chromePath });
+    await capture({ htmlPath, outputPath: mobilePath, view: 'mobile', chromePath });
+  }
   await assertPreviewImage(desktopPath, 'computador');
   await assertPreviewImage(mobilePath, 'celular');
 
-  return { desktopPath, mobilePath, htmlPath, productImagePaths, products, visualSource };
+  return { desktopPath, mobilePath, htmlPath, productImagePaths, products, visualSource: usedLivePrint ? 'live_menu_print' : visualSource };
 }
 
 export function resolveOutreachProducts(lead = {}, photos = []) {
@@ -95,39 +109,68 @@ export function resolveOutreachProducts(lead = {}, photos = []) {
   return products;
 }
 
-export async function captureWithChrome({ htmlPath, outputPath, view, chromePath }) {
+export async function captureWithChrome({ htmlPath, url: targetUrl, outputPath, view, chromePath, timeoutMs = 25000 }) {
   const executable = chromePath || findChrome();
   if (!executable) throw new Error('Chrome ou Edge não encontrado para gerar a prévia.');
-  const url = `${pathToFileURL(htmlPath).href}?view=${encodeURIComponent(view)}`;
+  const url = targetUrl || `${pathToFileURL(htmlPath).href}?view=${encodeURIComponent(view)}`;
   const profile = join(resolve(outputPath, '..'), `.chrome-${view}`);
   await mkdir(profile, { recursive: true });
+
+  const isLiveUrl = /^https?:\/\//i.test(url);
+  const isMobile = view === 'mobile';
+  const windowSize = isMobile ? '412,915' : '1200,900';
+
+  const chromeArgs = [
+    '--headless=new',
+    '--no-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--disable-crash-reporter',
+    '--disable-breakpad',
+    '--hide-scrollbars',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--allow-file-access-from-files',
+    `--window-size=${isLiveUrl ? windowSize : '1080,1350'}`,
+    `--user-data-dir=${profile}`,
+    `--screenshot=${outputPath}`,
+    url
+  ];
+
+  if (isLiveUrl) {
+    chromeArgs.splice(chromeArgs.length - 1, 0, '--virtual-time-budget=4000');
+    if (isMobile) {
+      chromeArgs.splice(chromeArgs.length - 1, 0, '--user-agent=Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36');
+    }
+  }
+
   await new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, [
-      '--headless=new',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--disable-crash-reporter',
-      '--disable-breakpad',
-      '--hide-scrollbars',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--allow-file-access-from-files',
-      '--force-device-scale-factor=1',
-      '--window-size=1080,1350',
-      `--user-data-dir=${profile}`,
-      `--screenshot=${outputPath}`,
-      url
-    ], {
+    const child = spawn(executable, chromeArgs, {
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
       env: { ...process.env, HOME: profile, XDG_CONFIG_HOME: profile, XDG_CACHE_HOME: profile }
     });
     let errors = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
     child.stderr.on('data', (chunk) => { errors += chunk.toString(); });
-    child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolvePromise() : reject(new Error(`Chrome encerrou com código ${code}: ${errors.slice(-500)}`)));
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolvePromise() : reject(new Error(`Chrome encerrou com código ${code}: ${errors.slice(-500)}`));
+    });
   });
+
+  if (isLiveUrl) {
+    const image = sharp(outputPath);
+    const meta = await image.metadata();
+    if (meta.width !== 1080 || meta.height !== 1350) {
+      const buffer = await readFile(outputPath);
+      await sharp(buffer)
+        .resize(1080, 1350, { fit: 'cover', position: 'top' })
+        .png()
+        .toFile(outputPath);
+    }
+  }
 }
 
 async function photoBytes(photo) {
