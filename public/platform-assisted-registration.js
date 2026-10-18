@@ -48,7 +48,7 @@
   async function loadList() {
     const q = $('#assistedSearch').value.trim();
     const [data, metricData] = await Promise.all([
-      api(`/assisted-registrations${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+      api(`/assisted-registrations?limit=100${q ? `&q=${encodeURIComponent(q)}` : ''}`),
       api('/assisted-registrations-metrics')
     ]);
     renderMetrics(metricData.metrics);
@@ -115,5 +115,5 @@
   function maskPhone(value) { const digits=String(value||'').replace(/\D/g,''); return digits.length>4?`•••• ${digits.slice(-4)}`:'Sem telefone'; }
   function formatDate(value) { return value?new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'Agora'; }
   function escapeHtml(value) { return String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char])); }
-  window.PlatformAssistedRegistration={ STATUSES, loadList };
+  window.PlatformAssistedRegistration={ STATUSES, loadList, loadRegistration, openEditor };
 })();

@@ -367,6 +367,8 @@ els.marketingTabs.forEach((button) => button.addEventListener('click', () => act
 document.addEventListener('click', (event) => {
   const continuityButton = event.target.closest?.('[data-outreach-continuity]');
   if (continuityButton) handleOutreachContinuity(continuityButton);
+  const openAssistedButton = event.target.closest?.('[data-open-assisted]');
+  if (openAssistedButton) handleOpenAssistedRegistration(openAssistedButton);
   const deleteMenuButton = event.target.closest?.('[data-outreach-delete-menu]');
   if (deleteMenuButton) handleOutreachDeleteMenu(deleteMenuButton);
   const button = event.target.closest?.('[data-marketing-update]');
@@ -2341,13 +2343,22 @@ async function handleOutreachContinuity(button) {
       method: 'POST'
     });
     if (result.ok) {
-      toast('Continuidade confirmada! O cardápio está seguro e não será excluído.');
+      toast('Continuidade confirmada! Cadastro assistido vinculado com sucesso.');
       await loadCommercialAnalytics();
     }
   } catch (error) {
     toast(error.message || 'Erro ao confirmar continuidade.', 'error');
     button.disabled = false;
     button.textContent = originalText;
+  }
+}
+
+function handleOpenAssistedRegistration(button) {
+  const regId = button.dataset.openAssisted;
+  if (!regId) return;
+  activatePlatformView('assisted', { load: true });
+  if (window.PlatformAssistedRegistration?.loadRegistration) {
+    window.PlatformAssistedRegistration.loadRegistration(regId);
   }
 }
 

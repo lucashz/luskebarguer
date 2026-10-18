@@ -120,12 +120,16 @@
               let actionsCell = '<span class="muted">—</span>';
 
               if (hasMenu) {
+                const openAssistedBtn = row.registration_id
+                  ? `<button class="ghost-button compact" data-open-assisted="${row.registration_id}" type="button" style="padding:4px 8px;font-size:12px;color:var(--primary,#0284c7);border-color:#bae6fd;white-space:nowrap;font-weight:600;">Abrir no Cadastro Assistido →</button>`
+                  : '';
+
                 if (row.continuity_confirmed) {
                   statusCell = `<span class="status-pill success" style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;">✓ Mantido</span>`;
-                  actionsCell = `<small style="color:#166534;font-weight:500;">Continuidade dada</small>`;
+                  actionsCell = openAssistedBtn || `<small style="color:#166534;font-weight:500;">Continuidade dada</small>`;
                 } else if (row.menu_status === 'deleted') {
                   statusCell = `<span class="status-pill muted" style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:999px;font-size:12px;">Excluído</span>`;
-                  actionsCell = `<small class="muted">Prazo de 15h expirou</small>`;
+                  actionsCell = openAssistedBtn || `<small class="muted">Prazo de 15h expirou</small>`;
                 } else {
                   const hours = typeof row.hours_remaining === 'number' ? row.hours_remaining : null;
                   const isExpiringSoon = hours !== null && hours <= 4;
@@ -134,8 +138,9 @@
                   const expText = hours !== null ? (hours > 0 ? `Expira em ${hours}h` : 'Expirando') : 'Ativo (15h)';
                   statusCell = `<span class="status-pill" style="background:${expBg};color:${expColor};padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;">${escapeHtml(expText)}</span>`;
                   actionsCell = `
-                    <div style="display:flex;gap:6px;align-items:center;">
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                       <button class="primary-button compact" data-outreach-continuity="${row.id}" type="button" style="padding:4px 10px;font-size:12px;white-space:nowrap;">Dar continuidade</button>
+                      ${openAssistedBtn}
                       <button class="ghost-button compact" data-outreach-delete-menu="${row.id}" type="button" title="Excluir cardápio agora" style="padding:4px 8px;font-size:12px;color:#dc2626;border-color:#fecaca;">Excluir</button>
                     </div>
                   `;

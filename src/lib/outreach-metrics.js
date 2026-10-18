@@ -271,6 +271,7 @@ function recentLeads(leads, events, messages) {
       store_id: meta.store_id || null,
       continuity_confirmed: Boolean(meta.continuity_confirmed),
       continuity_confirmed_at: meta.continuity_confirmed_at || null,
+      registration_id: meta.registration_id || null,
       menu_status: meta.menu_status || (meta.store_id || meta.menu_url ? 'active' : null),
       last_contact_at: lead.last_contact_at || null,
       expires_at: expiresAt,
