@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="sk-grad" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#b91c1c"/>
+      <stop offset="100%" stop-color="#7f1d1d"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="94" fill="url(#sk-grad)" stroke="#facc15" stroke-width="4"/>
+  <circle cx="100" cy="100" r="86" fill="none" stroke="#ffffff" stroke-width="1.2"/>
+  
+  <!-- Retro Starburst Emblem -->
+  <g transform="translate(100, 60)">
+    <circle cx="0" cy="0" r="24" fill="#facc15"/>
+    <text x="0" y="6" font-family="'Impact', 'Arial Black', sans-serif" font-size="16" font-weight="900" fill="#7f1d1d" text-anchor="middle">SK</text>
+    <path d="M-34 0 L-26 0 M26 0 L34 0 M0 -34 L0 -26 M0 26 L0 34" stroke="#facc15" stroke-width="2.5"/>
+  </g>
+
+  <!-- Typography -->
+  <path d="M22 104 L178 104 L168 126 L32 126 Z" fill="#facc15"/>
+  <text x="100" y="120.5" font-family="'Impact', 'Arial Black', sans-serif" font-size="17" font-weight="900" fill="#7f1d1d" text-anchor="middle" letter-spacing="2">SKIN LANCHES</text>
+  
+  <text x="100" y="146" font-family="'Montserrat', sans-serif" font-size="9.5" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="2">DA PRETA</text>
+  <text x="100" y="164" font-family="'Montserrat', sans-serif" font-size="7" font-weight="700" fill="#fef08a" text-anchor="middle" letter-spacing="1.5">BRAÇO DO NORTE • SC</text>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <radialGradient id="pq-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ea580c"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </radialGradient>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#pq-bg)" stroke="#ffedd5" stroke-width="3"/>
+  <g transform="translate(0, -6)">
+    <path d="M54 62 L106 62 L100 86 C100 90 92 94 80 94 C68 94 60 90 60 86 Z" fill="#ffedd5"/>
+    <rect x="50" y="58" width="60" height="5" rx="2.5" fill="#fef08a"/>
+    <path d="M70 48 Q67 42 70 36 M80 46 Q83 40 80 34 M90 48 Q87 42 90 36" stroke="#fef08a" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  </g>
+  <text x="80" y="118" font-family="'Montserrat', sans-serif" font-size="11.5" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">PÃO QUENTE</text>
+  <text x="80" y="134" font-family="'Montserrat', sans-serif" font-size="7.5" font-weight="700" fill="#ffedd5" text-anchor="middle" letter-spacing="1.5">MARMITARIA &amp; DELIVERY</text>
+</svg>

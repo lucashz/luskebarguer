@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <radialGradient id="rp-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </radialGradient>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#rp-bg)" stroke="#e11d48" stroke-width="3"/>
+  <circle cx="80" cy="58" r="24" fill="#e11d48"/>
+  <rect x="56" y="60" width="48" height="16" rx="8" fill="#ffffff"/>
+  <rect x="54" y="54" width="52" height="10" rx="5" fill="#f97316"/>
+  <rect x="74" y="52" width="12" height="26" rx="3" fill="#0f172a"/>
+  <text x="80" y="112" font-family="'Montserrat', sans-serif" font-size="12.5" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2.5">ROPPONGI</text>
+  <text x="80" y="128" font-family="'Montserrat', sans-serif" font-size="7.5" font-weight="700" fill="#e11d48" text-anchor="middle" letter-spacing="3">SUSHI HOUSE</text>
+</svg>

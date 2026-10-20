@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="pdi-bg" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="100%" stop-color="#fef3c7"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="94" fill="url(#pdi-bg)" stroke="#78350f" stroke-width="4"/>
+  <circle cx="100" cy="100" r="88" fill="none" stroke="#d97706" stroke-width="1.5" stroke-dasharray="3,3"/>
+  
+  <!-- Classic Botanical Wheat Sheaf (Fine line art) -->
+  <g transform="translate(100, 56)" stroke="#78350f" stroke-width="1.8" fill="none" stroke-linecap="round">
+    <path d="M0 24 L0 -18"/>
+    <path d="M-6 -8 C-14 -14 -12 -22 0 -24 C12 -22 14 -14 6 -8"/>
+    <path d="M-8 0 C-18 -4 -16 -12 -4 -12"/>
+    <path d="M8 0 C18 -4 16 -12 4 -12"/>
+    <path d="M-8 10 C-16 6 -14 -2 -2 -2"/>
+    <path d="M8 10 C16 6 14 -2 2 -2"/>
+  </g>
+
+  <!-- Brand Typography -->
+  <text x="100" y="112" font-family="'Merriweather', 'Cinzel', Georgia, serif" font-size="15" font-weight="900" fill="#78350f" text-anchor="middle" letter-spacing="1.5">DOIS IRMÃOS</text>
+  
+  <!-- Banner -->
+  <rect x="28" y="124" width="144" height="22" rx="4" fill="#78350f"/>
+  <text x="100" y="139" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="900" fill="#fef3c7" text-anchor="middle" letter-spacing="2">PADARIA &amp; CONFEITARIA</text>
+  
+  <text x="100" y="162" font-family="'Montserrat', sans-serif" font-size="7.5" font-weight="700" fill="#b45309" text-anchor="middle" letter-spacing="2">DESDE 2018</text>
+  <text x="100" y="174" font-family="'Montserrat', sans-serif" font-size="6.5" font-weight="600" fill="#78350f" text-anchor="middle" letter-spacing="1.5">DOIS CÓRREGOS • SP</text>
+</svg>

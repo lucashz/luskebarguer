@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="nc-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#27272a"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="42" fill="url(#nc-grad)" stroke="#dc2626" stroke-width="4"/>
+  
+  <!-- Stylized Cleaver & Bull Horns Crest -->
+  <g transform="translate(100, 60)">
+    <circle cx="0" cy="0" r="26" fill="#dc2626"/>
+    <!-- Clean geometric cleaver silhouette in white -->
+    <path d="M-12 -12 L10 -12 L12 6 L-8 6 Z" fill="#ffffff"/>
+    <rect x="-14" y="2" width="6" height="14" rx="2" fill="#713f12"/>
+    <circle cx="4" cy="-6" r="2" fill="#dc2626"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="100" y="126" font-family="'Impact', 'Arial Black', sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">NO CEPO</text>
+  
+  <rect x="36" y="136" width="128" height="18" rx="4" fill="#dc2626"/>
+  <text x="100" y="149" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">LANCHES &amp; PARRILLA</text>
+  
+  <text x="100" y="170" font-family="'Montserrat', sans-serif" font-size="7" font-weight="700" fill="#a1a1aa" text-anchor="middle" letter-spacing="1.5">LAGOA VERMELHA • RS</text>
+</svg>

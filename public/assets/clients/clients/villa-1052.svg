@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="v-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064e3b"/>
+      <stop offset="100%" stop-color="#022c22"/>
+    </linearGradient>
+    <linearGradient id="v-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="40" fill="url(#v-grad)" stroke="url(#v-gold)" stroke-width="4"/>
+  <rect x="15" y="15" width="170" height="170" rx="33" fill="none" stroke="url(#v-gold)" stroke-width="1" stroke-dasharray="4,2"/>
+  
+  <!-- Pub Crest with Monogram -->
+  <g transform="translate(100, 60)">
+    <path d="M-24 -24 L24 -24 L24 6 C24 22 0 34 0 34 C0 34 -24 22 -24 6 Z" fill="none" stroke="url(#v-gold)" stroke-width="2.5"/>
+    <text x="0" y="-3" font-family="'Cinzel', Georgia, serif" font-size="11" font-weight="900" fill="url(#v-gold)" text-anchor="middle" letter-spacing="1">PUB</text>
+    <text x="0" y="16" font-family="'Cinzel', Georgia, serif" font-size="15" font-weight="900" fill="#ffffff" text-anchor="middle">1052</text>
+  </g>
+
+  <!-- Brand Typography -->
+  <text x="100" y="122" font-family="'Cinzel', 'Playfair Display', Georgia, serif" font-size="17" font-weight="900" fill="url(#v-gold)" text-anchor="middle" letter-spacing="3.5">VILLA 1052</text>
+  
+  <rect x="52" y="132" width="96" height="18" rx="4" fill="url(#v-gold)"/>
+  <text x="100" y="145" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="900" fill="#022c22" text-anchor="middle" letter-spacing="2">GASTRO PUB</text>
+  
+  <text x="100" y="168" font-family="'Montserrat', sans-serif" font-size="7" font-weight="700" fill="#6ee7b7" text-anchor="middle" letter-spacing="1.5">BRAÇO DO NORTE • SC</text>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="bb-dark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+    <linearGradient id="bb-fire" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+  </defs>
+  <!-- Squircle Base -->
+  <rect x="8" y="8" width="184" height="184" rx="44" fill="url(#bb-dark)" stroke="url(#bb-fire)" stroke-width="4"/>
+  
+  <!-- Geometric Flame & Grill Mark -->
+  <g transform="translate(100, 62)">
+    <!-- Stylized modern flame crest (geometry, not cartoon) -->
+    <path d="M0 -32 C12 -16 26 -2 26 18 C26 34 14 44 0 44 C-14 44 -26 34 -26 18 C-26 -2 -12 -16 0 -32 Z" fill="url(#bb-fire)"/>
+    <path d="M0 -14 C6 -4 14 4 14 18 C14 28 8 34 0 34 C-8 34 -14 28 -14 18 C-14 4 -6 -4 0 -14 Z" fill="#fbbf24"/>
+    <!-- Minimalist crossed butcher steel skewers -->
+    <path d="M-36 28 L36 -20 M-36 -20 L36 28" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="100" y="132" font-family="'Impact', 'Arial Black', sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">BRASANO</text>
+  
+  <rect x="44" y="144" width="112" height="18" rx="4" fill="url(#bb-fire)"/>
+  <text x="100" y="157" font-family="'Montserrat', sans-serif" font-size="9" font-weight="900" fill="#09090b" text-anchor="middle" letter-spacing="2.5">SMASH BURGER</text>
+  <text x="100" y="176" font-family="'Montserrat', sans-serif" font-size="7" font-weight="700" fill="#71717a" text-anchor="middle" letter-spacing="2">MARAVILHA • SC</text>
+</svg>

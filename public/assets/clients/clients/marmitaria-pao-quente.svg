@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="pq-grad" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#ea580c"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="94" fill="url(#pq-grad)" stroke="#ffedd5" stroke-width="4"/>
+  <circle cx="100" cy="100" r="87" fill="none" stroke="#fef08a" stroke-width="1.2" stroke-dasharray="4,2"/>
+  
+  <!-- Artisan Sunburst & Cloche -->
+  <g transform="translate(100, 62)">
+    <circle cx="0" cy="0" r="22" fill="#ffedd5"/>
+    <text x="0" y="7" font-family="'Impact', 'Arial Black', sans-serif" font-size="18" font-weight="900" fill="#9a3412" text-anchor="middle">PQ</text>
+  </g>
+
+  <!-- Brand Typography -->
+  <text x="100" y="122" font-family="'Montserrat', sans-serif" font-size="16" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">PÃO QUENTE</text>
+  
+  <rect x="34" y="132" width="132" height="18" rx="4" fill="#ffedd5"/>
+  <text x="100" y="145" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="900" fill="#9a3412" text-anchor="middle" letter-spacing="2">MARMITARIA &amp; DELIVERY</text>
+  
+  <text x="100" y="168" font-family="'Montserrat', sans-serif" font-size="7" font-weight="700" fill="#fef08a" text-anchor="middle" letter-spacing="1.5">PEDERNEIRAS • SP</text>
+</svg>

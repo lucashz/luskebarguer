@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <linearGradient id="ra-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="ra-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#ra-bg)" stroke="url(#ra-gold)" stroke-width="3"/>
+  <path d="M80 34 C78 34 77 35 77 37 C77 38 78 39 79 39 L79 42 C61 44 48 58 48 74 L112 74 C112 58 99 44 81 42 L81 39 C82 39 83 38 83 37 C83 35 82 34 80 34 Z" fill="url(#ra-gold)"/>
+  <rect x="44" y="76" width="72" height="5" rx="2.5" fill="url(#ra-gold)"/>
+  <path d="M72 49 Q75 45 72 41" stroke="#fef3c7" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  <path d="M80 47 Q83 43 80 39" stroke="#fef3c7" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  <path d="M88 49 Q91 45 88 41" stroke="#fef3c7" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  <text x="80" y="105" font-family="'Cinzel', Georgia, serif" font-size="12" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">ALIANÇA</text>
+  <path d="M50 114 L110 114" stroke="url(#ra-gold)" stroke-width="1"/>
+  <circle cx="80" cy="114" r="2.5" fill="#fbbf24"/>
+  <text x="80" y="128" font-family="'Montserrat', sans-serif" font-size="7.5" font-weight="700" fill="#94a3b8" text-anchor="middle" letter-spacing="2.5">RESTAURANTE</text>
+</svg>

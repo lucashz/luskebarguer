@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="in-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b"/>
+      <stop offset="100%" stop-color="#18181b"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="40" fill="url(#in-grad)" stroke="#facc15" stroke-width="4"/>
+  
+  <!-- Urban Hexagon Icon -->
+  <g transform="translate(100, 64)">
+    <polygon points="0,-30 28,-14 28,18 0,34 -28,18 -28,-14" fill="none" stroke="#facc15" stroke-width="3"/>
+    <polygon points="0,-22 20,-10 20,12 0,24 -20,12 -20,-10" fill="#facc15"/>
+    <text x="0" y="7" font-family="'Arial Black', sans-serif" font-size="14" font-weight="900" fill="#09090b" text-anchor="middle">IN</text>
+  </g>
+
+  <!-- Modern Industrial Wordmark -->
+  <text x="100" y="128" font-family="'Impact', 'Arial Black', sans-serif" font-size="24" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3.5">INSIDE</text>
+  
+  <rect x="42" y="138" width="116" height="18" rx="4" fill="#facc15"/>
+  <text x="100" y="151" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="900" fill="#09090b" text-anchor="middle" letter-spacing="2.5">HAMBURGUERIA</text>
+  
+  <text x="100" y="172" font-family="'Montserrat', sans-serif" font-size="7" font-weight="700" fill="#a1a1aa" text-anchor="middle" letter-spacing="2">IVAIPORÃ • PR</text>
+</svg>

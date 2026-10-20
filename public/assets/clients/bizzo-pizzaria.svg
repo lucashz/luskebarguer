@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <radialGradient id="bz-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1c1917"/>
+      <stop offset="100%" stop-color="#0c0a09"/>
+    </radialGradient>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#bz-bg)" stroke="#dc2626" stroke-width="3"/>
+  <path d="M80 32 L116 88 A40 40 0 0 1 44 88 Z" fill="#dc2626" stroke="#f87171" stroke-width="2"/>
+  <path d="M80 40 L108 84 A32 32 0 0 1 52 84 Z" fill="#fef08a"/>
+  <circle cx="76" cy="58" r="5" fill="#b91c1c"/>
+  <circle cx="88" cy="72" r="5.5" fill="#b91c1c"/>
+  <circle cx="68" cy="74" r="4.5" fill="#b91c1c"/>
+  <circle cx="80" cy="80" r="3.5" fill="#15803d"/>
+  <rect x="62" y="98" width="12" height="3" fill="#15803d"/>
+  <rect x="74" y="98" width="12" height="3" fill="#ffffff"/>
+  <rect x="86" y="98" width="12" height="3" fill="#dc2626"/>
+  <text x="80" y="122" font-family="'Oswald', 'Montserrat', sans-serif" font-size="17" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">BIZZO</text>
+  <text x="80" y="137" font-family="'Montserrat', sans-serif" font-size="7.5" font-weight="700" fill="#f87171" text-anchor="middle" letter-spacing="2">PIZZARIA ARTESANAL</text>
+</svg>

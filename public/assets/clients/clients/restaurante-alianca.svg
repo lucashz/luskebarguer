@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="ra-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="ra-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="50%" stop-color="#d97706"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="94" fill="url(#ra-grad)" stroke="url(#ra-gold)" stroke-width="4"/>
+  <circle cx="100" cy="100" r="87" fill="none" stroke="url(#ra-gold)" stroke-width="1.2" stroke-dasharray="4,2"/>
+  
+  <!-- Elegant Heraldic Shield -->
+  <g transform="translate(100, 68)">
+    <path d="M-28 -28 L28 -28 L28 4 C28 24 0 38 0 38 C0 38 -28 24 -28 4 Z" fill="none" stroke="url(#ra-gold)" stroke-width="2.5"/>
+    <text x="0" y="10" font-family="'Cinzel', Georgia, serif" font-size="28" font-weight="900" fill="url(#ra-gold)" text-anchor="middle">A</text>
+    <!-- Laurel Sprigs -->
+    <path d="M-36 -10 Q-44 10 -24 30 M36 -10 Q44 10 24 30" stroke="url(#ra-gold)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="100" y="132" font-family="'Cinzel', 'Playfair Display', Georgia, serif" font-size="16" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3.5">ALIANÇA</text>
+  <path d="M48 142 L152 142" stroke="url(#ra-gold)" stroke-width="1.5"/>
+  <circle cx="100" cy="142" r="3" fill="#fbbf24"/>
+  <text x="100" y="157" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="800" fill="url(#ra-gold)" text-anchor="middle" letter-spacing="3">GASTRONOMIA</text>
+  <text x="100" y="171" font-family="'Montserrat', sans-serif" font-size="6.5" font-weight="600" fill="#94a3b8" text-anchor="middle" letter-spacing="1.5">BRAÇO DO NORTE • SC</text>
+</svg>

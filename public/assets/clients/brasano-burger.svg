@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <radialGradient id="bb-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#27272a"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </radialGradient>
+  </defs>
+  <rect x="6" y="6" width="148" height="148" rx="36" fill="url(#bb-bg)" stroke="#ea580c" stroke-width="3"/>
+  <g transform="translate(0, -6)">
+    <path d="M80 30 C88 44 98 52 98 68 C98 80 88 88 80 88 C72 88 62 80 62 68 C62 54 74 46 80 30 Z" fill="#ea580c"/>
+    <path d="M80 44 C84 52 90 58 90 68 C90 75 84 80 80 80 C76 80 70 75 70 68 C70 60 76 54 80 44 Z" fill="#fba724"/>
+    <path d="M52 74 C52 64 64 60 80 60 C96 60 108 64 108 74 Z" fill="#fef08a"/>
+    <rect x="50" y="77" width="60" height="7" rx="3.5" fill="#78350f"/>
+    <path d="M50 83 L110 83 L105 88 L95 85 L85 91 L75 85 L65 90 L55 85 Z" fill="#f59e0b"/>
+    <rect x="53" y="87" width="54" height="6" rx="3" fill="#fef08a"/>
+  </g>
+  <text x="80" y="122" font-family="'Impact', 'Arial Black', sans-serif" font-size="14.5" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1.2">BRASANO</text>
+  <text x="80" y="137" font-family="'Montserrat', sans-serif" font-size="7.5" font-weight="800" fill="#ea580c" text-anchor="middle" letter-spacing="2.5">BURGER CO.</text>
+</svg>

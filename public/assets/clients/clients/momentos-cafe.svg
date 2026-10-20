@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="mc-grad" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#3b2014"/>
+      <stop offset="100%" stop-color="#1a0c06"/>
+    </radialGradient>
+    <linearGradient id="mc-copper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="50%" stop-color="#d4a373"/>
+      <stop offset="100%" stop-color="#9a5a2a"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="94" fill="url(#mc-grad)" stroke="url(#mc-copper)" stroke-width="4"/>
+  <circle cx="100" cy="100" r="87" fill="none" stroke="url(#mc-copper)" stroke-width="1" stroke-dasharray="3,3"/>
+  
+  <!-- Elegant Monogram Medallion -->
+  <g transform="translate(100, 64)">
+    <circle cx="0" cy="0" r="22" fill="#1a0c06" stroke="url(#mc-copper)" stroke-width="2"/>
+    <text x="0" y="8" font-family="'Cinzel', Georgia, serif" font-size="20" font-weight="900" fill="url(#mc-copper)" text-anchor="middle">M</text>
+  </g>
+
+  <!-- Typography -->
+  <text x="100" y="122" font-family="'Cinzel', 'Playfair Display', Georgia, serif" font-size="15" font-weight="900" fill="url(#mc-copper)" text-anchor="middle" letter-spacing="3">MOMENTOS</text>
+  
+  <path d="M46 132 L154 132" stroke="url(#mc-copper)" stroke-width="1.2"/>
+  <text x="100" y="148" font-family="'Montserrat', sans-serif" font-size="8.5" font-weight="800" fill="#fef3c7" text-anchor="middle" letter-spacing="3">CAFÉ &amp; BISTRÔ</text>
+  <text x="100" y="166" font-family="'Montserrat', sans-serif" font-size="7" font-weight="600" fill="url(#mc-copper)" text-anchor="middle" letter-spacing="2">POMERODE • SC</text>
+</svg>

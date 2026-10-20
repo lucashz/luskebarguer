@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <radialGradient id="in-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </radialGradient>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#in-bg)" stroke="#eab308" stroke-width="3"/>
+  <g transform="translate(0, -2)">
+    <path d="M50 62 C50 48 64 42 80 42 C96 42 110 48 110 62 Z" fill="#eab308"/>
+    <rect x="46" y="66" width="68" height="8" rx="4" fill="#ef4444"/>
+    <path d="M46 76 L114 76 L108 82 L96 78 L86 85 L74 78 L64 84 L52 78 Z" fill="#22c55e"/>
+    <rect x="48" y="82" width="64" height="7" rx="3.5" fill="#713f12"/>
+    <rect x="52" y="91" width="56" height="8" rx="4" fill="#eab308"/>
+  </g>
+  <text x="80" y="123" font-family="'Arial Black', sans-serif" font-size="15" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">INSIDE</text>
+  <text x="80" y="138" font-family="'Montserrat', sans-serif" font-size="7" font-weight="800" fill="#eab308" text-anchor="middle" letter-spacing="2">HAMBURGUERIA</text>
+</svg>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="lb-grad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#881337"/>
+      <stop offset="100%" stop-color="#4c0519"/>
+    </radialGradient>
+    <linearGradient id="lb-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#eab308"/>
+      <stop offset="100%" stop-color="#ca8a04"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Shield/Badge -->
+  <circle cx="100" cy="100" r="94" fill="url(#lb-grad)" stroke="url(#lb-gold)" stroke-width="4"/>
+  <circle cx="100" cy="100" r="86" fill="none" stroke="url(#lb-gold)" stroke-width="1.2" stroke-dasharray="3,3"/>
+  <circle cx="100" cy="100" r="82" fill="none" stroke="url(#lb-gold)" stroke-width="0.8"/>
+  
+  <!-- Crown / Heraldic Laurel -->
+  <g transform="translate(100, 48)" fill="url(#lb-gold)">
+    <path d="M-16 0 L-10 -12 L0 -4 L10 -12 L16 0 Z"/>
+    <circle cx="-10" cy="-14" r="2"/>
+    <circle cx="0" cy="-6" r="2.5"/>
+    <circle cx="10" cy="-14" r="2"/>
+  </g>
+
+  <!-- Monogram Crest -->
+  <g transform="translate(100, 78)">
+    <circle cx="0" cy="0" r="18" fill="#4c0519" stroke="url(#lb-gold)" stroke-width="1.5"/>
+    <text x="0" y="7" font-family="'Cinzel', 'Playfair Display', 'Times New Roman', serif" font-size="16" font-weight="900" fill="url(#lb-gold)" text-anchor="middle" letter-spacing="1">LB</text>
+  </g>
+
+  <!-- Brand Name Ribbon -->
+  <g transform="translate(100, 116)">
+    <rect x="-80" y="-12" width="160" height="24" rx="4" fill="url(#lb-gold)"/>
+    <text x="0" y="5.5" font-family="'Cinzel', 'Playfair Display', Georgia, serif" font-size="14.5" font-weight="900" fill="#4c0519" text-anchor="middle" letter-spacing="2">LA BELLA</text>
+  </g>
+
+  <!-- Subtitle -->
+  <text x="100" y="146" font-family="'Montserrat', sans-serif" font-size="9" font-weight="800" fill="#fef08a" text-anchor="middle" letter-spacing="3.5">PIZZERIA</text>
+  <text x="100" y="160" font-family="'Montserrat', sans-serif" font-size="6.5" font-weight="600" fill="#fca5a5" text-anchor="middle" letter-spacing="2">FORNO A LENHA • PR</text>
+  
+  <!-- Star accents -->
+  <text x="52" y="146" font-size="8" fill="url(#lb-gold)" text-anchor="middle">★</text>
+  <text x="148" y="146" font-size="8" fill="url(#lb-gold)" text-anchor="middle">★</text>
+</svg>
