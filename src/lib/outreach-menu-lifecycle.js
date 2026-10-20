@@ -72,6 +72,11 @@ export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 
 
   const metadata = lead.metadata || {};
   if (metadata.menu_status === 'deleted') {
+    const regId = metadata.registration_id;
+    if (regId) {
+      await client.query("DELETE FROM assisted_registrations WHERE id = $1 AND status NOT IN ('published', 'active', 'activated')", [regId]).catch(() => {});
+    }
+    await client.query("DELETE FROM assisted_registrations WHERE attribution->>'lead_id' = $1 AND status NOT IN ('published', 'active', 'activated')", [lead.id]).catch(() => {});
     return { ok: true, lead, alreadyDeleted: true };
   }
 
@@ -131,8 +136,34 @@ export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 
     }
   }
 
+  // Delete assisted registration associated with this lead/demo menu (if not already published/activated)
+  let assistedRegistrationDeleted = false;
+  const regId = metadata.registration_id;
+  if (regId) {
+    const delRes = await client.query(
+      "DELETE FROM assisted_registrations WHERE id = $1 AND status NOT IN ('published', 'active', 'activated')",
+      [regId]
+    ).catch(() => ({ rowCount: 0 }));
+    if (delRes?.rowCount > 0) assistedRegistrationDeleted = true;
+  }
+
+  const delLeadRes = await client.query(
+    "DELETE FROM assisted_registrations WHERE attribution->>'lead_id' = $1 AND status NOT IN ('published', 'active', 'activated')",
+    [lead.id]
+  ).catch(() => ({ rowCount: 0 }));
+  if (delLeadRes?.rowCount > 0) assistedRegistrationDeleted = true;
+
+  if (storeId) {
+    const delStoreRes = await client.query(
+      "DELETE FROM assisted_registrations WHERE store_id = $1 AND status NOT IN ('published', 'active', 'activated')",
+      [storeId]
+    ).catch(() => ({ rowCount: 0 }));
+    if (delStoreRes?.rowCount > 0) assistedRegistrationDeleted = true;
+  }
+
   const updatedMetadata = {
     ...metadata,
+    registration_id: null,
     menu_status: 'deleted',
     menu_deleted_at: new Date().toISOString(),
     menu_deletion_reason: reason
@@ -163,13 +194,15 @@ export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 
         store_id: storeId,
         menu_slug: storeSlug,
         menu_url: menuUrl,
+        registration_id: regId || null,
+        assisted_registration_deleted: assistedRegistrationDeleted,
         reason,
         deleted_at: new Date().toISOString()
       })
     ]
   ).catch(() => {});
 
-  return { ok: true, lead: updateRes.rows[0], storeDeleted: Boolean(store) };
+  return { ok: true, lead: updateRes.rows[0], storeDeleted: Boolean(store), assistedRegistrationDeleted };
 }
 
 export async function syncLeadToAssistedRegistration({ leadId, lead = null, pool = null, actor = 'outreach_sync' }) {
@@ -466,7 +499,7 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
       AND COALESCE((metadata->>'is_showcase')::boolean, false) = false
       AND COALESCE((metadata->>'do_not_delete')::boolean, false) = false
       AND COALESCE(metadata->>'menu_status', '') <> 'deleted'
-      AND (metadata->>'store_id' IS NOT NULL OR metadata->>'menu_url' IS NOT NULL)
+      AND (metadata->>'store_id' IS NOT NULL OR metadata->>'menu_url' IS NOT NULL OR metadata->>'registration_id' IS NOT NULL)
       AND stage NOT IN ('qualified', 'engaged', 'demo_requested', 'won', 'showcase')
     ORDER BY last_contact_at ASC
   `;
@@ -485,7 +518,8 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
         business_name: row.business_name,
         last_contact_at: row.last_contact_at,
         menu_url: row.metadata?.menu_url,
-        store_id: row.metadata?.store_id
+        store_id: row.metadata?.store_id,
+        registration_id: row.metadata?.registration_id
       }))
     };
   }
@@ -498,7 +532,13 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
         pool: client,
         reason: `expired_${cutoffHours}_hours_no_continuity`
       });
-      results.push({ id: candidate.id, business_name: candidate.business_name, success: true, storeDeleted: result.storeDeleted });
+      results.push({
+        id: candidate.id,
+        business_name: candidate.business_name,
+        success: true,
+        storeDeleted: result.storeDeleted,
+        assistedRegistrationDeleted: result.assistedRegistrationDeleted
+      });
     } catch (err) {
       results.push({ id: candidate.id, business_name: candidate.business_name, success: false, error: err.message });
     }
