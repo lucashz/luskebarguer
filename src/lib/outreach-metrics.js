@@ -46,6 +46,11 @@ export function buildOutreachMetrics(input = {}) {
     if (leadId) optedOut.add(leadId);
   }
 
+  const clicked = new Set([
+    ...eventLeadIds(periodEvents, ['outreach_link_clicked', 'menu_link_clicked']),
+    ...leads.filter((lead) => lead.metadata?.link_clicked && inPeriod(lead.metadata.last_link_click_at || lead.updated_at, period)).map((lead) => String(lead.id))
+  ]);
+
   const converted = new Set();
   for (const company of companies) {
     if (!inPeriod(company.created_at, period)) continue;
@@ -62,6 +67,7 @@ export function buildOutreachMetrics(input = {}) {
     discarded: discarded.size,
     previews_ready: previewsReady.size,
     contacts_sent: contacted.size,
+    link_clicks: clicked.size,
     respondents: respondents.size,
     interested: interested.size,
     opt_outs: optedOut.size,
@@ -75,6 +81,7 @@ export function buildOutreachMetrics(input = {}) {
       qualification: rate(summary.qualified, summary.found),
       preparation: rate(summary.previews_ready, summary.qualified),
       send_completion: rate(summary.contacts_sent, summary.previews_ready),
+      ctr: rate(summary.link_clicks, summary.contacts_sent),
       response: rate(summary.respondents, summary.contacts_sent),
       interest_per_contact: rate(summary.interested, summary.contacts_sent),
       interest_per_response: rate(summary.interested, summary.respondents),
@@ -273,6 +280,9 @@ function recentLeads(leads, events, messages) {
       continuity_confirmed_at: meta.continuity_confirmed_at || null,
       registration_id: meta.registration_id || null,
       menu_status: meta.menu_status || (meta.store_id || meta.menu_url ? 'active' : null),
+      link_clicked: Boolean(meta.link_clicked),
+      link_clicks: Number(meta.link_clicks || 0),
+      last_link_click_at: meta.last_link_click_at || null,
       last_contact_at: lead.last_contact_at || null,
       expires_at: expiresAt,
       hours_remaining: hoursRemaining,

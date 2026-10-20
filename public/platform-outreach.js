@@ -113,7 +113,10 @@
               let menuCell = '<span class="muted">—</span>';
               if (row.menu_url) {
                 const slug = row.menu_url.replace(/^https?:\/\/[^/]+\/?/, '/');
-                menuCell = `<a href="${escapeHtml(row.menu_url)}" target="_blank" rel="noopener noreferrer" class="outreach-menu-link" style="color:var(--primary,#0284c7);font-weight:600;text-decoration:none;">${escapeHtml(slug)} ↗</a>`;
+                const clickBadge = row.link_clicked
+                  ? `<div style="margin-top:4px;"><span class="status-pill success" style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;" title="Abriu em ${escapeHtml(row.last_link_click_at || '')}">👁️ ${row.link_clicks || 1} ${(row.link_clicks || 1) === 1 ? 'clique' : 'cliques'}</span></div>`
+                  : '';
+                menuCell = `<a href="${escapeHtml(row.menu_url)}" target="_blank" rel="noopener noreferrer" class="outreach-menu-link" style="color:var(--primary,#0284c7);font-weight:600;text-decoration:none;">${escapeHtml(slug)} ↗</a>${clickBadge}`;
               }
 
               let statusCell = '<span class="muted">—</span>';

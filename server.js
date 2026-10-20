@@ -26,6 +26,7 @@ import { filterPlatformMetricsData } from './src/lib/platform-metrics-exclusions
 import { assistedRegistrationMetrics, instagramPaidFunnel } from './src/lib/platform-ad-funnel.js';
 import { loadPlatformOutreachMetrics } from './src/lib/platform-outreach.js';
 import { cleanupExpiredOutreachMenus, confirmLeadContinuity, deleteOutreachMenuForLead } from './src/lib/outreach-menu-lifecycle.js';
+import { trackOutreachLinkClick } from './src/lib/outreach-click-tracking.js';
 import { enforceSecurityRateLimit, securityRateIdentity, securityRateRule } from './src/lib/security-rate-limit.js';
 import { invalidCredentialError, passwordHashForVerification } from './src/lib/security-auth.js';
 import { redactSensitive } from './src/lib/security-redaction.js';
@@ -169,6 +170,28 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+        if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/c\/([a-zA-Z0-9_-]+)\/?$/i.test(url.pathname)) {
+      const matchTrack = /^\/c\/([a-zA-Z0-9_-]+)\/?$/i.exec(url.pathname);
+      const target = matchTrack ? matchTrack[1] : '';
+      const tracking = await trackOutreachLinkClick({
+        leadId: target,
+        leadSlug: target,
+        userAgent: req.headers['user-agent'],
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress
+      }).catch(err => {
+        console.warn('[trackOutreachLinkClick error]', err.message);
+        return null;
+      });
+      const destUrl = tracking?.menuUrl || (tracking?.lead?.metadata?.menu_slug ? `/${tracking.lead.metadata.menu_slug}` : '/cardapio');
+      res.writeHead(302, {
+        Location: destUrl,
+        'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow'
+      });
+      res.end();
+      return;
+    }
+
     if (['GET', 'HEAD'].includes(req.method || 'GET') && /^\/p\/lemangiare\/?$/i.test(url.pathname)) {
       res.writeHead(302, {
         Location: '/cadastro?utm_source=whatsapp&utm_medium=outbound&utm_campaign=parceiros_regiao&utm_content=lemangiare',
@@ -244,6 +267,18 @@ if (IS_MAIN_MODULE && MARKETING_AUTOMATION_ENABLED) {
 
 async function handleApi(req, res, url) {
   const method = req.method || 'GET';
+
+    if (method === 'POST' && url.pathname === '/api/platform/outreach/track-click') {
+    const body = await parseJsonBody(req);
+    const tracking = await trackOutreachLinkClick({
+      leadId: body.lead_id || body.leadId,
+      leadSlug: body.slug || body.leadSlug,
+      userAgent: req.headers['user-agent'],
+      ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress
+    });
+    json(res, 200, tracking);
+    return;
+  }
 
   if (method === 'GET' && url.pathname === '/api/health') {
     json(res, 200, { ok: true });
@@ -19861,6 +19896,16 @@ async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch
     if (!store) {
       await sendFile(req, res, path.join(publicDir, '404.html'), { status: 404, headers: { 'X-Robots-Tag': 'noindex, follow' } });
       return;
+    }
+    const searchParams = new URL(req.url || '/', 'http://localhost').searchParams;
+    const lid = searchParams.get('lid') || searchParams.get('lead_id') || searchParams.get('lead');
+    if (lid || searchParams.get('ref') === 'wa') {
+      trackOutreachLinkClick({
+        leadId: lid,
+        leadSlug: storeSlug,
+        userAgent: req.headers['user-agent'],
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress
+      }).catch(err => console.warn('[trackOutreachLinkClick error]', err.message));
     }
     await sendSeoStorePage(req, res, store);
     return;
