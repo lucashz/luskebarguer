@@ -4,8 +4,8 @@ import { isOutreachWebhookHealthy } from './sales-automation.js';
 import { OUTREACH_DEMO_URL } from './outreach-message.js';
 
 const CAPTIONS = Object.freeze({
-  desktop: `Assim ficaria o cardápio de vocês no computador. Para testar o cardápio completo: ${OUTREACH_DEMO_URL}`,
-  mobile: `E esta é a visualização no celular. Para testar o cardápio completo: ${OUTREACH_DEMO_URL}`
+  desktop: 'Assim ficaria o cardápio de vocês no computador.',
+  mobile: 'E esta é a visualização rápida no celular, direto para o cliente fazer pedidos pelo WhatsApp.'
 });
 
 export async function sendOutreachSequence({ lead = {}, message = '', previews = {}, dependencies = {}, now = new Date() } = {}) {
@@ -79,8 +79,8 @@ async function sendPreview(kind, path, lead, deps, now) {
   const bytes = await deps.readFile(path);
   const menuUrl = clean(lead.metadata?.menu_url || lead.menu_url || OUTREACH_DEMO_URL);
   const caption = kind === 'desktop'
-    ? `Assim ficaria o cardápio de vocês no computador. Para ver e navegar no cardápio completo: ${menuUrl}`
-    : `E esta é a visualização rápida no celular, direto para o cliente fazer pedidos pelo WhatsApp. Cardápio completo: ${menuUrl}`;
+    ? 'Assim ficaria o cardápio de vocês no computador.'
+    : 'E esta é a visualização rápida no celular, direto para o cliente fazer pedidos pelo WhatsApp.';
   const sent = await deps.sendMedia({
     phone: lead.normalized_phone || lead.phone,
     media: Buffer.from(bytes).toString('base64'),
