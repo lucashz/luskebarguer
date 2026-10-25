@@ -74,9 +74,9 @@ export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 
   if (metadata.menu_status === 'deleted') {
     const regId = metadata.registration_id;
     if (regId) {
-      await client.query("DELETE FROM assisted_registrations WHERE id = $1 AND status NOT IN ('published', 'active', 'activated')", [regId]).catch(() => {});
+      await client.query("DELETE FROM assisted_registrations WHERE id = $1 AND status NOT IN ('published', 'activated')", [regId]).catch(() => {});
     }
-    await client.query("DELETE FROM assisted_registrations WHERE attribution->>'lead_id' = $1 AND status NOT IN ('published', 'active', 'activated')", [lead.id]).catch(() => {});
+    await client.query("DELETE FROM assisted_registrations WHERE attribution->>'lead_id' = $1 AND status NOT IN ('published', 'activated')", [lead.id]).catch(() => {});
     return { ok: true, lead, alreadyDeleted: true };
   }
 
@@ -141,21 +141,21 @@ export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 
   const regId = metadata.registration_id;
   if (regId) {
     const delRes = await client.query(
-      "DELETE FROM assisted_registrations WHERE id = $1 AND status NOT IN ('published', 'active', 'activated')",
+      "DELETE FROM assisted_registrations WHERE id = $1 AND status NOT IN ('published', 'activated')",
       [regId]
     ).catch(() => ({ rowCount: 0 }));
     if (delRes?.rowCount > 0) assistedRegistrationDeleted = true;
   }
 
   const delLeadRes = await client.query(
-    "DELETE FROM assisted_registrations WHERE attribution->>'lead_id' = $1 AND status NOT IN ('published', 'active', 'activated')",
+    "DELETE FROM assisted_registrations WHERE attribution->>'lead_id' = $1 AND status NOT IN ('published', 'activated')",
     [lead.id]
   ).catch(() => ({ rowCount: 0 }));
   if (delLeadRes?.rowCount > 0) assistedRegistrationDeleted = true;
 
   if (storeId) {
     const delStoreRes = await client.query(
-      "DELETE FROM assisted_registrations WHERE store_id = $1 AND status NOT IN ('published', 'active', 'activated')",
+      "DELETE FROM assisted_registrations WHERE store_id = $1 AND status NOT IN ('published', 'activated')",
       [storeId]
     ).catch(() => ({ rowCount: 0 }));
     if (delStoreRes?.rowCount > 0) assistedRegistrationDeleted = true;
@@ -508,6 +508,31 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
   const candidates = candidatesRes.rows;
 
   if (dryRun) {
+    const orphanedPreview = await client.query(`
+      SELECT ar.id, ar.establishment_name, ar.status, ar.created_at
+      FROM assisted_registrations ar
+      WHERE ar.status NOT IN ('published', 'activated')
+        AND (
+          (ar.store_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM stores s WHERE s.id = ar.store_id))
+          OR (ar.store_id IS NULL AND ar.created_at <= NOW() - ($1 || ' hours')::interval)
+          OR EXISTS (
+            SELECT 1 FROM sales_leads sl 
+            WHERE (sl.id = (CASE WHEN ar.attribution->>'lead_id' ~ '^[0-9a-fA-F-]{36}$' THEN (ar.attribution->>'lead_id')::uuid ELSE NULL END)
+                   OR sl.metadata->>'registration_id' = ar.id::text)
+              AND (
+                COALESCE(sl.metadata->>'menu_status', '') = 'deleted'
+                OR (
+                  sl.last_contact_at <= NOW() - ($1 || ' hours')::interval
+                  AND COALESCE((sl.metadata->>'continuity_confirmed')::boolean, false) = false
+                  AND COALESCE((sl.metadata->>'is_showcase')::boolean, false) = false
+                  AND COALESCE((sl.metadata->>'do_not_delete')::boolean, false) = false
+                  AND sl.stage NOT IN ('qualified', 'engaged', 'demo_requested', 'won', 'showcase')
+                )
+              )
+          )
+        )
+    `, [cutoffHours]).catch(() => ({ rows: [] }));
+
     return {
       ok: true,
       dryRun: true,
@@ -520,7 +545,9 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
         menu_url: row.metadata?.menu_url,
         store_id: row.metadata?.store_id,
         registration_id: row.metadata?.registration_id
-      }))
+      })),
+      orphanedAssistedCount: orphanedPreview.rows.length,
+      orphanedAssisted: orphanedPreview.rows.map((r) => ({ id: r.id, establishment_name: r.establishment_name }))
     };
   }
 
@@ -544,10 +571,39 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
     }
   }
 
+  // Sweep any orphaned or lingering assisted registrations that expired after 15h and were not confirmed
+  const sweepRes = await client.query(`
+    DELETE FROM assisted_registrations ar
+    WHERE ar.status NOT IN ('published', 'activated')
+      AND (
+        (ar.store_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM stores s WHERE s.id = ar.store_id))
+        OR (ar.store_id IS NULL AND ar.created_at <= NOW() - ($1 || ' hours')::interval)
+        OR EXISTS (
+          SELECT 1 FROM sales_leads sl 
+          WHERE (sl.id = (CASE WHEN ar.attribution->>'lead_id' ~ '^[0-9a-fA-F-]{36}$' THEN (ar.attribution->>'lead_id')::uuid ELSE NULL END)
+                 OR sl.metadata->>'registration_id' = ar.id::text)
+            AND (
+              COALESCE(sl.metadata->>'menu_status', '') = 'deleted'
+              OR (
+                sl.last_contact_at <= NOW() - ($1 || ' hours')::interval
+                AND COALESCE((sl.metadata->>'continuity_confirmed')::boolean, false) = false
+                AND COALESCE((sl.metadata->>'is_showcase')::boolean, false) = false
+                AND COALESCE((sl.metadata->>'do_not_delete')::boolean, false) = false
+                AND sl.stage NOT IN ('qualified', 'engaged', 'demo_requested', 'won', 'showcase')
+              )
+            )
+        )
+      )
+  `, [cutoffHours]).catch((err) => {
+    console.error('Error sweeping orphaned assisted registrations:', err.message);
+    return { rowCount: 0 };
+  });
+
   return {
     ok: true,
     scanned: candidates.length,
     processed: results.length,
+    orphanedAssistedDeleted: sweepRes?.rowCount || 0,
     results
   };
 }
