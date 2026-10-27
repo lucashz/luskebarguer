@@ -81,8 +81,7 @@ export function isOptOutMessage(body = '') {
 
 export function initialSalesMessage(lead = {}) {
   const business = clean(lead.business_name || lead.businessName || 'estabelecimento');
-  const city = clean(lead.city || 'região');
-  return `Oi, tudo bem? Falo com quem cuida dos pedidos da ${business}? Vi o trabalho de vocês aqui em ${city} e queria fazer uma pergunta rápida.`;
+  return `Oi, tudo bem? Falo com quem cuida dos pedidos da ${business}? Vi o trabalho de vocês e queria fazer uma pergunta rápida.`;
 }
 
 export function discoverySalesMessage() {

@@ -86,7 +86,7 @@ export const FALLBACK_SEGMENT_IMAGES = Object.freeze({
   padaria: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1200&q=85',
   pizzaria: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1200&q=85',
   hamburgueria: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1200&q=85',
-  bar: 'https://images.unsplash.com/photo-1608270197495-97e3a9c78d59?auto=format&fit=crop&w=1200&q=85',
+  bar: 'https://images.unsplash.com/photo-1518176258769-f227c798150e?auto=format&fit=crop&w=1200&q=85',
   acaiteria: 'https://images.unsplash.com/photo-1590301157890-4810ed352733?auto=format&fit=crop&w=1200&q=85',
   cafeteria: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=1200&q=85',
   marmitaria: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1200&q=85',
@@ -103,6 +103,122 @@ export const SEGMENT_COVER_URLS = Object.freeze({
   marmitaria: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1200&q=85',
   restaurante: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=85'
 });
+
+export function resolveProductIllustration(itemName, categoryName = '', segmentKey = 'restaurante') {
+  const text = `${itemName || ''} ${categoryName || ''}`.toLowerCase();
+
+  // 1. Combos e Baldes de Bebidas
+  if (text.includes('balde')) {
+    return 'https://upload.wikimedia.org/wikipedia/commons/f/f4/Bucket_of_beer_on_ice.jpg';
+  }
+  if (text.includes('gin')) {
+    return 'https://images.unsplash.com/photo-1560512823-829485b8bf24?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('combo') || text.includes('vodka') || text.includes('whisky') || text.includes('smirnoff')) {
+    return 'https://images.unsplash.com/photo-1514362545857-3bc16c4c7d1b?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  // 2. Cervejas e Chopes
+  if (text.includes('corona') || text.includes('limao') || text.includes('limão')) {
+    return 'https://images.unsplash.com/photo-1567696911980-2eed69a46042?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('heineken') || text.includes('long neck')) {
+    return 'https://images.unsplash.com/photo-1518176258769-f227c798150e?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('brahma') || text.includes('amstel') || text.includes('latao') || text.includes('latão') || text.includes('lager') || text.includes('cerveja') || text.includes('chopp')) {
+    return 'https://images.unsplash.com/photo-1535958636474-b021ee887b13?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  // 3. Petiscos, Gelo e Conveniência
+  if (text.includes('gelo')) {
+    return 'https://upload.wikimedia.org/wikipedia/commons/a/af/Ice_cubes.jpg';
+  }
+  if (text.includes('amendoim') || text.includes('castanha') || text.includes('snack')) {
+    return 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('pringles') || text.includes('chips')) {
+    return 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('batata') || text.includes('fritas')) {
+    if (text.includes('cheddar') || text.includes('bacon')) {
+      return 'https://images.unsplash.com/photo-1630384060421-cb20d0e0649d?auto=format&fit=crop&w=1200&q=85';
+    }
+    return 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('passarinho')) {
+    return 'https://images.unsplash.com/photo-1562967914-608f82629710?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  // 4. Refeições e Pratos Quentes
+  if (text.includes('parmegiana')) {
+    return 'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('marmitex') || text.includes('executivo')) {
+    return 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('bife') || text.includes('carne') || text.includes('cavalo')) {
+    return 'https://images.unsplash.com/photo-1600891964599-f61ba0e24092?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('frango grelhado') || text.includes('legumes')) {
+    return 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('feijoada')) {
+    return 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('peixe') || text.includes('tilapia') || text.includes('tilápia') || text.includes('frito') || text.includes('salmao') || text.includes('salmão') || text.includes('camarao') || text.includes('camarão')) {
+    return 'https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  // 5. Hambúrgueres e Lanches
+  if (text.includes('burger') || text.includes('hamburguer') || text.includes('x-')) {
+    if (text.includes('bacon')) {
+      return 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=1200&q=85';
+    }
+    return 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  // 6. Bebidas Não-Alcoólicas
+  if (text.includes('coca') || text.includes('refrigerante') || text.includes('guarana') || text.includes('guaraná')) {
+    if (text.includes('lata')) {
+      return 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=1200&q=85';
+    }
+    return 'https://images.unsplash.com/photo-1554866585-cd94860890b7?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('suco')) {
+    if (text.includes('laranja')) {
+      return 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=1200&q=85';
+    }
+    return 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('agua') || text.includes('água')) {
+    return 'https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  // 7. Sobremesas e Confeitaria
+  if (text.includes('pudim')) {
+    return 'https://images.unsplash.com/photo-1528975604071-b4dc52a2d18c?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('mousse') || text.includes('sobremesa')) {
+    return 'https://images.unsplash.com/photo-1587314168485-3236d6710814?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('cuca') || text.includes('torta') || text.includes('bolo')) {
+    return 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('pao') || text.includes('pão')) {
+    return 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('pizza')) {
+    return 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('acai') || text.includes('açaí')) {
+    return 'https://images.unsplash.com/photo-1590301157890-4810ed352733?auto=format&fit=crop&w=1200&q=85';
+  }
+  if (text.includes('cafe') || text.includes('café') || text.includes('cappuccino')) {
+    return 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=1200&q=85';
+  }
+
+  return FALLBACK_SEGMENT_IMAGES[segmentKey] || FALLBACK_SEGMENT_IMAGES.restaurante;
+}
 
 export function generateStoreSlug(businessName) {
   const cleanName = String(businessName || '')
@@ -142,7 +258,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           items: [
             { name: 'Cuca Alemã Tradicional de Ricota', description: 'Massa fofa coberta com ricota cremosa e farofa crocante amanteigada.', price: 26.0, tags: ['Especialidade'], image_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Cuca Colonial de Uva e Morango', description: 'Com frutas selecionadas da estação e farofinha açucarada.', price: 28.0, tags: ['Mais Pedida'], image_url: 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?auto=format&fit=crop&w=1200&q=85' },
-            { name: 'Fatia de Torta Holandesa Cremosa', description: 'Base crocante com creme holandês leve e cobertura de ganache nobre.', price: 14.0, tags: ['Sobremesa'], image_url: 'https://images.unsplash.com/photo-1535141192574-5d4897c13136?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Fatia de Torta Holandesa Cremosa', description: 'Base crocante com creme holandês leve e cobertura de ganache nobre.', price: 14.0, tags: ['Sobremesa'], image_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Bolo Caseiro de Cenoura com Chocolate', description: 'Bolo fofinho com cobertura generosa de brigadeiro artesanal.', price: 18.0, tags: ['Café da Tarde'], image_url: 'https://images.unsplash.com/photo-1606890737304-57a1ca8a5b62?auto=format&fit=crop&w=1200&q=85' }
           ]
         },
@@ -208,7 +324,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           items: [
             { name: 'Coca-Cola Original 2L Gelada', description: 'Garrafa 2L.', price: 13.0, tags: ['2 Litros'], image_url: 'https://images.unsplash.com/photo-1554866585-cd94860890b7?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Guaraná Antarctica 2L Gelado', description: 'Garrafa 2L.', price: 12.0, tags: ['2 Litros'], image_url: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=1200&q=85' },
-            { name: 'Cerveja Heineken Long Neck 330ml', description: 'Puro malte gelada.', price: 10.0, tags: ['Cerveja'], image_url: 'https://images.unsplash.com/photo-1608270197495-97e3a9c78d59?auto=format&fit=crop&w=1200&q=85' }
+            { name: 'Cerveja Heineken Long Neck 330ml', description: 'Puro malte gelada.', price: 10.0, tags: ['Cerveja'], image_url: 'https://images.unsplash.com/photo-1518176258769-f227c798150e?auto=format&fit=crop&w=1200&q=85' }
           ]
         }
       ]
@@ -234,7 +350,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           name: 'Porções e Acompanhamentos',
           description: 'Para compartilhar.',
           items: [
-            { name: 'Batata Rústica com Cheddar e Crispy de Bacon (450g)', description: 'Batatas com corte especial, páprica, molho cheddar cremoso e bacon.', price: 28.0, tags: ['Porção'], image_url: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Batata Rústica com Cheddar e Crispy de Bacon (450g)', description: 'Batatas com corte especial, páprica, molho cheddar cremoso e bacon.', price: 28.0, tags: ['Porção'], image_url: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Anéis de Cebola Empanados Crocantes (12 un)', description: 'Acompanha maionese verde de ervas da casa.', price: 22.0, tags: ['Petisco'], image_url: 'https://images.unsplash.com/photo-1639024471283-03518883512d?auto=format&fit=crop&w=1200&q=85' }
           ]
         },
@@ -260,10 +376,10 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           name: 'Cervejas Trincando de Geladas',
           description: 'Prontas para consumo ou entrega rápida no capricho.',
           items: [
-            { name: 'Heineken Long Neck 330ml', description: 'Cerveja puro malte gelada.', price: 10.0, tags: ['Mais Vendida', 'Gelada'], image_url: 'https://images.unsplash.com/photo-1608270197495-97e3a9c78d59?auto=format&fit=crop&w=1200&q=85' },
-            { name: 'Corona Extra 330ml com Limão', description: 'Acompanha rodela fresca de limão.', price: 11.0, tags: ['Importada'], image_url: 'https://images.unsplash.com/photo-1608270197495-97e3a9c78d59?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Heineken Long Neck 330ml', description: 'Cerveja puro malte gelada.', price: 10.0, tags: ['Mais Vendida', 'Gelada'], image_url: 'https://images.unsplash.com/photo-1518176258769-f227c798150e?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Corona Extra 330ml com Limão', description: 'Acompanha rodela fresca de limão.', price: 11.0, tags: ['Importada'], image_url: 'https://images.unsplash.com/photo-1567696911980-2eed69a46042?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Brahma Duplo Malte Latão 473ml', description: 'Duplo malte cremosa e encorpada.', price: 7.5, tags: ['Latão'], image_url: 'https://images.unsplash.com/photo-1535958636474-b021ee887b13?auto=format&fit=crop&w=1200&q=85' },
-            { name: 'Amstel Lager Latão 473ml', description: 'Puro malte europeia gelada.', price: 7.0, tags: ['Latão'], image_url: 'https://images.unsplash.com/photo-1535958636474-b021ee887b13?auto=format&fit=crop&w=1200&q=85' }
+            { name: 'Amstel Lager Latão 473ml', description: 'Puro malte europeia gelada.', price: 7.0, tags: ['Latão'], image_url: 'https://images.unsplash.com/photo-1575037614876-c38a4d44f5b8?auto=format&fit=crop&w=1200&q=85' }
           ]
         },
         {
@@ -279,7 +395,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           name: 'Petiscos e Conveniência',
           description: 'Gelo filtrado, aperitivos e artigos de conveniência.',
           items: [
-            { name: 'Saco de Gelo Filtrado em Cubos 5kg', description: 'Gelo cristalino de alta qualidade.', price: 15.0, tags: ['Gelo'], image_url: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Saco de Gelo Filtrado em Cubos 5kg', description: 'Gelo cristalino de alta qualidade.', price: 15.0, tags: ['Gelo'], image_url: 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Amendoim Salgado Crocante 150g', description: 'Aperitivo perfeito para cerveja.', price: 8.0, tags: ['Snack'], image_url: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Batata Pringles Original 114g', description: 'Batata crocante importada.', price: 16.0, tags: ['Importado'], image_url: 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?auto=format&fit=crop&w=1200&q=85' }
           ]
@@ -316,7 +432,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           description: 'Refrescâncias naturais preparadas na hora.',
           items: [
             { name: 'Smoothie Cremoso de Açaí com Banana 500ml', description: 'Açaí batido com banana fresca e água de coco.', price: 16.0, tags: ['Smoothie'], image_url: 'https://images.unsplash.com/photo-1590301157890-4810ed352733?auto=format&fit=crop&w=1200&q=85' },
-            { name: 'Água Mineral sem Gás 500ml', description: 'Garrafa 500ml gelada.', price: 4.0, tags: ['Água'], image_url: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=1200&q=85' }
+            { name: 'Água Mineral sem Gás 500ml', description: 'Garrafa 500ml gelada.', price: 4.0, tags: ['Água'], image_url: 'https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&w=1200&q=85' }
           ]
         }
       ]
@@ -350,7 +466,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           name: 'Doces e Confeitaria',
           description: 'Tortas finas e sobremesas da vitrine.',
           items: [
-            { name: 'Fatia de Torta Holandesa Cremosa', description: 'Base amanteigada com creme especial e cobertura de chocolate.', price: 14.5, tags: ['Sobremesa'], image_url: 'https://images.unsplash.com/photo-1535141192574-5d4897c13136?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Fatia de Torta Holandesa Cremosa', description: 'Base amanteigada com creme especial e cobertura de chocolate.', price: 14.5, tags: ['Sobremesa'], image_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Bolo Caseiro de Cenoura com Chocolate', description: 'Bolo fofinho coberto com brigadeiro cremoso.', price: 12.0, tags: ['Doce'], image_url: 'https://images.unsplash.com/photo-1606890737304-57a1ca8a5b62?auto=format&fit=crop&w=1200&q=85' }
           ]
         }
@@ -378,7 +494,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           name: 'Guarnições e Porções Extras',
           description: 'Para acompanhar seu prato.',
           items: [
-            { name: 'Porção Extra de Fritas Crocantes (300g)', description: 'Batata frita douradinha e sequinha.', price: 14.0, tags: ['Porção'], image_url: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?auto=format&fit=crop&w=1200&q=85' },
+            { name: 'Porção Extra de Fritas Crocantes (300g)', description: 'Batata frita douradinha e sequinha.', price: 14.0, tags: ['Porção'], image_url: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=1200&q=85' },
             { name: 'Farofa Especial da Casa (200g)', description: 'Farofa crocante com bacon e temperos.', price: 8.0, tags: ['Acompanhamento'], image_url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1200&q=85' }
           ]
         },
@@ -418,7 +534,7 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
         items: [
           { name: 'X-Especial da Casa Completo', description: 'Pão brioche tostado, hambúrguer artesanal 180g, cheddar duplo, bacon crocante, ovo e maionese defumada.', price: 29.9, tags: ['Especial'], image_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1200&q=85' },
           { name: 'X-Bacon Supremo com Queijo Derretido', description: 'Burger 160g, fatias generosas de bacon crocante, queijo muçarela, cebola dourada e barbecue.', price: 27.5, tags: ['Burger'], image_url: 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=1200&q=85' },
-          { name: 'Batata Frita com Cheddar e Bacon (500g)', description: 'Batata frita rústica crocante, coberta com cheddar cremoso e cubos de bacon.', price: 28.0, tags: ['Porção'], image_url: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?auto=format&fit=crop&w=1200&q=85' },
+          { name: 'Batata Frita com Cheddar e Bacon (500g)', description: 'Batata frita rústica crocante, coberta com cheddar cremoso e cubos de bacon.', price: 28.0, tags: ['Porção'], image_url: 'https://images.unsplash.com/photo-1630384060421-cb20d0e0649d?auto=format&fit=crop&w=1200&q=85' },
           { name: 'Frango a Passarinho Crocante (700g)', description: 'Pedaços de frango crocante temperados no alho dourado e salsinha fresca.', price: 38.0, tags: ['Petisco'], image_url: 'https://images.unsplash.com/photo-1562967914-608f82629710?auto=format&fit=crop&w=1200&q=85' }
         ]
       },
@@ -430,8 +546,8 @@ export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
           { name: 'Coca-Cola Lata 350ml Gelada', description: 'Lata 350ml gelada.', price: 6.0, tags: ['Lata'], image_url: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=1200&q=85' },
           { name: 'Suco Natural de Laranja 500ml', description: '100% natural, espremido na hora.', price: 9.0, tags: ['Suco Natural'], image_url: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=1200&q=85' },
           { name: 'Suco Natural de Maracujá 500ml', description: 'Polpa fresca batida gelada.', price: 9.5, tags: ['Refrescante'], image_url: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=1200&q=85' },
-          { name: 'Cerveja Heineken Long Neck 330ml', description: 'Cerveja puro malte gelada.', price: 10.0, tags: ['Cerveja'], image_url: 'https://images.unsplash.com/photo-1608270197495-97e3a9c78d59?auto=format&fit=crop&w=1200&q=85' },
-          { name: 'Água Mineral sem Gás 500ml', description: 'Garrafa 500ml gelada.', price: 4.0, tags: ['Água'], image_url: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=1200&q=85' }
+          { name: 'Cerveja Heineken Long Neck 330ml', description: 'Cerveja puro malte gelada.', price: 10.0, tags: ['Cerveja'], image_url: 'https://images.unsplash.com/photo-1518176258769-f227c798150e?auto=format&fit=crop&w=1200&q=85' },
+          { name: 'Água Mineral sem Gás 500ml', description: 'Garrafa 500ml gelada.', price: 4.0, tags: ['Água'], image_url: 'https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&w=1200&q=85' }
         ]
       },
       {
@@ -557,7 +673,10 @@ export async function provisionOutreachStore({ lead = {}, pool, baseUrl = 'https
       const categoryId = catRes.rows[0].id;
 
       for (const [itemIdx, item] of cat.items.entries()) {
-        const itemImage = item.image_url || FALLBACK_SEGMENT_IMAGES[menuData.segmentKey] || FALLBACK_SEGMENT_IMAGES.restaurante;
+        const itemImage = item.image_url || resolveProductIllustration(item.name, cat.name, menuData.segmentKey);
+        if (!itemImage) {
+          throw new Error(`REGRA VIOLADA: Item "${item.name}" não pode ser inserido sem imagem de alta resolução.`);
+        }
         await client.query(
           `INSERT INTO menu_items (
             store_id, category_id, name, description, price, image_url, tags,

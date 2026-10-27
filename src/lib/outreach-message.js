@@ -6,14 +6,14 @@ export function buildOutreachMessage(lead = {}) {
   const business = clean(lead.business_name || lead.businessName || lead.name || 'estabelecimento');
   const city = clean(lead.city || 'sua cidade');
   const segment = clean(lead.segment || 'estabelecimento').toLocaleLowerCase('pt-BR');
+  const article = ['restaurante', 'bar', 'estabelecimento', 'pub', 'boteco', 'quiosque'].includes(segment) ? 'o' : 'a';
   const rawMenuUrl = clean(lead.metadata?.menu_url || lead.menu_url || OUTREACH_DEMO_URL);
   const menuUrl = lead.id ? buildTrackedMenuUrl({ menuUrl: rawMenuUrl, leadId: lead.id }) : rawMenuUrl;
   return [
     `Olá, pessoal da ${business}! Aqui é o Lucas, da TáPronto.`,
-    `Vi a ${segment} de vocês em ${city} e não encontrei um cardápio online para os clientes consultarem. Por isso, preparei uma demonstração personalizada, com opções compatíveis com o que vocês vendem, para mostrar como o cardápio da loja poderia ficar:`,
+    `Vi ${article} ${segment} de vocês em ${city} e montei uma demonstração prática no celular e no computador, com opções no estilo do que vocês vendem:`,
     `👉 ${menuUrl}`,
-    'Se tiverem interesse, nossa equipe monta o cardápio completo e vocês podem fazer um teste gratuitamente.',
-    'Se tiverem alguma dúvida, estou à disposição.'
+    'Abre na hora, sem o cliente precisar baixar PDF ou dar zoom. O que acharam?'
   ].join('\n\n');
 }
 

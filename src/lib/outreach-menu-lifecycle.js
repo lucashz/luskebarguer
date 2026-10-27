@@ -486,9 +486,9 @@ export async function confirmLeadContinuity({ leadId, pool = null, actor = 'admi
   return { ok: true, lead: syncResult.lead, registrationId: syncResult.registrationId };
 }
 
-export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false, hours = 15, days = null }) {
+export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false, hours = 72, days = null }) {
   const client = await resolvePool(pool);
-  const cutoffHours = (days !== null && days !== undefined) ? Math.max(1, Number(days) * 24) : Math.max(1, Number(hours) || 15);
+  const cutoffHours = (days !== null && days !== undefined) ? Math.max(1, Number(days) * 24) : Math.max(1, Number(hours) || 72);
 
   const query = `
     SELECT id, business_name, phone, stage, last_contact_at, metadata
@@ -571,7 +571,7 @@ export async function cleanupExpiredOutreachMenus({ pool = null, dryRun = false,
     }
   }
 
-  // Sweep any orphaned or lingering assisted registrations that expired after 15h and were not confirmed
+  // Sweep any orphaned or lingering assisted registrations that expired after 72h and were not confirmed
   const sweepRes = await client.query(`
     DELETE FROM assisted_registrations ar
     WHERE ar.status NOT IN ('published', 'activated')

@@ -74,7 +74,7 @@ export async function probeEvolutionV2WebhookReceiver({ url } = {}, config = evo
 
 export async function sendEvolutionV2SalesText({ phone, text }, config = evolutionV2SalesConfig(), fetchImpl = fetch) {
   const number = normalizePhone(phone);
-  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  const body = String(text || '').replace(/[^\S\r\n]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   if (!/^55\d{10,11}$/.test(number)) throw new Error('Informe um telefone brasileiro válido para o envio.');
   if (!body) throw new Error('Informe o texto da mensagem.');
   const data = await evolutionV2Request(`/message/sendText/${encodeURIComponent(config.instance)}`, {
@@ -103,6 +103,42 @@ export async function sendEvolutionV2SalesMedia({ phone, mediaUrl, mediaBase64, 
   const id = String(data?.key?.id || data?.message?.key?.id || data?.id || '').trim();
   if (!id) throw new Error('Evolution API v2 não retornou o identificador da mensagem.');
   return { id, raw: data };
+}
+
+export async function checkEvolutionV2WhatsappNumber({ phone }, config = evolutionV2SalesConfig(), fetchImpl = fetch) {
+  const number = normalizePhone(phone);
+  if (!/^55\d{10,11}$/.test(number)) {
+    return { exists: false, jid: null, number };
+  }
+  try {
+    const data = await evolutionV2Request(`/chat/whatsappNumbers/${encodeURIComponent(config.instance)}`, {
+      method: 'POST',
+      body: JSON.stringify({ numbers: [number] })
+    }, config, fetchImpl);
+    const row = Array.isArray(data) ? data[0] : (data?.numbers?.[0] || data);
+    const exists = Boolean(row?.exists ?? row?.isBusiness ?? row?.jid);
+    const jid = row?.jid ? String(row.jid) : (exists ? `${number}@s.whatsapp.net` : null);
+    return { exists, jid, number, name: row?.name || null };
+  } catch (error) {
+    return { exists: false, jid: null, number, error: error.message };
+  }
+}
+
+export async function sendEvolutionV2Presence({ phone, presence = 'composing', delayMs = 4000 }, config = evolutionV2SalesConfig(), fetchImpl = fetch) {
+  const number = normalizePhone(phone);
+  if (!/^55\d{10,11}$/.test(number)) return { ok: false };
+  const safeDelay = Math.max(1000, Math.min(15000, Number(delayMs) || 4000));
+  try {
+    await evolutionV2Request(`/chat/sendPresence/${encodeURIComponent(config.instance)}`, {
+      method: 'POST',
+      body: JSON.stringify({ number, presence: presence || 'composing', delay: safeDelay })
+    }, config, fetchImpl);
+  } catch {
+    // Falhas no endpoint de presença não devem interromper o fluxo da mensagem
+  }
+  // Aguarda o delay localmente para simular o tempo de digitação natural antes do envio do texto
+  await new Promise((resolve) => setTimeout(resolve, safeDelay));
+  return { ok: true, presence, delayMs: safeDelay };
 }
 
 export async function setEvolutionV2SalesWebhook({ url, secret }, config = evolutionV2SalesConfig(), fetchImpl = fetch) {

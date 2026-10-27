@@ -11782,6 +11782,12 @@ async function receiveSalesEvolutionMessage(integration, payload = {}) {
   if (isAutomatedOutreachLead(lead)) {
     await createOutreachEvent(lead, 'inbound_received', { message_id: message.id, provider_message_id: inbound.providerMessageId || null });
   }
+  if (['contacted', 'awaiting_reply', 'first_message_sent', 'scheduled'].includes(lead.stage)) {
+    await dbRequest('PATCH', 'sales_leads', { id: `eq.${lead.id}` }, {
+      stage: 'engaged',
+      updated_at: new Date().toISOString()
+    }, ['Prefer: return=minimal']);
+  }
   if (inbound.body && inbound.messageType === 'text' && isOptOutMessage(inbound.body)) {
     await optOutSalesLead(lead.id, 'Solicitação recebida pelo WhatsApp.');
     await dbRequest('PATCH', 'sales_messages', { id: `eq.${message.id}` }, { intent: 'opt_out', confidence: 1 });
