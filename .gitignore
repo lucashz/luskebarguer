@@ -33,3 +33,13 @@ logs/
 temp_*
 google-result.html
 
+
+# Exclude binaries and large downloads
+tools/*.exe
+tools/*.pdf
+tools/*.png
+tools/scraper-src/
+tools/google-maps-scraper-kit/
+
+tools/
+
