@@ -7,6 +7,7 @@ import {
   sendEvolutionV2Presence
 } from '../src/lib/evolution-v2-sales.js';
 import { processAllInboundTrojan } from './handle-inbound-trojan.mjs';
+import { buildHarveyStep1 } from '../src/lib/harvey-outbound-engine.js';
 
 try { process.loadEnvFile?.('.env'); } catch {}
 
@@ -24,20 +25,10 @@ async function sleep(ms) {
 }
 
 // --------------------------------------------------------------------------
-// MENSAGEM PASSO 1: SPINTAX ANTI-BAN UNIVERSAL & TEMPORALMENTE INDEPENDENTE
+// MENSAGEM PASSO 1: PADRÃO HARVEY ANTI-AI (CURIOSIDADE & PERMISSÃO)
 // --------------------------------------------------------------------------
 export function buildInquiryMessage(lead) {
-  const hour = new Date().getHours();
-  const saudacao = hour >= 18 ? 'Boa noite' : (hour >= 12 ? 'Boa tarde' : 'Bom dia');
-
-  const copies = [
-    `${saudacao}, tudo bem? Vocês trabalham com delivery pelo WhatsApp? O cardápio com os valores fica por aqui mesmo ou vocês têm link?`,
-    `${saudacao}! Como faço pra ver o cardápio atualizado de vocês com os preços? Vocês mandam por aqui ou têm link de pedidos?`,
-    `${saudacao}, tudo certo? Vocês atendem pedidos de entrega por esse número? Tem o cardápio com os valores pra eu dar uma olhada?`,
-    `Olá, ${saudacao.toLowerCase()}! Queria tirar uma dúvida rápida: vocês aceitam pedidos de delivery pelo WhatsApp? Tem o cardápio com os valores por aqui ou vocês usam link?`,
-    `${saudacao}! Vi o perfil de vocês e queria ver as opções e valores de entrega. O cardápio é por aqui mesmo ou vocês têm link próprio?`
-  ];
-  return copies[Math.floor(Math.random() * copies.length)];
+  return buildHarveyStep1(lead);
 }
 
 // --------------------------------------------------------------------------
