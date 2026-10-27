@@ -18,6 +18,25 @@ async function sleep(ms) {
 // --------------------------------------------------------------------------
 // MENSAGEM 1: INQUIRY NATURAL COM SPINTAX ANTI-BAN (Zero Links, 100% Humano)
 // --------------------------------------------------------------------------
+function assertValidStep1Message(text) {
+  const forbiddenPatterns = [
+    /https?:\/\//i,
+    /tapronto/i,
+    /card[aá]pio digital/i,
+    /demonstra[çc][ãa]o/i,
+    /comiss[ãa]o/i,
+    /importa[çc][ãa]o autom[aá]tica/i,
+    /sistema/i,
+    /plataforma/i
+  ];
+
+  for (const pattern of forbiddenPatterns) {
+    if (pattern.test(text)) {
+      throw new Error(`[CRÍTICO: VIOLAÇÃO DA REGRA DE OUTREACH] Tentativa de enviar pitch/link no Passo 1! Padrão proibido detectado: ${pattern}. Mensagem barrada: "${text}"`);
+    }
+  }
+}
+
 function buildInquiryMessage(lead) {
   const segment = lead.segment || 'restaurante';
   const hour = new Date().getHours();
@@ -59,43 +78,64 @@ function buildInquiryMessage(lead) {
 }
 
 async function main() {
+  const args = process.argv.slice(2);
+  const isDryRun = args.includes('--dry-run');
+  const turnArg = args.find(a => a.startsWith('--turn='))?.split('=')[1];
+  const limitArg = args.find(a => a.startsWith('--limit='))?.split('=')[1];
+  
+  const currentHour = new Date().getHours();
+  const targetTurn = turnArg || (currentHour < 15 ? 'manha' : 'noite');
+  const limit = limitArg ? parseInt(limitArg, 10) : 20;
+
   console.log('================================================================');
-  console.log('  METODOLOGIA INQUIRY PERMISSIVO EM 3 PASSOS (FASE 1: DISPATCH) ');
+  console.log(`  METODOLOGIA INQUIRY PERMISSIVO EM 3 PASSOS (TURNO: ${targetTurn.toUpperCase()}) `);
+  console.log(`  Modo: ${isDryRun ? 'SIMULAÇÃO (DRY-RUN)' : 'PRODUÇÃO (DISPARO REAL)'}`);
   console.log('================================================================\n');
 
   const evoConfig = evolutionV2SalesConfig();
-  const conn = await getEvolutionV2ConnectionState(evoConfig);
-  if (!conn.connected) {
-    throw new Error(`WhatsApp não está conectado na instância "${evoConfig.instance}". Estado: ${conn.state}`);
+  if (!isDryRun) {
+    const conn = await getEvolutionV2ConnectionState(evoConfig);
+    if (!conn.connected) {
+      throw new Error(`WhatsApp não está conectado na instância "${evoConfig.instance}". Estado: ${conn.state}`);
+    }
+    console.log(`✅ WhatsApp conectado na instância "${evoConfig.instance}".\n`);
   }
-  console.log(`✅ WhatsApp conectado na instância "${evoConfig.instance}".\n`);
 
-  // Selecionar 5 leads noturnos de alta relevância (Botucatu e Bauru)
+  // Selecionar leads preparados para o turno correspondente
   const leadsRes = await pool.query(`
     SELECT id, business_name, city, state, segment, phone, normalized_phone, metadata
     FROM sales_leads
-    WHERE last_contact_at IS NULL
+    WHERE metadata->>'outreach_strategy' = 'ready_for_trojan_step1'
+      AND (metadata->>'target_turn' = $1 OR $1 = 'all')
+      AND last_contact_at IS NULL
       AND attempt_count = 0
-      AND stage IN ('discovered', 'verified')
-      AND segment IN ('hamburgueria', 'pizzaria', 'lanchonete', 'bar', 'petiscaria')
-      AND city IN ('Botucatu', 'Bauru')
-      AND phone IS NOT NULL
-    ORDER BY 
-      CASE WHEN city = 'Botucatu' THEN 1 ELSE 2 END,
-      COALESCE((metadata->>'reviews_count')::int, 0) DESC
-    LIMIT 5
-  `);
+    ORDER BY business_name ASC
+    LIMIT $2
+  `, [targetTurn, limit]);
 
   const leads = leadsRes.rows;
-  console.log(`Carregados ${leads.length} alvos para início do teste da Nova Metodologia:\n`);
+  console.log(`Carregados ${leads.length} alvos para o turno "${targetTurn}":\n`);
+
+  if (leads.length === 0) {
+    console.log('Nenhum lead pendente encontrado para este turno.');
+    return;
+  }
 
   for (let i = 0; i < leads.length; i++) {
     const lead = leads[i];
     const phone = lead.normalized_phone || lead.phone;
     const msg = buildInquiryMessage(lead);
 
+    // TRAVA PROGRAMÁTICA OBRIGATÓRIA (Zero links/pitch no Passo 1)
+    assertValidStep1Message(msg);
+
     console.log(`[${i + 1}/${leads.length}] Abordando: ${lead.business_name} (${phone}) - ${lead.city} [${lead.segment}]`);
-    console.log(`    Mensagem enviada: "${msg}"`);
+    console.log(`    Mensagem: "${msg}"`);
+
+    if (isDryRun) {
+      console.log(`    [DRY-RUN] Mensagem validada com sucesso, envio ignorado.\n`);
+      continue;
+    }
 
     try {
       // 1. Criar ou buscar conversa
@@ -147,15 +187,15 @@ async function main() {
       console.error(`    ❌ Erro ao enviar para ${lead.business_name}:`, err.message);
     }
 
-    // Intervalo de segurança anti-ban entre disparos (12 a 20 segundos)
+    // Intervalo de segurança anti-ban entre disparos (14 a 22 segundos)
     if (i < leads.length - 1) {
-      const wait = 12000 + Math.floor(Math.random() * 8000);
+      const wait = 14000 + Math.floor(Math.random() * 8000);
       console.log(`    ⏳ Aguardando ${(wait / 1000).toFixed(1)}s antes do próximo...\n`);
       await sleep(wait);
     }
   }
 
-  console.log('🏁 Disparo da Fase 1 concluído com sucesso!');
+  console.log('🏁 Disparo do turno concluído com sucesso!');
 }
 
 main()
