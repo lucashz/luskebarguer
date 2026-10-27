@@ -30,9 +30,6 @@ async function main() {
   console.log("   INGESTÃO DE LEADS EM NICHOS VARIADOS (NÃO MARMITARIA)       ");
   console.log("================================================================\n");
 
-  const fileStream = fs.createReadStream('d:/lsk/TáProntomenu.com.br/.worktrees/release-production-outreach-20261014/tools/batch_results.json');
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
   // Leads já contatados em qualquer momento
   const contactedRes = await pool.query("SELECT DISTINCT phone FROM sales_leads WHERE last_contact_at IS NOT NULL OR attempt_count > 0");
   const contactedPhones = new Set(contactedRes.rows.map(r => r.phone));
@@ -40,6 +37,11 @@ async function main() {
   // Leads existentes no banco
   const existingRes = await pool.query("SELECT phone FROM sales_leads");
   const existingPhones = new Set(existingRes.rows.map(r => r.phone));
+
+  console.log(`[INIT] ${contactedPhones.size} contatados anteriormente, ${existingPhones.size} existentes no banco.`);
+
+  const fileStream = fs.createReadStream('d:/lsk/TáProntomenu.com.br/.worktrees/release-production-outreach-20261014/tools/batch_results.json');
+  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
   let insertedCount = 0;
   const insertedBySegment = {};
@@ -152,7 +154,7 @@ async function main() {
 
       if (insertedCount >= 30) break; // meta de 25-30 leads frescos
     } catch (e) {
-      // Ignorar erros de linha
+      console.error('Error on line:', e.message);
     }
   }
 
