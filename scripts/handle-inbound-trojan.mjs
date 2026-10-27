@@ -6,6 +6,7 @@ import {
   sendEvolutionV2Presence
 } from '../src/lib/evolution-v2-sales.js';
 import { buildTrackedMenuUrl } from '../src/lib/outreach-click-tracking.js';
+import { buildHarveyStep2 } from '../src/lib/harvey-outbound-engine.js';
 import { readFile } from 'node:fs/promises';
 
 try { process.loadEnvFile?.('.env'); } catch {}
@@ -478,11 +479,11 @@ async function handleStep2Replies(evoConfig) {
       const hasRealScrapedMenu = Boolean(meta.has_real_menu || meta.scraped_menu || (Array.isArray(meta.scraped_items) && meta.scraped_items.length > 0));
       const featuredItem = meta.featured_item || 'principais produtos';
 
-      const itemMention = (hasRealScrapedMenu && meta.featured_item)
-        ? `(inclusive o ${meta.featured_item})`
-        : 'do segmento de vocês';
-
-      const deliveryMsg = `Aqui está o cardápio interativo de vocês:\n👉 ${trackedUrl}\n\nRepara que já cadastramos os produtos ${itemMention} com fotos de alta qualidade.\n\nClica no link e simula um pedido de teste pra você ver como é rápido pro seu cliente e como o pedido chega redondo no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha, sem taxa do iFood.\n\nSe quiser, deixo liberado pra vocês testarem hoje no delivery sem custo nenhum. O que achou?`;
+      const deliveryMsg = buildHarveyStep2({
+        id: row.lead_id,
+        business_name: meta.business_name || row.lead_name || 'loja',
+        metadata: meta
+      }, (hasRealScrapedMenu && meta.featured_item) ? meta.featured_item : null);
 
       // Humanização: Simulação de "Digitando..." proporcional ao tamanho do texto (5 a 8s)
       const deliveryDelay = Math.min(8000, Math.max(4500, Math.floor(deliveryMsg.length * 15)));
