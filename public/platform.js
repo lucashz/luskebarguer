@@ -151,6 +151,8 @@ const els = {
   platformAccessMetrics: document.querySelector('#platformAccessMetrics'),
   platformMarketingFunnel: document.querySelector('#platformMarketingFunnel'),
   platformOutreachMetrics: document.querySelector('#platformOutreachMetrics'),
+  platformOutreachWorkspaceMetrics: document.querySelector('#platformOutreachWorkspaceMetrics'),
+  refreshOutreachButton: document.querySelector('#refreshOutreachButton'),
   platformBillingMetrics: document.querySelector('#platformBillingMetrics'),
   platformCommercialAlerts: document.querySelector('#platformCommercialAlerts'),
   platformOperationalOverviewAlerts: document.querySelector('#platformOperationalOverviewAlerts'),
@@ -437,6 +439,7 @@ els.platformBillingConfigForm?.addEventListener('submit', submitBillingConfig);
 els.testBillingConfigButton?.addEventListener('click', testBillingConfig);
 els.testBillingConfigButtonHealth?.addEventListener('click', testBillingConfig);
 els.openCommunicationFromHealth?.addEventListener('click', () => activatePlatformView('communication', { load: true }));
+els.refreshOutreachButton?.addEventListener('click', () => loadCommercialAnalytics({ force: true }));
 els.clientFilterForm?.addEventListener('input', renderCompanies);
 els.clientFilterForm?.addEventListener('change', renderCompanies);
 els.operationalLogTypeFilter?.addEventListener('change', loadHealth);
@@ -688,7 +691,7 @@ async function loadMoreCompanies() {
 
 async function ensurePlatformViewData(view, options = {}) {
   const force = options.force === true;
-  if (['overview', 'commercial'].includes(view) && (force || !state.commercialLoaded)) {
+  if (['overview', 'commercial', 'outreach'].includes(view) && (force || !state.commercialLoaded)) {
     await loadCommercialAnalytics({ silent: true, renderBefore: true, renderAfter: true });
   } else if (view === 'health' && (force || !state.healthLoaded)) {
     await loadHealth({ silent: true });
@@ -2320,16 +2323,20 @@ function renderMarketingFunnel() {
 }
 
 function renderOutreachMetrics() {
-  if (!els.platformOutreachMetrics) return;
   const renderer = globalThis.OutreachDashboard?.renderOutreachMetricsHtml;
-  if (typeof renderer !== 'function') {
-    els.platformOutreachMetrics.innerHTML = '<p class="empty-state">Não foi possível carregar a visualização da prospecção.</p>';
-    return;
+  const content = typeof renderer === 'function'
+    ? renderer(state.analytics?.outreach, {
+        loading: state.commercialLoading && !state.commercialLoaded,
+        error: state.commercialError && !state.commercialLoaded ? state.commercialError : ''
+      })
+    : '<p class="empty-state">Não foi possível carregar a visualização da prospecção.</p>';
+
+  if (els.platformOutreachMetrics) {
+    els.platformOutreachMetrics.innerHTML = content;
   }
-  els.platformOutreachMetrics.innerHTML = renderer(state.analytics?.outreach, {
-    loading: state.commercialLoading && !state.commercialLoaded,
-    error: state.commercialError && !state.commercialLoaded ? state.commercialError : ''
-  });
+  if (els.platformOutreachWorkspaceMetrics) {
+    els.platformOutreachWorkspaceMetrics.innerHTML = content;
+  }
 }
 
 async function handleOutreachContinuity(button) {

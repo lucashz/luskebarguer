@@ -90,7 +90,7 @@
   }
 
   function recentTable(rows) {
-    const items = Array.isArray(rows) ? rows.slice(0, 20) : [];
+    const items = Array.isArray(rows) ? rows.slice(0, 50) : [];
     if (!items.length) return '';
     return `
       <section class="outreach-panel outreach-table-wrap">
@@ -132,13 +132,15 @@
                   actionsCell = openAssistedBtn || `<small style="color:#166534;font-weight:500;">Continuidade dada</small>`;
                 } else if (row.menu_status === 'deleted') {
                   statusCell = `<span class="status-pill muted" style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:999px;font-size:12px;">Excluído</span>`;
-                  actionsCell = openAssistedBtn || `<small class="muted">Prazo de 15h expirou</small>`;
+                  actionsCell = openAssistedBtn || `<small class="muted">Prazo de 72h expirou</small>`;
                 } else {
                   const hours = typeof row.hours_remaining === 'number' ? row.hours_remaining : null;
                   const isExpiringSoon = hours !== null && hours <= 4;
                   const expColor = isExpiringSoon ? '#991b1b' : '#854d0e';
                   const expBg = isExpiringSoon ? '#fee2e2' : '#fef9c3';
-                  const expText = hours !== null ? (hours > 0 ? `Expira em ${hours}h` : 'Expirando') : 'Ativo (15h)';
+                  const expText = hours !== null
+                    ? (hours > 24 ? `Ativo (${Math.floor(hours / 24)}d)` : (hours > 0 ? `Expira em ${hours}h` : 'Expirando'))
+                    : 'Ativo (72h)';
                   statusCell = `<span class="status-pill" style="background:${expBg};color:${expColor};padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;">${escapeHtml(expText)}</span>`;
                   actionsCell = `
                     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
@@ -154,7 +156,7 @@
                 <td><strong>${escapeHtml(row.business_name)}</strong></td>
                 <td>${escapeHtml([row.city, row.state].filter(Boolean).join('/'))}</td>
                 <td>${escapeHtml(row.phone)}</td>
-                <td>${escapeHtml(stageLabel(row.stage))}</td>
+                <td>${stagePill(row)}</td>
                 <td>${menuCell}</td>
                 <td>${statusCell}</td>
                 <td>${actionsCell}</td>
@@ -169,7 +171,46 @@
   function number(value) { return Number(value || 0).toLocaleString('pt-BR'); }
   function formatDate(value) { const [year, month, day] = String(value || '').slice(0, 10).split('-'); return year && month && day ? `${day}/${month}` : ''; }
   function healthLabel(value) { return ({ connected: 'Conectada', healthy: 'Saudável', disconnected: 'Desconectada', unavailable: 'Indisponível', unknown: 'Sem leitura' })[value] || value || 'Sem leitura'; }
-  function stageLabel(value) { return ({ discovered: 'Encontrado', basic_validated: 'Validado', activity_validated: 'Ativo', menu_checked: 'Sem cardápio', photos_ready: 'Fotos prontas', preview_ready: 'Prévia pronta', scheduled: 'Agendado', awaiting_reply: 'Aguardando resposta', discarded: 'Descartado', send_failed: 'Falha no envio', opted_out: 'Removido', human_handoff: 'Atendimento humano' })[value] || value || '—'; }
+  function stageLabel(value) {
+    return ({
+      discovered: 'Na fila',
+      contacted: 'Aguardando resposta',
+      awaiting_reply: 'Aguardando resposta',
+      replied: 'Respondeu no WhatsApp',
+      engaged: 'Respondeu (Engajado)',
+      trojan_pivot_step2: 'Apresentando Solução',
+      trojan_demo_delivered: 'Cardápio Entregue',
+      link_clicked: 'Visualizou Cardápio',
+      basic_validated: 'Validado',
+      activity_validated: 'Ativo',
+      menu_checked: 'Sem cardápio',
+      photos_ready: 'Fotos prontas',
+      preview_ready: 'Cardápio Pronto',
+      scheduled: 'Agendado',
+      discarded: 'Descartado',
+      send_failed: 'Falha no envio',
+      opted_out: 'Sem interesse (Opt-out)',
+      won: 'Cliente Mantido',
+      human_handoff: 'Atendimento humano'
+    })[value] || value || '—';
+  }
+
+  function stagePill(row) {
+    if (row.stage_badge) {
+      let bg = '#f1f5f9';
+      let color = '#475569';
+      let border = '#cbd5e1';
+      if (row.stage_type === 'success') { bg = '#dcfce7'; color = '#166534'; border = '#86efac'; }
+      else if (row.stage_type === 'info') { bg = '#e0f2fe'; color = '#0369a1'; border = '#7dd3fc'; }
+      else if (row.stage_type === 'accent') { bg = '#f3e8ff'; color = '#6b21a8'; border = '#d8b4fe'; }
+      else if (row.stage_type === 'warning') { bg = '#fef9c3'; color = '#854d0e'; border = '#fde047'; }
+      else if (row.stage_type === 'muted') { bg = '#fee2e2'; color = '#991b1b'; border = '#fca5a5'; }
+
+      const inboundTooltip = row.last_inbound_body ? ` title="Última resposta: ${escapeHtml(row.last_inbound_body)}"` : '';
+      return `<span class="status-pill" style="display:inline-block;background:${bg};color:${color};border:1px solid ${border};padding:3px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;"${inboundTooltip}>${escapeHtml(row.stage_badge)}</span>`;
+    }
+    return escapeHtml(stageLabel(row.stage));
+  }
   function discardLabel(value) { return ({ online_menu: 'Já possui cardápio online', no_whatsapp: 'WhatsApp não confirmado', inactive: 'Sem atividade recente', insufficient_photos: 'Fotos insuficientes', duplicate: 'Contato já trabalhado', inconclusive: 'Validação inconclusiva' })[value] || value || 'Não informado'; }
   function quotaLabel(value) { return ({ places_pro: 'Google Places Pro', places_advanced: 'Google Places avançado', place_photos: 'Fotos do Google' })[value] || value || 'Cota'; }
   function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]); }

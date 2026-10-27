@@ -25,6 +25,7 @@
           <button data-platform-view="marketing" type="button"><span aria-hidden="true">◎</span>Marketing</button>
           <button data-platform-view="clients" type="button"><span aria-hidden="true">◎</span>Clientes</button>
           <button data-platform-view="assisted" type="button"><span aria-hidden="true">✎</span>Cadastros assistidos</button>
+          <button data-platform-view="outreach" type="button"><span aria-hidden="true">🎯</span>Captação de Leads</button>
           <button data-platform-view="billing" type="button"><span aria-hidden="true">□</span>Billing</button>
           <button data-platform-view="support" type="button"><span aria-hidden="true">☏</span>Atendimentos</button>
           <button data-platform-view="health" type="button"><span aria-hidden="true">⌁</span>Operação Técnica</button>
@@ -979,6 +980,20 @@
           </section>
         </section>
 
+        <section class="panel platform-outreach-workspace" data-platform-section="outreach" hidden>
+          <div class="section-actions">
+            <div>
+              <p class="eyebrow">Outbound & Prospecção</p>
+              <h2>Captação de Leads e Cardápios</h2>
+              <p class="muted">Acompanhe contatos diários no WhatsApp, links gerados, visualizações e validade dos cardápios demonstrativos.</p>
+            </div>
+            <div class="row-actions">
+              <button class="ghost-button compact" id="refreshOutreachButton" type="button">Atualizar Leads</button>
+            </div>
+          </div>
+          <div id="platformOutreachWorkspaceMetrics"></div>
+        </section>
+
         <section class="panel" data-platform-section="backups" hidden>
           <div class="section-actions">
             <div>
@@ -1019,8 +1034,8 @@
     </div>
     <div class="toast" id="toast"></div>
     <script src="/platform-client-list.js?v=20260930-attention-filter"></script>
-    <script src="/platform-outreach.js?v=20261013-outreach-metrics"></script>
-    <script src="/platform.js?v=20261013-outreach-metrics"></script>
+    <script src="/platform-outreach.js?v=20261027-outreach-tab-v2"></script>
+    <script src="/platform.js?v=20261027-outreach-tab-v2"></script>
     <script src="/platform-assisted-registration.js?v=20261001-guided-questions"></script>
   </body>
 </html>
