@@ -1,5 +1,7 @@
 import pg from 'pg';
 
+try { process.loadEnvFile?.('.env'); } catch {}
+
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL
 });

@@ -12,10 +12,10 @@ param(
 )
 
 $VBoxManage = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
-$VmName = "Cardápio"
+$VmName = "b8a64fe3-ccca-4c00-812e-ace872147ca8" # Cardápio VM UUID
 $VmIp = "192.168.1.108"
 $EvoUrl = "http://${VmIp}:8080"
-$ApiKey = "a1d1ebc38c826622830f6ebaa31d796791e813f87c53641b9d4f55928d1ee7db"
+$ApiKey = "b99ee681a32aafc2cc8376608494974676fd7d19363a60a0d4f6c7a650e9f062"
 $Instance = "tapronto"
 
 Write-Host "================================================================" -ForegroundColor Cyan
@@ -51,11 +51,11 @@ if ($ForceReset -or ($vmState -ne "running")) {
 Write-Host "[2/5] Testando resposta de rede ($VmIp)..." -ForegroundColor Yellow
 $pingOk = $false
 for ($i = 1; $i -le 10; $i++) {
-    if (Test-Connection -ComputerName $VmIp -Count 1 -Quiet -TimeoutSeconds 2) {
+    if (Test-Connection -ComputerName $VmIp -Count 1 -Quiet) {
         $pingOk = $true
         break
     }
-    Write-Host "Tentativa $i: Aguardando rede da VM... ($i/10)" -ForegroundColor Gray
+    Write-Host "Tentativa ${i}: Aguardando rede da VM... (${i}/10)" -ForegroundColor Gray
     Start-Sleep -Seconds 3
 }
 
@@ -81,7 +81,7 @@ for ($i = 1; $i -le 15; $i++) {
             Write-Host "Evolution API respondendo, estado da instância: $($res.state)... aguardando conectar." -ForegroundColor Yellow
         }
     } catch {
-        Write-Host "Tentativa $i: Evolution API ainda carregando... ($i/15)" -ForegroundColor Gray
+        Write-Host "Tentativa ${i}: Evolution API ainda carregando... (${i}/15)" -ForegroundColor Gray
     }
     Start-Sleep -Seconds 4
 }
@@ -93,19 +93,28 @@ if (-not $evoOk) {
     Start-Sleep -Seconds 15
 }
 
-# 4. Status da Fila de Disparos
-Write-Host "[4/5] Verificando fila de disparos para hoje..." -ForegroundColor Yellow
-cd "d:\lsk\TáProntomenu.com.br\.worktrees\release-production-outreach-20261014"
-node scripts/verify-monday-jobs.mjs
+# 4. Garantir serviços de Túnel SSH e Proxies Ativos
+Write-Host "[4/6] Garantindo Túnel SSH (5433) e Proxies (8888, 10800) ativos..." -ForegroundColor Yellow
+$hiddenServicesScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "start-hidden-services.ps1"
+if (Test-Path $hiddenServicesScript) {
+    & powershell.exe -ExecutionPolicy Bypass -File $hiddenServicesScript
+}
 
-# 5. Executar disparo se solicitado
+# 5. Status da Fila de Disparos
+Write-Host "[5/6] Verificando fila de disparos para hoje..." -ForegroundColor Yellow
+cd "d:\lsk\TáProntomenu.com.br\.worktrees\release-production-outreach-20261014"
+if (Test-Path "scripts/check-tomorrow-leads-status.mjs") {
+    node scripts/check-tomorrow-leads-status.mjs
+}
+
+# 6. Executar disparo se solicitado
 if ($Dispatch) {
-    Write-Host "[5/5] Disparando lote de marmitarias agora..." -ForegroundColor Green
-    node scripts/dispatch-monday-marmitarias.mjs
+    Write-Host "[6/6] Disparando lote de marmitarias agora..." -ForegroundColor Green
+    node scripts/dispatch-monday-marmitarias.mjs --retry-failed
 } else {
     Write-Host ""
     Write-Host "Para forçar o disparo manual a qualquer momento, execute:" -ForegroundColor Cyan
-    Write-Host "  node scripts/dispatch-monday-marmitarias.mjs" -ForegroundColor White
+    Write-Host "  node scripts/dispatch-monday-marmitarias.mjs --retry-failed" -ForegroundColor White
     Write-Host "Ou execute este script com o parâmetro -Dispatch:" -ForegroundColor Cyan
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts/resuscitate-vm.ps1 -Dispatch" -ForegroundColor White
 }
@@ -114,3 +123,4 @@ Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "           RESSUSCITAÇÃO / WATCHDOG CONCLUÍDO COM SUCESSO!      " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
+

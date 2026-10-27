@@ -63,7 +63,7 @@ async function main() {
 
     await new Promise(r => setTimeout(r, 2000));
 
-    const altissimoCaption = `Visualização no celular para pedidos no WhatsApp. Cardápio completo: https://taprontomenu.com.br/altissimo`;
+    const altissimoCaption = `Visualização no celular para pedidos no WhatsApp.`;
     const mediaRes = await sendEvolutionV2SalesMedia({
       phone: altissimoLead.phone,
       mediaUrl: 'https://taprontomenu.com.br/uploads/previews/menu-preview-mobile.png',
@@ -93,7 +93,7 @@ async function main() {
 
     await new Promise(r => setTimeout(r, 2000));
 
-    const frankCaption = `Visualização no celular para pedidos no WhatsApp. Cardápio completo: https://taprontomenu.com.br/frank`;
+    const frankCaption = `Visualização no celular para pedidos no WhatsApp.`;
     const mediaRes = await sendEvolutionV2SalesMedia({
       phone: frankLead.phone,
       mediaUrl: 'https://taprontomenu.com.br/uploads/previews/frank-preview-mobile.png',

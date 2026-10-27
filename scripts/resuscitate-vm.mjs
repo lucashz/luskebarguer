@@ -67,14 +67,18 @@ export async function resuscitateVm({ forceReset = false, dispatch = false } = {
     await sleep(15000);
   }
 
-  // 3. Checar status da fila no banco
-  console.log('[3/4] Verificando status dos disparos de hoje...');
-  runCmd('node scripts/verify-monday-jobs.mjs');
+  // 3. Garantir Túnel SSH e Proxies
+  console.log('[3/5] Garantindo Túnel SSH (5433) e Proxies (8888, 10800) ativos...');
+  runCmd('powershell -ExecutionPolicy Bypass -File scripts/start-hidden-services.ps1');
 
-  // 4. Disparo opcional
+  // 4. Checar status da fila no banco
+  console.log('[4/5] Verificando status dos disparos de hoje...');
+  runCmd('node scripts/check-tomorrow-leads-status.mjs');
+
+  // 5. Disparo opcional
   if (dispatch) {
     console.log('[4/4] Executando disparo do lote agora...');
-    runCmd('node scripts/dispatch-monday-marmitarias.mjs');
+    runCmd('node scripts/dispatch-monday-marmitarias.mjs --retry-failed');
   } else {
     console.log('[4/4] VM e serviços 100% saudáveis e operacionais!');
   }
@@ -92,3 +96,4 @@ if (isDirectRun) {
     dispatch: args.has('--dispatch')
   }).catch(console.error);
 }
+

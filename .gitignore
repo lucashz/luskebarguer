@@ -27,3 +27,9 @@ artifacts/
 *recovery-key*
 *.before-*
 *.backup-*
+
+# Temporary files and scratch logs
+logs/
+temp_*
+google-result.html
+

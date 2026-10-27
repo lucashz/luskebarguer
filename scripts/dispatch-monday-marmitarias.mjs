@@ -49,6 +49,20 @@ async function main() {
   }
   console.log(`✅ WhatsApp conectado na instância "${evoConfig.instance}".\n`);
 
+  // Se houver argumento --retry-failed ou nenhum job pending mas houver failed
+  const forceRetry = process.argv.includes('--retry-failed') || process.argv.includes('--force');
+  if (forceRetry) {
+    const resetRes = await pool.query(`
+      UPDATE sales_automation_jobs
+      SET status = 'pending', last_error = NULL, updated_at = now()
+      WHERE idempotency_key LIKE 'monday-marmitarias-2026-10-26:%'
+        AND status = 'failed'
+    `);
+    if (resetRes.rowCount > 0) {
+      console.log(`🔄 [Reset] ${resetRes.rowCount} jobs com falha foram redefinidos para 'pending'.\n`);
+    }
+  }
+
   // 2. Carregar os jobs pendentes da run de segunda-feira
   const jobsRes = await pool.query(`
     SELECT j.id AS job_id, j.lead_id, j.payload, l.phone, l.normalized_phone, l.business_name, l.city
@@ -84,7 +98,22 @@ async function main() {
     // Etapa 1: Enviar mensagem principal com link
     console.log('  -> [1/3] Enviando mensagem persuasiva...');
     try {
-      const textRes = await sendEvolutionV2SalesText({ phone, text: payload.message }, evoConfig);
+      let textRes;
+      try {
+        textRes = await sendEvolutionV2SalesText({ phone, text: payload.message }, evoConfig);
+      } catch (sendErr) {
+        if (sendErr.message?.includes('500') || sendErr.message?.includes('Connection') || sendErr.message?.includes('400')) {
+          console.warn('  ⚠️ Socket WhatsApp pode ter reiniciado. Tentando auto-recuperar instância...');
+          await fetch(`${evoConfig.baseUrl}/instance/restart/${evoConfig.instance}`, {
+            method: 'POST',
+            headers: { apikey: evoConfig.apiKey }
+          }).catch(() => {});
+          await sleep(6000);
+          textRes = await sendEvolutionV2SalesText({ phone, text: payload.message }, evoConfig);
+        } else {
+          throw sendErr;
+        }
+      }
       console.log(`  ✓ Texto enviado! Provider ID: ${textRes.id}`);
       await saveOutboundMessage(job.lead_id, convId, payload.message, textRes.id, 'outreach_text');
     } catch (err) {

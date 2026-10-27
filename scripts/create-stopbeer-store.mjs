@@ -1,6 +1,8 @@
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 
+try { process.loadEnvFile?.('.env'); } catch {}
+
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   max: 2
