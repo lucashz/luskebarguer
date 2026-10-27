@@ -134,7 +134,11 @@ export function parseEvolutionInbound(payload = {}) {
   const data = payload?.data || payload;
   const key = data?.key || data?.Info || data?.info || {};
   const source = key?.MessageSource || key?.messageSource || data?.messageSource || {};
-  const remote = clean(key?.remoteJid || key?.RemoteJid || source?.Chat || source?.chat || source?.Sender || source?.sender || data?.remoteJid || data?.from || data?.sender || '');
+  let remote = clean(key?.remoteJid || key?.RemoteJid || source?.Chat || source?.chat || source?.Sender || source?.sender || data?.remoteJid || data?.from || data?.sender || '');
+  const altRemote = clean(key?.remoteJidAlt || key?.RemoteJidAlt || data?.remoteJidAlt || data?.remote_jid_alt || '');
+  if (/@lid$/i.test(remote) && altRemote) {
+    remote = altRemote;
+  }
   const fromMe = Boolean(key?.fromMe ?? key?.FromMe ?? source?.IsFromMe ?? source?.isFromMe ?? data?.fromMe ?? data?.from_me);
   if (fromMe || /@g\.us$/i.test(remote) || data?.isGroup === true) return null;
   const message = data?.message || data?.Message || {};
