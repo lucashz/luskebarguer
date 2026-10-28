@@ -18,8 +18,8 @@ Get-NetTCPConnection -LocalPort 5433,8888,10800 -State Listen -ErrorAction Silen
 }
 Start-Sleep -Milliseconds 500
 
-# 2. Start SSH Tunnel (port 5433)
-$sshCmd = "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=5 -N -L 5433:localhost:5432 lucas@130.51.23.180"
+# 2. Start SSH Tunnel (port 5433 to VPS Postgres, reverse port 8080 to VM Evolution API)
+$sshCmd = "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=5 -o BatchMode=yes -N -L 5433:localhost:5432 -R 8080:192.168.1.108:8080 lucas@130.51.23.180"
 Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine = $sshCmd} | Out-Null
 
 # 3. Start Windows HTTP Proxy (port 8888)
