@@ -19905,14 +19905,12 @@ async function serveStatic(req, res, requestPath, hostHeader = '', requestSearch
     }
     const searchParams = new URL(req.url || '/', 'http://localhost').searchParams;
     const lid = searchParams.get('lid') || searchParams.get('lead_id') || searchParams.get('lead');
-    if (lid || searchParams.get('ref') === 'wa') {
-      trackOutreachLinkClick({
-        leadId: lid,
-        leadSlug: storeSlug,
-        userAgent: req.headers['user-agent'],
-        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress
-      }).catch(err => console.warn('[trackOutreachLinkClick error]', err.message));
-    }
+    trackOutreachLinkClick({
+      leadId: lid,
+      leadSlug: storeSlug,
+      userAgent: req.headers['user-agent'],
+      ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress
+    }).catch(err => console.warn('[trackOutreachLinkClick error]', err.message));
     await sendSeoStorePage(req, res, store);
     return;
   }

@@ -5,7 +5,6 @@ import {
   sendEvolutionV2SalesMedia,
   sendEvolutionV2Presence
 } from '../src/lib/evolution-v2-sales.js';
-import { buildTrackedMenuUrl } from '../src/lib/outreach-click-tracking.js';
 import { generateAiSalesReply } from '../src/lib/sales-conversational-ai.js';
 import { readFile } from 'node:fs/promises';
 
@@ -153,10 +152,10 @@ async function handleAllInboundWithAI(evoConfig) {
       `, [row.lead_id]);
       const conversationHistory = historyRes.rows;
 
-      // 4. Obter item destaque e URL demonstrativa
+      // 4. Obter item destaque e URL demonstrativa 100% limpa (anti-spam, sem parâmetros de tracking)
       const featuredItem = await getFeaturedProduct(storeId, row.segment);
-      const rawMenuUrl = meta.menu_url || (meta.menu_slug ? `https://taprontomenu.com.br/${meta.menu_slug}` : 'https://taprontomenu.com.br');
-      const candidateMenuUrl = buildTrackedMenuUrl({ menuUrl: rawMenuUrl, leadId: row.lead_id });
+      const cleanSlug = meta.menu_slug || row.business_name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const candidateMenuUrl = `https://taprontomenu.com.br/${cleanSlug}`;
 
       // 5. Acionar o Motor Conversacional de IA (Cloudflare Workers AI Llama 70B/8B)
       const aiDecision = await generateAiSalesReply({

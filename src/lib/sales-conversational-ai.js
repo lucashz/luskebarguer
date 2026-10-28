@@ -17,8 +17,8 @@ try { process.loadEnvFile?.('.env'); } catch {}
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || 'f1ecc8b7715e9d42036becc9d6810df0';
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN || 'cfut_n4pHkGWvuIN5dwRZBMaRpP5SYGHi172vaV86LkXl4394e91d';
 
-const PRIMARY_MODEL = '@cf/meta/llama-3.1-70b-instruct';
-const FALLBACK_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const PRIMARY_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+const FALLBACK_MODEL = '@cf/meta/llama-3.2-3b-instruct';
 
 export const SYSTEM_SALES_PROMPT = `Você é o consultor comercial especialista da plataforma TáPronto (taprontomenu.com.br).
 Você atende donos e gerentes de restaurantes, marmitarias, hamburguerias e delivery pelo WhatsApp.
@@ -46,6 +46,11 @@ Você atende donos e gerentes de restaurantes, marmitarias, hamburguerias e deli
 - Se o lead fizer uma pergunta técnica (ex: "tem fidelidade?", "quanto custa?", "imprime cupom?"), responda a dúvida de forma clara e amigável e convide-o a ver a demonstração no link.
 - Se o lead disser claramente que NÃO tem interesse ("não quero", "não tenho interesse", "dispenso"), respeite educadamente: "Sem problemas! Agradeço a atenção e muito sucesso nas vendas por aí!" (action: "opt_out", delivered_link: false).
 - Se o lead for uma URA / Bot com opções numeradas ("digite 1 para..."), escolha a opção de ver cardápio ou fazer pedido.
+
+=== REGRA CRÍTICA DE LINKS (100% LIMPO & ANTI-SPAM) ===
+- O link do cardápio demonstrativo DEVE SER SEMPRE LIMPO E CURTO: https://taprontomenu.com.br/nome-da-loja
+- É TERMINANTEMENTE PROIBIDO adicionar parâmetros de rastreamento (?ref=wa, ?lid=..., UUIDs longos).
+- Links compridos com códigos aleatórios assustam o lojista e parecem vírus ou spam. Use SEMPRE apenas a URL limpa da marca do restaurante.
 
 === FORMATO OBRIGATÓRIO DE RESPOSTA ===
 Responda EXCLUSIVAMENTE em formato JSON puro, sem markdown ao redor do JSON ou comentários:
@@ -139,9 +144,13 @@ function enforceSafetyRules(replyText = '', candidateMenuUrl = '') {
   // 3. Remover travessões longos
   cleaned = cleaned.replace(/—/g, '-');
 
-  // 4. Se a IA prometeu o link mas omitiu a URL física
-  if ((cleaned.toLowerCase().includes('link') || cleaned.toLowerCase().includes('demonstração')) && !cleaned.includes('http') && candidateMenuUrl) {
-    cleaned += `\n\n👉 ${candidateMenuUrl}`;
+  // 4. LIMPEZA TOTAL DE LINKS: remover quaisquer parâmetros de tracking (?ref=..., ?lid=..., query strings)
+  cleaned = cleaned.replace(/(\bhttps?:\/\/taprontomenu\.com\.br\/[a-zA-Z0-9_-]+)\?[^\s)]+/gi, '$1');
+
+  // 5. Se a IA prometeu o link mas omitiu a URL física
+  if ((cleaned.toLowerCase().includes('link') || cleaned.toLowerCase().includes('demonstração')) && !cleaned.includes('taprontomenu.com.br') && candidateMenuUrl) {
+    const cleanUrl = candidateMenuUrl.replace(/\?[^\s]+$/, '');
+    cleaned += `\n\n👉 ${cleanUrl}`;
   }
 
   return cleaned.trim();
@@ -206,3 +215,4 @@ Com base no histórico e nas regras, gere o JSON com a melhor resposta para a ú
 
   return result;
 }
+
