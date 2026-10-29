@@ -1,20 +1,30 @@
-import { evolutionV2SalesConfig, getEvolutionV2WebhookState, probeEvolutionV2WebhookReceiver } from '../src/lib/evolution-v2-sales.js';
+import { probeEvolutionV2WebhookReceiver, evolutionV2SalesConfig } from '../src/lib/evolution-v2-sales.js';
+import dotenv from 'dotenv';
+dotenv.config();
 
-try { process.loadEnvFile?.('.env'); } catch {}
-
-async function main() {
+async function run() {
   const config = evolutionV2SalesConfig();
-  const expectedUrl = String(process.env.SALES_EVOLUTION_V2_WEBHOOK_URL || '').trim();
-  console.log('expectedUrl:', expectedUrl);
-  const state = await getEvolutionV2WebhookState({ expectedUrl }, config);
-  console.log('state:', state);
-  try {
-    const probe = await probeEvolutionV2WebhookReceiver({ url: expectedUrl }, config);
-    console.log('probe success:', probe);
-  } catch (err) {
-    console.error('probe error:', err);
+  console.log('Config:', {
+    baseUrl: config.baseUrl,
+    instance: config.instance,
+    hasApiKey: !!config.apiKey,
+    hasWebhookSecret: !!config.webhookSecret
+  });
+
+  const urlsToTest = [
+    'https://taprontomenu.com.br/api/integrations/evolution/webhook',
+    'https://central.taprontomenu.com.br/api/integrations/evolution/webhook'
+  ];
+
+  for (const url of urlsToTest) {
+    try {
+      console.log(`\nProbing ${url}...`);
+      const res = await probeEvolutionV2WebhookReceiver({ url }, config);
+      console.log('SUCCESS:', res);
+    } catch (err) {
+      console.error('FAILED:', err.message);
+    }
   }
 }
 
-main().catch(console.error);
-
+run();

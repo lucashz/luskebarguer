@@ -19,11 +19,10 @@ export function cleanLeadName(rawName = '') {
     .trim();
 }
 
-export function buildCleanMenuUrl(slug, leadId = null) {
+export function buildCleanMenuUrl(slug) {
   const cleanSlug = String(slug || '').trim().toLowerCase().replace(/^\/+/, '');
   if (!cleanSlug) return 'https://taprontomenu.com.br';
-  const param = leadId ? `?ref=wa&lid=${encodeURIComponent(leadId)}` : '?ref=wa';
-  return `https://taprontomenu.com.br/${cleanSlug}${param}`;
+  return `https://taprontomenu.com.br/${cleanSlug}`;
 }
 
 /**
@@ -32,29 +31,46 @@ export function buildCleanMenuUrl(slug, leadId = null) {
  */
 export function buildHarveyStep1(lead) {
   const name = cleanLeadName(lead.business_name);
-  const meta = lead.metadata || {};
   const hour = new Date().getHours();
   const saudacao = hour >= 18 ? 'Boa noite' : (hour >= 12 ? 'Boa tarde' : 'Bom dia');
+  const segment = String(lead.segment || '').toLowerCase();
 
-  const rawRating = meta.rating || lead.rating;
-  const rating = rawRating ? String(rawRating).replace(',', '.') : null;
-  const reviewsCount = meta.reviews_count || lead.reviews_count;
-
-  // Se tivermos a nota real do Google Maps (Sweet Spot)
-  if (rating && reviewsCount) {
+  // Segmento Almoço / Marmitaria (Turno Manhã)
+  if (segment === 'marmitaria' || segment === 'restaurante') {
     const templates = [
-      `Oi pessoal do ${name}, ${saudacao.toLowerCase()}! Tudo bem?\n\nDei uma olhada no perfil de vocês no Google e vi que estão com nota ${rating} (${reviewsCount} avaliações), parabéns pelo capricho!\n\nMontei uma prévia rápida no celular para mostrar como ficaria o cardápio digital de vocês com taxa zero de comissão e o pedido caindo direto com impressão na cozinha.\n\nPosso te mandar o link pra você dar uma olhada em 30 segundos?`,
-      `${saudacao}! Tudo bem? Vi as avaliações do ${name} no Google (nota ${rating} com ${reviewsCount} avaliações), muito legal o reconhecimento dos clientes.\n\nMontei um modelo prático de cardápio no celular pro segmento de vocês, onde o cliente não precisa somar nada na calculadora e o pedido já chega pronto no painel.\n\nQuer que eu te mande o link de teste aqui pra você ver como ficou?`,
-      `Oi, ${saudacao.toLowerCase()}! Tudo certo por aí no ${name}?\n\nParabéns pela nota ${rating} no Google! Montei uma prévia ilustrada do cardápio de vocês para estabelecimentos que querem fugir das taxas pesadas de marketplace e agilizar o WhatsApp nos dias de pico.\n\nPosso enviar o link aqui pra você dar uma olhada sem compromisso?`
+      `${saudacao}, tudo bem? Vocês atendem delivery hoje pro almoço? Tem o cardápio com os valores pra eu dar uma olhada?`,
+      `Oi, ${saudacao.toLowerCase()}! Como faço pra ver as opções de marmita/almoço de hoje no ${name}? Vocês mandam por aqui?`,
+      `${saudacao}! Vocês tão entregando almoço por esse número hoje? Como vejo o cardápio com os preços?`,
+      `${saudacao}, tudo certo? O cardápio de almoço de vocês com os valores fica por aqui mesmo no WhatsApp ou tem link?`
     ];
     return templates[Math.floor(Math.random() * templates.length)];
   }
 
-  // Abordagem por Curiosidade Natural (Pergunta Inocente)
+  // Segmento Pizzaria
+  if (segment === 'pizzaria') {
+    const templates = [
+      `${saudacao}, tudo bem? Vocês tão atendendo delivery hoje? Como faço pra ver o cardápio de pizzas com os valores?`,
+      `Oi, ${saudacao.toLowerCase()}! Vocês entregam por esse WhatsApp? Tem o cardápio atualizado das pizzas pra eu dar uma olhada?`,
+      `${saudacao}! Como faço pra ver as opções e sabores de pizza do ${name}? Vocês mandam por aqui?`
+    ];
+    return templates[Math.floor(Math.random() * templates.length)];
+  }
+
+  // Segmento Hamburgueria / Lanchonete (Turno Noite)
+  if (segment === 'hamburgueria' || segment === 'lanchonete') {
+    const templates = [
+      `${saudacao}, tudo bem? Vocês tão atendendo delivery hoje pelo WhatsApp? O cardápio dos lanches com os valores é por aqui mesmo ou tem link?`,
+      `Oi, ${saudacao.toLowerCase()}! Como vejo o cardápio de hambúrgueres do ${name} com os preços? Vocês mandam por aqui?`,
+      `${saudacao}, tudo certo? Vocês atendem delivery por esse número? Tem o cardápio com os valores pra eu dar uma olhada?`
+    ];
+    return templates[Math.floor(Math.random() * templates.length)];
+  }
+
+  // Padrão Geral / Outros Nichos
   const generalTemplates = [
-    `${saudacao}, tudo bem? Vocês trabalham com entregas pelo WhatsApp? O cardápio com os valores fica por aqui mesmo ou vocês têm link próprio?`,
-    `${saudacao}! Como faço pra ver o cardápio atualizado do ${name} com os preços? Vocês mandam por aqui ou têm link de pedidos?`,
-    `${saudacao}, tudo certo? Vocês atendem delivery por esse número? Tem o cardápio com os preços pra eu dar uma olhada?`
+    `${saudacao}, tudo bem? Vocês trabalham com entregas pelo WhatsApp? O cardápio com os valores fica por aqui mesmo ou vocês têm link?`,
+    `${saudacao}! Como faço pra ver o cardápio atualizado do ${name} com os preços? Vocês mandam por aqui?`,
+    `${saudacao}, tudo certo? Vocês atendem delivery por esse número hoje? Tem o cardápio pra eu dar uma olhada?`
   ];
   return generalTemplates[Math.floor(Math.random() * generalTemplates.length)];
 }

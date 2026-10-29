@@ -92,7 +92,7 @@ async function main() {
       pool
     });
 
-    const trackedUrl = `https://taprontomenu.com.br/c/${lead.id}`;
+    const trackedUrl = `https://taprontomenu.com.br/${prov.slug}`;
 
     await pool.query(`
       UPDATE sales_leads
@@ -146,7 +146,7 @@ async function main() {
       pool
     });
 
-    const trackedUrl = `https://taprontomenu.com.br/c/${lead.id}`;
+    const trackedUrl = `https://taprontomenu.com.br/${prov.slug}`;
 
     await pool.query(`
       UPDATE sales_leads
@@ -185,3 +185,4 @@ async function main() {
 }
 
 main().catch(console.error);
+

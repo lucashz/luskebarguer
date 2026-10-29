@@ -129,7 +129,7 @@ function parseAiJsonResponse(rawText = '') {
 /**
  * Pós-processamento e validação estrita das Regras de Ouro
  */
-function enforceSafetyRules(replyText = '', candidateMenuUrl = '') {
+function enforceSafetyRules(replyText = '', candidateMenuUrl = '', action = 'continue_conversation') {
   let cleaned = String(replyText || '').trim();
 
   // 1. Substituir qualquer ocorrência de "zap" por "WhatsApp"
@@ -147,13 +147,92 @@ function enforceSafetyRules(replyText = '', candidateMenuUrl = '') {
   // 4. LIMPEZA TOTAL DE LINKS: remover quaisquer parâmetros de tracking (?ref=..., ?lid=..., query strings)
   cleaned = cleaned.replace(/(\bhttps?:\/\/taprontomenu\.com\.br\/[a-zA-Z0-9_-]+)\?[^\s)]+/gi, '$1');
 
-  // 5. Se a IA prometeu o link mas omitiu a URL física
-  if ((cleaned.toLowerCase().includes('link') || cleaned.toLowerCase().includes('demonstração')) && !cleaned.includes('taprontomenu.com.br') && candidateMenuUrl) {
+  // 5. REGRA DO CAVALO DE TROIA: NUNCA enviar link se a mensagem for apenas um pedido de permissão (Passo 2)
+  const isAskingPermission = /\b(posso te mandar|posso enviar|quer que eu te mande|posso te passar|quer dar uma olhada|posso mandar)\b/i.test(cleaned);
+  if (isAskingPermission && action !== 'deliver_demo') {
+    // Remove qualquer link que tenha vazado acidentalmente no Passo 2
+    cleaned = cleaned.replace(/👉\s*https?:\/\/taprontomenu\.com\.br\/[^\s]+/gi, '').trim();
+    cleaned = cleaned.replace(/https?:\/\/taprontomenu\.com\.br\/[^\s]+/gi, '').trim();
+  } else if (action === 'deliver_demo' && !cleaned.includes('taprontomenu.com.br') && candidateMenuUrl) {
     const cleanUrl = candidateMenuUrl.replace(/\?[^\s]+$/, '');
     cleaned += `\n\n👉 ${cleanUrl}`;
   }
 
   return cleaned.trim();
+}
+
+import { cleanLeadName } from './harvey-outbound-engine.js';
+
+/**
+ * Fallback determinístico caso os modelos de IA estejam indisponíveis (ex: cota de neurônios atingida)
+ */
+export function generateDeterministicFallback({
+  lead = {},
+  conversationHistory = [],
+  candidateMenuUrl = '',
+  featuredItem = ''
+}) {
+  const meta = lead.metadata || {};
+  const businessName = cleanLeadName(lead.business_name || meta.business_name || 'Restaurante');
+  const rating = meta.rating || lead.rating || '';
+  const reviewsCount = meta.reviews_count || lead.reviews_count || '';
+  const menuUrl = candidateMenuUrl || meta.menu_url || (meta.menu_slug ? `https://taprontomenu.com.br/${meta.menu_slug}` : 'https://taprontomenu.com.br');
+
+  // Última mensagem recebida do cliente
+  const lastInbound = [...conversationHistory].reverse().find(m => m.direction === 'inbound')?.body || '';
+  const text = lastInbound.toLowerCase().trim();
+
+  // 1. Caso Opt-Out / Sem interesse
+  if (/\b(n[ãa]o tenho interesse|n[ãa]o quero|dispenso|pare|cancelar|n[ãa]o incomode|remover)\b/i.test(text)) {
+    return {
+      reply_text: 'Sem problemas! Agradeço a atenção e muito sucesso nas vendas por aí!',
+      action: 'opt_out',
+      delivered_link: false,
+      confidence: 0.9,
+      reasoning: 'Opt-out detectado no fallback determinístico'
+    };
+  }
+
+  // 2. Lead autorizou ou pediu o link (Passo 3: Entrega do Cardápio)
+  const hasAgreed = /\b(sim|quero|pode|manda|mande|envia|envie|com certeza|claro|bora|manda a[íi]|mostra|ver|opa)\b/i.test(text) ||
+                    /\b(como funciona|quanto custa|qual o valor)\b/i.test(text);
+
+  // Checa se o último outbound já foi o Passo 2 (perguntando se pode mandar o link)
+  const lastOutbound = [...conversationHistory].reverse().find(m => m.direction === 'outbound')?.body || '';
+  const askedForPermission = lastOutbound.toLowerCase().includes('posso te mandar') || 
+                             lastOutbound.toLowerCase().includes('quer que eu te mande') ||
+                             lastOutbound.toLowerCase().includes('posso enviar');
+
+  if (hasAgreed && (askedForPermission || text.length < 30)) {
+    const cleanUrl = menuUrl.replace(/\?[^\s]+$/, '');
+    const itemMention = featuredItem ? `os adicionais e opções de ${featuredItem}` : `os pratos e adicionais`;
+    return {
+      reply_text: `Show de bola! Dá uma olhada como ficou prático no celular:\n\n👉 ${cleanUrl}\n\nO cliente escolhe ${itemMention} em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha, sem depender de calculadora e sem comissão sobre as vendas.\n\nDeixei liberado pra vocês darem uma olhada. O que achou da agilidade?`,
+      action: 'deliver_demo',
+      delivered_link: true,
+      confidence: 0.95,
+      reasoning: 'Lead autorizou envio da demonstração (Passo 3)'
+    };
+  }
+
+  // 3. Lead respondeu ao Passo 1 com cardápio, URA ou texto (Passo 2: Pivot com Quebra de Padrão)
+  if (rating && reviewsCount) {
+    return {
+      reply_text: `Show de bola! Dei uma olhada nas avaliações do ${businessName} no Google e vi que estão com nota ${rating} (${reviewsCount} avaliações), parabéns pelo capricho e pelo reconhecimento dos clientes!\n\nMas sei como é corrido no delivery quando mandar texto ou cardápio solto no WhatsApp faz o cliente ter que ficar somando preços e adicionais na mão.\n\nA gente montou uma demonstração rápida no celular: o cliente escolhe os itens em 30 segundos e o pedido já chega pronto no Painel Gestor TáPronto com alerta sonoro e impressão na cozinha, com taxa zero de comissão.\n\nPosso te mandar o link aqui pra você fazer um teste rápido e ver como ficou a loja? Ficou bem bacana.`,
+      action: 'continue_conversation',
+      delivered_link: false,
+      confidence: 0.9,
+      reasoning: 'Pivot do Passo 2 com elogio do Google e pedido de permissão'
+    };
+  }
+
+  return {
+    reply_text: `Show de bola! Muito obrigado pelo retorno!\n\nA gente preparou um modelo prático de cardápio digital ilustrado para o segmento de vocês: o cliente escolhe as opções e adicionais direto no celular e o pedido já chega somado no Painel Gestor TáPronto com alerta sonoro e impressão na cozinha, com taxa zero.\n\nQuer que eu te mande o link aqui pra você dar uma olhada em 30 segundos sem compromisso?`,
+    action: 'continue_conversation',
+    delivered_link: false,
+    confidence: 0.85,
+    reasoning: 'Pivot do Passo 2 sem nota do Google'
+  };
 }
 
 /**
@@ -205,13 +284,20 @@ Com base no histórico e nas regras, gere o JSON com a melhor resposta para a ú
     try {
       rawAiOutput = await callCloudflareAI(messages, FALLBACK_MODEL);
     } catch (fallbackErr) {
-      console.error(`[Sales AI] Falha crítica em ambos os modelos:`, fallbackErr.message);
-      throw fallbackErr;
+      console.warn(`[Sales AI] Modelos Cloudflare indisponíveis (cota/rede). Acionando motor determinístico:`, fallbackErr.message);
+      const fallbackResult = generateDeterministicFallback({
+        lead,
+        conversationHistory,
+        candidateMenuUrl: menuUrl,
+        featuredItem
+      });
+      fallbackResult.reply_text = enforceSafetyRules(fallbackResult.reply_text, menuUrl, fallbackResult.action);
+      return fallbackResult;
     }
   }
 
   const result = parseAiJsonResponse(rawAiOutput);
-  result.reply_text = enforceSafetyRules(result.reply_text, menuUrl);
+  result.reply_text = enforceSafetyRules(result.reply_text, menuUrl, result.action);
 
   return result;
 }
