@@ -115,10 +115,35 @@ async function mineAllRegions() {
           if (existRes.rows.length > 0) continue;
 
           const reviews = Number(p.review_count ?? p.reviews_count ?? 0);
+          // TETO DE QUALIFICAÇÃO ICP:
+          // Restaurantes com mais de 250 avaliações quase sempre já possuem sistemas próprios, cardápios online ou franquia.
+          if (reviews > 250) {
+            continue;
+          }
+
+          const website = String(p.web_site || p.website || '').trim();
+          const wsLower = website.toLowerCase();
+
+          // BLACKLIST INEGOCIÁVEL DE PLATAFORMAS CONCORRENTES:
+          const COMPETITOR_PLATFORMS = [
+            'anota.ai', 'vocepede', 'brendi', 'cardapioweb', 'bitbar', 'goomer',
+            'instadelivery', 'saipos', 'cardapio.digital', 'ola.click', 'hubt', 'menudino',
+            'deliverydireto', 'deliverymuch', 'wabiz', 'yooga', 'delmatch', 'kyte',
+            'ccardapio', 'pedir.delivery', 'pedidos.mobi', 'cardapius', 'expresso.delivery',
+            'meucardapio', 'ifood.com.br', 'rappi.com.br', 'ubereats'
+          ];
+          if (COMPETITOR_PLATFORMS.some(k => wsLower.includes(k))) {
+            continue;
+          }
+
+          // Se tiver site próprio institucional com e-commerce e muitas avaliações, pular
+          if (wsLower.startsWith('http') && !wsLower.includes('instagram.com') && !wsLower.includes('facebook.com') && !wsLower.includes('wa.me') && !wsLower.includes('linktr.ee') && reviews > 150) {
+            continue;
+          }
+
           const rawRating = p.review_rating ?? p.rating ?? '';
           const rating = rawRating ? String(rawRating).replace(',', '.') : null;
           const address = p.address || `${reg.city} - ${reg.state}`;
-          const website = String(p.web_site || p.website || '').trim();
           const segment = detectSegment(title, q, p.category || (p.categories || []).join(' '));
 
           const ins = await pool.query(`
@@ -187,11 +212,12 @@ async function validateAndProvisionRegional(newLeads = [], targetToProvision = 4
   const evoConfig = evolutionV2SalesConfig();
   console.log(`\n--- Validando WhatsApp e Provisionando Cardápios Modelo (Meta: ${targetToProvision}) ---`);
 
-  // Ordena por quantidade de avaliações (autoridade no Google)
+  // Ordena por Sweet Spot: foco total nos negócios locais de bairro (entre 10 e 200 avaliações)
+  // que sofrem na mão com atendimento manual e NÃO possuem sistemas caros
   newLeads.sort((a, b) => {
     const revA = Number(a.metadata?.reviews_count || 0);
     const revB = Number(b.metadata?.reviews_count || 0);
-    return revB - revA;
+    return revA - revB; // Ascendente para pegar os estabelecimentos de bairro
   });
 
   let provisioned = 0;
