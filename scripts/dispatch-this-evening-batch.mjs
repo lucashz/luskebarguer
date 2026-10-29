@@ -107,50 +107,65 @@ async function main() {
     console.log(`   Mensagem Passo 1: "${msg}"`);
 
     if (!isDryRun) {
-      // 4. Digitação humana (4 a 6 segundos)
-      const typingMs = 4000 + Math.floor(Math.random() * 2500);
-      console.log(`   ⏳ Simulando digitação por ${(typingMs / 1000).toFixed(1)}s...`);
-      await sendEvolutionV2Presence({ phone, presence: 'composing', delayMs: typingMs }, evoConfig);
-      await sleep(typingMs);
+      try {
+        // Validação ativa de número e extração do JID exato (12 ou 13 dígitos)
+        const wa = await checkEvolutionV2WhatsappNumber({ phone }, evoConfig);
+        if (!wa.exists) {
+          console.log(`   ❌ [Sem WhatsApp] Número não existe. Pulando.`);
+          await pool.query(`UPDATE sales_leads SET stage = 'discarded', discard_code = 'no_whatsapp', updated_at = now() WHERE id = $1`, [lead.id]);
+          continue;
+        }
 
-      // 5. Envio real via Evolution API
-      const sendRes = await sendEvolutionV2SalesText({ phone, text: msg }, evoConfig);
-      console.log(`   ✓ Enviado com sucesso! (ID: ${sendRes.id})`);
+        const targetNumber = wa.jid ? wa.jid.replace(/@.*$/, '') : phone;
 
-      // 6. Atualização no Banco de Dados
-      await pool.query(`
-        UPDATE sales_leads
-        SET stage = 'awaiting_reply',
-            attempt_count = attempt_count + 1,
-            last_contact_at = now(),
-            metadata = jsonb_set(
-              COALESCE(metadata, '{}'::jsonb),
-              '{outreach_strategy}',
-              '"trojan_inquiry_step1"'::jsonb
+        // 4. Digitação humana (4 a 6 segundos)
+        const typingMs = 4000 + Math.floor(Math.random() * 2500);
+        console.log(`   ⏳ Simulando digitação por ${(typingMs / 1000).toFixed(1)}s...`);
+        await sendEvolutionV2Presence({ phone: targetNumber, presence: 'composing', delayMs: typingMs }, evoConfig);
+        await sleep(typingMs);
+
+        // 5. Envio real via Evolution API
+        const sendRes = await sendEvolutionV2SalesText({ phone: targetNumber, text: msg }, evoConfig);
+        console.log(`   ✓ Enviado com sucesso! (ID: ${sendRes.id})`);
+
+        // 6. Atualização no Banco de Dados
+        await pool.query(`
+          UPDATE sales_leads
+          SET stage = 'awaiting_reply',
+              attempt_count = attempt_count + 1,
+              last_contact_at = now(),
+              metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb),
+                '{outreach_strategy}',
+                '"trojan_inquiry_step1"'::jsonb
+              ),
+              updated_at = now()
+          WHERE id = $1
+        `, [lead.id]);
+
+        // 7. Registro em sales_messages
+        await pool.query(`
+          INSERT INTO sales_messages (
+            lead_id, provider_message_id, direction,
+            body, status, requires_approval, sent_at, metadata, created_at
+          ) VALUES (
+            $1, $2, 'outbound',
+            $3, 'sent', false, now(),
+            jsonb_build_object(
+              'kind', 'trojan_inquiry_step1',
+              'step', 1,
+              'turn', 'noite',
+              'batch_date', '2026-10-29'
             ),
-            updated_at = now()
-        WHERE id = $1
-      `, [lead.id]);
+            now()
+          ) ON CONFLICT (provider_message_id) DO NOTHING
+        `, [lead.id, sendRes.id, msg]);
 
-      // 7. Registro em sales_messages
-      await pool.query(`
-        INSERT INTO sales_messages (
-          lead_id, provider_message_id, direction,
-          body, status, requires_approval, sent_at, metadata, created_at
-        ) VALUES (
-          $1, $2, 'outbound',
-          $3, 'sent', false, now(),
-          jsonb_build_object(
-            'kind', 'trojan_inquiry_step1',
-            'step', 1,
-            'turn', 'noite',
-            'batch_date', '2026-10-29'
-          ),
-          now()
-        ) ON CONFLICT (provider_message_id) DO NOTHING
-      `, [lead.id, sendRes.id, msg]);
-
-      sentCount++;
+        sentCount++;
+      } catch (sendErr) {
+        console.error(`   ❌ Falha ao enviar para ${lead.business_name}:`, sendErr.message);
+        await pool.query(`UPDATE sales_leads SET stage = 'send_failed', metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('last_send_error', $1::text), updated_at = now() WHERE id = $2`, [sendErr.message, lead.id]);
+      }
 
       // 8. Delay anti-ban entre mensagens (45s a 75s) se houver próximo lead
       if (i < leads.length - 1) {
@@ -179,3 +194,4 @@ main().catch(err => {
   console.error("ERRO FATAL:", err);
   process.exit(1);
 });
+
