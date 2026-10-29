@@ -21,7 +21,10 @@ async function sleep(ms) {
 const PROTECTED_PHONES = new Set([
   '5514997013801', // Marmitaria La Mineira
   '5514996668189', // DONA NITA MARMITARIA
-  '5514998325915'  // Bom Sabor marmitaria
+  '5514998325915', // Bom Sabor marmitaria
+  '5514997992631', // Café da Di
+  '5514996237187', // Sabor Brasil
+  '5514991011313'  // Smash League Burger
 ]);
 
 // --------------------------------------------------------------------------
@@ -88,14 +91,19 @@ async function handleAllInboundWithAI(evoConfig) {
 
   const now = new Date();
   const rows = pendingRes.rows.filter(r => {
-    // Lead protegido manualmente
+    // 1. Lead protegido manualmente
     if (PROTECTED_PHONES.has(r.phone) || PROTECTED_PHONES.has(r.normalized_phone)) return false;
 
     const inTime = new Date(r.inbound_time);
     const outTime = r.outbound_time ? new Date(r.outbound_time) : new Date(0);
     const diffFromInbound = (now.getTime() - inTime.getTime()) / 1000;
     
-    // Processa se a última mensagem foi inbound e com pelo menos 20 segundos de debounce para digitação contínua
+    // 2. Trava de Mensagens Antigas (Stale Inbound): se a mensagem inbound chegou há mais de 3 horas, NÃO responder de surpresa!
+    if (diffFromInbound > 3 * 3600) {
+      return false;
+    }
+
+    // 3. Processa se a última mensagem foi inbound e com pelo menos 20 segundos de debounce para digitação contínua
     return inTime > outTime && diffFromInbound >= 20;
   });
 
@@ -124,7 +132,72 @@ async function handleAllInboundWithAI(evoConfig) {
         continue;
       }
 
-      // 2. Trava anti-flood: verificar se alguma mensagem outbound foi enviada nos últimos 40 segundos
+      // 2. Trava de Frequência Diária: no máximo 2 outbounds por lead nas últimas 24 horas
+      const recentOutbounds = await client.query(`
+        SELECT count(*)::int as count 
+        FROM sales_messages 
+        WHERE lead_id = $1 
+          AND direction = 'outbound' 
+          AND created_at >= now() - INTERVAL '24 hours'
+      `, [row.lead_id]);
+
+      if (recentOutbounds.rows[0]?.count >= 2) {
+        console.log(`  ⏹️ [Limite Diário Atingido] Lead ${row.business_name} já recebeu ${recentOutbounds.rows[0].count} mensagens nas últimas 24h. Pausando para evitar incômodo.`);
+        await client.query(`
+          UPDATE sales_leads 
+          SET stage = 'human_handoff', 
+              automation_status = 'stopped',
+              metadata = COALESCE(metadata, '{}'::jsonb) || '{"paused_reason": "daily_rate_limit_exceeded"}'::jsonb,
+              updated_at = now()
+          WHERE id = $1
+        `, [row.lead_id]);
+        await client.query('COMMIT');
+        client.release();
+        continue;
+      }
+
+      // 3. Detecção de Bot / Auto-Reply de WhatsApp Business
+      const lastInboundText = String(row.last_inbound || '').toLowerCase();
+      const isAutoReply = (
+        lastInboundText.includes('agradece seu contato') ||
+        lastInboundText.includes('como podemos ajudar') ||
+        lastInboundText.includes('atendimento automático') ||
+        lastInboundText.includes('mensagem automática') ||
+        lastInboundText.includes('fora do nosso horário') ||
+        lastInboundText.includes('no momento estamos ausentes') ||
+        lastInboundText.includes('horário de funcionamento') ||
+        lastInboundText.includes('pedidos delivery ou retirada somente pelo site') ||
+        lastInboundText.includes('acesse o aplicativo') ||
+        lastInboundText.includes('digite 1 para') ||
+        lastInboundText.includes('digite 2 para')
+      );
+
+      const previousInbounds = await client.query(`
+        SELECT body FROM sales_messages 
+        WHERE lead_id = $1 AND direction = 'inbound' 
+        ORDER BY created_at DESC LIMIT 3
+      `, [row.lead_id]);
+
+      if (isAutoReply && previousInbounds.rows.length >= 2) {
+        const bodies = previousInbounds.rows.map(b => b.body?.trim().toLowerCase());
+        const isRepeatedBot = bodies.length >= 2 && bodies[0] === bodies[1];
+        if (isRepeatedBot) {
+          console.log(`  🤖 [Bot Loop Detectado] Lead ${row.business_name} está enviando auto-respostas repetidas. Pausando automação para não ping-pongar.`);
+          await client.query(`
+            UPDATE sales_leads 
+            SET stage = 'human_handoff', 
+                automation_status = 'stopped',
+                metadata = COALESCE(metadata, '{}'::jsonb) || '{"paused_reason": "bot_loop_detected"}'::jsonb,
+                updated_at = now()
+            WHERE id = $1
+          `, [row.lead_id]);
+          await client.query('COMMIT');
+          client.release();
+          continue;
+        }
+      }
+
+      // 4. Trava anti-flood: verificar se alguma mensagem outbound foi enviada nos últimos 40 segundos
       const recentOutbound = await client.query(`
         SELECT created_at FROM sales_messages 
         WHERE lead_id = $1 AND direction = 'outbound' 
