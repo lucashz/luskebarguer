@@ -42,9 +42,11 @@ Você atende donos e gerentes de restaurantes, marmitarias, hamburguerias e deli
 
   Se curtir, pode me mandar uma foto ou PDF do seu cardápio atual por aqui mesmo que a nossa equipe cadastra seus produtos e preços reais hoje pra você testar grátis!"
   (action: "deliver_demo", delivered_link: true)
-- Recebimento de Foto/PDF do Cardápio: Se o lojista enviar foto, PDF ou avisar que enviou o cardápio:
-  Responda: "Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!"
-  (action: "human_handoff", delivered_link: false)
+- Recebimento de Foto/PDF do Cardápio: Se o lojista enviar foto, PDF ou avisar que enviou o cardápio, NUNCA diga que está montando uma versão oficial nem o deixe esperando. Entregue IMEDIATAMENTE a demonstração pronta do cardápio digital (action: "deliver_demo", delivered_link: true):
+  "Show de bola! Já deixei pronta uma prévia rápida no celular do cardápio digital de vocês com fotos e taxa zero:
+  👉 {candidateMenuUrl}
+
+  O cliente escolhe os itens em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha. Dá uma olhada e me fala o que achou da agilidade!"
 - Se o lojista citar concorrente (Anota AI, Goomer, Cardápio Web, iFood, etc.):
   Seja consultivo, pergunte se estão satisfeitos com agilidade e custos e ofereça a demonstração TáPronto sem comissão para comparar sem compromisso.
 
@@ -239,15 +241,16 @@ export function generateDeterministicFallback({
     };
   }
 
-  // 2. Envio de foto / PDF / cardápio pelo lead
-  const isMenuMedia = /\b(pdf|\.pdf|cardapio|cardápio|foto|tabela|anexo|segue o cardapio|segue o cardápio)\b/i.test(text);
+  // 2. Envio de foto / PDF / cardápio pelo lead -> Entrega IMEDIATA da demonstração pronta!
+  const isMenuMedia = /\b(pdf|\.pdf|cardapio|cardápio|foto|tabela|anexo|segue o cardapio|segue o cardápio|vou te mandar|mandei)\b/i.test(text);
   if (isMenuMedia) {
+    const cleanUrl = menuUrl.replace(/\?[^\s]+$/, '');
     return {
-      reply_text: 'Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!',
-      action: 'human_handoff',
-      delivered_link: false,
+      reply_text: `Show de bola! Já deixei pronta uma prévia rápida no celular do cardápio digital de vocês com fotos e taxa zero:\n\n👉 ${cleanUrl}\n\nO cliente escolhe os itens em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha. Dá uma olhada e me fala o que achou da agilidade!`,
+      action: 'deliver_demo',
+      delivered_link: true,
       confidence: 0.98,
-      reasoning: 'Lead enviou cardápio/mídia. Encaminhado para onboarding assistido com confirmação.'
+      reasoning: 'Lead enviou cardápio/mídia. Entrega imediata da demonstração pronta do cardápio digital.'
     };
   }
 

@@ -233,7 +233,7 @@ export function generateStoreSlug(businessName) {
 }
 
 export function resolveSegmentMenuData(rawSegment, businessName, city, state) {
-  const seg = String(rawSegment || '').toLowerCase();
+  const seg = `${String(rawSegment || '')} ${String(businessName || '')}`.toLowerCase();
   const loc = [city, state].filter(Boolean).join(' - ') || 'Brasil';
 
   if (seg.includes('padaria') || seg.includes('confeitaria') || seg.includes('panificadora')) {

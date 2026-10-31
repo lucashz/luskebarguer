@@ -62,10 +62,13 @@ if (!step3.includes('impressora de vocês') || !step3.includes('foto do seu card
   throw new Error('Passo 3 com falha de conteúdo');
 }
 
-// 6. Confirmação de recebimento de cardápio
-const mediaReply = buildValueFirstMediaReceivedReply();
-console.log('\n--- CONFIRMAÇÃO DE CARDÁPIO RECEBIDO: ---');
+// 6. Resposta ao envio de foto/PDF: Entrega IMEDIATA do cardápio pronto
+const mediaReply = buildValueFirstMediaReceivedReply({ menuUrl: 'https://taprontomenu.com.br/jacare-burger' });
+console.log('\n--- ENTREGA DE CARDÁPIO PRONTO APÓS MÍDIA: ---');
 console.log(mediaReply);
+if (!mediaReply.includes('taprontomenu.com.br/jacare-burger') || !mediaReply.includes('Painel Gestor')) {
+  throw new Error('Falha na resposta ao cardápio enviado');
+}
 
 // 7. Testes de classificadores
 console.log('\n--- CLASSIFICADORES: ---');

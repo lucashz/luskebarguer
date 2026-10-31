@@ -6,6 +6,7 @@ import {
   sendEvolutionV2Presence
 } from '../src/lib/evolution-v2-sales.js';
 import { generateAiSalesReply } from '../src/lib/sales-conversational-ai.js';
+import { provisionOutreachStore } from '../src/lib/outreach-store-provisioning.js';
 import { readFile } from 'node:fs/promises';
 
 try { process.loadEnvFile?.('.env'); } catch {}
@@ -284,12 +285,32 @@ async function handleAllInboundWithAI(evoConfig) {
         continue;
       }
 
-      if (aiDecision.action === 'human_handoff' || aiDecision.action === 'assisted_setup') {
-        // Se a mensagem do cliente contiver menção a envio de cardápio / PDF / foto, enviar confirmação imediata
-        const isMediaSent = /\b(pdf|\.pdf|cardapio|cardápio|foto|tabela|anexo|segue|mandei)\b/i.test(lastInboundText);
-        const replyText = isMediaSent
-          ? 'Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!'
-          : (aiDecision.reply_text || 'Entendido! Já estou encaminhando para o nosso especialista dar sequência com você por aqui.');
+      // 5.1. Se o cliente enviou cardápio / foto / PDF / menção a envio, entregar o cardápio pronto IMEDIATAMENTE
+      const isMediaSent = /\b(pdf|\.pdf|cardapio|cardápio|foto|tabela|anexo|segue|mandei|vou te mandar|olha o cardapio)\b/i.test(lastInboundText);
+      if (isMediaSent) {
+        if (!storeId || !meta.menu_slug) {
+          try {
+            const prov = await provisionOutreachStore({ lead: row, pool, baseUrl: 'https://taprontomenu.com.br' });
+            if (prov?.ok) {
+              storeId = prov.storeId;
+              meta.menu_slug = prov.slug;
+              meta.menu_url = prov.menuUrl;
+            }
+          } catch (provErr) {
+            console.error(`  ⚠️ Erro ao auto-provisionar loja para ${row.business_name}:`, provErr.message);
+          }
+        }
+
+        const readyMenuUrl = `https://taprontomenu.com.br/${meta.menu_slug || row.business_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+        aiDecision.action = 'deliver_demo';
+        aiDecision.delivered_link = true;
+        aiDecision.confidence = 0.99;
+        aiDecision.reasoning = 'Lead enviou cardápio/mídia. Entrega imediata da prévia pronta do cardápio digital.';
+        aiDecision.reply_text = `Show de bola! Já deixei pronta uma prévia rápida no celular do cardápio digital de vocês com fotos e taxa zero:\n\n👉 ${readyMenuUrl}\n\nO cliente escolhe os itens em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha. Dá uma olhada e me fala o que achou da agilidade!`;
+      }
+
+      if ((aiDecision.action === 'human_handoff' || aiDecision.action === 'assisted_setup') && !isMediaSent) {
+        const replyText = aiDecision.reply_text || 'Entendido! Já estou encaminhando para o nosso especialista dar sequência com você por aqui.';
 
         await sendEvolutionV2Presence({ phone, presence: 'composing', delayMs: 4500 }, evoConfig);
         const sendRes = await sendEvolutionV2SalesText({ phone, text: replyText }, evoConfig);
@@ -301,23 +322,22 @@ async function handleAllInboundWithAI(evoConfig) {
           ) VALUES (
             $1, $2, $3, 'outbound',
             $4, 'sent', now(),
-            jsonb_build_object('kind', 'assisted_setup_cardapio_received', 'reasoning', $5::text),
+            jsonb_build_object('kind', 'assisted_setup_handoff', 'reasoning', $5::text),
             now()
           ) ON CONFLICT (provider_message_id) DO NOTHING
-        `, [row.lead_id, row.conv_id, sendRes.id, replyText, aiDecision.reasoning || 'Cardápio recebido']);
+        `, [row.lead_id, row.conv_id, sendRes.id, replyText, aiDecision.reasoning || 'Encaminhado para especialista']);
 
         await client.query(`
           UPDATE sales_leads
           SET stage = 'human_handoff',
               automation_status = 'stopped',
               stop_reason = $2,
-              metadata = COALESCE(metadata, '{}'::jsonb) || '{"assisted_setup": true, "has_sent_menu_media": true}'::jsonb,
               updated_at = now()
           WHERE id = $1
-        `, [row.lead_id, isMediaSent ? 'Cardápio recebido para cadastro assistido' : (aiDecision.reasoning || 'Encaminhado para atendimento humano')]);
+        `, [row.lead_id, aiDecision.reasoning || 'Encaminhado para atendimento humano']);
 
         await client.query('COMMIT');
-        console.log(`  ℹ️ Lead ${row.business_name} transferido para atendimento humano (onboarding assistido).`);
+        console.log(`  ℹ️ Lead ${row.business_name} transferido para atendimento humano.`);
         continue;
       }
 
@@ -359,17 +379,18 @@ async function handleAllInboundWithAI(evoConfig) {
 
         const nextStrategy = aiDecision.delivered_link ? 'value_first_demo_delivered' : (meta.outreach_strategy || 'value_first_in_conversation');
 
-        await client.query(`
+        let updatedMetaQuery = `
           UPDATE sales_leads
           SET metadata = jsonb_set(
                 COALESCE(metadata, '{}'::jsonb),
                 '{outreach_strategy}', $2::jsonb
-              ),
+              ) || CASE WHEN $3::boolean THEN '{"assisted_setup": true, "has_sent_menu_media": true}'::jsonb ELSE '{}'::jsonb END,
               stage = 'engaged',
               last_contact_at = now(),
               updated_at = now()
           WHERE id = $1
-        `, [row.lead_id, JSON.stringify(nextStrategy)]);
+        `;
+        await client.query(updatedMetaQuery, [row.lead_id, JSON.stringify(nextStrategy), Boolean(isMediaSent)]);
 
         console.log(`  ✓ Resposta enviada com sucesso para ${row.business_name}!`);
       }

@@ -156,8 +156,12 @@ A estratégia comercial abandonou completamente o antigo "Cavalo de Troia" (que 
 
 ### 4.4. Tratamento Inteligente de Respostas Inbound (Classificador)
 - **Envio de Foto ou PDF do Cardápio pelo Lojista:**
-  - Resposta imediata: *"Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!"*
-  - Estágio atualizado para **Atendimento Humano** (`stage = 'human_handoff'`, `metadata->>'assisted_setup' = 'true'`), destacando o contato no topo da Central para a equipe cadastrar o cardápio oficial.
+  - **Regra Inegociável:** NUNCA deixar o lead esperando com promessas de "montar versão oficial". A demonstração da loja já está provisionada! O sistema entrega IMEDIATAMENTE a prévia pronta do cardápio digital com fotos gastronômicas de alta qualidade:
+  > *"Show de bola! Já deixei pronta uma prévia rápida no celular do cardápio digital de vocês com fotos e taxa zero:*
+  > 👉 {candidateMenuUrl}
+  > 
+  > *O cliente escolhe os itens em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha. Dá uma olhada e me fala o que achou da agilidade!"*
+  - Estágio atualizado para **Engajado** (`stage = 'engaged'`, `metadata->>'assisted_setup' = 'true'`, `metadata->>'has_sent_menu_media' = 'true'`), com acompanhamento ativo no topo da Central.
 - **Detecção de Robô / URA:**
   - Se menu com opções numéricas: envia `"1"` ou opção de pedidos/cardápio.
   - Se menu genérico: solicita falar com o responsável/atendente.

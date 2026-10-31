@@ -8,6 +8,7 @@ import {
 } from '../src/lib/evolution-v2-sales.js';
 import { processAllInboundTrojan } from './handle-inbound-trojan.mjs';
 import { buildValueFirstStep1 } from '../src/lib/sales-automation.js';
+import { provisionOutreachStore } from '../src/lib/outreach-store-provisioning.js';
 
 try { process.loadEnvFile?.('.env'); } catch {}
 
@@ -103,6 +104,19 @@ export async function dispatchSingleLead(lead, evoConfig) {
         updated_at = now()
     WHERE id = $1
   `, [lead.id, waCheck.jid]);
+
+  // 2.5. Garantir provisionamento da loja demonstrativa com fotos gastronômicas de alta qualidade
+  if (!lead.metadata?.menu_slug) {
+    try {
+      const prov = await provisionOutreachStore({ lead, pool, baseUrl: 'https://taprontomenu.com.br' });
+      if (prov?.ok) {
+        lead.metadata = { ...lead.metadata, menu_slug: prov.slug, menu_url: prov.menuUrl, store_id: prov.storeId };
+        console.log(`  🏪 Loja demonstrativa pronta: ${prov.menuUrl}`);
+      }
+    } catch (errProv) {
+      console.warn(`  ⚠️ Aviso ao provisionar loja para ${lead.business_name}:`, errProv.message);
+    }
+  }
 
   // 3. Montar mensagem Passo 1 (Value-First Transparente, Direto e Curto)
   const msg = buildValueFirstStep1(lead);

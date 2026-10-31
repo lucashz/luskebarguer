@@ -148,10 +148,12 @@ export function buildValueFirstStep3Followup() {
 }
 
 /**
- * Confirmação de recebimento de foto/PDF do cardápio
+ * Resposta de entrega imediata do cardápio pronto ao receber foto/PDF do cardápio do lead
  */
-export function buildValueFirstMediaReceivedReply() {
-  return `Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!`;
+export function buildValueFirstMediaReceivedReply({ menuUrl = '' } = {}) {
+  const cleanUrl = String(menuUrl || '').replace(/\?[^\s]+$/, '');
+  const urlSnippet = cleanUrl ? `\n\n👉 ${cleanUrl}\n\n` : '\n\n';
+  return `Show de bola! Já deixei pronta uma prévia rápida no celular do cardápio digital de vocês com fotos e taxa zero:${urlSnippet}O cliente escolhe os itens em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha. Dá uma olhada e me fala o que achou da agilidade!`;
 }
 
 export function isAffirmativeSalesReply(text = '') {
