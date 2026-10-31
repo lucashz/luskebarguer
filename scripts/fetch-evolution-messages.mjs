@@ -1,35 +1,67 @@
-import { evolutionV2SalesConfig, evolutionV2Request } from '../src/lib/evolution-v2-sales.js';
+import { evolutionV2Request } from '../src/lib/evolution-v2-sales.js';
+import pg from 'pg';
+import dotenv from 'dotenv';
+dotenv.config();
 
-try { process.loadEnvFile?.('.env'); } catch {}
+async function run() {
+  const pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:5433/cardapio'
+  });
 
-const cfg = evolutionV2SalesConfig();
+  // Get leads contacted today
+  const leadsRes = await pool.query(`
+    SELECT id, business_name, phone, normalized_phone, stage
+    FROM sales_leads
+    WHERE normalized_phone IS NOT NULL
+    ORDER BY updated_at DESC
+    LIMIT 100;
+  `);
 
-async function main() {
-  console.log('Consultando mensagens na Evolution API...');
-  
-  // Testar endpoint de mensagens
-  const endpoints = [
-    `/chat/findMessages/${cfg.instance}`,
-    `/chat/findChats/${cfg.instance}`
-  ];
+  console.log(`Checking messages in Evolution API for ${leadsRes.rows.length} leads...`);
 
-  for (const ep of endpoints) {
+  const repliesFound = [];
+
+  for (const lead of leadsRes.rows) {
+    const remoteJid = `${lead.normalized_phone}@s.whatsapp.net`;
     try {
-      console.log(`Tentando POST ${ep}...`);
-      const res = await evolutionV2Request(ep, {
+      // Find messages for this remoteJid
+      const data = await evolutionV2Request(`/chat/findMessages/tapronto`, {
         method: 'POST',
         body: JSON.stringify({
-          where: {},
+          where: {
+            key: {
+              remoteJid: remoteJid
+            }
+          },
           limit: 10
         })
-      }, cfg);
-      console.log(`Sucesso em ${ep}!`);
-      console.log(JSON.stringify(res, null, 2).slice(0, 1000));
-      return;
-    } catch (e) {
-      console.log(`Falha em POST ${ep}: ${e.message}`);
+      });
+
+      const records = data?.messages?.records || data?.records || (Array.isArray(data) ? data : []);
+      // Check if there are messages from the lead (fromMe === false)
+      const inboundMsgs = records.filter(m => m.key?.fromMe === false);
+      if (inboundMsgs.length > 0) {
+        repliesFound.push({
+          lead: lead.business_name,
+          phone: lead.normalized_phone,
+          stage: lead.stage,
+          inboundCount: inboundMsgs.length,
+          messages: inboundMsgs.map(m => ({
+            id: m.key?.id,
+            timestamp: m.messageTimestamp,
+            conversation: m.message?.conversation || m.message?.extendedTextMessage?.text || JSON.stringify(m.message)
+          }))
+        });
+      }
+    } catch (err) {
+      // Ignore or log error
     }
   }
+
+  console.log('\n=== REPLIES FOUND IN WHATSAPP ===');
+  console.log(JSON.stringify(repliesFound, null, 2));
+
+  await pool.end();
 }
 
-main().catch(console.error);
+run();

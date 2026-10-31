@@ -86,7 +86,7 @@ async function callCloudflareAI(messages, model = PRIMARY_MODEL) {
   }
 
   const data = await response.json();
-  const rawOutput = data?.result?.response;
+  const rawOutput = data?.result?.response ?? data?.result?.choices?.[0]?.message?.content;
   if (!rawOutput) {
     throw new Error(`Cloudflare AI retornou resposta vazia (${model})`);
   }
@@ -97,24 +97,59 @@ async function callCloudflareAI(messages, model = PRIMARY_MODEL) {
 /**
  * Sanitiza e extrai o JSON da resposta do modelo
  */
-function parseAiJsonResponse(rawText = '') {
-  let text = String(rawText || '').trim();
-  
+function parseAiJsonResponse(rawInput = '') {
+  // Se o Cloudflare Workers AI já retornou um objeto JS parseado
+  if (typeof rawInput === 'object' && rawInput !== null) {
+    if (rawInput.reply_text && typeof rawInput.reply_text === 'string') {
+      return {
+        reply_text: rawInput.reply_text.trim(),
+        action: rawInput.action || 'continue_conversation',
+        delivered_link: Boolean(rawInput.delivered_link || rawInput.reply_text.includes('http')),
+        confidence: Number(rawInput.confidence) || 0.95,
+        reasoning: String(rawInput.reasoning || 'Objeto estruturado direto do modelo Cloudflare')
+      };
+    }
+  }
+
+  let text = '';
+  if (typeof rawInput === 'string') {
+    text = rawInput.trim();
+  } else if (rawInput !== null && rawInput !== undefined) {
+    text = JSON.stringify(rawInput);
+  }
+
   // Remove markdown code fences se houver
   if (text.startsWith('```json')) {
     text = text.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
   } else if (text.startsWith('```')) {
     text = text.replace(/^```\s*/, '').replace(/\s*```$/, '');
   }
-  
+
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.reply_text) {
-        return parsed;
+      if (parsed.reply_text && typeof parsed.reply_text === 'string') {
+        return {
+          reply_text: parsed.reply_text.trim(),
+          action: parsed.action || 'continue_conversation',
+          delivered_link: Boolean(parsed.delivered_link || parsed.reply_text.includes('http')),
+          confidence: Number(parsed.confidence) || 0.9,
+          reasoning: String(parsed.reasoning || 'JSON extraído com sucesso')
+        };
       }
     } catch {}
+  }
+
+  // Se o texto resultante contiver [object Object], forçar fallback seguro
+  if (text === '[object Object]' || text.includes('[object Object]')) {
+    return {
+      reply_text: '',
+      action: 'continue_conversation',
+      delivered_link: false,
+      confidence: 0.1,
+      reasoning: 'Texto corrompido [object Object] detectado e sanitizado'
+    };
   }
 
   return {
@@ -298,6 +333,18 @@ Com base no histórico e nas regras, gere o JSON com a melhor resposta para a ú
 
   const result = parseAiJsonResponse(rawAiOutput);
   result.reply_text = enforceSafetyRules(result.reply_text, menuUrl, result.action);
+
+  if (!result.reply_text || result.reply_text === '[object Object]' || result.reply_text.includes('[object Object]')) {
+    console.warn('[Sales AI] Resposta da IA vazia ou corrompida. Acionando motor determinístico de segurança...');
+    const fallbackResult = generateDeterministicFallback({
+      lead,
+      conversationHistory,
+      candidateMenuUrl: menuUrl,
+      featuredItem
+    });
+    fallbackResult.reply_text = enforceSafetyRules(fallbackResult.reply_text, menuUrl, fallbackResult.action);
+    return fallbackResult;
+  }
 
   return result;
 }

@@ -77,6 +77,7 @@ export async function sendEvolutionV2SalesText({ phone, text }, config = evoluti
   const body = String(text || '').replace(/[^\S\r\n]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
   if (!/^55\d{10,11}$/.test(number)) throw new Error('Informe um telefone brasileiro válido para o envio.');
   if (!body) throw new Error('Informe o texto da mensagem.');
+  if (body === '[object Object]' || body.includes('[object Object]')) throw new Error('Falha de integridade: envio de [object Object] bloqueado.');
   const data = await evolutionV2Request(`/message/sendText/${encodeURIComponent(config.instance)}`, {
     method: 'POST', body: JSON.stringify({ number, text: body })
   }, config, fetchImpl);
