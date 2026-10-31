@@ -7,7 +7,7 @@ import {
   sendEvolutionV2Presence
 } from '../src/lib/evolution-v2-sales.js';
 import { processAllInboundTrojan } from './handle-inbound-trojan.mjs';
-import { buildHarveyStep1 } from '../src/lib/harvey-outbound-engine.js';
+import { buildValueFirstStep1 } from '../src/lib/sales-automation.js';
 
 try { process.loadEnvFile?.('.env'); } catch {}
 
@@ -18,23 +18,23 @@ const DAILY_TARGET_LEADS = 40;
 const COMMERCIAL_WINDOW_START_HOUR = 9;
 const COMMERCIAL_WINDOW_START_MINUTE = 15;
 const COMMERCIAL_WINDOW_END_HOUR = 19;
-const COMMERCIAL_WINDOW_END_MINUTE = 30;
+const COMMERCIAL_WINDOW_END_MINUTE = 0;
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // --------------------------------------------------------------------------
-// MENSAGEM PASSO 1: PADRÃO HARVEY ANTI-AI (CURIOSIDADE & PERMISSÃO)
+// MENSAGEM PASSO 1: PADRÃO VALUE-FIRST CONSULTIVO (DIRETO E TRANSPARENTE)
 // --------------------------------------------------------------------------
 export function buildInquiryMessage(lead) {
-  return buildHarveyStep1(lead);
+  return buildValueFirstStep1(lead);
 }
 
 // --------------------------------------------------------------------------
 // SELEÇÃO SORTIDA DE CANDIDATOS (100% Mista entre todos os nichos)
 // --------------------------------------------------------------------------
-async function getAssortedCandidates(limit = 1) {
+export async function getAssortedCandidates(limit = 1) {
   const query = `
     SELECT id, business_name, city, state, segment, phone, normalized_phone, metadata, score
     FROM sales_leads
@@ -55,12 +55,12 @@ async function getAssortedCandidates(limit = 1) {
 // --------------------------------------------------------------------------
 // CONTAGEM DE DISPAROS DO PASSO 1 HOJE
 // --------------------------------------------------------------------------
-async function countStep1SentToday() {
+export async function countStep1SentToday() {
   const res = await pool.query(`
     SELECT count(*)::int AS count
     FROM sales_messages
     WHERE direction = 'outbound'
-      AND (metadata->>'kind' = 'trojan_inquiry_step1' OR body LIKE '%delivery%')
+      AND (metadata->>'kind' IN ('step1_direct_value', 'trojan_inquiry_step1') OR body LIKE '%TáPronto%')
       AND created_at >= (CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo')
   `);
   return res.rows[0]?.count || 0;
@@ -72,13 +72,13 @@ async function countStep1SentToday() {
 export async function dispatchSingleLead(lead, evoConfig) {
   const phone = lead.normalized_phone || lead.phone;
   console.log(`\n----------------------------------------------------------------`);
-  console.log(`🔍 Avaliando lead: ${lead.business_name} (${phone}) - ${lead.city}/${lead.state} [${lead.segment}]`);
+  console.log(`🔍 Avaliando lead: ${lead.business_name} (${phone}) - ${lead.city || 'SP'}/${lead.state || 'SP'} [${lead.segment || 'geral'}]`);
 
-  // 1. Validação Real do WhatsApp (inclui celular de 13 dígitos e fixo de 12 dígitos)
+  // 1. Validação Real do WhatsApp (Evolution API v2 - suporta móvel 13 dígitos e fixo 12 dígitos)
   const waCheck = await checkEvolutionV2WhatsappNumber({ phone }, evoConfig);
 
   if (!waCheck.exists) {
-    console.log(`  ❌ WhatsApp INEXISTENTE ou desconectado para ${phone}. Descartando lead para preservar cota...`);
+    console.log(`  ❌ WhatsApp INEXISTENTE para ${phone}. Descartando lead para preservar cota...`);
     await pool.query(`
       UPDATE sales_leads
       SET stage = 'discarded',
@@ -104,15 +104,15 @@ export async function dispatchSingleLead(lead, evoConfig) {
     WHERE id = $1
   `, [lead.id, waCheck.jid]);
 
-  // 3. Montar mensagem Passo 1 (Spintax Dinâmica Universal)
-  const msg = buildInquiryMessage(lead);
-  console.log(`  💬 Mensagem Passo 1: "${msg}"`);
+  // 3. Montar mensagem Passo 1 (Value-First Transparente, Direto e Curto)
+  const msg = buildValueFirstStep1(lead);
+  console.log(`  💬 Mensagem Passo 1 (${msg.length} caracteres):\n"${msg}"`);
 
   // 4. Humanização: Simulação de "Digitando..." (4 a 6 segundos)
-  console.log(`  ⏳ Enviando status "Digitando..." (composing)...`);
-  await sendEvolutionV2Presence({ phone, presence: 'composing', delayMs: 4500 }, evoConfig);
+  console.log(`  ⏳ Enviando status "Digitando..." (composing por 5s)...`);
+  await sendEvolutionV2Presence({ phone, presence: 'composing', delayMs: 5000 }, evoConfig);
 
-  // 5. Sessão de conversa
+  // 5. Sessão de conversa no banco de dados
   let convRes = await pool.query('SELECT id FROM sales_conversations WHERE lead_id = $1 LIMIT 1', [lead.id]);
   let convId;
   if (convRes.rows.length === 0) {
@@ -137,7 +137,7 @@ export async function dispatchSingleLead(lead, evoConfig) {
     ) VALUES (
       $1, $2, $3, 'outbound',
       $4, 'sent', false, now(), now(),
-      jsonb_build_object('kind', 'trojan_inquiry_step1', 'step', 1, 'mode', 'assorted_drip'),
+      jsonb_build_object('kind', 'step1_direct_value', 'step', 1, 'mode', 'value_first_assorted_drip'),
       now()
     ) ON CONFLICT (provider_message_id) DO NOTHING
   `, [lead.id, convId, sendRes.id, msg]);
@@ -145,7 +145,7 @@ export async function dispatchSingleLead(lead, evoConfig) {
   // 8. Atualização do status do lead
   await pool.query(`
     UPDATE sales_leads
-    SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{outreach_strategy}', '"trojan_inquiry_step1"'::jsonb),
+    SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{outreach_strategy}', '"value_first_outreach"'::jsonb),
         attempt_count = attempt_count + 1,
         last_contact_at = now(),
         stage = 'awaiting_reply',
@@ -153,16 +153,16 @@ export async function dispatchSingleLead(lead, evoConfig) {
     WHERE id = $1
   `, [lead.id]);
 
-  console.log(`  🚀 Passo 1 enviado com sucesso! (ID: ${sendRes.id})`);
+  console.log(`  🚀 Passo 1 (Value-First) enviado com sucesso! (ID: ${sendRes.id})`);
   return { sent: true, providerId: sendRes.id };
 }
 
 // --------------------------------------------------------------------------
 // MODO TESTE DE LOTE SORTIDO (CLI)
 // --------------------------------------------------------------------------
-async function runTestBatch(targetCount = 2) {
+export async function runTestBatch(targetCount = 3) {
   console.log(`\n================================================================`);
-  console.log(`  INICIANDO LOTE DE TESTE SORTIDO (${targetCount} LEADS) `);
+  console.log(`  INICIANDO LOTE PILOTO VALUE-FIRST SORTIDO (${targetCount} LEADS) `);
   console.log(`================================================================\n`);
 
   const evoConfig = evolutionV2SalesConfig();
@@ -198,16 +198,18 @@ async function runTestBatch(targetCount = 2) {
     }
   }
 
-  console.log(`\n🏁 Teste sortido concluído: ${sentCount} enviados com sucesso.`);
+  console.log(`\n🏁 Teste piloto concluído: ${sentCount} lead(s) enviados com sucesso com o fluxo Value-First.`);
+  return { sentCount };
 }
 
 // --------------------------------------------------------------------------
-// ORQUESTRADOR CONTÍNUO AUTÔNOMO (40 LEADS / DIA - 09h15 às 19h30 SORTIDOS)
+// ORQUESTRADOR CONTÍNUO AUTÔNOMO (40 LEADS / DIA - 09h15 às 19h00 SORTIDOS)
 // --------------------------------------------------------------------------
 export async function runAutonomousOutreachLoop() {
   console.log('================================================================');
   console.log('   ORQUESTRADOR DIÁRIO AUTÔNOMO TÁPRONTO (40 LEADS / DIA)       ');
-  console.log('   Janela Contínua Sortida: 09h15 às 19h30 (Todos os Nichos)   ');
+  console.log('   Metodologia: Value-First Transparente (2 Passos + Follow-up)');
+  console.log('   Janela Contínua Sortida: 09h15 às 19h00 (Todos os Nichos)   ');
   console.log('   Gotejamento Orgânico com Delay Anti-ban (45 a 85s)          ');
   console.log('================================================================\n');
 
@@ -215,7 +217,7 @@ export async function runAutonomousOutreachLoop() {
 
   while (true) {
     try {
-      // 1. Processar sempre os inbounds (Step 2, Step 3 e Ghosting Recovery) a cada ciclo
+      // 1. Processar sempre os inbounds (Step 2 Demo, Step 3 Followup, Cardápios e Ghosting)
       await processAllInboundTrojan();
 
       // 2. Verificar horário comercial atual
@@ -224,16 +226,16 @@ export async function runAutonomousOutreachLoop() {
       const minute = now.getMinutes();
       const totalMinutes = hour * 60 + minute;
       const windowStart = COMMERCIAL_WINDOW_START_HOUR * 60 + COMMERCIAL_WINDOW_START_MINUTE; // 09:15 = 555
-      const windowEnd = COMMERCIAL_WINDOW_END_HOUR * 60 + COMMERCIAL_WINDOW_END_MINUTE;       // 19:30 = 1170
+      const windowEnd = COMMERCIAL_WINDOW_END_HOUR * 60 + COMMERCIAL_WINDOW_END_MINUTE;       // 19:00 = 1140
       const isWithinCommercialWindow = totalMinutes >= windowStart && totalMinutes <= windowEnd;
 
       // 3. Contabilizar envios de hoje
       const sentToday = await countStep1SentToday();
 
       if (isWithinCommercialWindow && sentToday < DAILY_TARGET_LEADS) {
-        // Cálculo de pacing orgânico ao longo do dia
+        // Cálculo de pacing orgânico contínuo ao longo do dia (585 minutos totais)
         const windowElapsed = totalMinutes - windowStart;
-        const totalWindowDuration = windowEnd - windowStart; // 615 minutos
+        const totalWindowDuration = windowEnd - windowStart; // 585 minutos
         const expectedPacedTarget = Math.max(1, Math.min(DAILY_TARGET_LEADS, Math.floor((windowElapsed / totalWindowDuration) * DAILY_TARGET_LEADS) + 1));
 
         if (sentToday < expectedPacedTarget) {
@@ -267,7 +269,7 @@ const isDirect = process.argv[1] && /autonomous-daily-outreach\.mjs$/i.test(proc
 if (isDirect) {
   const mode = process.argv[2];
   if (mode === 'test-batch') {
-    const count = Number(process.argv[3]) || 2;
+    const count = Number(process.argv[3]) || 3;
     runTestBatch(count)
       .then(() => pool.end())
       .catch((e) => { console.error(e); pool.end(); });

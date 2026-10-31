@@ -284,18 +284,40 @@ async function handleAllInboundWithAI(evoConfig) {
         continue;
       }
 
-      if (aiDecision.action === 'human_handoff') {
+      if (aiDecision.action === 'human_handoff' || aiDecision.action === 'assisted_setup') {
+        // Se a mensagem do cliente contiver menção a envio de cardápio / PDF / foto, enviar confirmação imediata
+        const isMediaSent = /\b(pdf|\.pdf|cardapio|cardápio|foto|tabela|anexo|segue|mandei)\b/i.test(lastInboundText);
+        const replyText = isMediaSent
+          ? 'Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!'
+          : (aiDecision.reply_text || 'Entendido! Já estou encaminhando para o nosso especialista dar sequência com você por aqui.');
+
+        await sendEvolutionV2Presence({ phone, presence: 'composing', delayMs: 4500 }, evoConfig);
+        const sendRes = await sendEvolutionV2SalesText({ phone, text: replyText }, evoConfig);
+
+        await client.query(`
+          INSERT INTO sales_messages (
+            lead_id, conversation_id, provider_message_id, direction,
+            body, status, sent_at, metadata, created_at
+          ) VALUES (
+            $1, $2, $3, 'outbound',
+            $4, 'sent', now(),
+            jsonb_build_object('kind', 'assisted_setup_cardapio_received', 'reasoning', $5::text),
+            now()
+          ) ON CONFLICT (provider_message_id) DO NOTHING
+        `, [row.lead_id, row.conv_id, sendRes.id, replyText, aiDecision.reasoning || 'Cardápio recebido']);
+
         await client.query(`
           UPDATE sales_leads
           SET stage = 'human_handoff',
               automation_status = 'stopped',
               stop_reason = $2,
+              metadata = COALESCE(metadata, '{}'::jsonb) || '{"assisted_setup": true, "has_sent_menu_media": true}'::jsonb,
               updated_at = now()
           WHERE id = $1
-        `, [row.lead_id, aiDecision.reasoning || 'Encaminhado para atendimento humano']);
+        `, [row.lead_id, isMediaSent ? 'Cardápio recebido para cadastro assistido' : (aiDecision.reasoning || 'Encaminhado para atendimento humano')]);
 
         await client.query('COMMIT');
-        console.log(`  ℹ️ Lead ${row.business_name} transferido para atendimento humano.`);
+        console.log(`  ℹ️ Lead ${row.business_name} transferido para atendimento humano (onboarding assistido).`);
         continue;
       }
 
@@ -335,7 +357,7 @@ async function handleAllInboundWithAI(evoConfig) {
           aiDecision.reasoning
         ]);
 
-        const nextStrategy = aiDecision.delivered_link ? 'trojan_demo_delivered' : (meta.outreach_strategy || 'trojan_in_conversation');
+        const nextStrategy = aiDecision.delivered_link ? 'value_first_demo_delivered' : (meta.outreach_strategy || 'value_first_in_conversation');
 
         await client.query(`
           UPDATE sales_leads
@@ -377,10 +399,10 @@ async function handleGhostingRecovery(evoConfig) {
         c.id AS conv_id
       FROM sales_leads l
       JOIN sales_conversations c ON c.lead_id = l.id
-      WHERE l.metadata->>'outreach_strategy' = 'trojan_demo_delivered'
+      WHERE (l.metadata->>'outreach_strategy' = 'value_first_demo_delivered' OR l.metadata->>'outreach_strategy' = 'trojan_demo_delivered')
         AND l.metadata->>'link_clicked' = 'true'
         AND (l.metadata->>'ghosting_followup_sent') IS NULL
-        AND NOW() - (l.metadata->>'last_link_click_at')::timestamptz >= INTERVAL '20 minutes'
+        AND NOW() - (l.metadata->>'last_link_click_at')::timestamptz >= INTERVAL '25 minutes'
         AND NOW() - (l.metadata->>'last_link_click_at')::timestamptz <= INTERVAL '6 hours'
         AND NOT EXISTS (
           SELECT 1 FROM sales_messages m 
@@ -397,7 +419,7 @@ async function handleGhostingRecovery(evoConfig) {
 
     if (ghostRes.rows.length === 0) return;
 
-    console.log(`[Ghosting Recovery] Leads que clicaram há >= 20min e não responderam/pediram: ${ghostRes.rows.length}`);
+    console.log(`[Ghosting Recovery] Leads que clicaram há >= 25min e não responderam/pediram: ${ghostRes.rows.length}`);
 
     for (const lead of ghostRes.rows) {
       if (PROTECTED_PHONES.has(lead.phone) || PROTECTED_PHONES.has(lead.normalized_phone)) continue;
@@ -406,12 +428,7 @@ async function handleGhostingRecovery(evoConfig) {
       const meta = lead.metadata || {};
       const featuredItem = meta.featured_item;
 
-      let ghostMsg;
-      if (featuredItem) {
-        ghostMsg = `Vi que você conseguiu abrir a loja de teste por aí! Experimenta clicar no ${featuredItem} e adicionar um opcional pra você ver a velocidade com que o pedido fecha e simula a comanda pronta pro balcão. Conseguiu testar?`;
-      } else {
-        ghostMsg = `Vi que você conseguiu abrir a demonstração por aí! Experimenta clicar em qualquer item e simular um pedido teste pra você ver como ele fecha em segundos e já chega pronto no Painel Gestor TáPronto com alerta sonoro pro balcão. Conseguiu dar uma olhada?`;
-      }
+      const ghostMsg = `Vi que você conseguiu abrir a prévia do cardápio aí! Ficou alguma dúvida de como os pedidos chegam prontos no computador ou impressora de vocês?\n\nSe quiser testar na prática hoje mesmo, é só me mandar uma foto do seu cardápio atual que eu deixo tudo configurado com os seus preços reais, sem custo.`;
 
       console.log(`  -> Enviando Ghosting Follow-up para ${lead.business_name}...`);
       await sendEvolutionV2Presence({ phone, presence: 'composing', delayMs: 4500 }, evoConfig);
@@ -424,7 +441,7 @@ async function handleGhostingRecovery(evoConfig) {
         ) VALUES (
           $1, $2, $3, 'outbound',
           $4, 'sent', now(),
-          jsonb_build_object('kind', 'ghosting_click_followup', 'step', 3.5),
+          jsonb_build_object('kind', 'step3_click_followup', 'step', 3),
           now()
         ) ON CONFLICT (provider_message_id) DO NOTHING
       `, [lead.lead_id, lead.conv_id, sendRes.id, ghostMsg]);

@@ -64,7 +64,7 @@ function cnpjDigit(value, weights) {
   return rest < 2 ? 0 : 11 - rest;
 }
 
-export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 'expired_15_hours_no_continuity' }) {
+export async function deleteOutreachMenuForLead({ leadId, pool = null, reason = 'expired_72_hours_no_continuity' }) {
   const client = await resolvePool(pool);
   const leadRes = await client.query('SELECT * FROM sales_leads WHERE id = $1 LIMIT 1', [leadId]);
   const lead = leadRes.rows[0];

@@ -169,9 +169,13 @@ function assertConfig(config) {
   if (!config?.instance) throw new Error('Configure a instância comercial da Evolution API v2.');
 }
 function normalizePhone(value) {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (digits.startsWith('55') && digits.length >= 12 && digits.length <= 13) return digits;
-  return digits.length === 10 || digits.length === 11 ? `55${digits}` : digits;
+  let digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0')) digits = digits.replace(/^0+/, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if (digits.length === 12 || digits.length === 13) return digits;
+  return digits;
 }
 function sanitize(message, config) {
   let output = String(message || '');

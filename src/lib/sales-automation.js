@@ -55,11 +55,18 @@ export function salesConfig(env = process.env) {
 }
 
 export function normalizeSalesPhone(value = '') {
-  const digits = String(value || '').replace(/\D/g, '');
+  let digits = String(value || '').replace(/\D/g, '');
   if (!digits) return '';
-  if (digits.startsWith('55') && digits.length >= 12 && digits.length <= 13) return digits;
+  if (digits.startsWith('0')) digits = digits.replace(/^0+/, '');
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return digits;
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if (digits.length === 12 || digits.length === 13) return digits;
   return digits;
+}
+
+export function isValidSalesPhone(value = '') {
+  const norm = normalizeSalesPhone(value);
+  return /^55\d{10,11}$/.test(norm);
 }
 
 export function shouldPauseForEvolutionConnectionState(value = '') {
@@ -79,9 +86,103 @@ export function isOptOutMessage(body = '') {
   return OPT_OUT_PATTERNS.some((pattern) => pattern.test(String(body || '').normalize('NFC')));
 }
 
+export function cleanLeadBusinessName(rawName = '') {
+  return String(rawName || '')
+    .replace(/\s*-\s*(Hamburgueria|Lanchonete|Restaurante|Pizzaria|Marmitaria|Bar|Disk|Delivery|Cafeteria|Rotisseria).*/i, '')
+    .replace(/\s*\|\s*.*/i, '')
+    .replace(/\(.*\)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * PASSO 1: Abordagem Direta, Curta e Transparente (Value-First)
+ * Máximo 350 caracteres, sem fingir compra, com dados reais do Google Maps.
+ */
+export function buildValueFirstStep1(lead = {}, now = new Date()) {
+  const business = cleanLeadBusinessName(lead.business_name || lead.businessName || 'estabelecimento');
+  const city = clean(lead.city || 'região');
+  const meta = lead.metadata || {};
+
+  const rawRating = meta.rating || lead.rating;
+  const ratingNum = rawRating ? Number(String(rawRating).replace(',', '.')) : 0;
+  const reviewsCount = Number(meta.reviews_count || lead.reviews_count || 0);
+
+  const hour = now.getHours();
+  const saudacao = hour >= 18 ? 'Boa noite' : (hour >= 12 ? 'Boa tarde' : 'Bom dia');
+
+  // Com reputação destacada no Google (nota >= 4.0 e reviews)
+  if (ratingNum >= 4.0 && reviewsCount > 0) {
+    const ratingStr = String(ratingNum.toFixed(1)).replace('.', ',');
+    const variations = [
+      `${saudacao}, tudo bem? Vi o perfil da *${business}* aqui no Google (parabéns pela nota ${ratingStr} ⭐!). Sou da TáPronto e montei uma prévia de como ficaria o cardápio digital de vocês pra receber pedidos já somados e prontos pra imprimir na cozinha, sem taxas do iFood. Posso te mandar o link aqui rapidinho pra você ver como ficou?`,
+      `${saudacao}! Tudo certo por aí? Achei a *${business}* pelo Google Maps (muito boas as ${reviewsCount} avaliações de vocês!). Preparei um modelo de demonstração do cardápio digital de vocês onde o cliente faz o pedido sozinho em 30s e já cai direto na impressora do caixa. Posso mandar o link aqui pra você testar sem compromisso?`,
+      `${saudacao}, tudo bom? Encontrei o perfil da *${business}* no Google com nota ${ratingStr} ⭐, parabéns pela reputação! Montei uma prévia ilustrada do cardápio digital de vocês, com pedidos diretos sem comissão e alerta sonoro no balcão. Posso te mandar o link de teste em 30 segundos?`,
+      `${saudacao}! Vi a ótima avaliação da *${business}* no Google (${reviewsCount} avaliações). Sou da equipe TáPronto e preparei uma demonstração rápida no celular para mostrar como agilizar o WhatsApp no pico, com impressão automática na cozinha e taxa zero. Posso enviar o link aqui pra dar uma olhada?`
+    ];
+    return variations[Math.floor(Math.random() * variations.length)].slice(0, 350);
+  }
+
+  // Fallback para estabelecimentos sem nota ou com nota < 4.0 (foco na cidade)
+  const fallbacks = [
+    `${saudacao}, tudo bem? Vi o trabalho da *${business}* aqui em ${city}. Sou da TáPronto e montei uma demonstração prática de como ficaria o cardápio digital de vocês para receber pedidos já somados no balcão, com alerta sonoro e impressão automática sem taxas. Posso te mandar o link aqui pra você testar em 30 segundos?`,
+    `${saudacao}! Tudo certo por aí na *${business}*? Sou da TáPronto e preparei um modelo de cardápio digital no celular pro segmento de vocês em ${city}, onde o pedido já cai somado direto na impressora do caixa. Posso mandar o link aqui rapidinho pra você dar uma olhada sem compromisso?`,
+    `${saudacao}, tudo bem? Sou da equipe TáPronto e montei uma prévia do cardápio digital da *${business}* em ${city}. O cliente escolhe os adicionais em 30s e o pedido cai direto na impressora da cozinha com som estridente e taxa zero. Posso enviar o link pra você dar uma olhada rápida?`
+  ];
+  return fallbacks[Math.floor(Math.random() * fallbacks.length)].slice(0, 350);
+}
+
+/**
+ * PASSO 2: Entrega Imediata da Demo + Gancho de Importação Gratuita
+ */
+export function buildValueFirstStep2({ menuUrl }) {
+  const cleanUrl = String(menuUrl || 'https://taprontomenu.com.br').trim();
+  return `Tá na mão! Dá uma olhada em como ficou o visual:\n👉 ${cleanUrl}\n\nColoquei alguns itens de exemplo com fotos só pra você testar a velocidade. Clica num produto e simula um pedido rápido — ele cai na hora no nosso Painel Gestor com alerta sonoro e impressão automática.\n\nSe curtir, pode me mandar uma foto ou PDF do seu cardápio atual por aqui mesmo que a nossa equipe cadastra seus produtos e preços reais hoje pra você testar grátis!`;
+}
+
+/**
+ * PASSO 3: Follow-up Consultivo Pós-Clique (25 minutos pós-clique sem resposta)
+ */
+export function buildValueFirstStep3Followup() {
+  return `Vi que você conseguiu abrir a prévia do cardápio aí! Ficou alguma dúvida de como os pedidos chegam prontos no computador ou impressora de vocês?\n\nSe quiser testar na prática hoje mesmo, é só me mandar uma foto do seu cardápio atual que eu deixo tudo configurado com os seus preços reais, sem custo.`;
+}
+
+/**
+ * Confirmação de recebimento de foto/PDF do cardápio
+ */
+export function buildValueFirstMediaReceivedReply() {
+  return `Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!`;
+}
+
+export function isAffirmativeSalesReply(text = '') {
+  const cleanText = String(text || '').toLowerCase().trim();
+  const patterns = [
+    /\b(pode|sim|manda|claro|manda ai|manda aí|quero|quero ver|beleza|blz|manda o link|pode sim|mande|envia|enviar|com certeza|bora|vamos|manda bala|manda aqui|como funciona|quero conhecer|pode ser|mostra)\b/i,
+    /pode\s*mandar/i,
+    /pode\s*enviar/i,
+    /quero\s*sim/i,
+    /pode\s*ser/i
+  ];
+  return patterns.some((p) => p.test(cleanText));
+}
+
+export function isMenuMediaReply(text = '') {
+  const cleanText = String(text || '').toLowerCase().trim();
+  return (
+    cleanText.includes('pdf') ||
+    cleanText.includes('.pdf') ||
+    cleanText.includes('cardapio') ||
+    cleanText.includes('cardápio') ||
+    cleanText.includes('segue o cardápio') ||
+    cleanText.includes('foto') ||
+    cleanText.includes('tabela') ||
+    cleanText.includes('anexo') ||
+    cleanText.includes('documento')
+  );
+}
+
 export function initialSalesMessage(lead = {}) {
-  const business = clean(lead.business_name || lead.businessName || 'estabelecimento');
-  return `Oi, tudo bem? Falo com quem cuida dos pedidos da ${business}? Vi o trabalho de vocês e queria fazer uma pergunta rápida.`;
+  return buildValueFirstStep1(lead);
 }
 
 export function discoverySalesMessage() {

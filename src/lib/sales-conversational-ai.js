@@ -32,10 +32,21 @@ Você atende donos e gerentes de restaurantes, marmitarias, hamburguerias e deli
 6. TESTE GRATUITO E SEM FIDELIDADE: O lojista recebe uma demonstração já montada com o nome da loja dele para testar sem pagar nada, sem pedir cartão de crédito e sem contrato de fidelidade ou multa de cancelamento. Se depois quiser manter, temos planos fixos super acessíveis a partir de R$ 69,90/mês.
 7. CONVIVÊNCIA COM IFOOD: Não precisa sair do iFood. O iFood é vitrine para atrair quem não conhece a loja. O TáPronto serve para atender o cliente que já chama no WhatsApp com taxa zero, gerando economia imediata de 27%.
 
-=== METODOLOGIA DE OUTREACH (INQUIRY PERMISSIVO EM 3 PASSOS) ===
-- Passo 1: Primeiro contato foi uma pergunta de cliente curioso se estão atendendo e como ver o cardápio, ou elogio às avaliações do Google com pedido de permissão para ver a demonstração.
-- Passo 2 (Pivot): Se o lead respondeu com cardápio em PDF, imagem, URA ou texto, mostramos a dor de somar na calculadora na correria e pedimos permissão para enviar o link demonstrativo pronto com fotos e taxa zero.
-- Passo 3 (Entrega): O lead disse "sim", "pode mandar", "quero ver", "manda aí", "mande", "com certeza", "quero sim". O LINK DEVE SER ENTREGUE IMEDIATAMENTE! NUNCA pedir permissão novamente nem repetir elogios se o lead já autorizou!
+=== METODOLOGIA COMERCIAL VALUE-FIRST CONSULTIVO (2 PASSOS + FOLLOW-UP) ===
+- Passo 1: O primeiro contato é DIRETO e TRANSPARENTE. A TáPronto se apresenta de forma limpa, elogia a reputação real do Google Maps e pede permissão para enviar o link demonstrativo no celular para testar em 30 segundos.
+- Passo 2 (Entrega da Demo + Gancho de Importação): Se o lojista disse "sim", "pode mandar", "quero ver", "manda aí", "mande", "com certeza", "quero sim", "como funciona", entregue IMEDIATAMENTE o link da demonstração no seguinte formato exato:
+  "Tá na mão! Dá uma olhada em como ficou o visual:
+  👉 {candidateMenuUrl}
+
+  Coloquei alguns itens de exemplo com fotos só pra você testar a velocidade. Clica num produto e simula um pedido rápido — ele cai na hora no nosso Painel Gestor com alerta sonoro e impressão automática.
+
+  Se curtir, pode me mandar uma foto ou PDF do seu cardápio atual por aqui mesmo que a nossa equipe cadastra seus produtos e preços reais hoje pra você testar grátis!"
+  (action: "deliver_demo", delivered_link: true)
+- Recebimento de Foto/PDF do Cardápio: Se o lojista enviar foto, PDF ou avisar que enviou o cardápio:
+  Responda: "Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!"
+  (action: "human_handoff", delivered_link: false)
+- Se o lojista citar concorrente (Anota AI, Goomer, Cardápio Web, iFood, etc.):
+  Seja consultivo, pergunte se estão satisfeitos com agilidade e custos e ofereça a demonstração TáPronto sem comissão para comparar sem compromisso.
 
 === DIRETRIZES E REGRAS DE COMUNICAÇÃO ===
 - NUNCA use a gíria ou termo "zap". Use SEMPRE "WhatsApp".
@@ -228,45 +239,50 @@ export function generateDeterministicFallback({
     };
   }
 
-  // 2. Lead autorizou ou pediu o link (Passo 3: Entrega do Cardápio)
-  const hasAgreed = /\b(sim|quero|pode|manda|mande|envia|envie|com certeza|claro|bora|manda a[íi]|mostra|ver|opa)\b/i.test(text) ||
-                    /\b(como funciona|quanto custa|qual o valor)\b/i.test(text);
-
-  // Checa se o último outbound já foi o Passo 2 (perguntando se pode mandar o link)
-  const lastOutbound = [...conversationHistory].reverse().find(m => m.direction === 'outbound')?.body || '';
-  const askedForPermission = lastOutbound.toLowerCase().includes('posso te mandar') || 
-                             lastOutbound.toLowerCase().includes('quer que eu te mande') ||
-                             lastOutbound.toLowerCase().includes('posso enviar');
-
-  if (hasAgreed && (askedForPermission || text.length < 30)) {
-    const cleanUrl = menuUrl.replace(/\?[^\s]+$/, '');
-    const itemMention = featuredItem ? `os adicionais e opções de ${featuredItem}` : `os pratos e adicionais`;
+  // 2. Envio de foto / PDF / cardápio pelo lead
+  const isMenuMedia = /\b(pdf|\.pdf|cardapio|cardápio|foto|tabela|anexo|segue o cardapio|segue o cardápio)\b/i.test(text);
+  if (isMenuMedia) {
     return {
-      reply_text: `Show de bola! Dá uma olhada como ficou prático no celular:\n\n👉 ${cleanUrl}\n\nO cliente escolhe ${itemMention} em segundos e o pedido já cai somado direto no Painel Gestor TáPronto com alerta sonoro e impressão automática na cozinha, sem depender de calculadora e sem comissão sobre as vendas.\n\nDeixei liberado pra vocês darem uma olhada. O que achou da agilidade?`,
-      action: 'deliver_demo',
-      delivered_link: true,
-      confidence: 0.95,
-      reasoning: 'Lead autorizou envio da demonstração (Passo 3)'
+      reply_text: 'Show! Recebi seu cardápio aqui, já estamos montando a versão oficial com seus preços e te aviso em instantes!',
+      action: 'human_handoff',
+      delivered_link: false,
+      confidence: 0.98,
+      reasoning: 'Lead enviou cardápio/mídia. Encaminhado para onboarding assistido com confirmação.'
     };
   }
 
-  // 3. Lead respondeu ao Passo 1 com cardápio, URA ou texto (Passo 2: Pivot com Quebra de Padrão)
-  if (rating && reviewsCount) {
+  // 3. Lead autorizou ou pediu o link (Passo 2 Value-First: Entrega Imediata da Loja Demo)
+  const hasAgreed = /\b(sim|quero|pode|manda|mande|envia|envie|com certeza|claro|bora|manda a[íi]|mostra|ver|opa|como funciona|quero ver|pode mandar|pode enviar|quero sim|manda aí|manda ai)\b/i.test(text);
+
+  if (hasAgreed) {
+    const cleanUrl = menuUrl.replace(/\?[^\s]+$/, '');
     return {
-      reply_text: `Show de bola! Dei uma olhada nas avaliações do ${businessName} no Google e vi que estão com nota ${rating} (${reviewsCount} avaliações), parabéns pelo capricho e pelo reconhecimento dos clientes!\n\nMas sei como é corrido no delivery quando mandar texto ou cardápio solto no WhatsApp faz o cliente ter que ficar somando preços e adicionais na mão.\n\nA gente montou uma demonstração rápida no celular: o cliente escolhe os itens em 30 segundos e o pedido já chega pronto no Painel Gestor TáPronto com alerta sonoro e impressão na cozinha, com taxa zero de comissão.\n\nPosso te mandar o link aqui pra você fazer um teste rápido e ver como ficou a loja? Ficou bem bacana.`,
-      action: 'continue_conversation',
-      delivered_link: false,
+      reply_text: `Tá na mão! Dá uma olhada em como ficou o visual:\n👉 ${cleanUrl}\n\nColoquei alguns itens de exemplo com fotos só pra você testar a velocidade. Clica num produto e simula um pedido rápido — ele cai na hora no nosso Painel Gestor com alerta sonoro e impressão automática.\n\nSe curtir, pode me mandar uma foto ou PDF do seu cardápio atual por aqui mesmo que a nossa equipe cadastra seus produtos e preços reais hoje pra você testar grátis!`,
+      action: 'deliver_demo',
+      delivered_link: true,
+      confidence: 0.98,
+      reasoning: 'Lead autorizou envio da demonstração (Passo 2 Value-First)'
+    };
+  }
+
+  // 4. Detecção de concorrente
+  if (/\b(ifood|anota\s*ai|goomer|card[aá]pio\s*web|menudino|instadelivery|ola\s*click)\b/i.test(text)) {
+    const cleanUrl = menuUrl.replace(/\?[^\s]+$/, '');
+    return {
+      reply_text: `Entendido! A gente desenvolveu o TáPronto justamente pra estabelecimentos que buscam agilidade máxima no WhatsApp e o pedido caindo direto no Painel Gestor com alerta sonoro e impressão térmica no balcão, com taxa zero de comissão.\n\nSe quiser comparar a agilidade na prática em 30 segundos, segue a demonstração da loja de vocês:\n👉 ${cleanUrl}\n\nO que achou da agilidade de carregamento?`,
+      action: 'deliver_demo',
+      delivered_link: true,
       confidence: 0.9,
-      reasoning: 'Pivot do Passo 2 com elogio do Google e pedido de permissão'
+      reasoning: 'Tratamento consultivo de concorrente com entrega de valor'
     };
   }
 
   return {
-    reply_text: `Show de bola! Muito obrigado pelo retorno!\n\nA gente preparou um modelo prático de cardápio digital ilustrado para o segmento de vocês: o cliente escolhe as opções e adicionais direto no celular e o pedido já chega somado no Painel Gestor TáPronto com alerta sonoro e impressão na cozinha, com taxa zero.\n\nQuer que eu te mande o link aqui pra você dar uma olhada em 30 segundos sem compromisso?`,
+    reply_text: `Show de bola! Montei uma demonstração rápida com cardápio ilustrado pro segmento de vocês para você testar como os pedidos chegam somados direto na impressora do caixa com som e taxa zero.\n\nPosso te mandar o link aqui pra você dar uma olhada em 30 segundos sem compromisso?`,
     action: 'continue_conversation',
     delivered_link: false,
     confidence: 0.85,
-    reasoning: 'Pivot do Passo 2 sem nota do Google'
+    reasoning: 'Resposta consultiva padrão pedindo permissão'
   };
 }
 
