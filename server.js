@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, statfs, unlink, writeFile } from 'node:
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { createCipheriv, createDecipheriv, createHash, createHmac, pbkdf2Sync, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, pbkdf2, pbkdf2Sync, randomBytes, randomInt, randomUUID, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import v8 from 'node:v8';
@@ -14,6 +14,9 @@ import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
 import pg from 'pg';
+
+const pbkdf2Async = promisify(pbkdf2);
+const scryptAsync = promisify(scrypt);
 import sharp from 'sharp';
 import { getLocalPool, localPostgrestRequest, withLocalTransaction } from './src/lib/local-postgrest-adapter.js';
 import { seoLandingPages } from './src/data/seo-pages.js';
@@ -2736,7 +2739,7 @@ async function setupFirstAdmin(data) {
   const password = validatePassword(data.password);
   const [created] = await dbRequest('POST', 'admin_users', {}, {
     ...admin,
-    password_hash: hashPassword(password),
+    password_hash: await hashPassword(password),
     role: 'owner',
     is_active: true
   }, ['Prefer: return=representation']);
@@ -2781,7 +2784,7 @@ async function loginAdmin(data) {
   });
 
   const admin = rows[0];
-  const passwordValid = verifyPassword(password, passwordHashForVerification(admin));
+  const passwordValid = await verifyPassword(password, passwordHashForVerification(admin));
   if (!admin || !passwordValid) throw invalidCredentialError(httpError);
   if (admin.is_active === false) {
     const pendingActivation = await hasPendingAdminActivation(admin.id).catch(() => false);
@@ -2951,7 +2954,7 @@ async function resetAdminPassword(req, token, data = {}) {
   const confirmPassword = String(data.confirm_password || data.confirmPassword || '');
   if (confirmPassword && confirmPassword !== password) throw httpError(422, 'A confirmação de senha não confere.');
   const [admin] = await dbRequest('PATCH', 'admin_users', { id: `eq.${reset.admin_user_id}` }, {
-    password_hash: hashPassword(password),
+    password_hash: await hashPassword(password),
     updated_at: new Date().toISOString()
   }, ['Prefer: return=representation']);
   if (!admin) throw httpError(404, 'Conta administrativa não encontrada.');
@@ -3048,7 +3051,7 @@ async function createAdminUser(data, session = null) {
   const [created] = await dbRequest('POST', 'admin_users', {}, {
     ...admin,
     company_id: session?.company_id || admin.company_id || null,
-    password_hash: hashPassword(password),
+    password_hash: await hashPassword(password),
     role,
     is_active: data.is_active === undefined ? true : Boolean(data.is_active)
   }, ['Prefer: return=representation']);
@@ -3167,7 +3170,7 @@ async function acceptAdminInvitation(req, token, data = {}) {
     company_id: invitation.company_id,
     name,
     email: invitation.email,
-    password_hash: hashPassword(password),
+    password_hash: await hashPassword(password),
     role: invitation.role,
     is_active: true
   }, ['Prefer: return=representation']);
@@ -3251,7 +3254,7 @@ async function updateAdminUser(id, data, session) {
   }
   if ('is_active' in data) payload.is_active = Boolean(data.is_active);
   if ('password' in data && String(data.password || '').trim()) {
-    payload.password_hash = hashPassword(validatePassword(data.password));
+    payload.password_hash = await hashPassword(validatePassword(data.password));
   }
   if (!Object.keys(payload).length) throw httpError(422, 'Informe algum dado para atualizar.');
 
@@ -3333,12 +3336,12 @@ async function changeAdminPassword(session, data) {
   const newPassword = validatePassword(data.new_password);
   const admin = await getAdminById(session.id);
 
-  if (!verifyPassword(currentPassword, admin.password_hash)) {
+  if (!(await verifyPassword(currentPassword, admin.password_hash))) {
     throw httpError(401, 'Senha atual inválida.');
   }
 
   await dbRequest('PATCH', 'admin_users', { id: `eq.${session.id}` }, {
-    password_hash: hashPassword(newPassword)
+    password_hash: await hashPassword(newPassword)
   }, ['Prefer: return=representation']);
   await deleteOwnerSessions('admin', session.id);
   clearAdminUsersCache();
@@ -3352,7 +3355,7 @@ async function deleteCurrentCompanyAccount(req, session, data = {}) {
     throw httpError(422, 'Digite EXCLUIR CONTA para confirmar.');
   }
   const admin = await getAdminById(session.id);
-  if (!verifyPassword(String(data.password || ''), admin.password_hash)) {
+  if (!(await verifyPassword(String(data.password || ''), admin.password_hash))) {
     throw httpError(401, 'Senha atual inválida.');
   }
   const companyId = session.company_id ? cleanUuid(session.company_id, 'empresa') : null;
@@ -5632,7 +5635,7 @@ async function createPortalSignup(req, data = {}) {
       company_id: company.id,
       name: parsed.owner.name,
       email: parsed.owner.email,
-      password_hash: hashPassword(parsed.owner.password),
+      password_hash: await hashPassword(parsed.owner.password),
       role: 'owner',
       is_active: false
     }, ['Prefer: return=representation']);
@@ -5923,7 +5926,7 @@ async function activateAssistedAdminAccount(req, activation, data = {}) {
     const registration = (await client.query('select * from assisted_registrations where admin_id=$1 for update', [activation.admin_user_id])).rows[0];
     if (!registration) throw httpError(404, 'Cadastro assistido não encontrado.');
     if (registration.status !== 'published') throw httpError(409, 'Esta conta já foi ativada ou não está pronta para ativação.');
-    admin = (await client.query('update admin_users set password_hash=$2,is_active=true,updated_at=now() where id=$1 returning *', [activation.admin_user_id, hashPassword(password)])).rows[0];
+    admin = (await client.query('update admin_users set password_hash=$2,is_active=true,updated_at=now() where id=$1 returning *', [activation.admin_user_id, await hashPassword(password)])).rows[0];
     await client.query("update admin_activation_tokens set status=case when id=$2 then 'used' else 'cancelled' end,used_at=case when id=$2 then now() else used_at end where admin_user_id=$1 and status='pending'", [admin.id, activation.id]);
     await client.query("update companies set status='trial',updated_at=now() where id=$1", [registration.company_id]);
     await client.query('update stores set is_active=true,updated_at=now() where id=$1', [registration.store_id]);
@@ -9760,7 +9763,7 @@ async function assertPlatformAdminPassword(req, admin, passwordValue) {
     id: `eq.${cleanUuid(admin.id)}`,
     limit: '1'
   });
-  if (!current || current.is_active === false || normalizeAdminRole(current.role) !== 'superadmin' || !verifyPassword(password, current.password_hash)) {
+  if (!current || current.is_active === false || normalizeAdminRole(current.role) !== 'superadmin' || !(await verifyPassword(password, current.password_hash))) {
     await auditPlatformService(req, admin, 'platform.service.password.failed', 'critical', {
       status: 'failed',
       message: 'Senha do superadmin inválida.'
@@ -15230,13 +15233,13 @@ async function registerCustomer(data, storeId, options = {}) {
     }
     [row] = await db('PATCH', 'customers', { id: `eq.${existing[0].id}` }, {
       ...customer,
-      password_hash: hashPassword(password)
+      password_hash: await hashPassword(password)
     }, ['Prefer: return=representation']);
   } else {
     [row] = await db('POST', 'customers', {}, {
       ...customer,
       store_id: resolvedStoreId,
-      password_hash: hashPassword(password)
+      password_hash: await hashPassword(password)
     }, ['Prefer: return=representation']);
   }
 
@@ -15261,7 +15264,7 @@ async function loginCustomer(data, storeId, options = {}) {
   });
 
   const customer = rows[0];
-  if (!customer || !customer.password_hash || !verifyPassword(password, customer.password_hash)) {
+  if (!customer || !customer.password_hash || !(await verifyPassword(password, customer.password_hash))) {
     throw httpError(401, 'Telefone ou senha inválidos.');
   }
 
@@ -15305,7 +15308,7 @@ async function resetCustomerPassword(data, storeId = null, options = {}) {
   }
 
   await db('PATCH', 'customers', { id: `eq.${customer.id}` }, {
-    password_hash: hashPassword(newPassword)
+    password_hash: await hashPassword(newPassword)
   }, ['Prefer: return=minimal']);
   await deleteOwnerSessions('customer', customer.id);
 }
@@ -15408,7 +15411,7 @@ async function updateCustomerProfile(customerId, data, storeId = null, options =
   const resolvedStoreId = cleanUuid(storeId);
   const customer = sanitizeCustomer(data.customer || data);
   const payload = { ...customer };
-  if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
+  if (data.password) payload.password_hash = await hashPassword(validatePassword(data.password));
 
   const [updated] = await db('PATCH', 'customers', {
     id: `eq.${customerId}`,
@@ -15440,7 +15443,7 @@ async function updateCustomerByAdmin(customerId, data, storeId = null, options =
   const resolvedStoreId = cleanUuid(storeId);
   const customer = sanitizeCustomer(data.customer || data);
   const payload = { ...customer };
-  if (data.password) payload.password_hash = hashPassword(validatePassword(data.password));
+  if (data.password) payload.password_hash = await hashPassword(validatePassword(data.password));
   const [updated] = await db('PATCH', 'customers', {
     id: `eq.${customerId}`,
     ...(resolvedStoreId ? { store_id: `eq.${resolvedStoreId}` } : {})
@@ -21032,18 +21035,18 @@ function modifierWhatsappLine(modifier) {
   return `${group}${modifier.name}${delta > 0 ? ` (+ ${formatMoney(delta)})` : ''}`;
 }
 
-function hashPassword(password) {
+async function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
   const iterations = 310000;
-  const digest = pbkdf2Sync(password, salt, iterations, 32, 'sha256').toString('hex');
+  const digest = (await pbkdf2Async(password, salt, iterations, 32, 'sha256')).toString('hex');
   return `pbkdf2_sha256$${iterations}$${salt}$${digest}`;
 }
 
-function verifyPassword(password, stored) {
+async function verifyPassword(password, stored) {
   if (!stored) return false;
   const [algorithm, iterations, salt, digest] = String(stored).split('$');
   if (algorithm !== 'pbkdf2_sha256' || !iterations || !salt || !digest) return false;
-  const actual = pbkdf2Sync(password, salt, Number(iterations), 32, 'sha256');
+  const actual = await pbkdf2Async(password, salt, Number(iterations), 32, 'sha256');
   const expected = Buffer.from(digest, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
